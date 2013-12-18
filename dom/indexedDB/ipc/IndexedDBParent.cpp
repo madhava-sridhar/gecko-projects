@@ -1523,7 +1523,7 @@ IndexedDBObjectStoreRequestParent::Get(const GetParams& aParams)
   nsRefPtr<IDBRequest> request;
 
   nsRefPtr<IDBKeyRange> keyRange =
-    IDBKeyRange::FromSerializedKeyRange(aParams.keyRange());
+    IDBKeyRange::FromSerialized(aParams.keyRange());
   MOZ_ASSERT(keyRange);
 
   {
@@ -1553,9 +1553,9 @@ IndexedDBObjectStoreRequestParent::GetAll(const GetAllParams& aParams)
   nsRefPtr<IDBKeyRange> keyRange;
 
   switch (keyRangeUnion.type()) {
-    case ipc::OptionalKeyRange::TKeyRange:
+    case ipc::OptionalKeyRange::TSerializedKeyRange:
       keyRange =
-        IDBKeyRange::FromSerializedKeyRange(keyRangeUnion.get_KeyRange());
+        IDBKeyRange::FromSerialized(keyRangeUnion.get_SerializedKeyRange());
       break;
 
     case ipc::OptionalKeyRange::Tvoid_t:
@@ -1591,9 +1591,9 @@ IndexedDBObjectStoreRequestParent::GetAllKeys(const GetAllKeysParams& aParams)
   nsRefPtr<IDBKeyRange> keyRange;
 
   switch (keyRangeUnion.type()) {
-    case ipc::OptionalKeyRange::TKeyRange:
+    case ipc::OptionalKeyRange::TSerializedKeyRange:
       keyRange =
-        IDBKeyRange::FromSerializedKeyRange(keyRangeUnion.get_KeyRange());
+        IDBKeyRange::FromSerialized(keyRangeUnion.get_SerializedKeyRange());
       break;
 
     case ipc::OptionalKeyRange::Tvoid_t:
@@ -1681,7 +1681,7 @@ IndexedDBObjectStoreRequestParent::Delete(const DeleteParams& aParams)
   nsRefPtr<IDBRequest> request;
 
   nsRefPtr<IDBKeyRange> keyRange =
-    IDBKeyRange::FromSerializedKeyRange(aParams.keyRange());
+    IDBKeyRange::FromSerialized(aParams.keyRange());
   MOZ_ASSERT(keyRange);
 
   {
@@ -1729,9 +1729,9 @@ IndexedDBObjectStoreRequestParent::Count(const CountParams& aParams)
   nsRefPtr<IDBKeyRange> keyRange;
 
   switch (keyRangeUnion.type()) {
-    case ipc::OptionalKeyRange::TKeyRange:
+    case ipc::OptionalKeyRange::TSerializedKeyRange:
       keyRange =
-        IDBKeyRange::FromSerializedKeyRange(keyRangeUnion.get_KeyRange());
+        IDBKeyRange::FromSerialized(keyRangeUnion.get_SerializedKeyRange());
       break;
 
     case ipc::OptionalKeyRange::Tvoid_t:
@@ -1767,9 +1767,9 @@ IndexedDBObjectStoreRequestParent::OpenCursor(const OpenCursorParams& aParams)
   nsRefPtr<IDBKeyRange> keyRange;
 
   switch (keyRangeUnion.type()) {
-    case ipc::OptionalKeyRange::TKeyRange:
+    case ipc::OptionalKeyRange::TSerializedKeyRange:
       keyRange =
-        IDBKeyRange::FromSerializedKeyRange(keyRangeUnion.get_KeyRange());
+        IDBKeyRange::FromSerialized(keyRangeUnion.get_SerializedKeyRange());
       break;
 
     case ipc::OptionalKeyRange::Tvoid_t:
@@ -1808,9 +1808,9 @@ IndexedDBObjectStoreRequestParent::OpenKeyCursor(
   nsRefPtr<IDBKeyRange> keyRange;
 
   switch (keyRangeUnion.type()) {
-    case ipc::OptionalKeyRange::TKeyRange:
+    case ipc::OptionalKeyRange::TSerializedKeyRange:
       keyRange =
-        IDBKeyRange::FromSerializedKeyRange(keyRangeUnion.get_KeyRange());
+        IDBKeyRange::FromSerialized(keyRangeUnion.get_SerializedKeyRange());
       break;
 
     case ipc::OptionalKeyRange::Tvoid_t:
@@ -1874,7 +1874,7 @@ IndexedDBIndexRequestParent::Get(const GetParams& aParams)
   nsRefPtr<IDBRequest> request;
 
   nsRefPtr<IDBKeyRange> keyRange =
-    IDBKeyRange::FromSerializedKeyRange(aParams.keyRange());
+    IDBKeyRange::FromSerialized(aParams.keyRange());
   MOZ_ASSERT(keyRange);
 
   {
@@ -1899,7 +1899,7 @@ IndexedDBIndexRequestParent::GetKey(const GetKeyParams& aParams)
   nsRefPtr<IDBRequest> request;
 
   nsRefPtr<IDBKeyRange> keyRange =
-    IDBKeyRange::FromSerializedKeyRange(aParams.keyRange());
+    IDBKeyRange::FromSerialized(aParams.keyRange());
   MOZ_ASSERT(keyRange);
 
   {
@@ -1928,9 +1928,9 @@ IndexedDBIndexRequestParent::GetAll(const GetAllParams& aParams)
   nsRefPtr<IDBKeyRange> keyRange;
 
   switch (keyRangeUnion.type()) {
-    case ipc::OptionalKeyRange::TKeyRange:
+    case ipc::OptionalKeyRange::TSerializedKeyRange:
       keyRange =
-        IDBKeyRange::FromSerializedKeyRange(keyRangeUnion.get_KeyRange());
+        IDBKeyRange::FromSerialized(keyRangeUnion.get_SerializedKeyRange());
       break;
 
     case ipc::OptionalKeyRange::Tvoid_t:
@@ -1966,9 +1966,9 @@ IndexedDBIndexRequestParent::GetAllKeys(const GetAllKeysParams& aParams)
   nsRefPtr<IDBKeyRange> keyRange;
 
   switch (keyRangeUnion.type()) {
-    case ipc::OptionalKeyRange::TKeyRange:
+    case ipc::OptionalKeyRange::TSerializedKeyRange:
       keyRange =
-        IDBKeyRange::FromSerializedKeyRange(keyRangeUnion.get_KeyRange());
+        IDBKeyRange::FromSerialized(keyRangeUnion.get_SerializedKeyRange());
       break;
 
     case ipc::OptionalKeyRange::Tvoid_t:
@@ -2002,9 +2002,9 @@ IndexedDBIndexRequestParent::Count(const CountParams& aParams)
   nsRefPtr<IDBKeyRange> keyRange;
 
   switch (keyRangeUnion.type()) {
-    case ipc::OptionalKeyRange::TKeyRange:
+    case ipc::OptionalKeyRange::TSerializedKeyRange:
       keyRange =
-        IDBKeyRange::FromSerializedKeyRange(keyRangeUnion.get_KeyRange());
+        IDBKeyRange::FromSerialized(keyRangeUnion.get_SerializedKeyRange());
       break;
 
     case ipc::OptionalKeyRange::Tvoid_t:
@@ -2040,9 +2040,9 @@ IndexedDBIndexRequestParent::OpenCursor(const OpenCursorParams& aParams)
   nsRefPtr<IDBKeyRange> keyRange;
 
   switch (keyRangeUnion.type()) {
-    case ipc::OptionalKeyRange::TKeyRange:
+    case ipc::OptionalKeyRange::TSerializedKeyRange:
       keyRange =
-        IDBKeyRange::FromSerializedKeyRange(keyRangeUnion.get_KeyRange());
+        IDBKeyRange::FromSerialized(keyRangeUnion.get_SerializedKeyRange());
       break;
 
     case ipc::OptionalKeyRange::Tvoid_t:
@@ -2080,9 +2080,9 @@ IndexedDBIndexRequestParent::OpenKeyCursor(const OpenKeyCursorParams& aParams)
   nsRefPtr<IDBKeyRange> keyRange;
 
   switch (keyRangeUnion.type()) {
-    case ipc::OptionalKeyRange::TKeyRange:
+    case ipc::OptionalKeyRange::TSerializedKeyRange:
       keyRange =
-        IDBKeyRange::FromSerializedKeyRange(keyRangeUnion.get_KeyRange());
+        IDBKeyRange::FromSerialized(keyRangeUnion.get_SerializedKeyRange());
       break;
 
     case ipc::OptionalKeyRange::Tvoid_t:

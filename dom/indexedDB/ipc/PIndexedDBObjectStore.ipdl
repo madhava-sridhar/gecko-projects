@@ -40,7 +40,7 @@ struct PutParams
 
 struct DeleteParams
 {
-  KeyRange keyRange;
+  SerializedKeyRange keyRange;
 };
 
 struct ClearParams

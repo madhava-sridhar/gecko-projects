@@ -11,6 +11,7 @@
 #include "mozilla/dom/indexedDB/Key.h"
 #include "mozilla/dom/indexedDB/KeyPath.h"
 #include "mozilla/dom/indexedDB/IDBCursor.h"
+#include "mozilla/dom/indexedDB/IDBKeyRange.h"
 #include "mozilla/dom/indexedDB/IDBTransaction.h"
 
 namespace IPC {
@@ -40,6 +41,51 @@ struct ParamTraits<mozilla::dom::indexedDB::Key>
   static void Log(const paramType& aParam, std::wstring* aLog)
   {
     LogParam(aParam.mBuffer, aLog);
+  }
+};
+
+template <>
+struct ParamTraits<mozilla::dom::indexedDB::SerializedKeyRange>
+{
+  typedef mozilla::dom::indexedDB::SerializedKeyRange paramType;
+
+  static void Write(Message* aMsg, const paramType& aParam)
+  {
+    WriteParam(aMsg, aParam.mLower);
+    WriteParam(aMsg, aParam.mIsOnly);
+    if (!aParam.mIsOnly) {
+      WriteParam(aMsg, aParam.mUpper);
+      WriteParam(aMsg, aParam.mLowerOpen);
+      WriteParam(aMsg, aParam.mUpperOpen);
+    }
+  }
+
+  static bool Read(const Message* aMsg, void** aIter, paramType* aResult)
+  {
+    if (!ReadParam(aMsg, aIter, &aResult->mLower) ||
+        !ReadParam(aMsg, aIter, &aResult->mIsOnly)) {
+      return false;
+    }
+
+    if (aResult->mIsOnly) {
+      aResult->mUpper.Unset();
+      aResult->mLowerOpen = false;
+      aResult->mUpperOpen = false;
+      return true;
+    }
+
+    return ReadParam(aMsg, aIter, &aResult->mUpper) &&
+           ReadParam(aMsg, aIter, &aResult->mLowerOpen) &&
+           ReadParam(aMsg, aIter, &aResult->mUpperOpen);
+  }
+
+  static void Log(const paramType& aParam, std::wstring* aLog)
+  {
+    LogParam(aParam.mLower, aLog);
+    LogParam(aParam.mUpper, aLog);
+    LogParam(aParam.mLowerOpen, aLog);
+    LogParam(aParam.mUpperOpen, aLog);
+    LogParam(aParam.mIsOnly, aLog);
   }
 };
 

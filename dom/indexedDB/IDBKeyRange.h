@@ -25,9 +25,35 @@ class GlobalObject;
 
 BEGIN_INDEXEDDB_NAMESPACE
 
-namespace ipc {
-class KeyRange;
-} // namespace ipc
+struct SerializedKeyRange
+{
+  SerializedKeyRange()
+  : mLowerOpen(false), mUpperOpen(false), mIsOnly(false)
+  { }
+
+  bool
+  operator==(const SerializedKeyRange& aOther) const
+  {
+    if (mIsOnly != aOther.mIsOnly ||
+        mLower != aOther.mLower) {
+      return false;
+    }
+
+    if (mIsOnly) {
+      return true;
+    }
+
+    return mUpper == aOther.mUpper &&
+           mLowerOpen == aOther.mLowerOpen &&
+           mUpperOpen == aOther.mUpperOpen;
+  }
+
+  Key mLower;
+  Key mUpper;
+  bool mLowerOpen;
+  bool mUpperOpen;
+  bool mIsOnly;
+};
 
 class IDBKeyRange MOZ_FINAL : public nsISupports
 {
@@ -39,9 +65,10 @@ public:
                             JS::Handle<JS::Value> aVal,
                             IDBKeyRange** aKeyRange);
 
-  template <class T>
   static already_AddRefed<IDBKeyRange>
-  FromSerializedKeyRange(const T& aKeyRange);
+  FromSerialized(const SerializedKeyRange& aKeyRange);
+
+  void ToSerialized(SerializedKeyRange& aKeyRange);
 
   const Key& Lower() const
   {
@@ -140,9 +167,6 @@ public:
 
     return NS_OK;
   }
-
-  template <class T>
-  void ToSerializedKeyRange(T& aKeyRange);
 
   void DropJSObjects();
 

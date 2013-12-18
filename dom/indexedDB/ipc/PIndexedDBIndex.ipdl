@@ -17,7 +17,7 @@ namespace ipc {
 
 struct GetKeyParams
 {
-  KeyRange keyRange;
+  SerializedKeyRange keyRange;
 };
 
 union IndexRequestParams

@@ -87,31 +87,29 @@ IDBKeyRange::FromJSVal(JSContext* aCx,
 }
 
 // static
-template <class T>
 already_AddRefed<IDBKeyRange>
-IDBKeyRange::FromSerializedKeyRange(const T& aKeyRange)
+IDBKeyRange::FromSerialized(const SerializedKeyRange& aKeyRange)
 {
   nsRefPtr<IDBKeyRange> keyRange =
-    new IDBKeyRange(nullptr, aKeyRange.lowerOpen(), aKeyRange.upperOpen(),
-                    aKeyRange.isOnly());
-  keyRange->Lower() = aKeyRange.lower();
+    new IDBKeyRange(nullptr, aKeyRange.mLowerOpen, aKeyRange.mUpperOpen,
+                    aKeyRange.mIsOnly);
+  keyRange->Lower() = aKeyRange.mLower;
   if (!keyRange->IsOnly()) {
-    keyRange->Upper() = aKeyRange.upper();
+    keyRange->Upper() = aKeyRange.mUpper;
   }
   return keyRange.forget();
 }
 
-template <class T>
 void
-IDBKeyRange::ToSerializedKeyRange(T& aKeyRange)
+IDBKeyRange::ToSerialized(SerializedKeyRange& aKeyRange)
 {
-  aKeyRange.lowerOpen() = IsLowerOpen();
-  aKeyRange.upperOpen() = IsUpperOpen();
-  aKeyRange.isOnly() = IsOnly();
+  aKeyRange.mLowerOpen = IsLowerOpen();
+  aKeyRange.mUpperOpen = IsUpperOpen();
+  aKeyRange.mIsOnly = IsOnly();
 
-  aKeyRange.lower() = Lower();
+  aKeyRange.mLower = Lower();
   if (!IsOnly()) {
-    aKeyRange.upper() = Upper();
+    aKeyRange.mUpper = Upper();
   }
 }
 
@@ -293,10 +291,3 @@ IDBKeyRange::Bound(const GlobalObject& aGlobal, JSContext* aCx,
 
   return keyRange.forget();
 }
-
-// Explicitly instantiate for all our key range types... Grumble.
-template already_AddRefed<IDBKeyRange>
-IDBKeyRange::FromSerializedKeyRange<KeyRange> (const KeyRange& aKeyRange);
-
-template void
-IDBKeyRange::ToSerializedKeyRange<KeyRange> (KeyRange& aKeyRange);

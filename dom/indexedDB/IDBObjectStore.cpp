@@ -3494,7 +3494,7 @@ GetHelper::PackArgumentsForParentProcess(ObjectStoreRequestParams& aParams)
 
   GetParams params;
 
-  mKeyRange->ToSerializedKeyRange(params.keyRange());
+  mKeyRange->ToSerialized(params.keyRange());
 
   aParams = params;
   return NS_OK;
@@ -3632,7 +3632,7 @@ DeleteHelper::PackArgumentsForParentProcess(ObjectStoreRequestParams& aParams)
 
   DeleteParams params;
 
-  mKeyRange->ToSerializedKeyRange(params.keyRange());
+  mKeyRange->ToSerialized(params.keyRange());
 
   aParams = params;
   return NS_OK;
@@ -3950,8 +3950,8 @@ OpenCursorHelper::PackArgumentsForParentProcess(
   OpenCursorParams params;
 
   if (mKeyRange) {
-    KeyRange keyRange;
-    mKeyRange->ToSerializedKeyRange(keyRange);
+    SerializedKeyRange keyRange;
+    mKeyRange->ToSerialized(keyRange);
     params.optionalKeyRange() = keyRange;
   }
   else {
@@ -4278,8 +4278,8 @@ OpenKeyCursorHelper::PackArgumentsForParentProcess(
   OpenKeyCursorParams params;
 
   if (mKeyRange) {
-    KeyRange keyRange;
-    mKeyRange->ToSerializedKeyRange(keyRange);
+    SerializedKeyRange keyRange;
+    mKeyRange->ToSerialized(keyRange);
     params.optionalKeyRange() = keyRange;
   }
   else {
@@ -4716,8 +4716,8 @@ GetAllHelper::PackArgumentsForParentProcess(ObjectStoreRequestParams& aParams)
   GetAllParams params;
 
   if (mKeyRange) {
-    KeyRange keyRange;
-    mKeyRange->ToSerializedKeyRange(keyRange);
+    SerializedKeyRange keyRange;
+    mKeyRange->ToSerialized(keyRange);
     params.optionalKeyRange() = keyRange;
   }
   else {
@@ -4966,8 +4966,8 @@ GetAllKeysHelper::PackArgumentsForParentProcess(
   GetAllKeysParams params;
 
   if (mKeyRange) {
-    KeyRange keyRange;
-    mKeyRange->ToSerializedKeyRange(keyRange);
+    SerializedKeyRange keyRange;
+    mKeyRange->ToSerialized(keyRange);
     params.optionalKeyRange() = keyRange;
   } else {
     params.optionalKeyRange() = mozilla::void_t();
@@ -5119,8 +5119,8 @@ CountHelper::PackArgumentsForParentProcess(ObjectStoreRequestParams& aParams)
   CountParams params;
 
   if (mKeyRange) {
-    KeyRange keyRange;
-    mKeyRange->ToSerializedKeyRange(keyRange);
+    SerializedKeyRange keyRange;
+    mKeyRange->ToSerialized(keyRange);
     params.optionalKeyRange() = keyRange;
   }
   else {
