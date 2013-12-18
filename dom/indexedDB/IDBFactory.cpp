@@ -7,6 +7,7 @@
 #include "IDBFactory.h"
 
 #include "nsIFile.h"
+#include "nsIIPCBackgroundChildCreateCallback.h"
 #include "nsIPrincipal.h"
 #include "nsIScriptContext.h"
 #include "nsIScriptSecurityManager.h"
@@ -14,6 +15,8 @@
 #include "nsIXPCScriptable.h"
 
 #include <algorithm>
+#include "mozilla/Preferences.h"
+#include "mozilla/storage.h"
 #include "mozilla/dom/ContentParent.h"
 #include "mozilla/dom/ContentChild.h"
 #include "mozilla/dom/IDBFactoryBinding.h"
@@ -21,8 +24,8 @@
 #include "mozilla/dom/quota/OriginOrPatternString.h"
 #include "mozilla/dom/quota/QuotaManager.h"
 #include "mozilla/dom/TabChild.h"
-#include "mozilla/Preferences.h"
-#include "mozilla/storage.h"
+#include "mozilla/ipc/BackgroundChild.h"
+#include "mozilla/ipc/PBackgroundChild.h"
 #include "nsComponentManagerUtils.h"
 #include "nsCharSeparatedTokenizer.h"
 #include "nsContentUtils.h"
@@ -35,6 +38,7 @@
 #include "nsThreadUtils.h"
 #include "nsXPCOMCID.h"
 
+#include "ActorsChild.h"
 #include "AsyncConnectionHelper.h"
 #include "CheckPermissionsHelper.h"
 #include "DatabaseInfo.h"
@@ -60,6 +64,7 @@ using mozilla::dom::IDBOpenDBOptions;
 using mozilla::dom::NonNull;
 using mozilla::dom::Optional;
 using mozilla::dom::TabChild;
+using mozilla::ipc::BackgroundChild;
 using mozilla::ErrorResult;
 using mozilla::Preferences;
 
@@ -76,22 +81,60 @@ struct ObjectStoreInfoMap
 
 } // anonymous namespace
 
+class IDBFactory::BackgroundCreateCallback MOZ_FINAL :
+                                      public nsIIPCBackgroundChildCreateCallback
+{
+  nsRefPtr<IDBFactory> mFactory;
+
+public:
+  BackgroundCreateCallback(IDBFactory* aFactory)
+  : mFactory(aFactory)
+  {
+    MOZ_ASSERT(aFactory);
+  }
+
+  NS_DECL_ISUPPORTS
+
+private:
+  ~BackgroundCreateCallback()
+  { }
+
+  NS_DECL_NSIIPCBACKGROUNDCHILDCREATECALLBACK
+};
+
+struct IDBFactory::PendingRequestInfo
+{
+  nsRefPtr<IDBOpenDBRequest> mRequest;
+  FactoryRequestParams mParams;
+  nsCString mDatabaseId;
+
+  PendingRequestInfo(IDBOpenDBRequest* aRequest,
+                     const FactoryRequestParams& aParams,
+                     const nsACString& aDatabaseId)
+  : mRequest(aRequest), mParams(aParams), mDatabaseId(aDatabaseId)
+  {
+    MOZ_ASSERT(aRequest);
+    MOZ_ASSERT(aParams.type() != FactoryRequestParams::T__None);
+  }
+};
+
 IDBFactory::IDBFactory()
 : mPrivilege(Content), mDefaultPersistenceType(PERSISTENCE_TYPE_TEMPORARY),
-  mOwningObject(nullptr), mActorChild(nullptr), mActorParent(nullptr),
-  mContentParent(nullptr), mRootedOwningObject(false)
+  mOwningObject(nullptr), mBackgroundActor(nullptr), mContentParent(nullptr),
+  mRootedOwningObject(false), mBackgroundActorFailed(false)
 {
   SetIsDOMBinding();
 }
 
 IDBFactory::~IDBFactory()
 {
-  NS_ASSERTION(!mActorParent, "Actor parent owns us, how can we be dying?!");
-  if (mActorChild) {
-    NS_ASSERTION(!IndexedDatabaseManager::IsMainProcess(), "Wrong process!");
-    mActorChild->Send__delete__(mActorChild);
-    NS_ASSERTION(!mActorChild, "Should have cleared in Send__delete__!");
+  MOZ_ASSERT_IF(mBackgroundActorFailed, !mBackgroundActor);
+
+  if (mBackgroundActor) {
+    BackgroundFactoryChild::Send__delete__(mBackgroundActor);
+    MOZ_ASSERT(!mBackgroundActor);
   }
+
   if (mRootedOwningObject) {
     mOwningObject = nullptr;
     mozilla::DropJSObjects(this);
@@ -153,24 +196,6 @@ IDBFactory::Create(nsPIDOMWindow* aWindow,
   factory->mWindow = aWindow;
   factory->mContentParent = aContentParent;
 
-  if (!IndexedDatabaseManager::IsMainProcess()) {
-    TabChild* tabChild = TabChild::GetFrom(aWindow);
-    IDB_ENSURE_TRUE(tabChild, NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
-
-    IndexedDBChild* actor = new IndexedDBChild(origin);
-
-    bool allowed;
-    tabChild->SendPIndexedDBConstructor(actor, group, origin, &allowed);
-
-    if (!allowed) {
-      actor->Send__delete__(actor);
-      *aFactory = nullptr;
-      return NS_OK;
-    }
-
-    actor->SetFactory(factory);
-  }
-
   factory.forget(aFactory);
   return NS_OK;
 }
@@ -211,17 +236,6 @@ IDBFactory::Create(JSContext* aCx,
 
   mozilla::HoldJSObjects(factory.get());
   factory->mRootedOwningObject = true;
-
-  if (!IndexedDatabaseManager::IsMainProcess()) {
-    ContentChild* contentChild = ContentChild::GetSingleton();
-    IDB_ENSURE_TRUE(contentChild, NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
-
-    IndexedDBChild* actor = new IndexedDBChild(origin);
-
-    contentChild->SendPIndexedDBConstructor(actor);
-
-    actor->SetFactory(factory);
-  }
 
   factory.forget(aFactory);
   return NS_OK;
@@ -592,6 +606,12 @@ IDBFactory::OpenInternal(const nsAString& aName,
   NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
   NS_ASSERTION(mWindow || mOwningObject, "Must have one of these!");
 
+  // Nothing can be done here if we have previously failed to create a
+  // background actor.
+  if (mBackgroundActorFailed) {
+    return NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
+  }
+
   AutoJSContext cx;
   nsCOMPtr<nsPIDOMWindow> window;
   JS::Rooted<JSObject*> scriptOwner(cx);
@@ -612,10 +632,57 @@ IDBFactory::OpenInternal(const nsAString& aName,
 
   nsRefPtr<IDBOpenDBRequest> request =
     IDBOpenDBRequest::Create(this, window, scriptOwner);
-  IDB_ENSURE_TRUE(request, NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
+  MOZ_ASSERT(request);
 
-  nsresult rv;
+  FactoryRequestParams params;
+  if (aDeleting) {
+    params = DeleteDatabaseRequestParams(nsString(aName), aPersistenceType);
+  }
+  else {
+    params =
+      OpenDatabaseRequestParams(nsString(aName), aVersion, aPersistenceType);
+  }
 
+  nsCString databaseId;
+  QuotaManager::GetStorageId(aPersistenceType, aASCIIOrigin, Client::IDB,
+                             aName, databaseId);
+  MOZ_ASSERT(!databaseId.IsEmpty());
+
+  if (!mBackgroundActor) {
+    // If another consumer has already created a background actor for this
+    // thread then we can start this request immediately.
+    if (PBackgroundChild* bgActor = BackgroundChild::GetForCurrentThread()) {
+      nsresult rv = BackgroundActorCreated(bgActor);
+      if (NS_WARN_IF(NS_FAILED(rv))) {
+        return rv;
+      }
+      MOZ_ASSERT(mBackgroundActor);
+    }
+  }
+
+  // If we already have a background actor then we can start this request now.
+  if (mBackgroundActor) {
+    nsresult rv = InitiateRequest(request, params, databaseId);
+    if (NS_WARN_IF(NS_FAILED(rv))) {
+      return rv;
+    }
+  }
+  else {
+    mPendingRequests.AppendElement(new PendingRequestInfo(request, params,
+                                                          databaseId));
+
+    if (mPendingRequests.Length() == 1) {
+      // We need to start the sequence to create a background actor for this
+      // thread.
+      nsRefPtr<BackgroundCreateCallback> cb =
+        new BackgroundCreateCallback(this);
+      if (NS_WARN_IF(!BackgroundChild::GetOrCreateForCurrentThread(cb))) {
+        return NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
+      }
+    }
+  }
+
+#if 0
   if (IndexedDatabaseManager::IsMainProcess()) {
     nsRefPtr<OpenDatabaseHelper> openHelper =
       new OpenDatabaseHelper(request, aName, aGroup, aASCIIOrigin, aVersion,
@@ -650,29 +717,7 @@ IDBFactory::OpenInternal(const nsAString& aName,
     }
     IDB_ENSURE_SUCCESS(rv, NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
   }
-  else if (aDeleting) {
-    nsCString databaseId;
-    QuotaManager::GetStorageId(aPersistenceType, aASCIIOrigin, Client::IDB,
-                               aName, databaseId);
-    MOZ_ASSERT(!databaseId.IsEmpty());
-
-    IndexedDBDeleteDatabaseRequestChild* actor =
-      new IndexedDBDeleteDatabaseRequestChild(this, request, databaseId);
-
-    mActorChild->SendPIndexedDBDeleteDatabaseRequestConstructor(
-                                                              actor,
-                                                              nsString(aName),
-                                                              aPersistenceType);
-  }
-  else {
-    IndexedDBDatabaseChild* dbActor =
-      static_cast<IndexedDBDatabaseChild*>(
-        mActorChild->SendPIndexedDBDatabaseConstructor(nsString(aName),
-                                                       aVersion,
-                                                       aPersistenceType));
-
-    dbActor->SetRequest(request);
-  }
+#endif
 
 #ifdef IDB_PROFILER_USE_MARKS
   {
@@ -693,6 +738,15 @@ IDBFactory::OpenInternal(const nsAString& aName,
 
   request.forget(_retval);
   return NS_OK;
+}
+
+void
+IDBFactory::SetBackgroundActor(BackgroundFactoryChild* aBackgroundActor)
+{
+  MOZ_ASSERT_IF(mBackgroundActor, !aBackgroundActor);
+  MOZ_ASSERT_IF(!mBackgroundActor, aBackgroundActor);
+
+  mBackgroundActor = aBackgroundActor;
 }
 
 JSObject*
@@ -832,4 +886,109 @@ IDBFactory::Open(nsIPrincipal* aPrincipal, const nsAString& aName,
   }
 
   return request.forget();
+}
+
+nsresult
+IDBFactory::BackgroundActorCreated(PBackgroundChild* aBackgroundActor)
+{
+  MOZ_ASSERT(aBackgroundActor);
+  MOZ_ASSERT(!mBackgroundActor);
+  MOZ_ASSERT(!mBackgroundActorFailed);
+
+  {
+    BackgroundFactoryChild* actor = new BackgroundFactoryChild(this);
+
+    mBackgroundActor =
+      static_cast<BackgroundFactoryChild*>(
+        aBackgroundActor->SendPBackgroundIDBFactoryConstructor(actor, mGroup,
+                                                               mASCIIOrigin,
+                                                               mPrivilege));
+  }
+
+  if (NS_WARN_IF(!mBackgroundActor)) {
+    BackgroundActorFailed();
+    return NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
+  }
+
+  nsresult rv = NS_OK;
+
+  for (uint32_t index = 0; index < mPendingRequests.Length(); index++) {
+    nsAutoPtr<PendingRequestInfo> info = mPendingRequests[index].forget();
+
+    nsresult rv2 =
+      InitiateRequest(info->mRequest, info->mParams, info->mDatabaseId);
+
+    // Warn for every failure, but just return the first failure if there are
+    // multiple failures.
+    if (NS_WARN_IF(NS_FAILED(rv2)) && NS_SUCCEEDED(rv)) {
+      rv = rv2;
+    }
+  }
+
+  mPendingRequests.Clear();
+
+  return rv;
+}
+
+void
+IDBFactory::BackgroundActorFailed()
+{
+  MOZ_ASSERT(!mPendingRequests.IsEmpty());
+  MOZ_ASSERT(!mBackgroundActor);
+  MOZ_ASSERT(!mBackgroundActorFailed);
+
+  mBackgroundActorFailed = true;
+
+  for (uint32_t index = 0; index < mPendingRequests.Length(); index++) {
+    nsAutoPtr<PendingRequestInfo> info = mPendingRequests[index].forget();
+    info->mRequest->DispatchError(NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
+  }
+
+  mPendingRequests.Clear();
+}
+
+nsresult
+IDBFactory::InitiateRequest(IDBOpenDBRequest* aRequest,
+                            const FactoryRequestParams& aParams,
+                            const nsCString& aDatabaseId)
+{
+  MOZ_ASSERT(aRequest);
+  MOZ_ASSERT(mBackgroundActor);
+  MOZ_ASSERT(!mBackgroundActorFailed);
+
+  auto actor = new BackgroundFactoryRequestChild(this, aRequest, aDatabaseId);
+
+  if (!mBackgroundActor->SendPBackgroundIDBFactoryRequestConstructor(actor,
+                                                                     aParams)) {
+    aRequest->DispatchError(NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
+    return NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
+  }
+
+  return NS_OK;
+}
+
+NS_IMPL_ISUPPORTS1(IDBFactory::BackgroundCreateCallback,
+                   nsIIPCBackgroundChildCreateCallback)
+
+void
+IDBFactory::BackgroundCreateCallback::ActorCreated(PBackgroundChild* aActor)
+{
+  MOZ_ASSERT(aActor);
+  MOZ_ASSERT(mFactory);
+
+  nsRefPtr<IDBFactory> factory;
+  mFactory.swap(factory);
+
+  factory->BackgroundActorCreated(aActor);
+}
+
+void
+IDBFactory::BackgroundCreateCallback::ActorFailed()
+{
+  MOZ_ASSERT(mFactory);
+
+  nsRefPtr<IDBFactory> factory;
+  mFactory.swap(factory);
+
+  factory->BackgroundActorFailed();
 }

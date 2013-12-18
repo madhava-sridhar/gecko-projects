@@ -175,16 +175,6 @@ IndexedDBChild::~IndexedDBChild()
 }
 
 void
-IndexedDBChild::SetFactory(IDBFactory* aFactory)
-{
-  MOZ_ASSERT(aFactory);
-  MOZ_ASSERT(!mFactory);
-
-  aFactory->SetActor(this);
-  mFactory = aFactory;
-}
-
-void
 IndexedDBChild::Disconnect()
 {
 #ifdef DEBUG
@@ -202,12 +192,6 @@ IndexedDBChild::Disconnect()
 void
 IndexedDBChild::ActorDestroy(ActorDestroyReason aWhy)
 {
-  if (mFactory) {
-    mFactory->SetActor(static_cast<IndexedDBChild*>(nullptr));
-#ifdef DEBUG
-    mFactory = nullptr;
-#endif
-  }
 }
 
 PIndexedDBDatabaseChild*

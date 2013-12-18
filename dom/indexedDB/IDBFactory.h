@@ -16,6 +16,7 @@
 #include "nsWrapperCache.h"
 
 class mozIStorageConnection;
+template<typename> class nsAutoPtr;
 class nsIFile;
 class nsIFileURL;
 class nsIPrincipal;
@@ -23,20 +24,27 @@ class nsPIDOMWindow;
 template<typename> class nsRefPtr;
 
 namespace mozilla {
+
 class ErrorResult;
 
+namespace ipc {
+
+class PBackgroundChild;
+
+} // namespace ipc
+
 namespace dom {
+
 class ContentParent;
 class IDBOpenDBOptions;
 
 namespace indexedDB {
 
+class BackgroundFactoryChild;
 struct DatabaseInfo;
+class FactoryRequestParams;
 class IDBDatabase;
 class IDBOpenDBRequest;
-class IndexedDBChild;
-class IndexedDBParent;
-
 struct ObjectStoreInfo;
 
 class IDBFactory MOZ_FINAL : public nsISupports,
@@ -44,8 +52,12 @@ class IDBFactory MOZ_FINAL : public nsISupports,
 {
   typedef mozilla::dom::ContentParent ContentParent;
   typedef mozilla::dom::quota::PersistenceType PersistenceType;
-  typedef nsTArray<nsRefPtr<ObjectStoreInfo> > ObjectStoreInfoArray;
   typedef mozilla::dom::quota::StoragePrivilege StoragePrivilege;
+  typedef mozilla::ipc::PBackgroundChild PBackgroundChild;
+  typedef nsTArray<nsRefPtr<ObjectStoreInfo> > ObjectStoreInfoArray;
+
+  class BackgroundCreateCallback;
+  struct PendingRequestInfo;
 
 public:
   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
@@ -127,18 +139,7 @@ public:
   }
 
   void
-  SetActor(IndexedDBChild* aActorChild)
-  {
-    NS_ASSERTION(!aActorChild || !mActorChild, "Shouldn't have more than one!");
-    mActorChild = aActorChild;
-  }
-
-  void
-  SetActor(IndexedDBParent* aActorParent)
-  {
-    NS_ASSERTION(!aActorParent || !mActorParent, "Shouldn't have more than one!");
-    mActorParent = aActorParent;
-  }
+  SetBackgroundActor(BackgroundFactoryChild* aBackgroundActor);
 
   const nsCString&
   GetASCIIOrigin() const
@@ -204,6 +205,17 @@ private:
        const Optional<mozilla::dom::StorageType>& aStorageType, bool aDelete,
        ErrorResult& aRv);
 
+  nsresult
+  BackgroundActorCreated(PBackgroundChild* aBackgroundActor);
+
+  void
+  BackgroundActorFailed();
+
+  nsresult
+  InitiateRequest(IDBOpenDBRequest* aRequest,
+                  const FactoryRequestParams& aParams,
+                  const nsCString& aDatabaseId);
+
   nsCString mGroup;
   nsCString mASCIIOrigin;
   StoragePrivilege mPrivilege;
@@ -214,12 +226,14 @@ private:
   nsCOMPtr<nsPIDOMWindow> mWindow;
   JS::Heap<JSObject*> mOwningObject;
 
-  IndexedDBChild* mActorChild;
-  IndexedDBParent* mActorParent;
+  nsTArray<nsAutoPtr<PendingRequestInfo>> mPendingRequests;
+
+  BackgroundFactoryChild* mBackgroundActor;
 
   mozilla::dom::ContentParent* mContentParent;
 
   bool mRootedOwningObject;
+  bool mBackgroundActorFailed;
 };
 
 } // namespace indexedDB

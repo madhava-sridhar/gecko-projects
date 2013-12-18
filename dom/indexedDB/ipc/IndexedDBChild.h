@@ -53,9 +53,6 @@ public:
   }
 
   void
-  SetFactory(IDBFactory* aFactory);
-
-  void
   Disconnect();
 
 protected:

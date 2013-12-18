@@ -40,6 +40,16 @@ protected:
 
   virtual bool
   DeallocPBackgroundTestChild(PBackgroundTestChild* aActor) MOZ_OVERRIDE;
+
+  virtual PBackgroundIDBFactoryChild*
+  AllocPBackgroundIDBFactoryChild(const nsCString& aGroup,
+                                  const nsCString& aASCIIOrigin,
+                                  const StoragePrivilege& aPrivilege)
+                                  MOZ_OVERRIDE;
+
+  virtual bool
+  DeallocPBackgroundIDBFactoryChild(PBackgroundIDBFactoryChild* aActor)
+                                    MOZ_OVERRIDE;
 };
 
 class BackgroundChildImpl::ThreadLocal

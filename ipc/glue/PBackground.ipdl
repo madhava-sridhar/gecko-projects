@@ -2,18 +2,29 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+include protocol PBackgroundIDBFactory;
 include protocol PBackgroundTest;
+
+include "mozilla/dom/indexedDB/SerializationHelpers.h";
+
+using mozilla::dom::quota::StoragePrivilege
+  from "mozilla/dom/quota/StoragePrivilege.h";
 
 namespace mozilla {
 namespace ipc {
 
 protocol PBackground
 {
+  manages PBackgroundIDBFactory;
   manages PBackgroundTest;
 
 parent:
   // Only called at startup during mochitests to check the basic infrastructure.
   PBackgroundTest(nsCString testArg);
+
+  PBackgroundIDBFactory(nsCString group,
+                        nsCString asciiOrigin,
+                        StoragePrivilege privilege);
 };
 
 } // namespace ipc

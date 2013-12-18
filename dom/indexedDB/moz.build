@@ -14,6 +14,8 @@ XPIDL_SOURCES += [
 XPIDL_MODULE = 'dom_indexeddb'
 
 EXPORTS.mozilla.dom.indexedDB += [
+    'ActorsChild.h',
+    'ActorsParent.h',
     'Client.h',
     'DatabaseInfo.h',
     'FileInfo.h',
@@ -59,10 +61,19 @@ UNIFIED_SOURCES += [
 
 # These files cannot be built in unified mode because of name collisions
 SOURCES += [
+    'ActorsChild.cpp',
+    'ActorsParent.cpp',
     'IDBCursor.cpp',
     'IDBIndex.cpp',
     'IDBObjectStore.cpp',
     'ReportInternalError.cpp',
+]
+
+IPDL_SOURCES += [
+    'IndexedDBParams.ipdlh',
+    'PBackgroundIDBDatabase.ipdl',
+    'PBackgroundIDBFactory.ipdl',
+    'PBackgroundIDBFactoryRequest.ipdl',
 ]
 
 FAIL_ON_WARNINGS = True
@@ -80,4 +91,3 @@ LOCAL_INCLUDES += [
     '/dom/src/storage',
     '/xpcom/build',
 ]
-

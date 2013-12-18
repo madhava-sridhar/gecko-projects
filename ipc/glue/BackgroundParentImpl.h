@@ -31,6 +31,16 @@ protected:
 
   virtual bool
   DeallocPBackgroundTestParent(PBackgroundTestParent* aActor) MOZ_OVERRIDE;
+
+  virtual PBackgroundIDBFactoryParent*
+  AllocPBackgroundIDBFactoryParent(const nsCString& aGroup,
+                                   const nsCString& aASCIIOrigin,
+                                   const StoragePrivilege& aPrivilege)
+                                   MOZ_OVERRIDE;
+
+  virtual bool
+  DeallocPBackgroundIDBFactoryParent(PBackgroundIDBFactoryParent* aActor)
+                                     MOZ_OVERRIDE;
 };
 
 } // namespace ipc

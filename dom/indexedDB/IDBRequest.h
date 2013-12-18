@@ -69,6 +69,8 @@ public:
 
   void Reset();
 
+  void DispatchError(nsresult aErrorCode);
+
   nsresult NotifyHelperCompleted(HelperBase* aHelper);
   void NotifyHelperSentResultsToChildProcess(nsresult aRv);
 

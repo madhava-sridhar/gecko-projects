@@ -1,0 +1,88 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this file,
+ * You can obtain one at http://mozilla.org/MPL/2.0/. */
+
+include protocol PBackground;
+include protocol PBackgroundIDBDatabase;
+include protocol PBackgroundIDBFactoryRequest;
+
+include "mozilla/dom/indexedDB/SerializationHelpers.h";
+
+using class mozilla::dom::indexedDB::KeyPath
+  from "mozilla/dom/indexedDB/KeyPath.h";
+
+using mozilla::dom::quota::PersistenceType
+  from "mozilla/dom/quota/PersistenceType.h";
+
+namespace mozilla {
+namespace dom {
+namespace indexedDB {
+
+struct OpenDatabaseRequestParams
+{
+  nsString name;
+  uint64_t version;
+  PersistenceType persistenceType;
+};
+
+struct DeleteDatabaseRequestParams
+{
+  nsString name;
+  PersistenceType persistenceType;
+};
+
+union FactoryRequestParams
+{
+  OpenDatabaseRequestParams;
+  DeleteDatabaseRequestParams;
+};
+
+struct IndexMetadata
+{
+  nsString name;
+  int64_t id;
+  KeyPath keyPath;
+  bool unique;
+  bool multiEntry;
+};
+
+struct ObjectStoreMetadata
+{
+  nsString name;
+  int64_t id;
+  KeyPath keyPath;
+  bool autoIncrement;
+  IndexMetadata[] indexes;
+
+  // These two are really only needed on the parent side.
+  int64_t nextAutoIncrementId;
+  int64_t comittedAutoIncrementId;
+};
+
+struct DatabaseMetadata
+{
+  OpenDatabaseRequestParams openParams;
+  int64_t nextObjectStoreId;
+  int64_t nextIndexId;
+  ObjectStoreMetadata[] objectStores;
+};
+
+protocol PBackgroundIDBFactory
+{
+  manager PBackground;
+
+  manages PBackgroundIDBDatabase;
+  manages PBackgroundIDBFactoryRequest;
+
+parent:
+  __delete__();
+
+  PBackgroundIDBFactoryRequest(FactoryRequestParams params);
+
+child:
+  PBackgroundIDBDatabase(DatabaseMetadata metadata);
+};
+
+} // namespace indexedDB
+} // namespace dom
+} // namespace mozilla

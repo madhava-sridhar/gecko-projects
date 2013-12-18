@@ -17,7 +17,6 @@ UNIFIED_SOURCES += [
 ]
 
 IPDL_SOURCES += [
-    'IndexedDBParams.ipdlh',
     'PIndexedDB.ipdl',
     'PIndexedDBCursor.ipdl',
     'PIndexedDBDatabase.ipdl',
@@ -39,4 +38,3 @@ LOCAL_INCLUDES += [
     '/dom/events',
     '/dom/indexedDB',
 ]
-

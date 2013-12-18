@@ -13,10 +13,24 @@
 
 BEGIN_INDEXEDDB_NAMESPACE
 
+class IndexMetadata;
 class Key;
+class ObjectStoreMetadata;
 
 class KeyPath
 {
+  // This private constructor is only to be used by IPDL-generated classes
+  // (so far only IndexMetadata and ObjectStoreMetadata, generated in
+  // PBackgroundIDBFactory.ipdl).
+  friend class IndexMetadata;
+  friend class ObjectStoreMetadata;
+
+  KeyPath()
+  : mType(NONEXISTENT)
+  {
+    MOZ_COUNT_CTOR(KeyPath);
+  }
+
 public:
   enum KeyPathType {
     NONEXISTENT,

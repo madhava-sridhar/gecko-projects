@@ -5,11 +5,14 @@
 #include "BackgroundParentImpl.h"
 
 #include "mozilla/Assertions.h"
+#include "mozilla/dom/indexedDB/ActorsParent.h"
 #include "mozilla/ipc/BackgroundParent.h"
 #include "mozilla/ipc/PBackgroundTestParent.h"
 #include "nsThreadUtils.h"
 #include "nsTraceRefcnt.h"
 #include "nsXULAppAPI.h"
+
+namespace indexedDB = mozilla::dom::indexedDB;
 
 using mozilla::ipc::AssertIsOnBackgroundThread;
 
@@ -73,7 +76,7 @@ BackgroundParentImpl::ActorDestroy(ActorDestroyReason aWhy)
   AssertIsOnBackgroundThread();
 }
 
-PBackgroundTestParent*
+BackgroundParentImpl::PBackgroundTestParent*
 BackgroundParentImpl::AllocPBackgroundTestParent(const nsCString& aTestArg)
 {
   AssertIsInMainProcess();
@@ -103,6 +106,30 @@ BackgroundParentImpl::DeallocPBackgroundTestParent(
   MOZ_ASSERT(aActor);
 
   delete static_cast<TestParent*>(aActor);
+  return true;
+}
+
+BackgroundParentImpl::PBackgroundIDBFactoryParent*
+BackgroundParentImpl::AllocPBackgroundIDBFactoryParent(
+                                             const nsCString& aGroup,
+                                             const nsCString& aASCIIOrigin,
+                                             const StoragePrivilege& aPrivilege)
+{
+  AssertIsInMainProcess();
+  AssertIsOnBackgroundThread();
+
+  return indexedDB::BackgroundFactoryParent::Create(aGroup, aASCIIOrigin,
+                                                    aPrivilege);
+}
+
+bool
+BackgroundParentImpl::DeallocPBackgroundIDBFactoryParent(
+                                            PBackgroundIDBFactoryParent* aActor)
+{
+  AssertIsInMainProcess();
+  AssertIsOnBackgroundThread();
+
+  delete static_cast<indexedDB::BackgroundFactoryParent*>(aActor);
   return true;
 }
 

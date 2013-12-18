@@ -164,6 +164,23 @@ IDBRequest::Reset()
   mError = nullptr;
 }
 
+void
+IDBRequest::DispatchError(nsresult aErrorCode)
+{
+  MOZ_ASSERT(NS_FAILED(aErrorCode));
+
+  SetError(aErrorCode);
+
+  // Make an error event and fire it at the target.
+  nsCOMPtr<nsIDOMEvent> event =
+    CreateGenericEvent(this, NS_LITERAL_STRING(ERROR_EVT_STR), eDoesBubble,
+                       eCancelable);
+  MOZ_ASSERT(event);
+
+  bool ignored;
+  NS_WARN_IF(NS_FAILED(DispatchEvent(event, &ignored)));
+}
+
 nsresult
 IDBRequest::NotifyHelperCompleted(HelperBase* aHelper)
 {
