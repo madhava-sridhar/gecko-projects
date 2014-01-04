@@ -170,6 +170,15 @@ public:
     return mFactory;
   }
 
+  void
+  RegisterTransaction(IDBTransaction* aTransaction);
+
+  void
+  UnregisterTransaction(IDBTransaction* aTransaction);
+
+  void
+  AbortTransactions();
+
   // nsWrapperCache
   virtual JSObject*
   WrapObject(JSContext* aCx, JS::Handle<JSObject*> aScope) MOZ_OVERRIDE;
@@ -260,6 +269,8 @@ private:
   mozilla::dom::ContentParent* mContentParent;
 
   nsRefPtr<mozilla::dom::quota::Client> mQuotaClient;
+
+  nsTHashtable<nsRefPtrHashKey<IDBTransaction>> mTransactions;
 
   bool mInvalidated;
   bool mRegistered;

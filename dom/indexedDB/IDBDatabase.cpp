@@ -174,6 +174,18 @@ private:
   nsString mName;
 };
 
+static PLDHashOperator
+AbortTransactionsEnumerator(nsRefPtrHashKey<IDBTransaction>* aTransaction,
+                            void* aNonUsed)
+{
+  // This can fail, for example if the transaction is in the process of
+  // being comitted. That is expected and fine, so we ignore any returned
+  // errors.
+  ErrorResult rv;
+  aTransaction->GetKey()->Abort(rv);
+  return PL_DHASH_NEXT;
+}
+
 } // anonymous namespace
 
 // static
@@ -780,6 +792,33 @@ nsresult
 IDBDatabase::PostHandleEvent(EventChainPostVisitor& aVisitor)
 {
   return IndexedDatabaseManager::FireWindowOnError(GetOwner(), aVisitor);
+}
+
+void
+IDBDatabase::RegisterTransaction(IDBTransaction* aTransaction)
+{
+  MOZ_ASSERT(NS_IsMainThread(), "Wrong thread!");
+  MOZ_ASSERT(aTransaction, "Null pointer!");
+  MOZ_ASSERT(!mTransactions.Contains(aTransaction),
+             "This transaction is already registered");
+
+  mTransactions.PutEntry(aTransaction);
+}
+
+void
+IDBDatabase::UnregisterTransaction(IDBTransaction* aTransaction)
+{
+  MOZ_ASSERT(NS_IsMainThread(), "Wrong thread!");
+  MOZ_ASSERT(aTransaction, "Null pointer!");
+  MOZ_ASSERT(mTransactions.Contains(aTransaction), "No such transaction");
+  mTransactions.RemoveEntry(aTransaction);
+}
+
+void
+IDBDatabase::AbortTransactions()
+{
+  MOZ_ASSERT(NS_IsMainThread(), "Wrong thread!");
+  mTransactions.EnumerateEntries(AbortTransactionsEnumerator, nullptr);
 }
 
 AsyncConnectionHelper::ChildProcessSendResult

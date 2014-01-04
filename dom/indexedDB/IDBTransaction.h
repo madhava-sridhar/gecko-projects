@@ -65,7 +65,6 @@ class IDBTransaction : public IDBWrapperCache,
   friend class CommitHelper;
   friend class IndexedDBDatabaseChild;
   friend class ThreadObserver;
-  friend class TransactionThreadPool;
 
 public:
   NS_DECL_ISUPPORTS_INHERITED
@@ -152,6 +151,11 @@ public:
     return mMode;
   }
 
+  uint64_t Id() const
+  {
+    return mId;
+  }
+
   IDBDatabase* Database()
   {
     NS_ASSERTION(mDatabase, "This should never be null!");
@@ -161,6 +165,11 @@ public:
   DatabaseInfo* DBInfo() const
   {
     return mDatabaseInfo;
+  }
+
+  const nsTArray<nsString>& ObjectStoreNames() const
+  {
+    return mObjectStoreNames;
   }
 
   already_AddRefed<IDBObjectStore>
@@ -278,6 +287,8 @@ private:
   ~IDBTransaction();
 
   nsresult CommitOrRollback();
+
+  uint64_t mId;
 
   nsRefPtr<IDBDatabase> mDatabase;
   nsRefPtr<DatabaseInfo> mDatabaseInfo;

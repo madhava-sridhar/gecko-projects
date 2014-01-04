@@ -231,14 +231,14 @@ Client::WaitForStoragesToComplete(nsTArray<nsIOfflineStorage*>& aStorages,
   TransactionThreadPool* pool = TransactionThreadPool::Get();
   NS_ASSERTION(pool, "Should have checked if transaction service is active!");
 
-  nsTArray<nsRefPtr<IDBDatabase> > databases(aStorages.Length());
+  nsTArray<nsCString> databases(aStorages.Length());
   for (uint32_t index = 0; index < aStorages.Length(); index++) {
     IDBDatabase* database = IDBDatabase::FromStorage(aStorages[index]);
     if (!database) {
       MOZ_CRASH();
     }
 
-    databases.AppendElement(database);
+    databases.AppendElement(database->Id());
   }
 
   pool->WaitForDatabasesToComplete(databases, aCallback);
@@ -250,13 +250,10 @@ Client::AbortTransactionsForStorage(nsIOfflineStorage* aStorage)
   NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
   NS_ASSERTION(aStorage, "Passed null storage!");
 
-  TransactionThreadPool* pool = TransactionThreadPool::Get();
-  NS_ASSERTION(pool, "Should have checked if transaction service is active!");
-
   IDBDatabase* database = IDBDatabase::FromStorage(aStorage);
   NS_ASSERTION(database, "This shouldn't be null!");
 
-  pool->AbortTransactionsForDatabase(database);
+  database->AbortTransactions();
 }
 
 bool
@@ -270,7 +267,7 @@ Client::HasTransactionsForStorage(nsIOfflineStorage* aStorage)
   IDBDatabase* database = IDBDatabase::FromStorage(aStorage);
   NS_ASSERTION(database, "This shouldn't be null!");
 
-  return pool->HasTransactionsForDatabase(database);
+  return pool->HasTransactionsForDatabase(database->Id());
 }
 
 void

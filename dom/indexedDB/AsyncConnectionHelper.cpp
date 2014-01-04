@@ -682,7 +682,15 @@ TransactionPoolEventTarget::Dispatch(nsIRunnable* aRunnable,
   TransactionThreadPool* pool = TransactionThreadPool::GetOrCreate();
   NS_ENSURE_TRUE(pool, NS_ERROR_UNEXPECTED);
 
-  nsresult rv = pool->Dispatch(mTransaction, aRunnable, false, nullptr);
+  if (mTransaction->Database()->IsInvalidated()) {
+    return NS_ERROR_NOT_AVAILABLE;
+  }
+
+  nsresult rv = pool->Dispatch(mTransaction->Id(),
+                               mTransaction->Database()->Id(),
+                               mTransaction->ObjectStoreNames(),
+                               mTransaction->GetMode(),
+                               aRunnable, false, nullptr);
   NS_ENSURE_SUCCESS(rv, rv);
 
   return NS_OK;

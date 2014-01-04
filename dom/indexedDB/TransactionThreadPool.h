@@ -17,8 +17,6 @@
 #include "nsClassHashtable.h"
 #include "nsHashKeys.h"
 
-#include "IDBTransaction.h"
-
 class nsIThreadPool;
 
 BEGIN_INDEXEDDB_NAMESPACE
@@ -40,20 +38,21 @@ public:
 
   static void Shutdown();
 
-  nsresult Dispatch(IDBTransaction* aTransaction,
+  static uint64_t NextTransactionId();
+
+  nsresult Dispatch(uint64_t aTransactionId,
+                    const nsACString& aDatabaseId,
+                    const nsTArray<nsString>& aObjectStoreNames,
+                    uint16_t aMode,
                     nsIRunnable* aRunnable,
                     bool aFinish,
                     nsIRunnable* aFinishRunnable);
 
-  void WaitForDatabasesToComplete(nsTArray<nsRefPtr<IDBDatabase> >& aDatabases,
+  void WaitForDatabasesToComplete(nsTArray<nsCString>& aDatabaseIds,
                                   nsIRunnable* aCallback);
 
-  // Abort all transactions, unless they are already in the process of being
-  // committed, for aDatabase.
-  void AbortTransactionsForDatabase(IDBDatabase* aDatabase);
-
   // Returns true if there are running or pending transactions for aDatabase.
-  bool HasTransactionsForDatabase(IDBDatabase* aDatabase);
+  bool HasTransactionsForDatabase(const nsACString& aDatabaseId);
 
 protected:
   class TransactionQueue MOZ_FINAL : public nsIRunnable
@@ -62,7 +61,10 @@ protected:
     NS_DECL_THREADSAFE_ISUPPORTS
     NS_DECL_NSIRUNNABLE
 
-    TransactionQueue(IDBTransaction* aTransaction);
+    TransactionQueue(uint64_t aTransactionId,
+                     const nsACString& aDatabaseId,
+                     const nsTArray<nsString>& aObjectStoreNames,
+                     uint16_t aMode);
 
     void Unblock();
 
@@ -72,7 +74,12 @@ protected:
 
   private:
     mozilla::Monitor mMonitor;
-    IDBTransaction* mTransaction;
+
+    uint64_t mTransactionId;
+    const nsCString mDatabaseId;
+    const nsTArray<nsString> mObjectStoreNames;
+    uint16_t mMode;
+
     nsAutoTArray<nsCOMPtr<nsIRunnable>, 10> mQueue;
     nsCOMPtr<nsIRunnable> mFinishRunnable;
     bool mShouldFinish;
@@ -82,12 +89,16 @@ protected:
 
   struct TransactionInfo
   {
-    TransactionInfo(IDBTransaction* aTransaction)
+    TransactionInfo(uint64_t aTransactionId,
+                    const nsACString& aDatabaseId,
+                    const nsTArray<nsString>& aObjectStoreNames,
+                    uint16_t aMode)
+    : transactionId(aTransactionId), databaseId(aDatabaseId)
     {
       MOZ_COUNT_CTOR(TransactionInfo);
 
-      transaction = aTransaction;
-      queue = new TransactionQueue(aTransaction);
+      queue = new TransactionQueue(aTransactionId, aDatabaseId,
+                                   aObjectStoreNames, aMode);
     }
 
     ~TransactionInfo()
@@ -95,10 +106,11 @@ protected:
       MOZ_COUNT_DTOR(TransactionInfo);
     }
 
-    nsRefPtr<IDBTransaction> transaction;
+    uint64_t transactionId;
+    nsCString databaseId;
     nsRefPtr<TransactionQueue> queue;
-    nsTHashtable<nsPtrHashKey<TransactionInfo> > blockedOn;
-    nsTHashtable<nsPtrHashKey<TransactionInfo> > blocking;
+    nsTHashtable<nsPtrHashKey<TransactionInfo>> blockedOn;
+    nsTHashtable<nsPtrHashKey<TransactionInfo>> blocking;
   };
 
   struct TransactionInfoPair
@@ -131,19 +143,19 @@ protected:
       MOZ_COUNT_DTOR(DatabaseTransactionInfo);
     }
 
-    typedef nsClassHashtable<nsPtrHashKey<IDBTransaction>, TransactionInfo >
+    typedef nsClassHashtable<nsUint64HashKey, TransactionInfo>
       TransactionHashtable;
     TransactionHashtable transactions;
     nsClassHashtable<nsStringHashKey, TransactionInfoPair> blockingTransactions;
   };
 
   static PLDHashOperator
-  CollectTransactions(IDBTransaction* aKey,
+  CollectTransactions(const uint64_t& aTransactionId,
                       TransactionInfo* aValue,
                       void* aUserArg);
 
   static PLDHashOperator
-  FindTransaction(IDBTransaction* aKey,
+  FindTransaction(const uint64_t& aTransactionId,
                   TransactionInfo* aValue,
                   void* aUserArg);
 
@@ -153,7 +165,7 @@ protected:
 
   struct DatabasesCompleteCallback
   {
-    nsTArray<nsRefPtr<IDBDatabase> > mDatabases;
+    nsTArray<nsCString> mDatabaseIds;
     nsCOMPtr<nsIRunnable> mCallback;
   };
 
@@ -163,9 +175,16 @@ protected:
   nsresult Init();
   nsresult Cleanup();
 
-  void FinishTransaction(IDBTransaction* aTransaction);
+  void FinishTransaction(uint64_t aTransactionId,
+                         const nsACString& aDatabaseId,
+                         const nsTArray<nsString>& aObjectStoreNames,
+                         uint16_t aMode);
 
-  TransactionQueue& GetQueueForTransaction(IDBTransaction* aTransaction);
+  TransactionQueue& GetQueueForTransaction(
+                                    uint64_t aTransactionId,
+                                    const nsACString& aDatabaseId,
+                                    const nsTArray<nsString>& aObjectStoreNames,
+                                    uint16_t aMode);
 
   bool MaybeFireCallback(DatabasesCompleteCallback aCallback);
 

@@ -124,7 +124,9 @@ IDBTransaction::CreateInternal(IDBDatabase* aDatabase,
       NS_ENSURE_TRUE(pool, nullptr);
 
       static StartTransactionRunnable sStartTransactionRunnable;
-      pool->Dispatch(transaction, &sStartTransactionRunnable, false, nullptr);
+      pool->Dispatch(transaction->Id(), transaction->Database()->Id(),
+                     transaction->ObjectStoreNames(), transaction->GetMode(),
+                     &sStartTransactionRunnable, false, nullptr);
     }
   }
   else if (!aIsVersionChangeTransactionChild) {
@@ -155,11 +157,13 @@ IDBTransaction::CreateInternal(IDBDatabase* aDatabase,
     actor->SetTransaction(transaction);
   }
 
+  aDatabase->RegisterTransaction(transaction);
   return transaction.forget();
 }
 
 IDBTransaction::IDBTransaction(IDBDatabase* aDatabase)
 : IDBWrapperCache(aDatabase),
+  mId(TransactionThreadPool::NextTransactionId()),
   mReadyState(IDBTransaction::INITIAL),
   mMode(IDBTransaction::READ_ONLY),
   mPendingRequests(0),
@@ -277,7 +281,8 @@ IDBTransaction::CommitOrRollback()
   mCachedStatements.Enumerate(DoomCachedStatements, helper);
   NS_ASSERTION(!mCachedStatements.Count(), "Statements left!");
 
-  nsresult rv = pool->Dispatch(this, helper, true, helper);
+  nsresult rv = pool->Dispatch(mId, mDatabase->Id(), mObjectStoreNames,
+                               mMode, helper, true, helper);
   NS_ENSURE_SUCCESS(rv, rv);
 
   return NS_OK;
@@ -852,6 +857,7 @@ CommitHelper::Run()
       mListener->NotifyTransactionPostComplete(mTransaction);
     }
 
+    mTransaction->Database()->UnregisterTransaction(mTransaction);
     mTransaction = nullptr;
 
     return NS_OK;
