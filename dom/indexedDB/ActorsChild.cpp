@@ -34,6 +34,7 @@ BackgroundRequestChildBase::~BackgroundRequestChildBase()
 
 BackgroundFactoryChild::BackgroundFactoryChild(IDBFactory* aFactory)
   : mFactory(aFactory)
+  , mDone(false)
 #ifdef DEBUG
   , mOwningThread(NS_GetCurrentThread())
 #endif
@@ -63,6 +64,16 @@ BackgroundFactoryChild::AssertIsOnOwningThread() const
 }
 
 #endif // DEBUG
+
+void
+BackgroundFactoryChild::SendDoneNotification()
+{
+  AssertIsOnOwningThread();
+  MOZ_ASSERT(!mDone);
+
+  mDone = true;
+  PBackgroundIDBFactoryChild::SendDone();
+}
 
 void
 BackgroundFactoryChild::ActorDestroy(ActorDestroyReason aWhy)
@@ -123,8 +134,9 @@ BackgroundFactoryRequestChild::BackgroundFactoryRequestChild(
                                                  IDBFactory* aFactory,
                                                  IDBOpenDBRequest* aOpenRequest,
                                                  const nsACString& aDatabaseId)
-: BackgroundRequestChildBase(aOpenRequest), mFactory(aFactory),
-  mDatabaseId(aDatabaseId)
+  : BackgroundRequestChildBase(aOpenRequest)
+  , mFactory(aFactory)
+  , mDatabaseId(aDatabaseId)
 {
   // Can't assert owning thread here because IPDL has not yet set our manager!
   MOZ_ASSERT(aFactory);
@@ -180,7 +192,8 @@ BackgroundFactoryRequestChild::RecvBlocked(const uint64_t& aCurrentVersion)
 
 BackgroundDatabaseChild::BackgroundDatabaseChild(
                                               const DatabaseMetadata& aMetadata)
-: mMetadata(aMetadata)
+  : mMetadata(aMetadata)
+  , mDone(false)
 {
   // Can't assert owning thread here because IPDL has not yet set our manager!
   MOZ_COUNT_CTOR(mozilla::dom::indexedDB::BackgroundDatabaseChild);
@@ -193,7 +206,32 @@ BackgroundDatabaseChild::~BackgroundDatabaseChild()
 }
 
 void
+BackgroundDatabaseChild::SendDoneNotification()
+{
+  AssertIsOnOwningThread();
+  MOZ_ASSERT(!mDone);
+
+  mDone = true;
+  PBackgroundIDBDatabaseChild::SendDone();
+}
+
+void
 BackgroundDatabaseChild::ActorDestroy(ActorDestroyReason aWhy)
+{
+  AssertIsOnOwningThread();
+  MOZ_CRASH("Implement me!");
+}
+
+bool
+BackgroundDatabaseChild::RecvVersionChange(const uint64_t& aOldVersion,
+                                           const uint64_t& aNewVersion)
+{
+  AssertIsOnOwningThread();
+  MOZ_CRASH("Implement me!");
+}
+
+bool
+BackgroundDatabaseChild::RecvInvalidate()
 {
   AssertIsOnOwningThread();
   MOZ_CRASH("Implement me!");

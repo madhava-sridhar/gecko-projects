@@ -131,8 +131,8 @@ IDBFactory::~IDBFactory()
   MOZ_ASSERT_IF(mBackgroundActorFailed, !mBackgroundActor);
 
   if (mBackgroundActor) {
-    BackgroundFactoryChild::Send__delete__(mBackgroundActor);
-    MOZ_ASSERT(!mBackgroundActor);
+    mBackgroundActor->SendDoneNotification();
+    mBackgroundActor = nullptr;
   }
 
   if (mRootedOwningObject) {

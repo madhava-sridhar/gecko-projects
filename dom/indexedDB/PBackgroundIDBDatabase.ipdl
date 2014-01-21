@@ -13,7 +13,16 @@ protocol PBackgroundIDBDatabase
   manager PBackgroundIDBFactory;
 
 parent:
+  Done();
+
+  Blocked();
+
+child:
   __delete__();
+
+  VersionChange(uint64_t oldVersion, uint64_t newVersion);
+
+  Invalidate();
 };
 
 } // namespace indexedDB

@@ -23,7 +23,8 @@ class BackgroundParentImpl;
 
 BEGIN_INDEXEDDB_NAMESPACE
 
-class BackgroundFactoryParent MOZ_FINAL : public PBackgroundIDBFactoryParent
+class BackgroundFactoryParent MOZ_FINAL
+  : public PBackgroundIDBFactoryParent
 {
   friend class mozilla::ipc::BackgroundParentImpl;
 
@@ -56,6 +57,9 @@ private:
   virtual void
   ActorDestroy(ActorDestroyReason aWhy) MOZ_OVERRIDE;
 
+  virtual bool
+  RecvDone() MOZ_OVERRIDE;
+
   virtual PBackgroundIDBFactoryRequestParent*
   AllocPBackgroundIDBFactoryRequestParent(const FactoryRequestParams& aParams)
                                           MOZ_OVERRIDE;
@@ -80,22 +84,31 @@ private:
                                       MOZ_OVERRIDE;
 };
 
-class BackgroundDatabaseParent MOZ_FINAL : public PBackgroundIDBDatabaseParent
+class BackgroundDatabaseParent MOZ_FINAL
+  : public PBackgroundIDBDatabaseParent
 {
   friend class BackgroundFactoryParent;
 
   DatabaseMetadata mMetadata;
+  nsCString mDatabaseId;
+
+public:
+  BackgroundDatabaseParent(const DatabaseMetadata& aMetadata,
+                           const nsACString& aDatabaseId);
 
 private:
-  // Only constructed by BackgroundFactoryParent.
-  BackgroundDatabaseParent(const DatabaseMetadata& aMetadata);
-
   // Only destroyed by BackgroundFactoryParent.
   ~BackgroundDatabaseParent();
 
   // IPDL methods are only called by IPDL.
   virtual void
   ActorDestroy(ActorDestroyReason aWhy) MOZ_OVERRIDE;
+
+  virtual bool
+  RecvDone() MOZ_OVERRIDE;
+
+  virtual bool
+  RecvBlocked() MOZ_OVERRIDE;
 };
 
 END_INDEXEDDB_NAMESPACE

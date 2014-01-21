@@ -75,11 +75,13 @@ protocol PBackgroundIDBFactory
   manages PBackgroundIDBFactoryRequest;
 
 parent:
-  __delete__();
+  Done();
 
   PBackgroundIDBFactoryRequest(FactoryRequestParams params);
 
 child:
+  __delete__();
+
   PBackgroundIDBDatabase(DatabaseMetadata metadata);
 };
 

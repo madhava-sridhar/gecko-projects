@@ -40,12 +40,14 @@ protected:
   ~BackgroundRequestChildBase();
 };
 
-class BackgroundFactoryChild MOZ_FINAL : public PBackgroundIDBFactoryChild
+class BackgroundFactoryChild MOZ_FINAL
+  : public PBackgroundIDBFactoryChild
 {
   friend class mozilla::ipc::BackgroundChildImpl;
   friend class IDBFactory;
 
   IDBFactory* mFactory;
+  bool mDone;
 
 #ifdef DEBUG
   nsCOMPtr<nsIEventTarget> mOwningThread;
@@ -68,6 +70,10 @@ public:
 #endif
 
 private:
+  // Only called by IDBFactory.
+  void
+  SendDoneNotification();
+
   // IPDL methods are only called by IPDL.
   virtual void
   ActorDestroy(ActorDestroyReason aWhy) MOZ_OVERRIDE;
@@ -90,9 +96,9 @@ private:
                                      MOZ_OVERRIDE;
 };
 
-class BackgroundFactoryRequestChild MOZ_FINAL :
-                                        public BackgroundRequestChildBase,
-                                        public PBackgroundIDBFactoryRequestChild
+class BackgroundFactoryRequestChild MOZ_FINAL
+  : public BackgroundRequestChildBase
+  , public PBackgroundIDBFactoryRequestChild
 {
   friend class IDBFactory;
   friend class BackgroundFactoryChild;
@@ -125,11 +131,13 @@ private:
   RecvBlocked(const uint64_t& aCurrentVersion) MOZ_OVERRIDE;
 };
 
-class BackgroundDatabaseChild MOZ_FINAL : public PBackgroundIDBDatabaseChild
+class BackgroundDatabaseChild MOZ_FINAL
+  : public PBackgroundIDBDatabaseChild
 {
   friend class BackgroundFactoryChild;
 
   DatabaseMetadata mMetadata;
+  bool mDone;
 
 private:
   // Only constructed by BackgroundFactoryChild.
@@ -146,9 +154,19 @@ public:
   }
 
 private:
+  void
+  SendDoneNotification();
+
   // IPDL methods are only called by IPDL.
   virtual void
   ActorDestroy(ActorDestroyReason aWhy) MOZ_OVERRIDE;
+
+  virtual bool
+  RecvVersionChange(const uint64_t& aOldVersion, const uint64_t& aNewVersion)
+                    MOZ_OVERRIDE;
+
+  virtual bool
+  RecvInvalidate() MOZ_OVERRIDE;
 };
 
 END_INDEXEDDB_NAMESPACE
