@@ -118,8 +118,10 @@ BackgroundParentImpl::AllocPBackgroundIDBFactoryParent(
   AssertIsInMainProcess();
   AssertIsOnBackgroundThread();
 
-  return indexedDB::BackgroundFactoryParent::Create(aGroup, aASCIIOrigin,
-                                                    aPrivilege);
+  nsRefPtr<indexedDB::BackgroundFactoryParent> actor =
+    indexedDB::BackgroundFactoryParent::Create(aGroup, aASCIIOrigin,
+                                               aPrivilege);
+  return actor.forget().get();
 }
 
 bool
@@ -129,7 +131,8 @@ BackgroundParentImpl::DeallocPBackgroundIDBFactoryParent(
   AssertIsInMainProcess();
   AssertIsOnBackgroundThread();
 
-  delete static_cast<indexedDB::BackgroundFactoryParent*>(aActor);
+  nsRefPtr<indexedDB::BackgroundFactoryParent> actor =
+    dont_AddRef(static_cast<indexedDB::BackgroundFactoryParent*>(aActor));
   return true;
 }
 

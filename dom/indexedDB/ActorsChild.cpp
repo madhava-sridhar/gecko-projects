@@ -17,7 +17,7 @@ USING_INDEXEDDB_NAMESPACE
  * BackgroundRequestChildBase
  ******************************************************************************/
 BackgroundRequestChildBase::BackgroundRequestChildBase(IDBRequest* aRequest)
-: mRequest(aRequest)
+  : mRequest(aRequest)
 {
   MOZ_ASSERT(aRequest);
   MOZ_COUNT_CTOR(mozilla::dom::indexedDB::BackgroundRequestChildBase);
@@ -34,7 +34,6 @@ BackgroundRequestChildBase::~BackgroundRequestChildBase()
 
 BackgroundFactoryChild::BackgroundFactoryChild(IDBFactory* aFactory)
   : mFactory(aFactory)
-  , mDone(false)
 #ifdef DEBUG
   , mOwningThread(NS_GetCurrentThread())
 #endif
@@ -66,16 +65,6 @@ BackgroundFactoryChild::AssertIsOnOwningThread() const
 #endif // DEBUG
 
 void
-BackgroundFactoryChild::SendDoneNotification()
-{
-  AssertIsOnOwningThread();
-  MOZ_ASSERT(!mDone);
-
-  mDone = true;
-  PBackgroundIDBFactoryChild::SendDone();
-}
-
-void
 BackgroundFactoryChild::ActorDestroy(ActorDestroyReason aWhy)
 {
   AssertIsOnOwningThread();
@@ -92,7 +81,8 @@ PBackgroundIDBFactoryRequestChild*
 BackgroundFactoryChild::AllocPBackgroundIDBFactoryRequestChild(
                                             const FactoryRequestParams& aParams)
 {
-  MOZ_CRASH("FactoryRequestChild actors should be manually constructed!");
+  MOZ_CRASH("PBackgroundIDBFactoryRequestChild actors should be manually "
+            "constructed!");
 }
 
 bool
@@ -193,7 +183,6 @@ BackgroundFactoryRequestChild::RecvBlocked(const uint64_t& aCurrentVersion)
 BackgroundDatabaseChild::BackgroundDatabaseChild(
                                               const DatabaseMetadata& aMetadata)
   : mMetadata(aMetadata)
-  , mDone(false)
 {
   // Can't assert owning thread here because IPDL has not yet set our manager!
   MOZ_COUNT_CTOR(mozilla::dom::indexedDB::BackgroundDatabaseChild);
@@ -206,20 +195,61 @@ BackgroundDatabaseChild::~BackgroundDatabaseChild()
 }
 
 void
-BackgroundDatabaseChild::SendDoneNotification()
-{
-  AssertIsOnOwningThread();
-  MOZ_ASSERT(!mDone);
-
-  mDone = true;
-  PBackgroundIDBDatabaseChild::SendDone();
-}
-
-void
 BackgroundDatabaseChild::ActorDestroy(ActorDestroyReason aWhy)
 {
   AssertIsOnOwningThread();
   MOZ_CRASH("Implement me!");
+}
+
+PBackgroundIDBTransactionChild*
+BackgroundDatabaseChild::AllocPBackgroundIDBTransactionChild(
+                                    const nsTArray<nsString>& aObjectStoreNames,
+                                    const Mode& aMode)
+{
+  MOZ_CRASH("PBackgroundIDBTransactionChild actors should be manually "
+            "constructed!");
+}
+
+bool
+BackgroundDatabaseChild::DeallocPBackgroundIDBTransactionChild(
+                                         PBackgroundIDBTransactionChild* aActor)
+{
+  AssertIsOnOwningThread();
+  MOZ_ASSERT(aActor);
+
+  delete static_cast<BackgroundTransactionChild*>(aActor);
+  return true;
+}
+
+PBackgroundIDBVersionChangeTransactionChild*
+BackgroundDatabaseChild::AllocPBackgroundIDBVersionChangeTransactionChild(
+                                              const DatabaseMetadata& aMetadata)
+{
+  AssertIsOnOwningThread();
+
+  return new BackgroundVersionChangeTransactionChild(aMetadata);
+}
+
+bool
+BackgroundDatabaseChild::RecvPBackgroundIDBVersionChangeTransactionConstructor(
+                            PBackgroundIDBVersionChangeTransactionChild* aActor,
+                            const DatabaseMetadata& aMetadata)
+{
+  AssertIsOnOwningThread();
+  MOZ_ASSERT(aActor);
+
+  MOZ_CRASH("Implement me!");
+}
+
+bool
+BackgroundDatabaseChild::DeallocPBackgroundIDBVersionChangeTransactionChild(
+                            PBackgroundIDBVersionChangeTransactionChild* aActor)
+{
+  AssertIsOnOwningThread();
+  MOZ_ASSERT(aActor);
+
+  delete static_cast<BackgroundVersionChangeTransactionChild*>(aActor);
+  return true;
 }
 
 bool
@@ -232,6 +262,69 @@ BackgroundDatabaseChild::RecvVersionChange(const uint64_t& aOldVersion,
 
 bool
 BackgroundDatabaseChild::RecvInvalidate()
+{
+  AssertIsOnOwningThread();
+  MOZ_CRASH("Implement me!");
+}
+
+/*******************************************************************************
+ * BackgroundTransactionChild
+ ******************************************************************************/
+
+BackgroundTransactionChild::BackgroundTransactionChild()
+{
+  // Can't assert owning thread here because IPDL has not yet set our manager!
+  MOZ_COUNT_CTOR(mozilla::dom::indexedDB::BackgroundTransactionChild);
+}
+
+BackgroundTransactionChild::~BackgroundTransactionChild()
+{
+  AssertIsOnOwningThread();
+  MOZ_COUNT_DTOR(mozilla::dom::indexedDB::BackgroundTransactionChild);
+}
+
+void
+BackgroundTransactionChild::ActorDestroy(ActorDestroyReason aWhy)
+{
+  AssertIsOnOwningThread();
+  MOZ_CRASH("Implement me!");
+}
+
+bool
+BackgroundTransactionChild::RecvComplete(const nsresult& aResult)
+{
+  AssertIsOnOwningThread();
+  MOZ_CRASH("Implement me!");
+}
+
+/*******************************************************************************
+ * BackgroundVersionChangeTransactionChild
+ ******************************************************************************/
+
+BackgroundVersionChangeTransactionChild::
+BackgroundVersionChangeTransactionChild(const DatabaseMetadata& aMetadata)
+  : mMetadata(aMetadata)
+{
+  // Can't assert owning thread here because IPDL has not yet set our manager!
+  MOZ_COUNT_CTOR(mozilla::dom::indexedDB::BackgroundVersionChangeTransactionChild);
+}
+
+BackgroundVersionChangeTransactionChild::
+~BackgroundVersionChangeTransactionChild()
+{
+  AssertIsOnOwningThread();
+  MOZ_COUNT_DTOR(mozilla::dom::indexedDB::BackgroundVersionChangeTransactionChild);
+}
+
+void
+BackgroundVersionChangeTransactionChild::ActorDestroy(ActorDestroyReason aWhy)
+{
+  AssertIsOnOwningThread();
+  MOZ_CRASH("Implement me!");
+}
+
+bool
+BackgroundVersionChangeTransactionChild::RecvComplete(const nsresult& aResult)
 {
   AssertIsOnOwningThread();
   MOZ_CRASH("Implement me!");

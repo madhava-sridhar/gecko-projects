@@ -1,0 +1,39 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this file,
+ * You can obtain one at http://mozilla.org/MPL/2.0/. */
+
+include protocol PBackgroundIDBDatabase;
+
+include PBackgroundIDBSharedTypes;
+
+namespace mozilla {
+namespace dom {
+namespace indexedDB {
+
+protocol PBackgroundIDBVersionChangeTransaction
+{
+  manager PBackgroundIDBDatabase;
+
+parent:
+  DeleteMe();
+
+  Commit();
+  Abort(nsresult resultCode);
+
+  CreateObjectStore(ObjectStoreMetadata metadata);
+  DeleteObjectStore(nsString name);
+
+  CreateIndex(nsString objectStoreName,
+              IndexMetadata metadata);
+  DeleteIndex(nsString objectStoreName,
+              nsString indexName);
+
+child:
+  __delete__();
+
+  Complete(nsresult result);
+};
+
+} // namespace indexedDB
+} // namespace dom
+} // namespace mozilla

@@ -10,13 +10,13 @@
 // Only meant to be included in IndexedDB source files, not exported.
 #include "IndexedDatabase.h"
 
-#include "nsIObserver.h"
 #include "nsIRunnable.h"
 
 #include "mozilla/Monitor.h"
 #include "nsClassHashtable.h"
 #include "nsHashKeys.h"
 
+class nsIEventTarget;
 class nsIThreadPool;
 
 BEGIN_INDEXEDDB_NAMESPACE
@@ -28,6 +28,8 @@ class TransactionThreadPool
 {
   friend class nsAutoPtr<TransactionThreadPool>;
   friend class FinishTransactionRunnable;
+
+  class CleanupRunnable;
 
 public:
   // returns a non-owning ref!
@@ -47,6 +49,12 @@ public:
                     nsIRunnable* aRunnable,
                     bool aFinish,
                     nsIRunnable* aFinishRunnable);
+
+  void Dispatch(uint64_t aTransactionId,
+                const nsACString& aDatabaseId,
+                nsIRunnable* aRunnable,
+                bool aFinish,
+                nsIRunnable* aFinishRunnable);
 
   void WaitForDatabasesToComplete(nsTArray<nsCString>& aDatabaseIds,
                                   nsIRunnable* aCallback);
@@ -75,6 +83,7 @@ protected:
   private:
     mozilla::Monitor mMonitor;
 
+    nsCOMPtr<nsIEventTarget> mOwningThread;
     uint64_t mTransactionId;
     const nsCString mDatabaseId;
     const nsTArray<nsString> mObjectStoreNames;
@@ -179,6 +188,9 @@ protected:
                          const nsACString& aDatabaseId,
                          const nsTArray<nsString>& aObjectStoreNames,
                          uint16_t aMode);
+
+  TransactionQueue* GetQueueForTransaction(uint64_t aTransactionId,
+                                           const nsACString& aDatabaseId);
 
   TransactionQueue& GetQueueForTransaction(
                                     uint64_t aTransactionId,

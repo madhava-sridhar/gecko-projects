@@ -6,19 +6,17 @@
 
 #include "TransactionThreadPool.h"
 
-#include "nsIObserverService.h"
-#include "nsIThreadPool.h"
-
+#include "IDBTransaction.h"
+#include "mozilla/ipc/BackgroundParent.h"
 #include "nsComponentManagerUtils.h"
+#include "nsIThreadPool.h"
 #include "nsThreadUtils.h"
 #include "nsServiceManagerUtils.h"
 #include "nsXPCOMCIDInternal.h"
-
 #include "ProfilerHelpers.h"
 
-#include "IDBTransaction.h"
-
 using mozilla::MonitorAutoLock;
+using mozilla::ipc::AssertIsOnBackgroundThread;
 
 USING_INDEXEDDB_NAMESPACE
 
@@ -28,8 +26,10 @@ const uint32_t kThreadLimit = 20;
 const uint32_t kIdleThreadLimit = 5;
 const uint32_t kIdleThreadTimeoutMs = 30000;
 
+// Only touched on the PBackground thread.
 TransactionThreadPool* gThreadPool = nullptr;
-bool gShutdown = false;
+
+// Only touched on the PBackground thread.
 uint64_t gUniqueTransactionId = 0;
 
 #ifdef MOZ_ENABLE_PROFILER_SPS
@@ -73,32 +73,58 @@ private:
 
 END_INDEXEDDB_NAMESPACE
 
+class TransactionThreadPool::CleanupRunnable
+  : public nsRunnable
+{
+  nsAutoPtr<TransactionThreadPool> mThreadPool;
+
+public:
+  CleanupRunnable(TransactionThreadPool* aThreadPool)
+    : mThreadPool(aThreadPool)
+  {
+    AssertIsOnBackgroundThread();
+    MOZ_ASSERT(aThreadPool);
+  }
+
+  NS_IMETHOD
+  Run()
+  {
+    AssertIsOnBackgroundThread();
+    if (NS_FAILED(mThreadPool->Cleanup())) {
+      NS_WARNING("Failed to clean up thread pool!");
+    }
+
+    return NS_OK;
+  }
+};
+
 TransactionThreadPool::TransactionThreadPool()
 {
-  NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
-  NS_ASSERTION(!gThreadPool, "More than one instance!");
+  AssertIsOnBackgroundThread();
+  MOZ_ASSERT(!gThreadPool);
 }
 
 TransactionThreadPool::~TransactionThreadPool()
 {
-  NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
-  NS_ASSERTION(gThreadPool == this, "Different instances!");
-  gThreadPool = nullptr;
+  AssertIsOnBackgroundThread();
 }
 
 // static
 TransactionThreadPool*
 TransactionThreadPool::GetOrCreate()
 {
-  if (!gThreadPool && !gShutdown) {
-    NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
+  AssertIsOnBackgroundThread();
+
+  if (!gThreadPool) {
     nsAutoPtr<TransactionThreadPool> pool(new TransactionThreadPool());
 
-    nsresult rv = pool->Init();
-    NS_ENSURE_SUCCESS(rv, nullptr);
+    if (NS_WARN_IF(NS_FAILED(pool->Init()))) {
+      return nullptr;
+    }
 
     gThreadPool = pool.forget();
   }
+
   return gThreadPool;
 }
 
@@ -106,6 +132,8 @@ TransactionThreadPool::GetOrCreate()
 TransactionThreadPool*
 TransactionThreadPool::Get()
 {
+  AssertIsOnBackgroundThread();
+
   return gThreadPool;
 }
 
@@ -113,53 +141,65 @@ TransactionThreadPool::Get()
 void
 TransactionThreadPool::Shutdown()
 {
-  NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
-
-  gShutdown = true;
+  AssertIsOnBackgroundThread();
 
   if (gThreadPool) {
-    if (NS_FAILED(gThreadPool->Cleanup())) {
-      NS_WARNING("Failed to shutdown thread pool!");
-    }
-    delete gThreadPool;
+    nsRefPtr<CleanupRunnable> runnable = new CleanupRunnable(gThreadPool);
     gThreadPool = nullptr;
+
+    MOZ_ALWAYS_TRUE(NS_SUCCEEDED(NS_DispatchToCurrentThread(runnable)));
   }
+
+  gUniqueTransactionId = 0;
 }
 
 uint64_t
 TransactionThreadPool::NextTransactionId()
 {
-  NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
+  AssertIsOnBackgroundThread();
+
   return ++gUniqueTransactionId;
 }
 
 nsresult
 TransactionThreadPool::Init()
 {
-  NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
+  AssertIsOnBackgroundThread();
 
   nsresult rv;
   mThreadPool = do_CreateInstance(NS_THREADPOOL_CONTRACTID, &rv);
-  NS_ENSURE_SUCCESS(rv, rv);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
 
   rv = mThreadPool->SetName(NS_LITERAL_CSTRING("IndexedDB Trans"));
-  NS_ENSURE_SUCCESS(rv, rv);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
 
   rv = mThreadPool->SetThreadLimit(kThreadLimit);
-  NS_ENSURE_SUCCESS(rv, rv);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
 
   rv = mThreadPool->SetIdleThreadLimit(kIdleThreadLimit);
-  NS_ENSURE_SUCCESS(rv, rv);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
 
   rv = mThreadPool->SetIdleThreadTimeout(kIdleThreadTimeoutMs);
-  NS_ENSURE_SUCCESS(rv, rv);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
 
 #ifdef MOZ_ENABLE_PROFILER_SPS
   nsCOMPtr<nsIThreadPoolListener> listener =
     new TransactionThreadPoolListener();
 
   rv = mThreadPool->SetListener(listener);
-  NS_ENSURE_SUCCESS(rv, rv);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
 #endif
 
   return NS_OK;
@@ -168,16 +208,19 @@ TransactionThreadPool::Init()
 nsresult
 TransactionThreadPool::Cleanup()
 {
-  NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
+  AssertIsOnBackgroundThread();
 
-  PROFILER_MAIN_THREAD_LABEL("IndexedDB", "TransactionThreadPool::Cleanup");
+  PROFILER_LABEL("IndexedDB", "TransactionThreadPool::Cleanup");
 
   nsresult rv = mThreadPool->Shutdown();
   NS_ENSURE_SUCCESS(rv, rv);
 
+  nsIThread* currentThread = NS_GetCurrentThread();
+  MOZ_ASSERT(currentThread);
+
   // Make sure the pool is still accessible while any callbacks generated from
   // the other threads are processed.
-  rv = NS_ProcessPendingEvents(nullptr);
+  rv = NS_ProcessPendingEvents(currentThread);
   NS_ENSURE_SUCCESS(rv, rv);
 
   if (!mCompleteCallbacks.IsEmpty()) {
@@ -188,7 +231,7 @@ TransactionThreadPool::Cleanup()
     mCompleteCallbacks.Clear();
 
     // And make sure they get processed.
-    rv = NS_ProcessPendingEvents(nullptr);
+    rv = NS_ProcessPendingEvents(currentThread);
     NS_ENSURE_SUCCESS(rv, rv);
   }
 
@@ -200,7 +243,7 @@ PLDHashOperator
 TransactionThreadPool::MaybeUnblockTransaction(nsPtrHashKey<TransactionInfo>* aKey,
                                                void* aUserArg)
 {
-  NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
+  AssertIsOnBackgroundThread();
 
   TransactionInfo* maybeUnblockedInfo = aKey->GetKey();
   TransactionInfo* finishedInfo = static_cast<TransactionInfo*>(aUserArg);
@@ -223,10 +266,9 @@ TransactionThreadPool::FinishTransaction(
                                     const nsTArray<nsString>& aObjectStoreNames,
                                     uint16_t aMode)
 {
-  NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
+  AssertIsOnBackgroundThread();
 
-  PROFILER_MAIN_THREAD_LABEL("IndexedDB",
-                             "TransactionThreadPool::FinishTransaction");
+  PROFILER_LABEL("IndexedDB", "TransactionThreadPool::FinishTransaction");
 
   DatabaseTransactionInfo* dbTransactionInfo;
   if (!mTransactionsInProgress.Get(aDatabaseId, &dbTransactionInfo)) {
@@ -294,6 +336,26 @@ TransactionThreadPool::FinishTransaction(
   transactionsInProgress.Remove(aTransactionId);
 }
 
+TransactionThreadPool::TransactionQueue*
+TransactionThreadPool::GetQueueForTransaction(uint64_t aTransactionId,
+                                              const nsACString& aDatabaseId)
+{
+  AssertIsOnBackgroundThread();
+
+  DatabaseTransactionInfo* dbTransactionInfo;
+  if (mTransactionsInProgress.Get(aDatabaseId, &dbTransactionInfo)) {
+    DatabaseTransactionInfo::TransactionHashtable& transactionsInProgress =
+      dbTransactionInfo->transactions;
+    TransactionInfo* info = transactionsInProgress.Get(aTransactionId);
+    if (info) {
+      // We recognize this one.
+      return info->queue;
+    }
+  }
+
+  return nullptr;
+}
+
 TransactionThreadPool::TransactionQueue&
 TransactionThreadPool::GetQueueForTransaction(
                                     uint64_t aTransactionId,
@@ -301,7 +363,13 @@ TransactionThreadPool::GetQueueForTransaction(
                                     const nsTArray<nsString>& aObjectStoreNames,
                                     uint16_t aMode)
 {
-  NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
+  AssertIsOnBackgroundThread();
+
+  TransactionQueue* existingQueue =
+    GetQueueForTransaction(aTransactionId, aDatabaseId);
+  if (existingQueue) {
+    return *existingQueue;
+  }
 
   // See if we can run this transaction now.
   DatabaseTransactionInfo* dbTransactionInfo;
@@ -393,11 +461,29 @@ TransactionThreadPool::Dispatch(uint64_t aTransactionId,
 }
 
 void
+TransactionThreadPool::Dispatch(uint64_t aTransactionId,
+                                const nsACString& aDatabaseId,
+                                nsIRunnable* aRunnable,
+                                bool aFinish,
+                                nsIRunnable* aFinishRunnable)
+{
+  TransactionQueue* queue = GetQueueForTransaction(aTransactionId, aDatabaseId);
+  if (!queue) {
+    MOZ_CRASH("This transaction id was useless!");
+  }
+
+  queue->Dispatch(aRunnable);
+  if (aFinish) {
+    queue->Finish(aFinishRunnable);
+  }
+}
+
+void
 TransactionThreadPool::WaitForDatabasesToComplete(
                                              nsTArray<nsCString>& aDatabaseIds,
                                              nsIRunnable* aCallback)
 {
-  NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
+  AssertIsOnBackgroundThread();
   NS_ASSERTION(!aDatabaseIds.IsEmpty(), "No databases to wait on!");
   NS_ASSERTION(aCallback, "Null pointer!");
 
@@ -453,7 +539,7 @@ TransactionThreadPool::FindTransaction(const uint64_t& aTransactionId,
 bool
 TransactionThreadPool::HasTransactionsForDatabase(const nsACString& aDatabaseId)
 {
-  NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
+  AssertIsOnBackgroundThread();
   MOZ_ASSERT(!aDatabaseId.IsEmpty(), "An empty DatabaseId!");
 
   DatabaseTransactionInfo* dbTransactionInfo = nullptr;
@@ -471,10 +557,9 @@ TransactionThreadPool::HasTransactionsForDatabase(const nsACString& aDatabaseId)
 bool
 TransactionThreadPool::MaybeFireCallback(DatabasesCompleteCallback aCallback)
 {
-  NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
+  AssertIsOnBackgroundThread();
 
-  PROFILER_MAIN_THREAD_LABEL("IndexedDB",
-                             "TransactionThreadPool::MaybeFireCallback");
+  PROFILER_LABEL("IndexedDB", "TransactionThreadPool::MaybeFireCallback");
 
   for (uint32_t index = 0; index < aCallback.mDatabaseIds.Length(); index++) {
     nsCString databaseId = aCallback.mDatabaseIds[index];
@@ -497,13 +582,15 @@ TransactionQueue::TransactionQueue(uint64_t aTransactionId,
                                    const nsTArray<nsString>& aObjectStoreNames,
                                    uint16_t aMode)
 : mMonitor("TransactionQueue::mMonitor"),
+  mOwningThread(NS_GetCurrentThread()),
   mTransactionId(aTransactionId),
   mDatabaseId(aDatabaseId),
   mObjectStoreNames(aObjectStoreNames),
   mMode(aMode),
   mShouldFinish(false)
 {
-  NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
+  AssertIsOnBackgroundThread();
+  MOZ_ASSERT(mOwningThread);
 }
 
 void
@@ -547,9 +634,6 @@ NS_IMPL_ISUPPORTS1(TransactionThreadPool::TransactionQueue, nsIRunnable)
 NS_IMETHODIMP
 TransactionThreadPool::TransactionQueue::Run()
 {
-  NS_ASSERTION(!NS_IsMainThread(), "Wrong thread!");
-  NS_ASSERTION(IndexedDatabaseManager::IsMainProcess(), "Wrong process!");
-
   PROFILER_LABEL("IndexedDB", "TransactionQueue::Run");
 
   IDB_PROFILER_MARK("IndexedDB Transaction %llu: Beginning database work",
@@ -598,7 +682,7 @@ TransactionThreadPool::TransactionQueue::Run()
     new FinishTransactionRunnable(mTransactionId, mDatabaseId,
                                   mObjectStoreNames, mMode,
                                   finishRunnable);
-  if (NS_FAILED(NS_DispatchToMainThread(finishTransactionRunnable,
+  if (NS_FAILED(mOwningThread->Dispatch(finishTransactionRunnable,
                                         NS_DISPATCH_NORMAL))) {
     NS_WARNING("Failed to dispatch finishTransactionRunnable!");
   }
@@ -626,9 +710,9 @@ NS_IMPL_ISUPPORTS1(FinishTransactionRunnable, nsIRunnable)
 NS_IMETHODIMP
 FinishTransactionRunnable::Run()
 {
-  NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
+  AssertIsOnBackgroundThread();
 
-  PROFILER_MAIN_THREAD_LABEL("IndexedDB", "FinishTransactionRunnable::Run");
+  PROFILER_LABEL("IndexedDB", "FinishTransactionRunnable::Run");
 
   if (!gThreadPool) {
     NS_ERROR("Running after shutdown!");

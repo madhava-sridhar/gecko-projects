@@ -217,7 +217,7 @@ Client::IsTransactionServiceActivated()
 {
   NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
 
-  return !!TransactionThreadPool::Get();
+  return false;
 }
 
 void
@@ -274,8 +274,6 @@ void
 Client::ShutdownTransactionService()
 {
   NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
-
-  TransactionThreadPool::Shutdown();
 }
 
 nsresult

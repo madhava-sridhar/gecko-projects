@@ -3,6 +3,13 @@
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 include protocol PBackgroundIDBFactory;
+include protocol PBackgroundIDBTransaction;
+include protocol PBackgroundIDBVersionChangeTransaction;
+
+include PBackgroundIDBSharedTypes;
+
+using mozilla::dom::indexedDB::IDBTransaction::Mode
+  from "mozilla/dom/indexedDB/IDBTransaction.h";
 
 namespace mozilla {
 namespace dom {
@@ -12,10 +19,15 @@ protocol PBackgroundIDBDatabase
 {
   manager PBackgroundIDBFactory;
 
+  manages PBackgroundIDBTransaction;
+  manages PBackgroundIDBVersionChangeTransaction;
+
 parent:
-  Done();
+  DeleteMe();
 
   Blocked();
+
+  PBackgroundIDBTransaction(nsString[] objectStoreNames, Mode mode);
 
 child:
   __delete__();
@@ -23,6 +35,8 @@ child:
   VersionChange(uint64_t oldVersion, uint64_t newVersion);
 
   Invalidate();
+
+  PBackgroundIDBVersionChangeTransaction(DatabaseMetadata metadata);
 };
 
 } // namespace indexedDB

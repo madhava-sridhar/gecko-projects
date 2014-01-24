@@ -74,6 +74,9 @@ IPDL_SOURCES += [
     'PBackgroundIDBDatabase.ipdl',
     'PBackgroundIDBFactory.ipdl',
     'PBackgroundIDBFactoryRequest.ipdl',
+    'PBackgroundIDBSharedTypes.ipdlh',
+    'PBackgroundIDBTransaction.ipdl',
+    'PBackgroundIDBVersionChangeTransaction.ipdl',
 ]
 
 FAIL_ON_WARNINGS = True

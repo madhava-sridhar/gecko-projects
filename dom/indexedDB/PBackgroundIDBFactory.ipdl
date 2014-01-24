@@ -6,13 +6,7 @@ include protocol PBackground;
 include protocol PBackgroundIDBDatabase;
 include protocol PBackgroundIDBFactoryRequest;
 
-include "mozilla/dom/indexedDB/SerializationHelpers.h";
-
-using class mozilla::dom::indexedDB::KeyPath
-  from "mozilla/dom/indexedDB/KeyPath.h";
-
-using mozilla::dom::quota::PersistenceType
-  from "mozilla/dom/quota/PersistenceType.h";
+include PBackgroundIDBSharedTypes;
 
 namespace mozilla {
 namespace dom {
@@ -20,51 +14,18 @@ namespace indexedDB {
 
 struct OpenDatabaseRequestParams
 {
-  nsString name;
-  uint64_t version;
-  PersistenceType persistenceType;
+  DatabaseMetadata metadata;
 };
 
 struct DeleteDatabaseRequestParams
 {
-  nsString name;
-  PersistenceType persistenceType;
+  DatabaseMetadata metadata;
 };
 
 union FactoryRequestParams
 {
   OpenDatabaseRequestParams;
   DeleteDatabaseRequestParams;
-};
-
-struct IndexMetadata
-{
-  nsString name;
-  int64_t id;
-  KeyPath keyPath;
-  bool unique;
-  bool multiEntry;
-};
-
-struct ObjectStoreMetadata
-{
-  nsString name;
-  int64_t id;
-  KeyPath keyPath;
-  bool autoIncrement;
-  IndexMetadata[] indexes;
-
-  // These two are really only needed on the parent side.
-  int64_t nextAutoIncrementId;
-  int64_t comittedAutoIncrementId;
-};
-
-struct DatabaseMetadata
-{
-  OpenDatabaseRequestParams openParams;
-  int64_t nextObjectStoreId;
-  int64_t nextIndexId;
-  ObjectStoreMetadata[] objectStores;
 };
 
 protocol PBackgroundIDBFactory
@@ -75,7 +36,7 @@ protocol PBackgroundIDBFactory
   manages PBackgroundIDBFactoryRequest;
 
 parent:
-  Done();
+  DeleteMe();
 
   PBackgroundIDBFactoryRequest(FactoryRequestParams params);
 

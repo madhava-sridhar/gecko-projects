@@ -131,7 +131,7 @@ IDBFactory::~IDBFactory()
   MOZ_ASSERT_IF(mBackgroundActorFailed, !mBackgroundActor);
 
   if (mBackgroundActor) {
-    mBackgroundActor->SendDoneNotification();
+    mBackgroundActor->SendDeleteMe();
     mBackgroundActor = nullptr;
   }
 
@@ -634,13 +634,17 @@ IDBFactory::OpenInternal(const nsAString& aName,
     IDBOpenDBRequest::Create(this, window, scriptOwner);
   MOZ_ASSERT(request);
 
+  DatabaseMetadata metadata;
+  metadata.name() = aName;
+  metadata.persistenceType() = aPersistenceType;
+
   FactoryRequestParams params;
   if (aDeleting) {
-    params = DeleteDatabaseRequestParams(nsString(aName), aPersistenceType);
-  }
-  else {
-    params =
-      OpenDatabaseRequestParams(nsString(aName), aVersion, aPersistenceType);
+    metadata.version() = 0;
+    params = DeleteDatabaseRequestParams(metadata);
+  } else {
+    metadata.version() = aVersion;
+    params = OpenDatabaseRequestParams(metadata);
   }
 
   nsCString databaseId;

@@ -7,9 +7,11 @@
 
 #include "mozilla/dom/indexedDB/IndexedDatabase.h"
 
+#include "mozilla/dom/indexedDB/PBackgroundIDBDatabaseChild.h"
 #include "mozilla/dom/indexedDB/PBackgroundIDBFactoryChild.h"
 #include "mozilla/dom/indexedDB/PBackgroundIDBFactoryRequestChild.h"
-#include "mozilla/dom/indexedDB/PBackgroundIDBDatabaseChild.h"
+#include "mozilla/dom/indexedDB/PBackgroundIDBTransactionChild.h"
+#include "mozilla/dom/indexedDB/PBackgroundIDBVersionChangeTransactionChild.h"
 
 class nsIEventTarget;
 template <class> class nsCOMPtr;
@@ -47,7 +49,6 @@ class BackgroundFactoryChild MOZ_FINAL
   friend class IDBFactory;
 
   IDBFactory* mFactory;
-  bool mDone;
 
 #ifdef DEBUG
   nsCOMPtr<nsIEventTarget> mOwningThread;
@@ -70,10 +71,6 @@ public:
 #endif
 
 private:
-  // Only called by IDBFactory.
-  void
-  SendDoneNotification();
-
   // IPDL methods are only called by IPDL.
   virtual void
   ActorDestroy(ActorDestroyReason aWhy) MOZ_OVERRIDE;
@@ -137,7 +134,6 @@ class BackgroundDatabaseChild MOZ_FINAL
   friend class BackgroundFactoryChild;
 
   DatabaseMetadata mMetadata;
-  bool mDone;
 
 private:
   // Only constructed by BackgroundFactoryChild.
@@ -154,12 +150,35 @@ public:
   }
 
 private:
-  void
-  SendDoneNotification();
-
   // IPDL methods are only called by IPDL.
   virtual void
   ActorDestroy(ActorDestroyReason aWhy) MOZ_OVERRIDE;
+
+  virtual PBackgroundIDBTransactionChild*
+  AllocPBackgroundIDBTransactionChild(
+                                     const nsTArray<nsString>& aObjectStoreNames,
+                                     const Mode& aMode)
+                                     MOZ_OVERRIDE;
+
+  virtual bool
+  DeallocPBackgroundIDBTransactionChild(PBackgroundIDBTransactionChild* aActor)
+                                        MOZ_OVERRIDE;
+
+  virtual PBackgroundIDBVersionChangeTransactionChild*
+  AllocPBackgroundIDBVersionChangeTransactionChild(
+                                              const DatabaseMetadata& aMetadata)
+                                              MOZ_OVERRIDE;
+
+  virtual bool
+  RecvPBackgroundIDBVersionChangeTransactionConstructor(
+                            PBackgroundIDBVersionChangeTransactionChild* aActor,
+                            const DatabaseMetadata& aMetadata)
+                            MOZ_OVERRIDE;
+
+  virtual bool
+  DeallocPBackgroundIDBVersionChangeTransactionChild(
+                            PBackgroundIDBVersionChangeTransactionChild* aActor)
+                            MOZ_OVERRIDE;
 
   virtual bool
   RecvVersionChange(const uint64_t& aOldVersion, const uint64_t& aNewVersion)
@@ -167,6 +186,64 @@ private:
 
   virtual bool
   RecvInvalidate() MOZ_OVERRIDE;
+};
+
+class BackgroundTransactionChild MOZ_FINAL
+  : public PBackgroundIDBTransactionChild
+{
+  friend class BackgroundDatabaseChild;
+
+private:
+  // Only created by BackgroundDatabaseChild.
+  BackgroundTransactionChild();
+
+  // Only destroyed by BackgroundDatabaseChild.
+  ~BackgroundTransactionChild();
+
+public:
+  void
+  AssertIsOnOwningThread() const
+  {
+    static_cast<BackgroundDatabaseChild*>(Manager())->AssertIsOnOwningThread();
+  }
+
+private:
+  // IPDL methods are only called by IPDL.
+  virtual void
+  ActorDestroy(ActorDestroyReason aWhy) MOZ_OVERRIDE;
+
+  bool
+  RecvComplete(const nsresult& aResult) MOZ_OVERRIDE;
+};
+
+class BackgroundVersionChangeTransactionChild MOZ_FINAL
+  : public PBackgroundIDBVersionChangeTransactionChild
+{
+  friend class BackgroundDatabaseChild;
+
+  DatabaseMetadata mMetadata;
+
+private:
+  // Only created by BackgroundDatabaseChild.
+  BackgroundVersionChangeTransactionChild(const DatabaseMetadata& aMetadata);
+
+  // Only destroyed by BackgroundDatabaseChild.
+  ~BackgroundVersionChangeTransactionChild();
+
+public:
+  void
+  AssertIsOnOwningThread() const
+  {
+    static_cast<BackgroundDatabaseChild*>(Manager())->AssertIsOnOwningThread();
+  }
+
+private:
+  // IPDL methods are only called by IPDL.
+  virtual void
+  ActorDestroy(ActorDestroyReason aWhy) MOZ_OVERRIDE;
+
+  bool
+  RecvComplete(const nsresult& aResult) MOZ_OVERRIDE;
 };
 
 END_INDEXEDDB_NAMESPACE

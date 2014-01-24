@@ -19,9 +19,7 @@ class ObjectStoreMetadata;
 
 class KeyPath
 {
-  // This private constructor is only to be used by IPDL-generated classes
-  // (so far only IndexMetadata and ObjectStoreMetadata, generated in
-  // PBackgroundIDBFactory.ipdl).
+  // This private constructor is only to be used by IPDL-generated classes.
   friend class IndexMetadata;
   friend class ObjectStoreMetadata;
 

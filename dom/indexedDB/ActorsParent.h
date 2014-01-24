@@ -7,11 +7,9 @@
 
 #include "mozilla/dom/indexedDB/IndexedDatabase.h"
 
-#include "mozilla/ipc/PBackground.h"
 #include "mozilla/dom/indexedDB/PBackgroundIDBFactoryParent.h"
-#include "mozilla/dom/indexedDB/PBackgroundIDBFactoryRequestParent.h"
-#include "mozilla/dom/indexedDB/PBackgroundIDBDatabaseParent.h"
 #include "mozilla/dom/quota/StoragePrivilege.h"
+#include "nsISupportsImpl.h"
 
 namespace mozilla {
 namespace ipc {
@@ -31,7 +29,7 @@ class BackgroundFactoryParent MOZ_FINAL
   typedef mozilla::dom::quota::StoragePrivilege StoragePrivilege;
 
   nsCString mGroup;
-  nsCString mASCIIOrigin;
+  nsCString mOrigin;
   StoragePrivilege mPrivilege;
 
   // Counts the number of "live" BackgroundFactoryParent instances that have not
@@ -40,25 +38,47 @@ class BackgroundFactoryParent MOZ_FINAL
 
 private:
   // Only created by mozilla::ipc::BackgroundParentImpl.
-  static BackgroundFactoryParent*
+  static already_AddRefed<BackgroundFactoryParent>
   Create(const nsCString& aGroup,
-         const nsCString& aASCIIOrigin,
+         const nsCString& aOrigin,
          const StoragePrivilege& aPrivilege);
 
   // Only constructed in Create().
   BackgroundFactoryParent(const nsCString& aGroup,
-                          const nsCString& aASCIIOrigin,
+                          const nsCString& aOrigin,
                           const StoragePrivilege& aPrivilege);
 
-  // Only destroyed by mozilla::ipc::BackgroundChildImpl.
+  // Reference counted.
   ~BackgroundFactoryParent();
 
+public:
+  NS_INLINE_DECL_THREADSAFE_REFCOUNTING(BackgroundFactoryParent)
+
+  const nsCString&
+  Group() const
+  {
+    return mGroup;
+  }
+
+  const nsCString&
+  Origin() const
+  {
+    return mOrigin;
+  }
+
+  StoragePrivilege
+  Privilege() const
+  {
+    return mPrivilege;
+  }
+
+private:
   // IPDL methods are only called by IPDL.
   virtual void
   ActorDestroy(ActorDestroyReason aWhy) MOZ_OVERRIDE;
 
   virtual bool
-  RecvDone() MOZ_OVERRIDE;
+  RecvDeleteMe() MOZ_OVERRIDE;
 
   virtual PBackgroundIDBFactoryRequestParent*
   AllocPBackgroundIDBFactoryRequestParent(const FactoryRequestParams& aParams)
@@ -82,33 +102,6 @@ private:
   virtual bool
   DeallocPBackgroundIDBDatabaseParent(PBackgroundIDBDatabaseParent* aActor)
                                       MOZ_OVERRIDE;
-};
-
-class BackgroundDatabaseParent MOZ_FINAL
-  : public PBackgroundIDBDatabaseParent
-{
-  friend class BackgroundFactoryParent;
-
-  DatabaseMetadata mMetadata;
-  nsCString mDatabaseId;
-
-public:
-  BackgroundDatabaseParent(const DatabaseMetadata& aMetadata,
-                           const nsACString& aDatabaseId);
-
-private:
-  // Only destroyed by BackgroundFactoryParent.
-  ~BackgroundDatabaseParent();
-
-  // IPDL methods are only called by IPDL.
-  virtual void
-  ActorDestroy(ActorDestroyReason aWhy) MOZ_OVERRIDE;
-
-  virtual bool
-  RecvDone() MOZ_OVERRIDE;
-
-  virtual bool
-  RecvBlocked() MOZ_OVERRIDE;
 };
 
 END_INDEXEDDB_NAMESPACE
