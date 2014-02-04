@@ -43,6 +43,8 @@ class IndexedDBDatabaseChild;
 class IndexedDBTransactionChild;
 class IndexedDBTransactionParent;
 struct ObjectStoreInfo;
+class PBackgroundIDBTransactionChild;
+class PBackgroundIDBVersionChangeTransactionChild;
 class TransactionThreadPool;
 class UpdateRefcountFunction;
 
@@ -100,6 +102,33 @@ public:
                           false);
   }
 
+  static already_AddRefed<IDBTransaction>
+  CreateVersionChange(IDBDatabase* aDatabase,
+                      PBackgroundIDBVersionChangeTransactionChild* aActor);
+
+  void
+  AssertIsOnOwningThread() const
+#ifdef DEBUG
+  ;
+#else
+  { }
+#endif
+
+  void
+  SetBackgroundActor(PBackgroundIDBTransactionChild* aBackgroundActor);
+
+  void
+  ClearBackgroundActor()
+  {
+    AssertIsOnOwningThread();
+
+    if (mMode == VERSION_CHANGE) {
+      mBackgroundActor.mVersionChangeBackgroundActor = nullptr;
+    } else {
+      mBackgroundActor.mNormalBackgroundActor = nullptr;
+    }
+  }
+
   // nsIDOMEventTarget
   virtual nsresult PreHandleEvent(EventChainPreVisitor& aVisitor) MOZ_OVERRIDE;
 
@@ -153,7 +182,8 @@ public:
 
   uint64_t Id() const
   {
-    return mId;
+    // XXX Remove me!
+    return 0;
   }
 
   IDBDatabase* Database()
@@ -222,7 +252,7 @@ public:
   }
 
 #ifdef MOZ_ENABLE_PROFILER_SPS
-  uint64_t
+  uint32_t
   GetSerialNumber() const
   {
     return mSerialNumber;
@@ -288,7 +318,8 @@ private:
 
   nsresult CommitOrRollback();
 
-  uint64_t mId;
+  void SendCommit();
+  void SendAbort(nsresult aResultCode);
 
   nsRefPtr<IDBDatabase> mDatabase;
   nsRefPtr<DatabaseInfo> mDatabaseInfo;
@@ -317,6 +348,14 @@ private:
 
   IndexedDBTransactionChild* mActorChild;
   IndexedDBTransactionParent* mActorParent;
+
+  // Tagged with mMode. If mMode is VERSION_CHANGE then mBackgroundActor will be
+  // a mVersionChangeBackgroundActor*. Otherwise it will be a
+  // PBackgroundIDBTransactionChild*.
+  union {
+    PBackgroundIDBTransactionChild* mNormalBackgroundActor;
+    PBackgroundIDBVersionChangeTransactionChild* mVersionChangeBackgroundActor;
+  } mBackgroundActor;
 
   nsresult mAbortCode;
 #ifdef MOZ_ENABLE_PROFILER_SPS

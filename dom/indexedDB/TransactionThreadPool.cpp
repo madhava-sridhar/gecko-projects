@@ -57,18 +57,20 @@ public:
   NS_DECL_THREADSAFE_ISUPPORTS
   NS_DECL_NSIRUNNABLE
 
-  inline FinishTransactionRunnable(uint64_t aTransactionId,
-                                   const nsACString& aDatabaseId,
-                                   const nsTArray<nsString>& aObjectStoreNames,
-                                   uint16_t aMode,
-                                   nsCOMPtr<nsIRunnable>& aFinishRunnable);
+  FinishTransactionRunnable(TransactionThreadPool* aThreadPool,
+                            uint64_t aTransactionId,
+                            const nsACString& aDatabaseId,
+                            const nsTArray<nsString>& aObjectStoreNames,
+                            uint16_t aMode,
+                            already_AddRefed<nsIRunnable> aFinishRunnable);
 
 private:
+  TransactionThreadPool* mThreadPool;
+  nsCOMPtr<nsIRunnable> mFinishRunnable;
   uint64_t mTransactionId;
   const nsCString mDatabaseId;
   const nsTArray<nsString> mObjectStoreNames;
   uint16_t mMode;
-  nsCOMPtr<nsIRunnable> mFinishRunnable;
 };
 
 END_INDEXEDDB_NAMESPACE
@@ -387,7 +389,8 @@ TransactionThreadPool::GetQueueForTransaction(
     return *info->queue;
   }
 
-  TransactionInfo* transactionInfo = new TransactionInfo(aTransactionId,
+  TransactionInfo* transactionInfo = new TransactionInfo(this,
+                                                         aTransactionId,
                                                          aDatabaseId,
                                                          aObjectStoreNames,
                                                          aMode);
@@ -577,11 +580,13 @@ TransactionThreadPool::MaybeFireCallback(DatabasesCompleteCallback aCallback)
 }
 
 TransactionThreadPool::
-TransactionQueue::TransactionQueue(uint64_t aTransactionId,
+TransactionQueue::TransactionQueue(TransactionThreadPool* aThreadPool,
+                                   uint64_t aTransactionId,
                                    const nsACString& aDatabaseId,
                                    const nsTArray<nsString>& aObjectStoreNames,
                                    uint16_t aMode)
 : mMonitor("TransactionQueue::mMonitor"),
+  mOwningThreadPool(aThreadPool),
   mOwningThread(NS_GetCurrentThread()),
   mTransactionId(aTransactionId),
   mDatabaseId(aDatabaseId),
@@ -679,9 +684,9 @@ TransactionThreadPool::TransactionQueue::Run()
                     mTransaction->GetSerialNumber());
 
   nsCOMPtr<nsIRunnable> finishTransactionRunnable =
-    new FinishTransactionRunnable(mTransactionId, mDatabaseId,
-                                  mObjectStoreNames, mMode,
-                                  finishRunnable);
+    new FinishTransactionRunnable(mOwningThreadPool, mTransactionId,
+                                  mDatabaseId, mObjectStoreNames, mMode,
+                                  finishRunnable.forget());
   if (NS_FAILED(mOwningThread->Dispatch(finishTransactionRunnable,
                                         NS_DISPATCH_NORMAL))) {
     NS_WARNING("Failed to dispatch finishTransactionRunnable!");
@@ -691,18 +696,20 @@ TransactionThreadPool::TransactionQueue::Run()
 }
 
 FinishTransactionRunnable::FinishTransactionRunnable(
-                                    uint64_t aTransactionId,
-                                    const nsACString& aDatabaseId,
-                                    const nsTArray<nsString>& aObjectStoreNames,
-                                    uint16_t aMode,
-                                    nsCOMPtr<nsIRunnable>& aFinishRunnable)
-: mTransactionId(aTransactionId),
+                                  TransactionThreadPool* aThreadPool,
+                                  uint64_t aTransactionId,
+                                  const nsACString& aDatabaseId,
+                                  const nsTArray<nsString>& aObjectStoreNames,
+                                  uint16_t aMode,
+                                  already_AddRefed<nsIRunnable> aFinishRunnable)
+: mThreadPool(aThreadPool),
+  mFinishRunnable(aFinishRunnable),
+  mTransactionId(aTransactionId),
   mDatabaseId(aDatabaseId),
   mObjectStoreNames(aObjectStoreNames),
   mMode(aMode)
 {
   NS_ASSERTION(!NS_IsMainThread(), "Wrong thread!");
-  mFinishRunnable.swap(aFinishRunnable);
 }
 
 NS_IMPL_ISUPPORTS1(FinishTransactionRunnable, nsIRunnable)
@@ -711,20 +718,15 @@ NS_IMETHODIMP
 FinishTransactionRunnable::Run()
 {
   AssertIsOnBackgroundThread();
+  MOZ_ASSERT(mThreadPool);
 
   PROFILER_LABEL("IndexedDB", "FinishTransactionRunnable::Run");
 
-  if (!gThreadPool) {
-    NS_ERROR("Running after shutdown!");
-    return NS_ERROR_FAILURE;
-  }
-
-  gThreadPool->FinishTransaction(mTransactionId, mDatabaseId, mObjectStoreNames,
+  mThreadPool->FinishTransaction(mTransactionId, mDatabaseId, mObjectStoreNames,
                                  mMode);
 
   if (mFinishRunnable) {
     mFinishRunnable->Run();
-    mFinishRunnable = nullptr;
   }
 
   return NS_OK;

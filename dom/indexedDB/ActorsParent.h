@@ -96,8 +96,10 @@ private:
                                      MOZ_OVERRIDE;
 
   virtual PBackgroundIDBDatabaseParent*
-  AllocPBackgroundIDBDatabaseParent(const DatabaseMetadata& aMetadata)
-                                    MOZ_OVERRIDE;
+  AllocPBackgroundIDBDatabaseParent(
+                                   const DatabaseSpec& aSpec,
+                                   PBackgroundIDBFactoryRequestParent* aRequest)
+                                   MOZ_OVERRIDE;
 
   virtual bool
   DeallocPBackgroundIDBDatabaseParent(PBackgroundIDBDatabaseParent* aActor)

@@ -21,6 +21,7 @@
 #include "nsThreadUtils.h"
 #include "nsWidgetsCID.h"
 
+#include "ActorsChild.h"
 #include "AsyncConnectionHelper.h"
 #include "DatabaseInfo.h"
 #include "IDBCursor.h"
@@ -33,6 +34,10 @@
 #include "TransactionThreadPool.h"
 
 #include "ipc/IndexedDBChild.h"
+
+#ifdef MOZ_ENABLE_PROFILER_SPS
+#include "mozilla/Atomics.h"
+#endif
 
 #define SAVEPOINT_NAME "savepoint"
 
@@ -47,7 +52,7 @@ namespace {
 NS_DEFINE_CID(kAppShellCID, NS_APPSHELL_CID);
 
 #ifdef MOZ_ENABLE_PROFILER_SPS
-uint64_t gNextTransactionSerialNumber = 1;
+Atomic<uint32_t> gNextTransactionSerialNumber;
 #endif
 
 PLDHashOperator
@@ -161,9 +166,37 @@ IDBTransaction::CreateInternal(IDBDatabase* aDatabase,
   return transaction.forget();
 }
 
+// static
+already_AddRefed<IDBTransaction>
+IDBTransaction::CreateVersionChange(
+                            IDBDatabase* aDatabase,
+                            PBackgroundIDBVersionChangeTransactionChild* aActor)
+{
+  MOZ_ASSERT(aDatabase);
+  aDatabase->AssertIsOnOwningThread();
+  MOZ_ASSERT(aActor);
+
+  nsRefPtr<IDBTransaction> transaction = new IDBTransaction(aDatabase);
+
+  transaction->SetScriptOwner(aDatabase->GetScriptOwner());
+  transaction->mDatabase = aDatabase;
+  transaction->mBackgroundActor.mVersionChangeBackgroundActor = aActor;
+  transaction->mMode = VERSION_CHANGE;
+
+  // XXX This won't work on non-main threads!
+  nsCOMPtr<nsIAppShell> appShell = do_GetService(kAppShellCID);
+  if (NS_WARN_IF(!appShell) ||
+      NS_WARN_IF(NS_FAILED(appShell->RunBeforeNextEvent(transaction)))) {
+    return nullptr;
+  }
+
+  transaction->mCreating = true;
+
+  return transaction.forget();
+}
+
 IDBTransaction::IDBTransaction(IDBDatabase* aDatabase)
 : IDBWrapperCache(aDatabase),
-  mId(TransactionThreadPool::NextTransactionId()),
   mReadyState(IDBTransaction::INITIAL),
   mMode(IDBTransaction::READ_ONLY),
   mPendingRequests(0),
@@ -172,14 +205,15 @@ IDBTransaction::IDBTransaction(IDBDatabase* aDatabase)
   mActorParent(nullptr),
   mAbortCode(NS_OK),
 #ifdef MOZ_ENABLE_PROFILER_SPS
-  mSerialNumber(gNextTransactionSerialNumber++),
+  mSerialNumber(++gNextTransactionSerialNumber),
 #endif
   mCreating(false)
 #ifdef DEBUG
   , mFiredCompleteOrAbort(false)
 #endif
 {
-  NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
+  aDatabase->AssertIsOnOwningThread();
+  mBackgroundActor.mNormalBackgroundActor = nullptr;
 }
 
 IDBTransaction::~IDBTransaction()
@@ -197,6 +231,36 @@ IDBTransaction::~IDBTransaction()
     mActorChild->Send__delete__(mActorChild);
     NS_ASSERTION(!mActorChild, "Should have cleared in Send__delete__!");
   }
+
+  if (mBackgroundActor.mNormalBackgroundActor) {
+    mBackgroundActor.mNormalBackgroundActor->SendDeleteMe();
+    mBackgroundActor.mNormalBackgroundActor = nullptr;
+  } else if (mBackgroundActor.mVersionChangeBackgroundActor) {
+    mBackgroundActor.mVersionChangeBackgroundActor->SendDeleteMe();
+    mBackgroundActor.mVersionChangeBackgroundActor = nullptr;
+  }
+}
+
+#ifdef DEBUG
+
+void
+IDBTransaction::AssertIsOnOwningThread() const
+{
+  MOZ_ASSERT(mDatabase);
+  mDatabase->AssertIsOnOwningThread();
+}
+
+#endif // DEBUG
+
+void
+IDBTransaction::SetBackgroundActor(
+                               PBackgroundIDBTransactionChild* aBackgroundActor)
+{
+  AssertIsOnOwningThread();
+  MOZ_ASSERT(aBackgroundActor);
+  MOZ_ASSERT(!mBackgroundActor.mNormalBackgroundActor);
+
+  mBackgroundActor.mNormalBackgroundActor = aBackgroundActor;
 }
 
 void
@@ -281,11 +345,40 @@ IDBTransaction::CommitOrRollback()
   mCachedStatements.Enumerate(DoomCachedStatements, helper);
   NS_ASSERTION(!mCachedStatements.Count(), "Statements left!");
 
-  nsresult rv = pool->Dispatch(mId, mDatabase->Id(), mObjectStoreNames,
+  nsresult rv = pool->Dispatch(Id(), mDatabase->Id(), mObjectStoreNames,
                                mMode, helper, true, helper);
   NS_ENSURE_SUCCESS(rv, rv);
 
   return NS_OK;
+}
+
+void
+IDBTransaction::SendCommit()
+{
+  AssertIsOnOwningThread();
+
+  if (mMode == VERSION_CHANGE) {
+    MOZ_ASSERT(mBackgroundActor.mVersionChangeBackgroundActor);
+    mBackgroundActor.mVersionChangeBackgroundActor->SendCommit();
+  } else {
+    MOZ_ASSERT(mBackgroundActor.mNormalBackgroundActor);
+    mBackgroundActor.mNormalBackgroundActor->SendCommit();
+  }
+}
+
+void
+IDBTransaction::SendAbort(nsresult aResultCode)
+{
+  AssertIsOnOwningThread();
+  MOZ_ASSERT(NS_FAILED(aResultCode));
+
+  if (mMode == VERSION_CHANGE) {
+    MOZ_ASSERT(mBackgroundActor.mVersionChangeBackgroundActor);
+    mBackgroundActor.mVersionChangeBackgroundActor->SendAbort(aResultCode);
+  } else {
+    MOZ_ASSERT(mBackgroundActor.mNormalBackgroundActor);
+    mBackgroundActor.mNormalBackgroundActor->SendAbort(aResultCode);
+  }
 }
 
 bool
@@ -738,7 +831,7 @@ IDBTransaction::PreHandleEvent(EventChainPreVisitor& aVisitor)
 NS_IMETHODIMP
 IDBTransaction::Run()
 {
-  NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
+  AssertIsOnOwningThread();
 
   // We're back at the event loop, no longer newborn.
   mCreating = false;
@@ -747,9 +840,7 @@ IDBTransaction::Run()
   if (mReadyState == IDBTransaction::INITIAL) {
     mReadyState = IDBTransaction::DONE;
 
-    if (NS_FAILED(CommitOrRollback())) {
-      NS_WARNING("Failed to commit!");
-    }
+    SendCommit();
   }
 
   return NS_OK;

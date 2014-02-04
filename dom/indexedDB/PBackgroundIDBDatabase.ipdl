@@ -36,7 +36,8 @@ child:
 
   Invalidate();
 
-  PBackgroundIDBVersionChangeTransaction(DatabaseMetadata metadata);
+  PBackgroundIDBVersionChangeTransaction(uint64_t currentVersion,
+                                         uint64_t requestedVersion);
 };
 
 } // namespace indexedDB

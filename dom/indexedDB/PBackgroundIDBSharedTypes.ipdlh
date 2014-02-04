@@ -36,6 +36,18 @@ struct IndexMetadata
   bool multiEntry;
 };
 
+struct DatabaseSpec
+{
+  DatabaseMetadata metadata;
+  ObjectStoreSpec[] objectStores;
+};
+
+struct ObjectStoreSpec
+{
+  ObjectStoreMetadata metadata;
+  IndexMetadata[] indexes;
+};
+
 } // namespace indexedDB
 } // namespace dom
 } // namespace mozilla

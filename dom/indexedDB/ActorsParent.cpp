@@ -2586,8 +2586,10 @@ protected:
   SendSuccessResult() = 0;
 
   // Must be overridden in subclasses. Called on the background thread to allow
-  // the subclass to its failure code.
-  virtual void
+  // the subclass to send its failure code. Returning false will cause the
+  // transaction to be aborted with aResultCode. Returning true will not cause
+  // the transaction to be aborted.
+  virtual bool
   SendFailureResult(nsresult aResultCode) = 0;
 
   // This callback will be called on the background thread before releasing the
@@ -2706,7 +2708,8 @@ private:
 
   virtual PBackgroundIDBVersionChangeTransactionParent*
   AllocPBackgroundIDBVersionChangeTransactionParent(
-                                              const DatabaseMetadata& aMetadata)
+                                              const uint64_t& aCurrentVersion,
+                                              const uint64_t& aRequestedVersion)
                                               MOZ_OVERRIDE;
 
   virtual bool
@@ -2738,6 +2741,7 @@ protected:
     mCachedStatements;
   nsTArray<FullObjectStoreMetadata*> mCreatedObjectStores;
   const uint64_t mTransactionId;
+  Atomic<uint32_t> mActorDestroyed;
   Mode mMode;
   bool mCommittedOrAborted;
 
@@ -2750,8 +2754,17 @@ protected:
                   Mode aMode);
 
   // Reference counted.
-  virtual ~TransactionBase()
-  { }
+  virtual
+  ~TransactionBase();
+
+  void
+  NoteActorDestroyed()
+  {
+    AssertIsOnBackgroundThread();
+    MOZ_ASSERT(!mActorDestroyed);
+
+    mActorDestroyed = 1;
+  }
 
   virtual bool
   SendCompleteNotification(nsresult aResult) = 0;
@@ -2791,10 +2804,20 @@ public:
 #endif
   }
 
+  bool
+  IsActorDestroyed() const
+  {
+    AssertIsOnBackgroundThread();
+    return mActorDestroyed == 1;
+  }
+
   NS_INLINE_DECL_THREADSAFE_REFCOUNTING(TransactionBase)
 
   nsresult
   EnsureConnection();
+
+  void
+  Abort(nsresult aResultCode);
 
   mozIStorageConnection*
   Connection() const
@@ -2822,6 +2845,8 @@ public:
     return mDatabase;
   }
 };
+
+class OpenDatabaseOp;
 
 class TransactionBase::UpdateRefcountFunction MOZ_FINAL
   : public mozIStorageFunction
@@ -2987,11 +3012,7 @@ private:
 
   // Only called by TransactionBase.
   virtual bool
-  SendCompleteNotification(nsresult aResult)
-  {
-    AssertIsOnBackgroundThread();
-    return SendComplete(aResult);
-  }
+  SendCompleteNotification(nsresult aResult) MOZ_OVERRIDE;
 
   // IPDL methods are only called by IPDL.
   virtual void
@@ -3007,28 +3028,25 @@ private:
   RecvAbort(const nsresult& aResultCode) MOZ_OVERRIDE;
 };
 
+class OpenDatabaseOp;
+
 class VersionChangeTransaction MOZ_FINAL
   : public TransactionBase
   , public PBackgroundIDBVersionChangeTransactionParent
 {
-  uint64_t mTransactionId;
+  nsRefPtr<OpenDatabaseOp> mOpenDatabaseOp;
 
 public:
   // This constructor is called by OpenDatabaseOp.
-  VersionChangeTransaction(Database* aDatabase);
+  VersionChangeTransaction(OpenDatabaseOp* aOpenDatabaseOp);
 
 private:
   // Reference counted.
-  ~VersionChangeTransaction()
-  { }
+  ~VersionChangeTransaction();
 
   // Only called by TransactionBase.
   virtual bool
-  SendCompleteNotification(nsresult aResult)
-  {
-    AssertIsOnBackgroundThread();
-    return SendComplete(aResult);
-  }
+  SendCompleteNotification(nsresult aResult) MOZ_OVERRIDE;
 
   // IPDL methods are only called by IPDL.
   virtual void
@@ -3100,7 +3118,8 @@ protected:
     // DatabaseWorkVersionChange.
     State_DispatchToTransactionThreadPool,
 
-    // Waiting to do/doing work on the transaction thread pool. Next step is
+    // Waiting to do/doing work on the transaction thread pool. Thereafter we
+    // wait until the version change transaction commits. Next step is
     // SendingResults.
     State_DatabaseWorkVersionChange,
 
@@ -3129,30 +3148,13 @@ protected:
             const nsACString& aOrigin,
             StoragePrivilege aPrivilege,
             const nsAString& aName,
-            PersistenceType aPersistenceType)
-    : mState(State_Initial)
-    , mGroup(aGroup)
-    , mOrigin(aOrigin)
-    , mName(aName)
-    , mPrivilege(aPrivilege)
-    , mPersistenceType(aPersistenceType)
-  {
-    QuotaManager::GetStorageId(aPersistenceType, aOrigin,
-                               Client::IDB, aName, mDatabaseId);
-    MOZ_ASSERT(!mDatabaseId.IsEmpty());
-  }
+            PersistenceType aPersistenceType);
 
   virtual
-  ~FactoryOp()
-  {
-    MOZ_ASSERT(mState == State_Initial || mState == State_Completed);
-  }
+  ~FactoryOp();
 
   virtual void
-  ActorDestroy(ActorDestroyReason aWhy) MOZ_OVERRIDE
-  {
-    NoteActorDestroyed();
-  }
+  ActorDestroy(ActorDestroyReason aWhy) MOZ_OVERRIDE;
 
   nsresult
   Open();
@@ -3168,10 +3170,16 @@ class OpenDatabaseOp MOZ_FINAL
   : public FactoryOp
 {
   friend class Database;
+  friend class VersionChangeTransaction;
 
   class VersionChangeOp;
 
-  nsAutoPtr<FullDatabaseMetadata> mMetadata;
+  // mOwnedMetadata is owned by this class until it is transferred to
+  // gLiveDatabaseHashtable. At that point mOwnedMetadata is set to null.
+  // mMetadata always points to the metadata regardless of ownership.
+  nsAutoPtr<FullDatabaseMetadata> mOwnedMetadata;
+  FullDatabaseMetadata* mMetadata;
+
   uint64_t mRequestedVersion;
   nsString mDatabaseFilePath;
   nsRefPtr<FileManager> mFileManager;
@@ -3189,7 +3197,8 @@ public:
                  const OpenDatabaseRequestParams& aParams)
     : FactoryOp(aGroup, aOrigin, aPrivilege, aParams.metadata().name(),
                 aParams.metadata().persistenceType())
-    , mMetadata(new FullDatabaseMetadata())
+    , mOwnedMetadata(new FullDatabaseMetadata())
+    , mMetadata(mOwnedMetadata)
     , mRequestedVersion(aParams.metadata().version())
     , mLastObjectStoreId(0)
     , mLastIndexId(0)
@@ -3263,7 +3272,7 @@ private:
   virtual nsresult
   SendSuccessResult() MOZ_OVERRIDE;
 
-  virtual void
+  virtual bool
   SendFailureResult(nsresult aResultCode) MOZ_OVERRIDE;
 
   virtual void
@@ -3484,10 +3493,9 @@ BackgroundFactoryParent::DeallocPBackgroundIDBFactoryRequestParent(
 
 PBackgroundIDBDatabaseParent*
 BackgroundFactoryParent::AllocPBackgroundIDBDatabaseParent(
-                                              const DatabaseMetadata& aMetadata)
+                                   const DatabaseSpec& aSpec,
+                                   PBackgroundIDBFactoryRequestParent* aRequest)
 {
-  AssertIsOnBackgroundThread();
-
   MOZ_CRASH("PBackgroundIDBDatabaseParent actors should be constructed "
             "manually!");
 }
@@ -3581,10 +3589,9 @@ Database::DeallocPBackgroundIDBTransactionParent(
 
 PBackgroundIDBVersionChangeTransactionParent*
 Database::AllocPBackgroundIDBVersionChangeTransactionParent(
-                                              const DatabaseMetadata& aMetadata)
+                                              const uint64_t& aCurrentVersion,
+                                              const uint64_t& aRequestedVersion)
 {
-  AssertIsOnBackgroundThread();
-
   MOZ_CRASH("PBackgroundIDBVersionChangeTransactionParent actors should be "
             "constructed manually!");
 }
@@ -3633,11 +3640,16 @@ TransactionBase::TransactionBase(Database* aDatabase,
                                  IDBTransaction::Mode aMode)
   : mDatabase(aDatabase)
   , mTransactionId(TransactionThreadPool::NextTransactionId())
+  , mActorDestroyed(0)
   , mMode(aMode)
   , mCommittedOrAborted(false)
 {
   AssertIsOnBackgroundThread();
   MOZ_ASSERT(aDatabase);
+}
+
+TransactionBase::~TransactionBase()
+{
 }
 
 nsresult
@@ -3699,6 +3711,15 @@ TransactionBase::EnsureConnection()
   return NS_OK;
 }
 
+void
+TransactionBase::Abort(nsresult aResultCode)
+{
+  AssertIsOnBackgroundThread();
+  MOZ_ASSERT(NS_FAILED(aResultCode));
+
+  CommitOrAbort(aResultCode);
+}
+
 bool
 TransactionBase::CommitOrAbort(nsresult aResultCode)
 {
@@ -3711,7 +3732,7 @@ TransactionBase::CommitOrAbort(nsresult aResultCode)
   mCommittedOrAborted = true;
 
   nsRefPtr<CommitOp> commitOp =
-    new CommitOp(this, aResultCode, mCreatedObjectStores);
+    new CommitOp(this, ClampResultCode(aResultCode), mCreatedObjectStores);
 
   TransactionThreadPool* threadPool = TransactionThreadPool::Get();
   MOZ_ASSERT(threadPool);
@@ -3783,12 +3804,22 @@ NormalTransaction::NormalTransaction(Database* aDatabase,
   AssertIsOnBackgroundThread();
 }
 
+bool
+NormalTransaction::SendCompleteNotification(nsresult aResult)
+{
+  AssertIsOnBackgroundThread();
+
+  return IsActorDestroyed() ? true : SendComplete(aResult);
+}
+
 void
 NormalTransaction::ActorDestroy(ActorDestroyReason aWhy)
 {
   AssertIsOnBackgroundThread();
 
   CommitOrAbort(NS_ERROR_DOM_INDEXEDDB_ABORT_ERR);
+
+  NoteActorDestroyed();
 }
 
 bool
@@ -3830,10 +3861,39 @@ NormalTransaction::RecvAbort(const nsresult& aResultCode)
  * VersionChangeTransaction
  ******************************************************************************/
 
-VersionChangeTransaction::VersionChangeTransaction(Database* aDatabase)
-  : TransactionBase(aDatabase, IDBTransaction::VERSION_CHANGE)
+VersionChangeTransaction::VersionChangeTransaction(
+                                                OpenDatabaseOp* aOpenDatabaseOp)
+  : TransactionBase(aOpenDatabaseOp->mDatabase, IDBTransaction::VERSION_CHANGE)
+  , mOpenDatabaseOp(aOpenDatabaseOp)
 {
   AssertIsOnBackgroundThread();
+  MOZ_ASSERT(aOpenDatabaseOp);
+}
+
+VersionChangeTransaction::~VersionChangeTransaction()
+{
+}
+
+bool
+VersionChangeTransaction::SendCompleteNotification(nsresult aResult)
+{
+  AssertIsOnBackgroundThread();
+  MOZ_ASSERT(mOpenDatabaseOp);
+
+  nsRefPtr<OpenDatabaseOp> openDatabaseOp;
+  mOpenDatabaseOp.swap(openDatabaseOp);
+
+  if (!IsActorDestroyed()) {
+    openDatabaseOp->mState = OpenDatabaseOp::State_SendingResults;
+
+    bool result = SendComplete(aResult);
+
+    MOZ_ALWAYS_TRUE(NS_SUCCEEDED(openDatabaseOp->Run()));
+
+    return result;
+  }
+
+  return true;
 }
 
 void
@@ -3842,6 +3902,8 @@ VersionChangeTransaction::ActorDestroy(ActorDestroyReason aWhy)
   AssertIsOnBackgroundThread();
 
   CommitOrAbort(NS_ERROR_DOM_INDEXEDDB_ABORT_ERR);
+
+  NoteActorDestroyed();
 }
 
 bool
@@ -3933,6 +3995,37 @@ DatabaseOperationBase::OnProgress(mozIStorageConnection* aConnection,
 {
   *_retval = !!mActorDestroyed;
   return NS_OK;
+}
+
+FactoryOp::FactoryOp(const nsACString& aGroup,
+                     const nsACString& aOrigin,
+                     StoragePrivilege aPrivilege,
+                     const nsAString& aName,
+                     PersistenceType aPersistenceType)
+  : mState(State_Initial)
+  , mGroup(aGroup)
+  , mOrigin(aOrigin)
+  , mName(aName)
+  , mPrivilege(aPrivilege)
+  , mPersistenceType(aPersistenceType)
+{
+  QuotaManager::GetStorageId(aPersistenceType, aOrigin, Client::IDB, aName,
+                             mDatabaseId);
+  MOZ_ASSERT(!mDatabaseId.IsEmpty());
+}
+
+FactoryOp::~FactoryOp()
+{
+  MOZ_ASSERT_IF(!mActorDestroyed,
+                mState == State_Initial || mState == State_Completed);
+}
+
+void
+FactoryOp::ActorDestroy(ActorDestroyReason aWhy)
+{
+  AssertIsOnBackgroundThread();
+
+  NoteActorDestroyed();
 }
 
 nsresult
@@ -4232,6 +4325,7 @@ OpenDatabaseOp::BeginVersionChange()
   AssertIsOnOwningThread();
   MOZ_ASSERT(mState == State_BeginVersionChange);
   MOZ_ASSERT(mMaybeBlockedDatabases.IsEmpty());
+  MOZ_ASSERT(mMetadata->mCommonMetadata.version() != mRequestedVersion);
 
   if (IsActorDestroyed()) {
     return NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
@@ -4250,10 +4344,11 @@ OpenDatabaseOp::BeginVersionChange()
   MOZ_ASSERT(!info->mWaitingOpenOp);
 
   nsRefPtr<VersionChangeTransaction> transaction =
-    new VersionChangeTransaction(mDatabase);
+    new VersionChangeTransaction(this);
   if (!mDatabase->SendPBackgroundIDBVersionChangeTransactionConstructor(
-                                                  transaction,
-                                                  mMetadata->mCommonMetadata)) {
+                                           transaction,
+                                           mMetadata->mCommonMetadata.version(),
+                                           mRequestedVersion)) {
     return NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
   }
 
@@ -4463,14 +4558,36 @@ OpenDatabaseOp::EnsureDatabaseActor()
   MOZ_ASSERT(mMetadata->mFilePath.IsEmpty());
   mMetadata->mFilePath = mDatabaseFilePath;
 
+  DatabaseSpec spec;
+  spec.metadata() = mMetadata->mCommonMetadata;
+
+  const uint32_t objectStoreCount = mMetadata->mObjectStores.Length();
+  spec.objectStores().SetCapacity(objectStoreCount);
+
+  for (uint32_t i = 0; i < objectStoreCount; i++) {
+    const FullObjectStoreMetadata* objectStoreMetadata =
+      mMetadata->mObjectStores[i];
+
+    ObjectStoreSpec* objectStoreSpec = spec.objectStores().AppendElement();
+    objectStoreSpec->metadata() = objectStoreMetadata->mCommonMetadata;
+
+    const uint32_t indexCount = objectStoreMetadata->mIndexes.Length();
+    objectStoreSpec->indexes().SetCapacity(indexCount);
+
+    for (uint32_t j = 0; j < indexCount; j++) {
+      const FullIndexMetadata* indexMetadata = objectStoreMetadata->mIndexes[j];
+
+      IndexMetadata* indexSpec = objectStoreSpec->indexes().AppendElement();
+      *indexSpec = indexMetadata->mCommonMetadata;
+    }
+  }
+
   auto factory = static_cast<BackgroundFactoryParent*>(Manager());
 
   nsRefPtr<Database> database =
     new Database(factory, mMetadata, mFileManager);
 
-  if (!factory->SendPBackgroundIDBDatabaseConstructor(
-                                                  database,
-                                                  mMetadata->mCommonMetadata)) {
+  if (!factory->SendPBackgroundIDBDatabaseConstructor(database, spec, this)) {
     return NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
   }
 
@@ -4482,7 +4599,7 @@ OpenDatabaseOp::EnsureDatabaseActor()
     AssertMetadataConsistency(info->mMetadata);
     info->mLiveDatabases.AppendElement(database);
   } else {
-    info = new DatabaseActorInfo(mMetadata.forget(), database);
+    info = new DatabaseActorInfo(mOwnedMetadata.forget(), database);
     gLiveDatabaseHashtable->Put(mDatabaseId, info);
   }
 
@@ -4561,6 +4678,7 @@ OpenDatabaseOp::
 VersionChangeOp::DoDatabaseWork(TransactionBase* aTransaction)
 {
   MOZ_ASSERT(aTransaction);
+  MOZ_ASSERT(mOpenDatabaseOp->mState == State_DatabaseWorkVersionChange);
 
   PROFILER_LABEL("IndexedDB", "VersionChangeOp::DoDatabaseWork");
 
@@ -4594,17 +4712,13 @@ OpenDatabaseOp::
 VersionChangeOp::SendSuccessResult()
 {
   AssertIsOnOwningThread();
-  MOZ_ASSERT(mOpenDatabaseOp);
-  MOZ_ASSERT(NS_SUCCEEDED(mOpenDatabaseOp->ResultCode()));
 
-  mOpenDatabaseOp->mState = State_SendingResults;
-
-  MOZ_ALWAYS_TRUE(NS_SUCCEEDED(mOpenDatabaseOp->Run()));
-
+  // We don't progress to the next state until the version change transaction
+  // commits.
   return NS_OK;
 }
 
-void
+bool
 OpenDatabaseOp::
 VersionChangeOp::SendFailureResult(nsresult aResultCode)
 {
@@ -4615,6 +4729,8 @@ VersionChangeOp::SendFailureResult(nsresult aResultCode)
   mOpenDatabaseOp->mState = State_SendingResults;
 
   MOZ_ALWAYS_TRUE(NS_SUCCEEDED(mOpenDatabaseOp->Run()));
+
+  return false;
 }
 
 void
@@ -4922,7 +5038,10 @@ CommonDatabaseOperationBase::Run()
 
   if (NS_WARN_IF(NS_FAILED(mResultCode))) {
     // This should definitely release the IPDL reference.
-    SendFailureResult(mResultCode);
+    if (!SendFailureResult(mResultCode)) {
+      // Abort the transaction.
+      mTransaction->Abort(mResultCode);
+    }
   }
 
   Cleanup();
@@ -5396,6 +5515,12 @@ CommitOp::Run()
 
     mTransaction->SendCompleteNotification(ClampResultCode(mResultCode));
     mTransaction = nullptr;
+
+#ifdef DEBUG
+    // A bit hacky but the CommitOp is not really a normal database operation
+    // that is tied to an actor. Do this to make our assertions happy.
+    NoteActorDestroyed();
+#endif
 
     return NS_OK;
   }

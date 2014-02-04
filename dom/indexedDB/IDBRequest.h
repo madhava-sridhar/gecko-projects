@@ -9,6 +9,7 @@
 
 #include "mozilla/dom/indexedDB/IndexedDatabase.h"
 
+#include "js/TypeDecls.h"
 #include "mozilla/Attributes.h"
 #include "mozilla/EventForwards.h"
 #include "mozilla/dom/DOMError.h"
@@ -19,6 +20,7 @@
 
 #include "mozilla/dom/indexedDB/IDBWrapperCache.h"
 
+class nsIEventTarget;
 class nsIScriptContext;
 class nsPIDOMWindow;
 
@@ -44,6 +46,11 @@ class IndexedDBRequestParentBase;
 class IDBRequest : public IDBWrapperCache
 {
 public:
+  typedef nsresult
+    (*GetResultCallback)(JSContext* aCx,
+                         void* aUserData,
+                         JS::MutableHandle<JS::Value> aResult);
+
   NS_DECL_ISUPPORTS_INHERITED
   NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS_INHERITED(IDBRequest,
                                                          IDBWrapperCache)
@@ -75,6 +82,8 @@ public:
   void NotifyHelperSentResultsToChildProcess(nsresult aRv);
 
   void SetError(nsresult aRv);
+  void SetResultCallback(GetResultCallback aCallback,
+                         void* aUserData = nullptr);
 
   nsresult
   GetErrorCode() const
@@ -134,7 +143,7 @@ public:
   }
 
   JS::Value
-  GetResult(JSContext* aCx, ErrorResult& aRv) const;
+  GetResult(JSContext* aCx, ErrorResult& aRv);
 
   IDBTransaction*
   GetTransaction() const
@@ -149,10 +158,20 @@ public:
   IMPL_EVENT_HANDLER(success);
   IMPL_EVENT_HANDLER(error);
 
+  void
+  AssertIsOnOwningThread() const
+#ifdef DEBUG
+  ;
+#else
+  { }
+#endif
+
 protected:
   IDBRequest(IDBDatabase* aDatabase);
   IDBRequest(nsPIDOMWindow* aOwner);
   ~IDBRequest();
+
+  void ConstructResult();
 
   // At most one of these three fields can be non-null.
   nsRefPtr<IDBObjectStore> mSourceAsObjectStore;
@@ -168,8 +187,14 @@ protected:
 
   nsRefPtr<IDBTransaction> mTransaction;
 
+#ifdef DEBUG
+  nsCOMPtr<nsIEventTarget> mOwningThread;
+#endif
+
   JS::Heap<JS::Value> mResultVal;
   nsRefPtr<mozilla::dom::DOMError> mError;
+  GetResultCallback mGetResultCallback;
+  void* mGetResultCallbackUserData;
   IndexedDBRequestParentBase* mActorParent;
   nsString mFilename;
 #ifdef MOZ_ENABLE_PROFILER_SPS

@@ -17,6 +17,7 @@
 
 class mozIStorageConnection;
 template<typename> class nsAutoPtr;
+class nsIEventTarget;
 class nsIFile;
 class nsIFileURL;
 class nsIPrincipal;
@@ -141,6 +142,14 @@ public:
   void
   SetBackgroundActor(BackgroundFactoryChild* aBackgroundActor);
 
+  void
+  ClearBackgroundActor()
+  {
+    AssertIsOnOwningThread();
+
+    mBackgroundActor = nullptr;
+  }
+
   const nsCString&
   GetASCIIOrigin() const
   {
@@ -195,6 +204,14 @@ public:
   DeleteForPrincipal(nsIPrincipal* aPrincipal, const nsAString& aName,
                      const IDBOpenDBOptions& aOptions, ErrorResult& aRv);
 
+  void
+  AssertIsOnOwningThread() const
+#ifdef DEBUG
+  ;
+#else
+  { }
+#endif
+
 private:
   IDBFactory();
   ~IDBFactory();
@@ -213,8 +230,11 @@ private:
 
   nsresult
   InitiateRequest(IDBOpenDBRequest* aRequest,
-                  const FactoryRequestParams& aParams,
-                  const nsCString& aDatabaseId);
+                  const FactoryRequestParams& aParams);
+
+#ifdef DEBUG
+  nsCOMPtr<nsIEventTarget> mOwningThread;
+#endif
 
   nsCString mGroup;
   nsCString mASCIIOrigin;

@@ -69,7 +69,8 @@ protected:
     NS_DECL_THREADSAFE_ISUPPORTS
     NS_DECL_NSIRUNNABLE
 
-    TransactionQueue(uint64_t aTransactionId,
+    TransactionQueue(TransactionThreadPool* aThreadPool,
+                     uint64_t aTransactionId,
                      const nsACString& aDatabaseId,
                      const nsTArray<nsString>& aObjectStoreNames,
                      uint16_t aMode);
@@ -83,6 +84,7 @@ protected:
   private:
     mozilla::Monitor mMonitor;
 
+    TransactionThreadPool* mOwningThreadPool;
     nsCOMPtr<nsIEventTarget> mOwningThread;
     uint64_t mTransactionId;
     const nsCString mDatabaseId;
@@ -98,7 +100,8 @@ protected:
 
   struct TransactionInfo
   {
-    TransactionInfo(uint64_t aTransactionId,
+    TransactionInfo(TransactionThreadPool* aThreadPool,
+                    uint64_t aTransactionId,
                     const nsACString& aDatabaseId,
                     const nsTArray<nsString>& aObjectStoreNames,
                     uint16_t aMode)
@@ -106,7 +109,7 @@ protected:
     {
       MOZ_COUNT_CTOR(TransactionInfo);
 
-      queue = new TransactionQueue(aTransactionId, aDatabaseId,
+      queue = new TransactionQueue(aThreadPool, aTransactionId, aDatabaseId,
                                    aObjectStoreNames, aMode);
     }
 

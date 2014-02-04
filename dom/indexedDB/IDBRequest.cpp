@@ -50,6 +50,8 @@ IDBRequest::IDBRequest(IDBDatabase* aDatabase)
 : IDBWrapperCache(aDatabase),
   mResultVal(JSVAL_VOID),
   mActorParent(nullptr),
+  mGetResultCallback(nullptr),
+  mGetResultCallbackUserData(nullptr),
 #ifdef MOZ_ENABLE_PROFILER_SPS
   mSerialNumber(gNextRequestSerialNumber++),
 #endif
@@ -57,13 +59,18 @@ IDBRequest::IDBRequest(IDBDatabase* aDatabase)
   mLineNo(0),
   mHaveResultOrErrorCode(false)
 {
-  NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
+#ifdef DEBUG
+  mOwningThread = NS_GetCurrentThread();
+  AssertIsOnOwningThread();
+#endif
 }
 
 IDBRequest::IDBRequest(nsPIDOMWindow* aOwner)
 : IDBWrapperCache(aOwner),
   mResultVal(JSVAL_VOID),
   mActorParent(nullptr),
+  mGetResultCallback(nullptr),
+  mGetResultCallbackUserData(nullptr),
 #ifdef MOZ_ENABLE_PROFILER_SPS
   mSerialNumber(gNextRequestSerialNumber++),
 #endif
@@ -71,7 +78,10 @@ IDBRequest::IDBRequest(nsPIDOMWindow* aOwner)
   mLineNo(0),
   mHaveResultOrErrorCode(false)
 {
-  NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
+#ifdef DEBUG
+  mOwningThread = NS_GetCurrentThread();
+  AssertIsOnOwningThread();
+#endif
 }
 
 IDBRequest::~IDBRequest()
@@ -79,6 +89,20 @@ IDBRequest::~IDBRequest()
   mResultVal = JSVAL_VOID;
   NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
 }
+
+#ifdef DEBUG
+
+void
+IDBRequest::AssertIsOnOwningThread() const
+{
+  MOZ_ASSERT(mOwningThread);
+
+  bool current;
+  MOZ_ASSERT(NS_SUCCEEDED(mOwningThread->IsOnCurrentThread(&current)));
+  MOZ_ASSERT(current);
+}
+
+#endif // DEBUG
 
 // static
 already_AddRefed<IDBRequest>
@@ -160,6 +184,8 @@ IDBRequest::Reset()
 {
   NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
   mResultVal = JSVAL_VOID;
+  mGetResultCallback = nullptr;
+  mGetResultCallbackUserData = nullptr;
   mHaveResultOrErrorCode = false;
   mError = nullptr;
 }
@@ -344,26 +370,104 @@ IDBRequest::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aScope)
 }
 
 JS::Value
-IDBRequest::GetResult(JSContext* aCx, mozilla::ErrorResult& aRv) const
+IDBRequest::GetResult(JSContext* aCx, mozilla::ErrorResult& aRv)
 {
-  NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
+  AssertIsOnOwningThread();
 
   if (!mHaveResultOrErrorCode) {
-    // XXX Need a real error code here.
-    aRv.Throw(NS_ERROR_DOM_INDEXEDDB_NOT_ALLOWED_ERR);
+    if (!mGetResultCallback) {
+      // XXX Need a real error code here.
+      aRv.Throw(NS_ERROR_DOM_INDEXEDDB_NOT_ALLOWED_ERR);
+    }
+
+    ConstructResult();
+
+    MOZ_ASSERT(mHaveResultOrErrorCode);
   }
 
   return mResultVal;
 }
 
+void
+IDBRequest::SetResultCallback(GetResultCallback aCallback,
+                              void* aUserData)
+{
+  AssertIsOnOwningThread();
+  MOZ_ASSERT(aCallback);
+  MOZ_ASSERT(!mHaveResultOrErrorCode);
+  MOZ_ASSERT(!mGetResultCallback);
+  MOZ_ASSERT(!mGetResultCallbackUserData);
+  MOZ_ASSERT(mResultVal.isUndefined());
+  MOZ_ASSERT(!mError);
+
+  mGetResultCallback = aCallback;
+  mGetResultCallbackUserData = aUserData;
+}
+
+void
+IDBRequest::ConstructResult()
+{
+  AssertIsOnOwningThread();
+  MOZ_ASSERT(!mHaveResultOrErrorCode);
+  MOZ_ASSERT(mGetResultCallback);
+  MOZ_ASSERT(mResultVal.isUndefined());
+  MOZ_ASSERT(!mError);
+
+  // See if our window is still valid.
+  if (NS_FAILED(CheckInnerWindowCorrectness())) {
+    IDB_REPORT_INTERNAL_ERR();
+    SetError(NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
+    return;
+  }
+
+  JSContext* cx = GetJSContext();
+  if (!cx) {
+    IDB_REPORT_INTERNAL_ERR();
+    SetError(NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
+    return;
+  }
+
+  Maybe<AutoPushJSContext> maybePush;
+  if (NS_IsMainThread()) {
+    maybePush.construct(cx);
+  }
+
+  JS::Rooted<JSObject*> global(cx, IDBWrapperCache::GetParentObject());
+  MOZ_ASSERT(global);
+
+  JSAutoCompartment ac(cx, global);
+  AssertIsRooted();
+
+  JS::Rooted<JS::Value> result(cx);
+  nsresult rv = mGetResultCallback(cx, mGetResultCallbackUserData, &result);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    SetError(rv);
+    mResultVal.setUndefined();
+  } else {
+    mError = nullptr;
+    mResultVal = result;
+  }
+
+  mGetResultCallback = nullptr;
+  mGetResultCallbackUserData = nullptr;
+
+  mHaveResultOrErrorCode = true;
+}
+
 mozilla::dom::DOMError*
 IDBRequest::GetError(mozilla::ErrorResult& aRv)
 {
-  NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
+  AssertIsOnOwningThread();
 
   if (!mHaveResultOrErrorCode) {
-    aRv.Throw(NS_ERROR_DOM_INVALID_STATE_ERR);
-    return nullptr;
+    if (!mGetResultCallback) {
+      aRv.Throw(NS_ERROR_DOM_INVALID_STATE_ERR);
+      return nullptr;
+    }
+
+    ConstructResult();
+
+    MOZ_ASSERT(mHaveResultOrErrorCode);
   }
 
   return mError;

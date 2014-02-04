@@ -14,12 +14,14 @@
 #include "mozilla/dom/ContentParent.h"
 #include "mozilla/dom/DOMStringList.h"
 #include "mozilla/dom/DOMStringListBinding.h"
+#include "mozilla/dom/indexedDB/PBackgroundIDBSharedTypes.h"
 #include "mozilla/dom/quota/Client.h"
 #include "mozilla/dom/quota/QuotaManager.h"
 #include "nsJSUtils.h"
 #include "nsProxyRelease.h"
 #include "nsThreadUtils.h"
 
+#include "ActorsChild.h"
 #include "AsyncConnectionHelper.h"
 #include "DatabaseInfo.h"
 #include "IDBEvents.h"
@@ -235,6 +237,29 @@ IDBDatabase::Create(IDBWrapperCache* aOwnerCache,
 }
 
 // static
+already_AddRefed<IDBDatabase>
+IDBDatabase::Create(IDBWrapperCache* aOwnerCache,
+                    IDBFactory* aFactory,
+                    PBackgroundIDBDatabaseChild* aActor,
+                    DatabaseSpec* aSpec)
+{
+  MOZ_ASSERT(aOwnerCache);
+  MOZ_ASSERT(aFactory);
+  aFactory->AssertIsOnOwningThread();
+  MOZ_ASSERT(aActor);
+  MOZ_ASSERT(aSpec);
+
+  nsRefPtr<IDBDatabase> db = new IDBDatabase(aOwnerCache);
+
+  db->SetScriptOwner(aOwnerCache->GetScriptOwner());
+  db->mFactory = aFactory;
+  db->mBackgroundActor = aActor;
+  db->mSpec = aSpec;
+
+  return db.forget();
+}
+
+// static
 IDBDatabase*
 IDBDatabase::FromStorage(nsIOfflineStorage* aStorage)
 {
@@ -246,24 +271,34 @@ IDBDatabase::IDBDatabase(IDBWrapperCache* aOwnerCache)
 : IDBWrapperCache(aOwnerCache),
   mActorChild(nullptr),
   mActorParent(nullptr),
+  mBackgroundActor(nullptr),
   mContentParent(nullptr),
   mInvalidated(false),
   mRegistered(false),
-  mClosed(false),
-  mRunningVersionChange(false)
+  mClosed(false)
 {
-  NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
 }
 
 IDBDatabase::~IDBDatabase()
 {
-  NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
+  AssertIsOnOwningThread();
 }
+
+#ifdef DEBUG
+
+void
+IDBDatabase::AssertIsOnOwningThread() const
+{
+  MOZ_ASSERT(mFactory);
+  mFactory->AssertIsOnOwningThread();
+}
+
+#endif // DEBUG
 
 void
 IDBDatabase::LastRelease()
 {
-  NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
+  AssertIsOnOwningThread();
 
   NS_ASSERTION(!mActorParent, "Actor parent owns us, how can we be dying?!");
   if (mActorChild) {
@@ -280,6 +315,11 @@ IDBDatabase::LastRelease()
       quotaManager->UnregisterStorage(this);
     }
     mRegistered = false;
+  }
+
+  if (mBackgroundActor) {
+    mBackgroundActor->SendDeleteMe();
+    mBackgroundActor = nullptr;
   }
 }
 
@@ -373,28 +413,32 @@ IDBDatabase::IsClosed()
 void
 IDBDatabase::EnterSetVersionTransaction()
 {
-  NS_ASSERTION(!mRunningVersionChange, "How did that happen?");
+  AssertIsOnOwningThread();
+  MOZ_ASSERT(!RunningVersionChangeTransaction());
+  MOZ_ASSERT(mSpec);
+  MOZ_ASSERT(!mPreviousSpec);
 
-  mPreviousDatabaseInfo = mDatabaseInfo->Clone();
-
-  mRunningVersionChange = true;
+  mPreviousSpec = new DatabaseSpec(*mSpec);
 }
 
 void
 IDBDatabase::ExitSetVersionTransaction()
 {
-  NS_ASSERTION(mRunningVersionChange, "How did that happen?");
+  AssertIsOnOwningThread();
+  MOZ_ASSERT(RunningVersionChangeTransaction());
+  MOZ_ASSERT(mPreviousSpec);
 
-  mPreviousDatabaseInfo = nullptr;
-
-  mRunningVersionChange = false;
+  mPreviousSpec = nullptr;
 }
 
 void
 IDBDatabase::RevertToPreviousState()
 {
-  mDatabaseInfo = mPreviousDatabaseInfo;
-  mPreviousDatabaseInfo = nullptr;
+  AssertIsOnOwningThread();
+  MOZ_ASSERT(RunningVersionChangeTransaction());
+  MOZ_ASSERT(mPreviousSpec);
+
+  mSpec = mPreviousSpec.forget();
 }
 
 void
@@ -634,7 +678,7 @@ IDBDatabase::Transaction(const Sequence<nsString>& aStoreNames,
     return nullptr;
   }
 
-  if (mRunningVersionChange) {
+  if (RunningVersionChangeTransaction()) {
     aRv.Throw(NS_ERROR_DOM_INDEXEDDB_NOT_ALLOWED_ERR);
     return nullptr;
   }

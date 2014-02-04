@@ -106,12 +106,10 @@ struct IDBFactory::PendingRequestInfo
 {
   nsRefPtr<IDBOpenDBRequest> mRequest;
   FactoryRequestParams mParams;
-  nsCString mDatabaseId;
 
   PendingRequestInfo(IDBOpenDBRequest* aRequest,
-                     const FactoryRequestParams& aParams,
-                     const nsACString& aDatabaseId)
-  : mRequest(aRequest), mParams(aParams), mDatabaseId(aDatabaseId)
+                     const FactoryRequestParams& aParams)
+  : mRequest(aRequest), mParams(aParams)
   {
     MOZ_ASSERT(aRequest);
     MOZ_ASSERT(aParams.type() != FactoryRequestParams::T__None);
@@ -123,6 +121,11 @@ IDBFactory::IDBFactory()
   mOwningObject(nullptr), mBackgroundActor(nullptr), mContentParent(nullptr),
   mRootedOwningObject(false), mBackgroundActorFailed(false)
 {
+#ifdef DEBUG
+  mOwningThread = NS_GetCurrentThread();
+  AssertIsOnOwningThread();
+#endif
+
   SetIsDOMBinding();
 }
 
@@ -140,6 +143,20 @@ IDBFactory::~IDBFactory()
     mozilla::DropJSObjects(this);
   }
 }
+
+#ifdef DEBUG
+
+void
+IDBFactory::AssertIsOnOwningThread() const
+{
+  MOZ_ASSERT(mOwningThread);
+
+  bool current;
+  MOZ_ASSERT(NS_SUCCEEDED(mOwningThread->IsOnCurrentThread(&current)));
+  MOZ_ASSERT(current);
+}
+
+#endif // DEBUG
 
 // static
 nsresult
@@ -647,11 +664,6 @@ IDBFactory::OpenInternal(const nsAString& aName,
     params = OpenDatabaseRequestParams(metadata);
   }
 
-  nsCString databaseId;
-  QuotaManager::GetStorageId(aPersistenceType, aASCIIOrigin, Client::IDB,
-                             aName, databaseId);
-  MOZ_ASSERT(!databaseId.IsEmpty());
-
   if (!mBackgroundActor) {
     // If another consumer has already created a background actor for this
     // thread then we can start this request immediately.
@@ -666,14 +678,13 @@ IDBFactory::OpenInternal(const nsAString& aName,
 
   // If we already have a background actor then we can start this request now.
   if (mBackgroundActor) {
-    nsresult rv = InitiateRequest(request, params, databaseId);
+    nsresult rv = InitiateRequest(request, params);
     if (NS_WARN_IF(NS_FAILED(rv))) {
       return rv;
     }
   }
   else {
-    mPendingRequests.AppendElement(new PendingRequestInfo(request, params,
-                                                          databaseId));
+    mPendingRequests.AppendElement(new PendingRequestInfo(request, params));
 
     if (mPendingRequests.Length() == 1) {
       // We need to start the sequence to create a background actor for this
@@ -747,8 +758,9 @@ IDBFactory::OpenInternal(const nsAString& aName,
 void
 IDBFactory::SetBackgroundActor(BackgroundFactoryChild* aBackgroundActor)
 {
-  MOZ_ASSERT_IF(mBackgroundActor, !aBackgroundActor);
-  MOZ_ASSERT_IF(!mBackgroundActor, aBackgroundActor);
+  AssertIsOnOwningThread();
+  MOZ_ASSERT(aBackgroundActor);
+  MOZ_ASSERT(!mBackgroundActor);
 
   mBackgroundActor = aBackgroundActor;
 }
@@ -919,8 +931,7 @@ IDBFactory::BackgroundActorCreated(PBackgroundChild* aBackgroundActor)
   for (uint32_t index = 0; index < mPendingRequests.Length(); index++) {
     nsAutoPtr<PendingRequestInfo> info = mPendingRequests[index].forget();
 
-    nsresult rv2 =
-      InitiateRequest(info->mRequest, info->mParams, info->mDatabaseId);
+    nsresult rv2 = InitiateRequest(info->mRequest, info->mParams);
 
     // Warn for every failure, but just return the first failure if there are
     // multiple failures.
@@ -953,14 +964,13 @@ IDBFactory::BackgroundActorFailed()
 
 nsresult
 IDBFactory::InitiateRequest(IDBOpenDBRequest* aRequest,
-                            const FactoryRequestParams& aParams,
-                            const nsCString& aDatabaseId)
+                            const FactoryRequestParams& aParams)
 {
   MOZ_ASSERT(aRequest);
   MOZ_ASSERT(mBackgroundActor);
   MOZ_ASSERT(!mBackgroundActorFailed);
 
-  auto actor = new BackgroundFactoryRequestChild(this, aRequest, aDatabaseId);
+  auto actor = new BackgroundFactoryRequestChild(this, aRequest);
 
   if (!mBackgroundActor->SendPBackgroundIDBFactoryRequestConstructor(actor,
                                                                      aParams)) {

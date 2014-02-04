@@ -40,6 +40,7 @@ BEGIN_INDEXEDDB_NAMESPACE
 
 class AsyncConnectionHelper;
 struct DatabaseInfo;
+class DatabaseSpec;
 class IDBFactory;
 class IDBIndex;
 class IDBObjectStore;
@@ -48,6 +49,7 @@ class IndexedDatabaseManager;
 class IndexedDBDatabaseChild;
 class IndexedDBDatabaseParent;
 struct ObjectStoreInfoGuts;
+class PBackgroundIDBDatabaseChild;
 
 class IDBDatabase : public IDBWrapperCache,
                     public nsIOfflineStorage
@@ -70,6 +72,20 @@ public:
          const nsACString& aASCIIOrigin,
          FileManager* aFileManager,
          mozilla::dom::ContentParent* aContentParent);
+
+  static already_AddRefed<IDBDatabase>
+  Create(IDBWrapperCache* aOwnerCache,
+         IDBFactory* aFactory,
+         PBackgroundIDBDatabaseChild* aActor,
+         DatabaseSpec* aSpec);
+
+  void
+  AssertIsOnOwningThread() const
+#ifdef DEBUG
+  ;
+#else
+  { }
+#endif
 
   static IDBDatabase*
   FromStorage(nsIOfflineStorage* aStorage);
@@ -240,16 +256,32 @@ public:
 
   virtual void LastRelease() MOZ_OVERRIDE;
 
+  void
+  ClearBackgroundActor()
+  {
+    AssertIsOnOwningThread();
+
+    mBackgroundActor = nullptr;
+  }
+
 private:
   IDBDatabase(IDBWrapperCache* aOwnerCache);
   ~IDBDatabase();
 
   void OnUnlink();
 
+  bool RunningVersionChangeTransaction() const
+  {
+    return !!mPreviousSpec;
+  }
+
   // The factory must be kept alive when IndexedDB is used in multiple
   // processes. If it dies then the entire actor tree will be destroyed with it
   // and the world will explode.
   nsRefPtr<IDBFactory> mFactory;
+
+  nsAutoPtr<DatabaseSpec> mSpec;
+  nsAutoPtr<DatabaseSpec> mPreviousSpec;
 
   nsRefPtr<DatabaseInfo> mDatabaseInfo;
 
@@ -266,6 +298,8 @@ private:
   IndexedDBDatabaseChild* mActorChild;
   IndexedDBDatabaseParent* mActorParent;
 
+  PBackgroundIDBDatabaseChild* mBackgroundActor;
+
   mozilla::dom::ContentParent* mContentParent;
 
   nsRefPtr<mozilla::dom::quota::Client> mQuotaClient;
@@ -275,7 +309,6 @@ private:
   bool mInvalidated;
   bool mRegistered;
   bool mClosed;
-  bool mRunningVersionChange;
 };
 
 END_INDEXEDDB_NAMESPACE

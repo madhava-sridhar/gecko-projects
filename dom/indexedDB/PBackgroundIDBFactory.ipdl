@@ -43,7 +43,8 @@ parent:
 child:
   __delete__();
 
-  PBackgroundIDBDatabase(DatabaseMetadata metadata);
+  PBackgroundIDBDatabase(DatabaseSpec spec,
+                         PBackgroundIDBFactoryRequest request);
 };
 
 } // namespace indexedDB
