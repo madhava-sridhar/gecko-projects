@@ -4,8 +4,6 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "base/basictypes.h"
-
 #include "AsyncConnectionHelper.h"
 
 #include "mozilla/dom/quota/QuotaManager.h"
@@ -16,7 +14,9 @@
 #include "nsThreadUtils.h"
 #include "nsWrapperCacheInlines.h"
 
+#include "FileInfo.h"
 #include "IDBEvents.h"
+#include "IDBObjectStore.h"
 #include "IDBTransaction.h"
 #include "IndexedDatabaseManager.h"
 #include "ProfilerHelpers.h"
@@ -688,7 +688,7 @@ TransactionPoolEventTarget::Dispatch(nsIRunnable* aRunnable,
 
   nsresult rv = pool->Dispatch(mTransaction->Id(),
                                mTransaction->Database()->Id(),
-                               mTransaction->ObjectStoreNames(),
+                               mTransaction->ObjectStoreNamesInternal(),
                                mTransaction->GetMode(),
                                aRunnable, false, nullptr);
   NS_ENSURE_SUCCESS(rv, rv);

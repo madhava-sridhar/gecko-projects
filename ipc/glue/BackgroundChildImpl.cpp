@@ -44,6 +44,7 @@ namespace ipc {
 
 BackgroundChildImpl::
 ThreadLocal::ThreadLocal()
+: mCurrentTransaction(nullptr)
 {
   // May happen on any thread!
   MOZ_COUNT_CTOR(mozilla::ipc::BackgroundChildImpl::ThreadLocal);

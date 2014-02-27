@@ -16,6 +16,7 @@
 #include "nsIURI.h"
 
 #include "CheckQuotaHelper.h"
+#include "FileManager.h"
 #include "nsContentUtils.h"
 #include "nsNetUtil.h"
 #include "nsThreadUtils.h"

@@ -9,13 +9,10 @@
 
 #include "mozilla/dom/indexedDB/IndexedDatabase.h"
 
-#include "mozilla/Attributes.h"
 #include "mozilla/dom/IDBCursorBinding.h"
-#include "mozilla/ErrorResult.h"
 #include "nsCycleCollectionParticipant.h"
 #include "nsWrapperCache.h"
 
-#include "mozilla/dom/indexedDB/IDBObjectStore.h"
 #include "mozilla/dom/indexedDB/Key.h"
 
 class nsIRunnable;
@@ -23,6 +20,7 @@ class nsIScriptContext;
 class nsPIDOMWindow;
 
 namespace mozilla {
+class ErrorResult;
 namespace dom {
 class OwningIDBObjectStoreOrIDBIndex;
 }
@@ -35,8 +33,8 @@ class ContinueObjectStoreHelper;
 class ContinueIndexHelper;
 class ContinueIndexObjectHelper;
 class IDBIndex;
+class IDBObjectStore;
 class IDBRequest;
-class IDBTransaction;
 class IndexedDBCursorChild;
 class IndexedDBCursorParent;
 
@@ -172,11 +170,8 @@ public:
   WrapObject(JSContext* aCx, JS::Handle<JSObject*> aScope) MOZ_OVERRIDE;
 
   // WebIDL
-  IDBTransaction*
-  GetParentObject() const
-  {
-    return mTransaction;
-  }
+  nsPIDOMWindow*
+  GetParentObject() const;
 
   void
   GetSource(OwningIDBObjectStoreOrIDBIndex& aSource) const;

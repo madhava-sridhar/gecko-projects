@@ -23,6 +23,7 @@ struct DatabaseMetadata
 
 struct ObjectStoreMetadata
 {
+  int64_t id;
   nsString name;
   KeyPath keyPath;
   bool autoIncrement;
@@ -30,6 +31,7 @@ struct ObjectStoreMetadata
 
 struct IndexMetadata
 {
+  int64_t id;
   nsString name;
   KeyPath keyPath;
   bool unique;

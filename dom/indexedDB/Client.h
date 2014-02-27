@@ -7,13 +7,20 @@
 #ifndef mozilla_dom_indexeddb_client_h__
 #define mozilla_dom_indexeddb_client_h__
 
-#include "IndexedDatabase.h"
-
+#include "mozilla/Attributes.h"
 #include "mozilla/dom/quota/Client.h"
+#include "nsISupportsImpl.h"
 
 #define JOURNAL_DIRECTORY_NAME "journals"
 
-BEGIN_INDEXEDDB_NAMESPACE
+class nsACString;
+class nsIFile;
+class nsIOfflineStorage;
+template <typename> class nsTArray;
+
+namespace mozilla {
+namespace dom {
+namespace indexedDB {
 
 class Client : public mozilla::dom::quota::Client
 {
@@ -90,6 +97,8 @@ private:
   NS_DECL_OWNINGTHREAD
 };
 
-END_INDEXEDDB_NAMESPACE
+} // namespace indexedDB
+} // namespace dom
+} // namespace mozilla
 
 #endif // mozilla_dom_indexeddb_client_h__

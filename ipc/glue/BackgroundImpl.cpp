@@ -1239,6 +1239,8 @@ ParentImpl::RequestMessageLoopRunnable::Run()
   AssertIsInMainProcess();
   MOZ_ASSERT(mTargetThread);
 
+  char stackBaseGuess;
+
   if (NS_IsMainThread()) {
     MOZ_ASSERT(mMessageLoop);
 
@@ -1268,7 +1270,6 @@ ParentImpl::RequestMessageLoopRunnable::Run()
     return NS_OK;
   }
 
-  char stackBaseGuess;
   profiler_register_thread("IPDL Background", &stackBaseGuess);
 
 #ifdef DEBUG

@@ -5,11 +5,11 @@
 #ifndef mozilla_dom_indexeddb_actorsparent_h__
 #define mozilla_dom_indexeddb_actorsparent_h__
 
-#include "mozilla/dom/indexedDB/IndexedDatabase.h"
-
+#include "mozilla/Attributes.h"
 #include "mozilla/dom/indexedDB/PBackgroundIDBFactoryParent.h"
 #include "mozilla/dom/quota/StoragePrivilege.h"
 #include "nsISupportsImpl.h"
+#include "nsString.h"
 
 namespace mozilla {
 namespace ipc {
@@ -17,9 +17,9 @@ namespace ipc {
 class BackgroundParentImpl;
 
 } // namespace ipc
-} // namespace mozilla
 
-BEGIN_INDEXEDDB_NAMESPACE
+namespace dom {
+namespace indexedDB {
 
 class BackgroundFactoryParent MOZ_FINAL
   : public PBackgroundIDBFactoryParent
@@ -35,21 +35,6 @@ class BackgroundFactoryParent MOZ_FINAL
   // Counts the number of "live" BackgroundFactoryParent instances that have not
   // yet had ActorDestroy called.
   static uint64_t sFactoryInstanceCount;
-
-private:
-  // Only created by mozilla::ipc::BackgroundParentImpl.
-  static already_AddRefed<BackgroundFactoryParent>
-  Create(const nsCString& aGroup,
-         const nsCString& aOrigin,
-         const StoragePrivilege& aPrivilege);
-
-  // Only constructed in Create().
-  BackgroundFactoryParent(const nsCString& aGroup,
-                          const nsCString& aOrigin,
-                          const StoragePrivilege& aPrivilege);
-
-  // Reference counted.
-  ~BackgroundFactoryParent();
 
 public:
   NS_INLINE_DECL_THREADSAFE_REFCOUNTING(BackgroundFactoryParent)
@@ -72,7 +57,20 @@ public:
     return mPrivilege;
   }
 
-private:
+  // Only created by mozilla::ipc::BackgroundParentImpl.
+  static already_AddRefed<BackgroundFactoryParent>
+  Create(const nsCString& aGroup,
+         const nsCString& aOrigin,
+         const StoragePrivilege& aPrivilege);
+
+  // Only constructed in Create().
+  BackgroundFactoryParent(const nsCString& aGroup,
+                          const nsCString& aOrigin,
+                          const StoragePrivilege& aPrivilege);
+
+  // Reference counted.
+  ~BackgroundFactoryParent();
+
   // IPDL methods are only called by IPDL.
   virtual void
   ActorDestroy(ActorDestroyReason aWhy) MOZ_OVERRIDE;
@@ -106,6 +104,8 @@ private:
                                       MOZ_OVERRIDE;
 };
 
-END_INDEXEDDB_NAMESPACE
+} // namespace indexedDB
+} // namespace dom
+} // namespace mozilla
 
 #endif // mozilla_dom_indexeddb_actorsparent_h__

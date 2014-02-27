@@ -7,45 +7,51 @@
 #ifndef mozilla_dom_indexeddb_idbtransaction_h__
 #define mozilla_dom_indexeddb_idbtransaction_h__
 
-#include "mozilla/Attributes.h"
-#include "mozilla/dom/indexedDB/IndexedDatabase.h"
-
-#include "mozIStorageConnection.h"
-#include "mozIStorageStatement.h"
-#include "mozIStorageFunction.h"
-#include "mozilla/dom/DOMError.h"
-#include "nsIRunnable.h"
-
+#include "mozilla/dom/IDBTransactionBinding.h"
+#include "mozilla/dom/indexedDB/IDBWrapperCache.h"
 #include "nsAutoPtr.h"
 #include "nsClassHashtable.h"
+#include "nsCOMPtr.h"
+#include "nsCycleCollectionParticipant.h"
 #include "nsHashKeys.h"
 #include "nsInterfaceHashtable.h"
+#include "nsIRunnable.h"
 #include "nsRefPtrHashtable.h"
+#include "nsString.h"
+#include "nsTArray.h"
 
-#include "mozilla/dom/IDBTransactionBinding.h"
-#include "mozilla/dom/indexedDB/IDBDatabase.h"
-#include "mozilla/dom/indexedDB/IDBWrapperCache.h"
-#include "mozilla/dom/indexedDB/FileInfo.h"
-
-class nsIThread;
+class mozIStorageConnection;
+class mozIStorageStatement;
 class nsPIDOMWindow;
 
 namespace mozilla {
-class EventChainPreVisitor;
-} // namespace mozilla
 
-BEGIN_INDEXEDDB_NAMESPACE
+class ErrorResult;
+class EventChainPreVisitor;
+
+namespace dom {
+
+class DOMError;
+class DOMStringList;
+
+namespace indexedDB {
 
 class AsyncConnectionHelper;
+class BackgroundTransactionChild;
+class BackgroundVersionChangeTransactionChild;
 class CommitHelper;
+class DatabaseInfo;
+class FileInfo;
+class IDBDatabase;
+class IDBObjectStore;
 class IDBRequest;
+class IDBTransaction;
 class IndexedDBDatabaseChild;
 class IndexedDBTransactionChild;
 class IndexedDBTransactionParent;
+class IndexMetadata;
 struct ObjectStoreInfo;
-class PBackgroundIDBTransactionChild;
-class PBackgroundIDBVersionChangeTransactionChild;
-class TransactionThreadPool;
+class ObjectStoreSpec;
 class UpdateRefcountFunction;
 
 class IDBTransactionListener
@@ -55,13 +61,16 @@ public:
   NS_IMETHOD_(nsrefcnt) Release() = 0;
 
   // Called just before dispatching the final events on the transaction.
-  virtual nsresult NotifyTransactionPreComplete(IDBTransaction* aTransaction) = 0;
+  virtual nsresult
+  NotifyTransactionPreComplete(IDBTransaction* aTransaction) = 0;
   // Called just after dispatching the final events on the transaction.
-  virtual nsresult NotifyTransactionPostComplete(IDBTransaction* aTransaction) = 0;
+  virtual nsresult
+  NotifyTransactionPostComplete(IDBTransaction* aTransaction) = 0;
 };
 
-class IDBTransaction : public IDBWrapperCache,
-                       public nsIRunnable
+class IDBTransaction MOZ_FINAL
+  : public IDBWrapperCache
+  , public nsIRunnable
 {
   friend class AsyncConnectionHelper;
   friend class CommitHelper;
@@ -69,11 +78,6 @@ class IDBTransaction : public IDBWrapperCache,
   friend class ThreadObserver;
 
 public:
-  NS_DECL_ISUPPORTS_INHERITED
-  NS_DECL_NSIRUNNABLE
-
-  NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(IDBTransaction, IDBWrapperCache)
-
   enum Mode
   {
     READ_ONLY = 0,
@@ -92,19 +96,76 @@ public:
     DONE
   };
 
-  static already_AddRefed<IDBTransaction>
-  Create(IDBDatabase* aDatabase,
-         const Sequence<nsString>& aObjectStoreNames,
-         Mode aMode,
-         bool aDispatchDelayed)
-  {
-    return CreateInternal(aDatabase, aObjectStoreNames, aMode, aDispatchDelayed,
-                          false);
-  }
+private:
+  nsRefPtr<IDBDatabase> mDatabase;
+  nsRefPtr<DatabaseInfo> mDatabaseInfo;
+  nsRefPtr<DOMError> mError;
+  nsTArray<nsString> mObjectStoreNames;
+  ReadyState mReadyState;
+  Mode mMode;
+  uint32_t mPendingRequests;
+
+  nsInterfaceHashtable<nsCStringHashKey, mozIStorageStatement>
+    mCachedStatements;
+
+  nsRefPtr<IDBTransactionListener> mListener;
+
+  // Only touched on the database thread.
+  nsCOMPtr<mozIStorageConnection> mConnection;
+
+  // Only touched on the database thread.
+  uint32_t mSavepointCount;
+
+  nsTArray<nsRefPtr<IDBObjectStore>> mObjectStores;
+
+  nsRefPtr<UpdateRefcountFunction> mUpdateFileRefcountFunction;
+  nsRefPtrHashtable<nsISupportsHashKey, FileInfo> mCreatedFileInfos;
+
+  IndexedDBTransactionChild* mActorChild;
+  IndexedDBTransactionParent* mActorParent;
+
+  // Tagged with mMode. If mMode is VERSION_CHANGE then mBackgroundActor will be
+  // a BackgroundVersionChangeTransactionChild. Otherwise it will be a
+  // BackgroundTransactionChild.
+  union {
+    BackgroundTransactionChild* mNormalBackgroundActor;
+    BackgroundVersionChangeTransactionChild* mVersionChangeBackgroundActor;
+  } mBackgroundActor;
+
+  nsresult mAbortCode;
+
+  // Only used for VERSION_CHANGE transactions.
+  int64_t mNextObjectStoreId;
+  int64_t mNextIndexId;
+
+#ifdef MOZ_ENABLE_PROFILER_SPS
+  uint64_t mSerialNumber;
+#endif
+  bool mCreating;
+
+#ifdef DEBUG
+  bool mFiredCompleteOrAbort;
+#endif
+
+public:
+  NS_DECL_ISUPPORTS_INHERITED
+  NS_DECL_NSIRUNNABLE
+
+  NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(IDBTransaction, IDBWrapperCache)
 
   static already_AddRefed<IDBTransaction>
   CreateVersionChange(IDBDatabase* aDatabase,
-                      PBackgroundIDBVersionChangeTransactionChild* aActor);
+                      BackgroundVersionChangeTransactionChild* aActor,
+                      int64_t aNextObjectStoreId,
+                      int64_t aNextIndexId);
+
+  static already_AddRefed<IDBTransaction>
+  Create(IDBDatabase* aDatabase,
+         const nsTArray<nsString>& aObjectStoreNames,
+         Mode aMode);
+
+  static IDBTransaction*
+  GetCurrent();
 
   void
   AssertIsOnOwningThread() const
@@ -115,7 +176,7 @@ public:
 #endif
 
   void
-  SetBackgroundActor(PBackgroundIDBTransactionChild* aBackgroundActor);
+  SetBackgroundActor(BackgroundTransactionChild* aBackgroundActor);
 
   void
   ClearBackgroundActor()
@@ -129,14 +190,15 @@ public:
     }
   }
 
+  void
+  RefreshSpec();
+
   // nsIDOMEventTarget
   virtual nsresult PreHandleEvent(EventChainPreVisitor& aVisitor) MOZ_OVERRIDE;
 
   void OnNewRequest();
   void OnRequestFinished();
   void OnRequestDisconnected();
-
-  void RemoveObjectStore(const nsAString& aName);
 
   void SetTransactionListener(IDBTransactionListener* aListener);
 
@@ -197,7 +259,8 @@ public:
     return mDatabaseInfo;
   }
 
-  const nsTArray<nsString>& ObjectStoreNames() const
+  const nsTArray<nsString>&
+  ObjectStoreNamesInternal() const
   {
     return mObjectStoreNames;
   }
@@ -206,6 +269,18 @@ public:
   GetOrCreateObjectStore(const nsAString& aName,
                          ObjectStoreInfo* aObjectStoreInfo,
                          bool aCreating);
+
+  already_AddRefed<IDBObjectStore>
+  CreateObjectStore(const ObjectStoreSpec& aSpec);
+
+  void
+  DeleteObjectStore(int64_t aObjectStoreId);
+
+  void
+  CreateIndex(IDBObjectStore* aObjectStore, const IndexMetadata& aMetadata);
+
+  void
+  DeleteIndex(IDBObjectStore* aObjectStore, int64_t aIndexId);
 
   already_AddRefed<FileInfo> GetFileInfo(nsIDOMBlob* aBlob);
   void AddFileInfo(nsIDOMBlob* aBlob, FileInfo* aFileInfo);
@@ -265,10 +340,7 @@ public:
 
   // WebIDL
   nsPIDOMWindow*
-  GetParentObject() const
-  {
-    return GetOwner();
-  }
+  GetParentObject() const;
 
   IDBTransactionMode
   GetMode(ErrorResult& aRv) const;
@@ -298,20 +370,23 @@ public:
   IMPL_EVENT_HANDLER(error)
 
   already_AddRefed<DOMStringList>
-  GetObjectStoreNames(ErrorResult& aRv);
+  ObjectStoreNames();
+
+  void
+  FireCompleteOrAbortEvents(nsresult aResult);
+
+  // Only for VERSION_CHANGE transactions.
+  int64_t
+  NextObjectStoreId();
+
+  // Only for VERSION_CHANGE transactions.
+  int64_t
+  NextIndexId();
 
 private:
   nsresult
   AbortInternal(nsresult aAbortCode,
                 already_AddRefed<mozilla::dom::DOMError> aError);
-
-  // Should only be called directly through IndexedDBDatabaseChild.
-  static already_AddRefed<IDBTransaction>
-  CreateInternal(IDBDatabase* aDatabase,
-                 const Sequence<nsString>& aObjectStoreNames,
-                 Mode aMode,
-                 bool aDispatchDelayed,
-                 bool aIsVersionChangeTransactionChild);
 
   IDBTransaction(IDBDatabase* aDatabase);
   ~IDBTransaction();
@@ -320,52 +395,6 @@ private:
 
   void SendCommit();
   void SendAbort(nsresult aResultCode);
-
-  nsRefPtr<IDBDatabase> mDatabase;
-  nsRefPtr<DatabaseInfo> mDatabaseInfo;
-  nsRefPtr<DOMError> mError;
-  nsTArray<nsString> mObjectStoreNames;
-  ReadyState mReadyState;
-  Mode mMode;
-  uint32_t mPendingRequests;
-
-  nsInterfaceHashtable<nsCStringHashKey, mozIStorageStatement>
-    mCachedStatements;
-
-  nsRefPtr<IDBTransactionListener> mListener;
-
-  // Only touched on the database thread.
-  nsCOMPtr<mozIStorageConnection> mConnection;
-
-  // Only touched on the database thread.
-  uint32_t mSavepointCount;
-
-  nsTArray<nsRefPtr<IDBObjectStore> > mCreatedObjectStores;
-  nsTArray<nsRefPtr<IDBObjectStore> > mDeletedObjectStores;
-
-  nsRefPtr<UpdateRefcountFunction> mUpdateFileRefcountFunction;
-  nsRefPtrHashtable<nsISupportsHashKey, FileInfo> mCreatedFileInfos;
-
-  IndexedDBTransactionChild* mActorChild;
-  IndexedDBTransactionParent* mActorParent;
-
-  // Tagged with mMode. If mMode is VERSION_CHANGE then mBackgroundActor will be
-  // a mVersionChangeBackgroundActor*. Otherwise it will be a
-  // PBackgroundIDBTransactionChild*.
-  union {
-    PBackgroundIDBTransactionChild* mNormalBackgroundActor;
-    PBackgroundIDBVersionChangeTransactionChild* mVersionChangeBackgroundActor;
-  } mBackgroundActor;
-
-  nsresult mAbortCode;
-#ifdef MOZ_ENABLE_PROFILER_SPS
-  uint64_t mSerialNumber;
-#endif
-  bool mCreating;
-
-#ifdef DEBUG
-  bool mFiredCompleteOrAbort;
-#endif
 };
 
 class CommitHelper MOZ_FINAL : public nsIRunnable
@@ -414,138 +443,8 @@ private:
   nsresult mAbortCode;
 };
 
-class UpdateRefcountFunction MOZ_FINAL : public mozIStorageFunction
-{
-public:
-  NS_DECL_THREADSAFE_ISUPPORTS
-  NS_DECL_MOZISTORAGEFUNCTION
-
-  UpdateRefcountFunction(FileManager* aFileManager)
-  : mFileManager(aFileManager), mInSavepoint(false)
-  { }
-
-  ~UpdateRefcountFunction()
-  { }
-
-  void StartSavepoint()
-  {
-    MOZ_ASSERT(!mInSavepoint);
-    MOZ_ASSERT(!mSavepointEntriesIndex.Count());
-
-    mInSavepoint = true;
-  }
-
-  void ReleaseSavepoint()
-  {
-    MOZ_ASSERT(mInSavepoint);
-
-    mSavepointEntriesIndex.Clear();
-
-    mInSavepoint = false;
-  }
-
-  void RollbackSavepoint()
-  {
-    MOZ_ASSERT(mInSavepoint);
-
-    mInSavepoint = false;
-
-    mSavepointEntriesIndex.EnumerateRead(RollbackSavepointCallback, nullptr);
-
-    mSavepointEntriesIndex.Clear();
-  }
-
-  void ClearFileInfoEntries()
-  {
-    mFileInfoEntries.Clear();
-  }
-
-  nsresult WillCommit(mozIStorageConnection* aConnection);
-  void DidCommit();
-  void DidAbort();
-
-private:
-  class FileInfoEntry
-  {
-  public:
-    FileInfoEntry(FileInfo* aFileInfo)
-    : mFileInfo(aFileInfo), mDelta(0), mSavepointDelta(0)
-    { }
-
-    ~FileInfoEntry()
-    { }
-
-    nsRefPtr<FileInfo> mFileInfo;
-    int32_t mDelta;
-    int32_t mSavepointDelta;
-  };
-
-  enum UpdateType {
-    eIncrement,
-    eDecrement
-  };
-
-  class DatabaseUpdateFunction
-  {
-  public:
-    DatabaseUpdateFunction(mozIStorageConnection* aConnection,
-                           UpdateRefcountFunction* aFunction)
-    : mConnection(aConnection), mFunction(aFunction), mErrorCode(NS_OK)
-    { }
-
-    bool Update(int64_t aId, int32_t aDelta);
-    nsresult ErrorCode()
-    {
-      return mErrorCode;
-    }
-
-  private:
-    nsresult UpdateInternal(int64_t aId, int32_t aDelta);
-
-    nsCOMPtr<mozIStorageConnection> mConnection;
-    nsCOMPtr<mozIStorageStatement> mUpdateStatement;
-    nsCOMPtr<mozIStorageStatement> mSelectStatement;
-    nsCOMPtr<mozIStorageStatement> mInsertStatement;
-
-    UpdateRefcountFunction* mFunction;
-
-    nsresult mErrorCode;
-  };
-
-  nsresult ProcessValue(mozIStorageValueArray* aValues,
-                        int32_t aIndex,
-                        UpdateType aUpdateType);
-
-  nsresult CreateJournals();
-
-  nsresult RemoveJournals(const nsTArray<int64_t>& aJournals);
-
-  static PLDHashOperator
-  DatabaseUpdateCallback(const uint64_t& aKey,
-                         FileInfoEntry* aValue,
-                         void* aUserArg);
-
-  static PLDHashOperator
-  FileInfoUpdateCallback(const uint64_t& aKey,
-                         FileInfoEntry* aValue,
-                         void* aUserArg);
-
-  static PLDHashOperator
-  RollbackSavepointCallback(const uint64_t& aKey,
-                            FileInfoEntry* aValue,
-                            void* aUserArg);
-
-  FileManager* mFileManager;
-  nsClassHashtable<nsUint64HashKey, FileInfoEntry> mFileInfoEntries;
-  nsDataHashtable<nsUint64HashKey, FileInfoEntry*> mSavepointEntriesIndex;
-
-  nsTArray<int64_t> mJournalsToCreateBeforeCommit;
-  nsTArray<int64_t> mJournalsToRemoveAfterCommit;
-  nsTArray<int64_t> mJournalsToRemoveAfterAbort;
-
-  bool mInSavepoint;
-};
-
-END_INDEXEDDB_NAMESPACE
+} // namespace indexedDB
+} // namespace dom
+} // namespace mozilla
 
 #endif // mozilla_dom_indexeddb_idbtransaction_h__

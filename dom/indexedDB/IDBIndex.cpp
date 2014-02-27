@@ -4,38 +4,37 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "base/basictypes.h"
-
 #include "IDBIndex.h"
 
 #include <algorithm>
-#include "mozilla/dom/ContentChild.h"
-#include "mozilla/dom/ContentParent.h"
-#include "mozilla/dom/ipc/Blob.h"
-#include "mozilla/storage.h"
-#include "nsThreadUtils.h"
-#include "xpcpublic.h"
-
 #include "AsyncConnectionHelper.h"
 #include "DatabaseInfo.h"
+#include "FileInfo.h"
 #include "IDBCursor.h"
 #include "IDBEvents.h"
 #include "IDBKeyRange.h"
 #include "IDBObjectStore.h"
 #include "IDBTransaction.h"
-#include "ProfilerHelpers.h"
-#include "ReportInternalError.h"
-
+#include "IndexedDatabase.h"
+#include "IndexedDatabaseInlines.h"
+#include "IndexedDatabaseManager.h"
 #include "ipc/IndexedDBChild.h"
 #include "ipc/IndexedDBParent.h"
+#include "mozilla/ErrorResult.h"
+#include "mozilla/dom/ContentChild.h"
+#include "mozilla/dom/ContentParent.h"
+#include "mozilla/dom/indexedDB/PBackgroundIDBSharedTypes.h"
+#include "mozilla/dom/ipc/Blob.h"
+#include "mozilla/storage.h"
+#include "nsThreadUtils.h"
+#include "ProfilerHelpers.h"
+#include "ReportInternalError.h"
+#include "xpcpublic.h"
 
-#include "IndexedDatabaseInlines.h"
-
-USING_INDEXEDDB_NAMESPACE
+using namespace mozilla;
 using namespace mozilla::dom;
+using namespace mozilla::dom::indexedDB;
 using namespace mozilla::dom::indexedDB::ipc;
-using mozilla::ErrorResult;
-using mozilla::Move;
 
 namespace {
 
@@ -363,11 +362,6 @@ IDBIndex::Create(IDBObjectStore* aObjectStore,
   nsRefPtr<IDBIndex> index = new IDBIndex();
 
   index->mObjectStore = aObjectStore;
-  index->mId = aIndexInfo->id;
-  index->mName = aIndexInfo->name;
-  index->mKeyPath = aIndexInfo->keyPath;
-  index->mUnique = aIndexInfo->unique;
-  index->mMultiEntry = aIndexInfo->multiEntry;
 
   if (!IndexedDatabaseManager::IsMainProcess()) {
     IndexedDBObjectStoreChild* objectStoreActor = aObjectStore->GetActorChild();
@@ -394,36 +388,94 @@ IDBIndex::Create(IDBObjectStore* aObjectStore,
   return index.forget();
 }
 
+already_AddRefed<IDBIndex>
+IDBIndex::Create(IDBObjectStore* aObjectStore,
+                 const IndexMetadata& aMetadata)
+{
+  MOZ_ASSERT(aObjectStore);
+  aObjectStore->AssertIsOnOwningThread();
+
+  nsRefPtr<IDBIndex> index = new IDBIndex();
+
+  index->mObjectStore = aObjectStore;
+  index->mMetadata = new IndexMetadata(aMetadata);
+
+  return index.forget();
+}
+
 IDBIndex::IDBIndex()
-: mId(INT64_MIN),
-  mKeyPath(0),
-  mCachedKeyPath(JSVAL_VOID),
+: mCachedKeyPath(JSVAL_VOID),
   mActorChild(nullptr),
   mActorParent(nullptr),
-  mUnique(false),
-  mMultiEntry(false),
   mRooted(false)
 {
-  NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
-
   SetIsDOMBinding();
 }
 
 IDBIndex::~IDBIndex()
 {
-  NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
-  NS_ASSERTION(!mActorParent, "Actor parent owns us, how can we be dying?!");
+  AssertIsOnOwningThread();
 
   if (mRooted) {
     mCachedKeyPath = JSVAL_VOID;
     mozilla::DropJSObjects(this);
   }
+}
 
-  if (mActorChild) {
-    NS_ASSERTION(!IndexedDatabaseManager::IsMainProcess(), "Wrong process!");
-    mActorChild->Send__delete__(mActorChild);
-    NS_ASSERTION(!mActorChild, "Should have cleared in Send__delete__!");
-  }
+#ifdef DEBUG
+
+void
+IDBIndex::AssertIsOnOwningThread() const
+{
+  MOZ_ASSERT(mObjectStore);
+  mObjectStore->AssertIsOnOwningThread();
+}
+
+#endif // DEBUG
+
+int64_t
+IDBIndex::Id() const
+{
+  AssertIsOnOwningThread();
+  MOZ_ASSERT(mMetadata);
+
+  return mMetadata->id();
+}
+
+const nsString&
+IDBIndex::Name() const
+{
+  AssertIsOnOwningThread();
+  MOZ_ASSERT(mMetadata);
+
+  return mMetadata->name();
+}
+
+bool
+IDBIndex::Unique() const
+{
+  AssertIsOnOwningThread();
+  MOZ_ASSERT(mMetadata);
+
+  return mMetadata->unique();
+}
+
+bool
+IDBIndex::MultiEntry() const
+{
+  AssertIsOnOwningThread();
+  MOZ_ASSERT(mMetadata);
+
+  return mMetadata->multiEntry();
+}
+
+const KeyPath&
+IDBIndex::GetKeyPath() const
+{
+  AssertIsOnOwningThread();
+  MOZ_ASSERT(mMetadata);
+
+  return mMetadata->keyPath();
 }
 
 already_AddRefed<IDBRequest>
@@ -826,6 +878,12 @@ IDBIndex::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aScope)
   return IDBIndexBinding::Wrap(aCx, aScope, this);
 }
 
+nsPIDOMWindow*
+IDBIndex::GetParentObject() const
+{
+  return mObjectStore->GetParentObject();
+}
+
 JS::Value
 IDBIndex::GetKeyPath(JSContext* aCx, ErrorResult& aRv)
 {
@@ -1022,6 +1080,13 @@ IDBIndex::Count(JSContext* aCx, JS::Handle<JS::Value> aKey,
 }
 
 void
+IDBIndex::GetStoreName(nsString& aStoreName) const
+{
+  NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
+  mObjectStore->GetName(aStoreName);
+}
+
+void
 IndexHelper::ReleaseMainThreadObjects()
 {
   mIndex = nullptr;
@@ -1073,7 +1138,7 @@ GetKeyHelper::DoDatabaseWork(mozIStorageConnection* /* aConnection */)
   PROFILER_LABEL("IndexedDB", "GetKeyHelper::DoDatabaseWork");
 
   nsCString indexTable;
-  if (mIndex->IsUnique()) {
+  if (mIndex->Unique()) {
     indexTable.AssignLiteral("unique_index_data");
   }
   else {
@@ -1197,7 +1262,7 @@ GetHelper::DoDatabaseWork(mozIStorageConnection* /* aConnection */)
   PROFILER_LABEL("IndexedDB", "GetHelper::DoDatabaseWork [IDBIndex.cpp]");
 
   nsCString indexTable;
-  if (mIndex->IsUnique()) {
+  if (mIndex->Unique()) {
     indexTable.AssignLiteral("unique_index_data");
   }
   else {
@@ -1366,7 +1431,7 @@ GetAllKeysHelper::DoDatabaseWork(mozIStorageConnection* /* aConnection */)
                  "GetAllKeysHelper::DoDatabaseWork [IDBIndex.cpp]");
 
   nsCString tableName;
-  if (mIndex->IsUnique()) {
+  if (mIndex->Unique()) {
     tableName.AssignLiteral("unique_index_data");
   }
   else {
@@ -1548,7 +1613,7 @@ GetAllHelper::DoDatabaseWork(mozIStorageConnection* /* aConnection */)
   PROFILER_LABEL("IndexedDB", "GetAllHelper::DoDatabaseWork [IDBIndex.cpp]");
 
   nsCString indexTable;
-  if (mIndex->IsUnique()) {
+  if (mIndex->Unique()) {
     indexTable.AssignLiteral("unique_index_data");
   }
   else {
@@ -1773,7 +1838,7 @@ OpenKeyCursorHelper::DoDatabaseWork(mozIStorageConnection* aConnection)
   PROFILER_LABEL("IndexedDB", "OpenKeyCursorHelper::DoDatabaseWork");
 
   nsCString table;
-  if (mIndex->IsUnique()) {
+  if (mIndex->Unique()) {
     table.AssignLiteral("unique_index_data");
   }
   else {
@@ -2108,7 +2173,7 @@ OpenCursorHelper::DoDatabaseWork(mozIStorageConnection* aConnection)
                  "OpenCursorHelper::DoDatabaseWork [IDBIndex.cpp]");
 
   nsCString indexTable;
-  if (mIndex->IsUnique()) {
+  if (mIndex->Unique()) {
     indexTable.AssignLiteral("unique_index_data");
   }
   else {
@@ -2440,7 +2505,7 @@ CountHelper::DoDatabaseWork(mozIStorageConnection* aConnection)
   PROFILER_LABEL("IndexedDB", "CountHelper::DoDatabaseWork [IDBIndex.cpp]");
 
   nsCString table;
-  if (mIndex->IsUnique()) {
+  if (mIndex->Unique()) {
     table.AssignLiteral("unique_index_data");
   }
   else {

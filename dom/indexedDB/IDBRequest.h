@@ -12,9 +12,7 @@
 #include "js/TypeDecls.h"
 #include "mozilla/Attributes.h"
 #include "mozilla/EventForwards.h"
-#include "mozilla/dom/DOMError.h"
 #include "mozilla/dom/IDBRequestBinding.h"
-#include "mozilla/ErrorResult.h"
 #include "nsCycleCollectionParticipant.h"
 #include "nsWrapperCache.h"
 
@@ -25,9 +23,9 @@ class nsIScriptContext;
 class nsPIDOMWindow;
 
 namespace mozilla {
-class EventChainPostVisitor;
-class EventChainPreVisitor;
+class ErrorResult;
 namespace dom {
+class DOMError;
 class OwningIDBObjectStoreOrIDBIndexOrIDBCursor;
 class ErrorEventInit;
 }
@@ -205,7 +203,7 @@ protected:
   bool mHaveResultOrErrorCode;
 };
 
-class IDBOpenDBRequest : public IDBRequest
+class IDBOpenDBRequest MOZ_FINAL : public IDBRequest
 {
 public:
   NS_DECL_ISUPPORTS_INHERITED

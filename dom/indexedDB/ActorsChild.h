@@ -5,13 +5,15 @@
 #ifndef mozilla_dom_indexeddb_actorschild_h__
 #define mozilla_dom_indexeddb_actorschild_h__
 
-#include "mozilla/dom/indexedDB/IndexedDatabase.h"
-
+#include "mozilla/Attributes.h"
 #include "mozilla/dom/indexedDB/PBackgroundIDBDatabaseChild.h"
 #include "mozilla/dom/indexedDB/PBackgroundIDBFactoryChild.h"
 #include "mozilla/dom/indexedDB/PBackgroundIDBFactoryRequestChild.h"
 #include "mozilla/dom/indexedDB/PBackgroundIDBTransactionChild.h"
 #include "mozilla/dom/indexedDB/PBackgroundIDBVersionChangeTransactionChild.h"
+#include "nsAutoPtr.h"
+#include "nsCOMPtr.h"
+#include "nsTArrayForwardDeclare.h"
 
 class nsIEventTarget;
 
@@ -21,9 +23,9 @@ namespace ipc {
 class BackgroundChildImpl;
 
 } // namespace ipc
-} // namespace mozilla
 
-BEGIN_INDEXEDDB_NAMESPACE
+namespace dom {
+namespace indexedDB {
 
 class IDBDatabase;
 class IDBFactory;
@@ -35,12 +37,6 @@ class BackgroundRequestChildBase
 {
 protected:
   nsRefPtr<IDBRequest> mRequest;
-
-protected:
-  BackgroundRequestChildBase(IDBRequest* aRequest);
-
-  virtual
-  ~BackgroundRequestChildBase();
 
 public:
   void
@@ -57,6 +53,12 @@ public:
     AssertIsOnOwningThread();
     return mRequest;
   }
+
+protected:
+  BackgroundRequestChildBase(IDBRequest* aRequest);
+
+  virtual
+  ~BackgroundRequestChildBase();
 };
 
 class BackgroundFactoryChild MOZ_FINAL
@@ -70,13 +72,6 @@ class BackgroundFactoryChild MOZ_FINAL
 #ifdef DEBUG
   nsCOMPtr<nsIEventTarget> mOwningThread;
 #endif
-
-private:
-  // Only created by IDBFactory.
-  BackgroundFactoryChild(IDBFactory* aFactory);
-
-  // Only destroyed by mozilla::ipc::BackgroundChildImpl.
-  ~BackgroundFactoryChild();
 
 public:
   void
@@ -95,6 +90,15 @@ public:
   }
 
 private:
+  // Only created by IDBFactory.
+  BackgroundFactoryChild(IDBFactory* aFactory);
+
+  // Only destroyed by mozilla::ipc::BackgroundChildImpl.
+  ~BackgroundFactoryChild();
+
+  void
+  SendDeleteMe();
+
   // IPDL methods are only called by IPDL.
   virtual void
   ActorDestroy(ActorDestroyReason aWhy) MOZ_OVERRIDE;
@@ -130,14 +134,6 @@ class BackgroundFactoryRequestChild MOZ_FINAL
 
   nsRefPtr<IDBFactory> mFactory;
 
-private:
-  // Only created by IDBFactory.
-  BackgroundFactoryRequestChild(IDBFactory* aFactory,
-                                IDBOpenDBRequest* aOpenRequest);
-
-  // Only destroyed by BackgroundFactoryChild.
-  ~BackgroundFactoryRequestChild();
-
 public:
   void
   AssertIsOnOwningThread() const
@@ -146,14 +142,16 @@ public:
   }
 
   IDBOpenDBRequest*
-  GetDOMObject() const
-  {
-    AssertIsOnOwningThread();
-    IDBRequest* baseRequest = BackgroundRequestChildBase::GetDOMObject();
-    return static_cast<IDBOpenDBRequest*>(baseRequest);
-  }
+  GetDOMObject() const;
 
 private:
+  // Only created by IDBFactory.
+  BackgroundFactoryRequestChild(IDBFactory* aFactory,
+                                IDBOpenDBRequest* aOpenRequest);
+
+  // Only destroyed by BackgroundFactoryChild.
+  ~BackgroundFactoryRequestChild();
+
   // IPDL methods are only called by IPDL.
   virtual bool
   Recv__delete__(const FactoryRequestResponse& aResponse) MOZ_OVERRIDE;
@@ -167,25 +165,12 @@ class BackgroundDatabaseChild MOZ_FINAL
 {
   friend class BackgroundFactoryChild;
   friend class BackgroundFactoryRequestChild;
+  friend class IDBDatabase;
 
   nsAutoPtr<DatabaseSpec> mSpec;
   nsRefPtr<IDBDatabase> mTemporaryStrongDatabase;
   BackgroundFactoryRequestChild* mOpenRequestActor;
   IDBDatabase* mDatabase;
-
-private:
-  // Only constructed by BackgroundFactoryChild.
-  BackgroundDatabaseChild(const DatabaseSpec& aSpec,
-                          BackgroundFactoryRequestChild* aOpenRequest);
-
-  // Only destroyed by BackgroundFactoryChild.
-  ~BackgroundDatabaseChild();
-
-  bool
-  EnsureDOMObject();
-
-  void
-  ReleaseDOMObject();
 
 public:
   void
@@ -209,6 +194,22 @@ public:
   }
 
 private:
+  // Only constructed by BackgroundFactoryChild.
+  BackgroundDatabaseChild(const DatabaseSpec& aSpec,
+                          BackgroundFactoryRequestChild* aOpenRequest);
+
+  // Only destroyed by BackgroundFactoryChild.
+  ~BackgroundDatabaseChild();
+
+  void
+  SendDeleteMe();
+
+  bool
+  EnsureDOMObject();
+
+  void
+  ReleaseDOMObject();
+
   // IPDL methods are only called by IPDL.
   virtual void
   ActorDestroy(ActorDestroyReason aWhy) MOZ_OVERRIDE;
@@ -226,14 +227,18 @@ private:
   virtual PBackgroundIDBVersionChangeTransactionChild*
   AllocPBackgroundIDBVersionChangeTransactionChild(
                                               const uint64_t& aCurrentVersion,
-                                              const uint64_t& aRequestedVersion)
+                                              const uint64_t& aRequestedVersion,
+                                              const int64_t& aNextObjectStoreId,
+                                              const int64_t& aNextIndexId)
                                               MOZ_OVERRIDE;
 
   virtual bool
   RecvPBackgroundIDBVersionChangeTransactionConstructor(
                             PBackgroundIDBVersionChangeTransactionChild* aActor,
                             const uint64_t& aCurrentVersion,
-                            const uint64_t& aRequestedVersion)
+                            const uint64_t& aRequestedVersion,
+                            const int64_t& aNextObjectStoreId,
+                            const int64_t& aNextIndexId)
                             MOZ_OVERRIDE;
 
   virtual bool
@@ -254,12 +259,6 @@ class BackgroundTransactionBase
 protected:
   nsRefPtr<IDBTransaction> mTransaction;
 
-  BackgroundTransactionBase();
-  BackgroundTransactionBase(IDBTransaction* aTransaction);
-
-  virtual
-  ~BackgroundTransactionBase();
-
 public:
 #ifdef DEBUG
   virtual void
@@ -277,22 +276,23 @@ public:
     return mTransaction;
   }
 
+protected:
+  BackgroundTransactionBase();
+  BackgroundTransactionBase(IDBTransaction* aTransaction);
+
+  virtual
+  ~BackgroundTransactionBase();
+
   void
   NoteActorDestroyed();
 };
 
 class BackgroundTransactionChild MOZ_FINAL
   : public BackgroundTransactionBase
-  , PBackgroundIDBTransactionChild
+  , public PBackgroundIDBTransactionChild
 {
   friend class BackgroundDatabaseChild;
-
-private:
-  // Only created by BackgroundDatabaseChild.
-  BackgroundTransactionChild(IDBTransaction* aTransaction);
-
-  // Only destroyed by BackgroundDatabaseChild.
-  ~BackgroundTransactionChild();
+  friend class IDBDatabase;
 
 public:
 #ifdef DEBUG
@@ -300,7 +300,16 @@ public:
   AssertIsOnOwningThread() const;
 #endif
 
+  void
+  SendDeleteMe();
+
 private:
+  // Only created by IDBDatabase.
+  BackgroundTransactionChild(IDBTransaction* aTransaction);
+
+  // Only destroyed by BackgroundDatabaseChild.
+  ~BackgroundTransactionChild();
+
   // IPDL methods are only called by IPDL.
   virtual void
   ActorDestroy(ActorDestroyReason aWhy) MOZ_OVERRIDE;
@@ -315,6 +324,15 @@ class BackgroundVersionChangeTransactionChild MOZ_FINAL
 {
   friend class BackgroundDatabaseChild;
 
+public:
+#ifdef DEBUG
+  virtual void
+  AssertIsOnOwningThread() const;
+#endif
+
+  void
+  SendDeleteMe();
+
 private:
   // Only created by BackgroundDatabaseChild.
   BackgroundVersionChangeTransactionChild();
@@ -322,13 +340,6 @@ private:
   // Only destroyed by BackgroundDatabaseChild.
   ~BackgroundVersionChangeTransactionChild();
 
-public:
-#ifdef DEBUG
-  virtual void
-  AssertIsOnOwningThread() const;
-#endif
-
-private:
   // Only called by BackgroundDatabaseChild.
   void
   SetDOMObject(IDBTransaction* aDOMObject);
@@ -341,6 +352,8 @@ private:
   RecvComplete(const nsresult& aResult) MOZ_OVERRIDE;
 };
 
-END_INDEXEDDB_NAMESPACE
+} // namespace indexedDB
+} // namespace dom
+} // namespace mozilla
 
 #endif // mozilla_dom_indexeddb_actorschild_h__

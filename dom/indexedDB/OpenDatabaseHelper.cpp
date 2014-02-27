@@ -7,9 +7,11 @@
 #include "OpenDatabaseHelper.h"
 
 #include "nsIBFCacheEntry.h"
+#include "nsIDocument.h"
 #include "nsIFile.h"
 
 #include <algorithm>
+#include "mozilla/dom/DOMError.h"
 #include "mozilla/dom/quota/AcquireListener.h"
 #include "mozilla/dom/quota/OriginOrPatternString.h"
 #include "mozilla/dom/quota/QuotaManager.h"
@@ -20,8 +22,10 @@
 #include "snappy/snappy.h"
 
 #include "Client.h"
+#include "FileManager.h"
 #include "IDBEvents.h"
 #include "IDBFactory.h"
+#include "IDBTransaction.h"
 #include "IndexedDatabaseManager.h"
 #include "ProfilerHelpers.h"
 #include "ReportInternalError.h"
@@ -2124,37 +2128,7 @@ OpenDatabaseHelper::CreateDatabaseConnection(
 nsresult
 OpenDatabaseHelper::StartSetVersion()
 {
-  NS_ASSERTION(mState == eSetVersionPending, "Why are we here?");
-
-  // In case we fail, fire error events
-  mState = eFiringEvents;
-
-  nsresult rv = EnsureSuccessResult();
-  NS_ENSURE_SUCCESS(rv, rv);
-
-  Sequence<nsString> storesToOpen;
-  nsRefPtr<IDBTransaction> transaction =
-    IDBTransaction::Create(mDatabase, storesToOpen,
-                           IDBTransaction::VERSION_CHANGE, true);
-  IDB_ENSURE_TRUE(transaction, NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
-
-  nsRefPtr<SetVersionHelper> helper =
-    new SetVersionHelper(transaction, mOpenDBRequest, this, mRequestedVersion,
-                         mCurrentVersion);
-
-  QuotaManager* quotaManager = QuotaManager::Get();
-  NS_ASSERTION(quotaManager, "This should never be null!");
-
-  rv = quotaManager->AcquireExclusiveAccess(
-             mDatabase, mDatabase->Origin(), helper,
-             &VersionChangeEventsRunnable::QueueVersionChange<SetVersionHelper>,
-             helper);
-  IDB_ENSURE_SUCCESS(rv, NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
-
-  // The SetVersionHelper is responsible for dispatching us back to the
-  // main thread again and changing the state to eSetVersionCompleted.
-  mState = eSetVersionPending;
-  return NS_OK;
+  MOZ_CRASH("Remove me!");
 }
 
 nsresult

@@ -5,9 +5,16 @@
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "IDBWrapperCache.h"
-#include "nsCycleCollector.h"
 
-USING_INDEXEDDB_NAMESPACE
+#include "mozilla/HoldDropJSObjects.h"
+#include "nsCOMPtr.h"
+
+#ifdef DEBUG
+#include "nsCycleCollector.h"
+#endif
+
+using namespace mozilla;
+using namespace mozilla::dom::indexedDB;
 
 NS_IMPL_CYCLE_COLLECTION_CLASS(IDBWrapperCache)
 
@@ -38,6 +45,14 @@ NS_INTERFACE_MAP_END_INHERITING(nsDOMEventTargetHelper)
 NS_IMPL_ADDREF_INHERITED(IDBWrapperCache, nsDOMEventTargetHelper)
 NS_IMPL_RELEASE_INHERITED(IDBWrapperCache, nsDOMEventTargetHelper)
 
+IDBWrapperCache::IDBWrapperCache(nsDOMEventTargetHelper* aOwner)
+  : nsDOMEventTargetHelper(aOwner), mScriptOwner(nullptr)
+{ }
+
+IDBWrapperCache::IDBWrapperCache(nsPIDOMWindow* aOwner)
+  : nsDOMEventTargetHelper(aOwner), mScriptOwner(nullptr)
+{ }
+
 IDBWrapperCache::~IDBWrapperCache()
 {
   mScriptOwner = nullptr;
@@ -52,6 +67,20 @@ IDBWrapperCache::SetScriptOwner(JSObject* aScriptOwner)
 
   mScriptOwner = aScriptOwner;
   mozilla::HoldJSObjects(this);
+}
+
+JSObject*
+IDBWrapperCache::GetParentObject()
+{
+  if (mScriptOwner) {
+    return mScriptOwner;
+  }
+
+  // Do what nsEventTargetSH::PreCreate does.
+  nsCOMPtr<nsIScriptGlobalObject> parent;
+  nsDOMEventTargetHelper::GetParentObject(getter_AddRefs(parent));
+
+  return parent ? parent->GetGlobalJSObject() : nullptr;
 }
 
 #ifdef DEBUG

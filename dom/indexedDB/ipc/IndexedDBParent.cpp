@@ -28,6 +28,7 @@
 #include "IDBKeyRange.h"
 #include "IDBObjectStore.h"
 #include "IDBTransaction.h"
+#include "IndexedDatabaseManager.h"
 
 #define CHROME_ORIGIN "chrome"
 #define PERMISSION_PREFIX "indexedDB-chrome-"
@@ -581,7 +582,7 @@ IndexedDBDatabaseParent::RecvClose(const bool& aUnlinked)
     return true;
   }
 
-  mDatabase->CloseInternal(aUnlinked);
+  mDatabase->CloseInternal();
   return true;
 }
 
@@ -590,45 +591,7 @@ IndexedDBDatabaseParent::RecvPIndexedDBTransactionConstructor(
                                             PIndexedDBTransactionParent* aActor,
                                             const TransactionParams& aParams)
 {
-  MOZ_ASSERT(aParams.type() ==
-             TransactionParams::TNormalTransactionParams);
-  MOZ_ASSERT(!mOpenRequest);
-
-  if (IsDisconnected()) {
-    // We're shutting down, ignore this request.
-    return true;
-  }
-
-  if (!mDatabase) {
-    return true;
-  }
-
-  IndexedDBTransactionParent* actor =
-    static_cast<IndexedDBTransactionParent*>(aActor);
-
-  const NormalTransactionParams& params = aParams.get_NormalTransactionParams();
-
-  if (params.mode() != IDBTransaction::READ_ONLY &&
-      !CheckWritePermission(mDatabase->Name())) {
-    return false;
-  }
-
-  if (mDatabase->IsClosed()) {
-    // If the window was navigated then we won't be able to do anything here.
-    return true;
-  }
-
-  Sequence<nsString> storesToOpen;
-  storesToOpen.AppendElements(params.names());
-
-  nsRefPtr<IDBTransaction> transaction =
-    IDBTransaction::Create(mDatabase, storesToOpen, params.mode(), false);
-  NS_ENSURE_TRUE(transaction, false);
-
-  nsresult rv = actor->SetTransaction(transaction);
-  NS_ENSURE_SUCCESS(rv, false);
-
-  return true;
+  MOZ_CRASH("Remove me!");
 }
 
 PIndexedDBTransactionParent*
@@ -941,7 +904,8 @@ IndexedDBVersionChangeTransactionParent::RecvPIndexedDBObjectStoreConstructor(
     {
       AutoSetCurrentTransaction asct(mTransaction);
 
-      objectStore = db->CreateObjectStoreInternal(mTransaction, info, rv);
+      // XXXRemove
+      //objectStore = db->CreateObjectStoreInternal(mTransaction, info, rv);
     }
 
     ENSURE_SUCCESS(rv, false);

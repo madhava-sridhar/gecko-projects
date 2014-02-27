@@ -27,6 +27,8 @@ parent:
 
   Blocked();
 
+  Close();
+
   PBackgroundIDBTransaction(nsString[] objectStoreNames, Mode mode);
 
 child:
@@ -37,7 +39,9 @@ child:
   Invalidate();
 
   PBackgroundIDBVersionChangeTransaction(uint64_t currentVersion,
-                                         uint64_t requestedVersion);
+                                         uint64_t requestedVersion,
+                                         int64_t nextObjectStoreId,
+                                         int64_t nextIndexId);
 };
 
 } // namespace indexedDB

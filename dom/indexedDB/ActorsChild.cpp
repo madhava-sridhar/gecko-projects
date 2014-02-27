@@ -4,51 +4,26 @@
 
 #include "ActorsChild.h"
 
+#include "BackgroundChildImpl.h"
 #include "IDBDatabase.h"
 #include "IDBEvents.h"
 #include "IDBFactory.h"
 #include "IDBRequest.h"
 #include "IDBTransaction.h"
+#include "mozilla/BasicEvents.h"
+#include "mozilla/ipc/BackgroundChild.h"
 #include "nsCOMPtr.h"
 #include "nsContentUtils.h"
+#include "nsIDOMEvent.h"
 #include "nsIEventTarget.h"
 #include "nsThreadUtils.h"
 #include "nsTraceRefcnt.h"
 #include "ProfilerHelpers.h"
 #include "ReportInternalError.h"
-#include "mozilla/BasicEvents.h"
 
 using namespace mozilla;
 using namespace mozilla::dom;
 using namespace mozilla::dom::indexedDB;
-
-/*******************************************************************************
- * Constants
- ******************************************************************************/
-
-namespace {
-
-const char16_t kSuccessEventType[] = MOZ_UTF16("success");
-const char16_t kErrorEventType[] = MOZ_UTF16("error");
-const char16_t kCompleteEventType[] = MOZ_UTF16("complete");
-const char16_t kAbortEventType[] = MOZ_UTF16("abort");
-const char16_t kVersionChangeEventType[] = MOZ_UTF16("versionchange");
-const char16_t kBlockedEventType[] = MOZ_UTF16("blocked");
-const char16_t kUpgradeNeededEventType[] = MOZ_UTF16("upgradeneeded");
-
-enum BubblesOrNot
-{
-  Bubbles,
-  DoesNotBubble
-};
-
-enum CancelableOrNot
-{
-  Cancelable,
-  NotCancelable
-};
-
-} // anonymous namespace
 
 /*******************************************************************************
  * Helper functions
@@ -56,17 +31,38 @@ enum CancelableOrNot
 
 namespace {
 
-class ResultHelper
+class MOZ_STACK_CLASS ResultHelper MOZ_FINAL
 {
+  typedef mozilla::ipc::BackgroundChildImpl BackgroundChildImpl;
+
   IDBWrapperCache* mWrapper;
   nsISupports* mResult;
+  BackgroundChildImpl::ThreadLocal* mThreadLocal;
 
 public:
-  ResultHelper(IDBWrapperCache* aWrapper, nsISupports* aResult)
+  ResultHelper(IDBWrapperCache* aWrapper, nsISupports* aResult,
+               IDBTransaction* aTransaction = nullptr)
     : mWrapper(aWrapper)
     , mResult(aResult)
+    , mThreadLocal(nullptr)
   {
     MOZ_ASSERT(aWrapper);
+
+    if (aTransaction) {
+      mThreadLocal = BackgroundChildImpl::GetThreadLocalForCurrentThread();
+      MOZ_ASSERT(mThreadLocal);
+
+      MOZ_ASSERT(!mThreadLocal->mCurrentTransaction);
+      mThreadLocal->mCurrentTransaction = aTransaction;
+    }
+  }
+
+  ~ResultHelper()
+  {
+    if (mThreadLocal) {
+      MOZ_ASSERT(mThreadLocal->mCurrentTransaction);
+      mThreadLocal->mCurrentTransaction = nullptr;
+    }
   }
 
   static nsresult
@@ -106,34 +102,6 @@ public:
 
 namespace {
 
-already_AddRefed<nsIDOMEvent>
-CreateEvent(EventTarget* aTarget,
-            const nsAString& aType,
-            BubblesOrNot aBubbles,
-            CancelableOrNot aCancelable)
-{
-  MOZ_ASSERT(aTarget);
-  MOZ_ASSERT(!aType.IsEmpty());
-
-  nsCOMPtr<nsIDOMEvent> event;
-  nsresult rv =
-    NS_NewDOMEvent(getter_AddRefs(event), aTarget, nullptr, nullptr);
-  if (NS_WARN_IF(NS_FAILED(rv))) {
-    return nullptr;
-  }
-
-  rv = event->InitEvent(aType,
-                        aBubbles == Bubbles ? true : false,
-                        aCancelable == Cancelable ? true : false);
-  if (NS_WARN_IF(NS_FAILED(rv))) {
-    return nullptr;
-  }
-
-  event->SetTrusted(true);
-
-  return event.forget();
-}
-
 void
 DispatchSuccessEvent(IDBRequest* aRequest,
                      ResultHelper* aResultHelper,
@@ -147,8 +115,8 @@ DispatchSuccessEvent(IDBRequest* aRequest,
 
   nsCOMPtr<nsIDOMEvent> newEvent;
   if (!aEvent) {
-    newEvent = CreateEvent(aRequest, nsLiteralString(kSuccessEventType),
-                           DoesNotBubble, NotCancelable);
+    newEvent = CreateGenericEvent(aRequest, NS_LITERAL_STRING(SUCCESS_EVT_STR),
+                                  eDoesNotBubble, eNotCancelable);
     if (NS_WARN_IF(!newEvent)) {
       return;
     }
@@ -249,6 +217,18 @@ BackgroundFactoryChild::AssertIsOnOwningThread() const
 #endif // DEBUG
 
 void
+BackgroundFactoryChild::SendDeleteMe()
+{
+  AssertIsOnOwningThread();
+
+  if (mFactory) {
+    mFactory = nullptr;
+
+    MOZ_ALWAYS_TRUE(PBackgroundIDBFactoryChild::SendDeleteMe());
+  }
+}
+
+void
 BackgroundFactoryChild::ActorDestroy(ActorDestroyReason aWhy)
 {
   AssertIsOnOwningThread();
@@ -329,6 +309,15 @@ BackgroundFactoryRequestChild::~BackgroundFactoryRequestChild()
   MOZ_COUNT_DTOR(mozilla::dom::indexedDB::BackgroundFactoryRequestChild);
 }
 
+IDBOpenDBRequest*
+BackgroundFactoryRequestChild::GetDOMObject() const
+{
+  AssertIsOnOwningThread();
+
+  IDBRequest* baseRequest = BackgroundRequestChildBase::GetDOMObject();
+  return static_cast<IDBOpenDBRequest*>(baseRequest);
+}
+
 bool
 BackgroundFactoryRequestChild::Recv__delete__(
                                         const FactoryRequestResponse& aResponse)
@@ -337,6 +326,7 @@ BackgroundFactoryRequestChild::Recv__delete__(
 
   switch (aResponse.type()) {
     case FactoryRequestResponse::Tnsresult: {
+      MOZ_ASSERT(NS_FAILED(aResponse.get_nsresult()));
       mRequest->DispatchError(aResponse.get_nsresult());
       break;
     }
@@ -383,6 +373,10 @@ BackgroundFactoryRequestChild::RecvBlocked(const uint64_t& aCurrentVersion)
 {
   AssertIsOnOwningThread();
 
+  if (!mRequest) {
+    return true;
+  }
+
   MOZ_CRASH("Implement me!");
   return true;
 }
@@ -409,6 +403,18 @@ BackgroundDatabaseChild::~BackgroundDatabaseChild()
   AssertIsOnOwningThread();
 
   MOZ_COUNT_DTOR(mozilla::dom::indexedDB::BackgroundDatabaseChild);
+}
+
+void
+BackgroundDatabaseChild::SendDeleteMe()
+{
+  AssertIsOnOwningThread();
+
+  if (mDatabase) {
+    mDatabase = nullptr;
+
+    MOZ_ALWAYS_TRUE(PBackgroundIDBDatabaseChild::SendDeleteMe());
+  }
 }
 
 bool
@@ -491,7 +497,9 @@ BackgroundDatabaseChild::DeallocPBackgroundIDBTransactionChild(
 PBackgroundIDBVersionChangeTransactionChild*
 BackgroundDatabaseChild::AllocPBackgroundIDBVersionChangeTransactionChild(
                                               const uint64_t& aCurrentVersion,
-                                              const uint64_t& aRequestedVersion)
+                                              const uint64_t& aRequestedVersion,
+                                              const int64_t& aNextObjectStoreId,
+                                              const int64_t& aNextIndexId)
 {
   AssertIsOnOwningThread();
 
@@ -502,7 +510,9 @@ bool
 BackgroundDatabaseChild::RecvPBackgroundIDBVersionChangeTransactionConstructor(
                             PBackgroundIDBVersionChangeTransactionChild* aActor,
                             const uint64_t& aCurrentVersion,
-                            const uint64_t& aRequestedVersion)
+                            const uint64_t& aRequestedVersion,
+                            const int64_t& aNextObjectStoreId,
+                            const int64_t& aNextIndexId)
 {
   AssertIsOnOwningThread();
   MOZ_ASSERT(aActor);
@@ -512,15 +522,17 @@ BackgroundDatabaseChild::RecvPBackgroundIDBVersionChangeTransactionConstructor(
     return false;
   }
 
+  auto actor = static_cast<BackgroundVersionChangeTransactionChild*>(aActor);
+
   nsRefPtr<IDBTransaction> transaction =
-    IDBTransaction::CreateVersionChange(mDatabase, aActor);
+    IDBTransaction::CreateVersionChange(mDatabase, actor, aNextObjectStoreId,
+                                        aNextIndexId);
   if (!transaction) {
     return false;
   }
 
   transaction->AssertIsOnOwningThread();
 
-  auto actor = static_cast<BackgroundVersionChangeTransactionChild*>(aActor);
   actor->SetDOMObject(transaction);
 
   mDatabase->EnterSetVersionTransaction();
@@ -534,7 +546,8 @@ BackgroundDatabaseChild::RecvPBackgroundIDBVersionChangeTransactionConstructor(
     IDBVersionChangeEvent::CreateUpgradeNeeded(request, aCurrentVersion,
                                                aRequestedVersion);
 
-  ResultHelper helper(request, static_cast<IDBWrapperCache*>(mDatabase));
+  ResultHelper helper(request, static_cast<IDBWrapperCache*>(mDatabase),
+                      transaction);
 
   DispatchSuccessEvent(request, &helper, transaction, upgradeNeededEvent);
 
@@ -557,6 +570,11 @@ BackgroundDatabaseChild::RecvVersionChange(const uint64_t& aOldVersion,
                                            const uint64_t& aNewVersion)
 {
   AssertIsOnOwningThread();
+
+  if (!mDatabase) {
+    return true;
+  }
+
   MOZ_CRASH("Implement me!");
 }
 
@@ -564,6 +582,11 @@ bool
 BackgroundDatabaseChild::RecvInvalidate()
 {
   AssertIsOnOwningThread();
+
+  if (!mDatabase) {
+    return true;
+  }
+
   MOZ_CRASH("Implement me!");
 }
 
@@ -589,6 +612,8 @@ BackgroundTransactionBase::~BackgroundTransactionBase()
 void
 BackgroundTransactionBase::NoteActorDestroyed()
 {
+  AssertIsOnOwningThread();
+
   if (mTransaction) {
     mTransaction->ClearBackgroundActor();
 #ifdef DEBUG
@@ -630,6 +655,14 @@ BackgroundTransactionChild::AssertIsOnOwningThread() const
 #endif // DEBUG
 
 void
+BackgroundTransactionChild::SendDeleteMe()
+{
+  AssertIsOnOwningThread();
+
+  NoteActorDestroyed();
+}
+
+void
 BackgroundTransactionChild::ActorDestroy(ActorDestroyReason aWhy)
 {
   AssertIsOnOwningThread();
@@ -641,7 +674,14 @@ bool
 BackgroundTransactionChild::RecvComplete(const nsresult& aResult)
 {
   AssertIsOnOwningThread();
-  MOZ_CRASH("Implement me!");
+
+  if (!mTransaction) {
+    return true;
+  }
+
+  mTransaction->FireCompleteOrAbortEvents(aResult);
+
+  return true;
 }
 
 /*******************************************************************************
@@ -673,6 +713,14 @@ BackgroundVersionChangeTransactionChild::AssertIsOnOwningThread() const
 #endif // DEBUG
 
 void
+BackgroundVersionChangeTransactionChild::SendDeleteMe()
+{
+  AssertIsOnOwningThread();
+
+  NoteActorDestroyed();
+}
+
+void
 BackgroundVersionChangeTransactionChild::SetDOMObject(
                                                    IDBTransaction* aTransaction)
 {
@@ -695,12 +743,20 @@ BackgroundVersionChangeTransactionChild::RecvComplete(const nsresult& aResult)
 {
   AssertIsOnOwningThread();
 
-  auto databaseActor = static_cast<BackgroundDatabaseChild*>(Manager());
+  if (!mTransaction) {
+    return true;
+  }
 
-  nsRefPtr<IDBDatabase> database = databaseActor->GetDOMObject();
+  IDBDatabase* database = mTransaction->Database();
   MOZ_ASSERT(database);
 
   database->ExitSetVersionTransaction();
 
-  MOZ_CRASH("Implement me!");
+  if (NS_FAILED(aResult)) {
+    MOZ_ALWAYS_TRUE(NS_SUCCEEDED(database->Close()));
+  }
+
+  mTransaction->FireCompleteOrAbortEvents(aResult);
+
+  return true;
 }

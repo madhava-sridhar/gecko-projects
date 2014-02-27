@@ -6,15 +6,19 @@
 
 #include "IDBFactory.h"
 
-#include "nsIFile.h"
-#include "nsIIPCBackgroundChildCreateCallback.h"
-#include "nsIPrincipal.h"
-#include "nsIScriptContext.h"
-#include "nsIScriptSecurityManager.h"
-#include "nsIXPConnect.h"
-#include "nsIXPCScriptable.h"
-
+#include "ActorsChild.h"
 #include <algorithm>
+#include "AsyncConnectionHelper.h"
+#include "CheckPermissionsHelper.h"
+#include "DatabaseInfo.h"
+#include "FileManager.h"
+#include "IDBDatabase.h"
+#include "IDBEvents.h"
+#include "IDBKeyRange.h"
+#include "IndexedDatabaseManager.h"
+#include "ipc/IndexedDBChild.h"
+#include "Key.h"
+#include "mozilla/ErrorResult.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/storage.h"
 #include "mozilla/dom/ContentParent.h"
@@ -26,6 +30,7 @@
 #include "mozilla/dom/TabChild.h"
 #include "mozilla/ipc/BackgroundChild.h"
 #include "mozilla/ipc/PBackgroundChild.h"
+#include "nsAutoPtr.h"
 #include "nsComponentManagerUtils.h"
 #include "nsCharSeparatedTokenizer.h"
 #include "nsContentUtils.h"
@@ -33,40 +38,28 @@
 #include "nsDOMClassInfoID.h"
 #include "nsGlobalWindow.h"
 #include "nsHashKeys.h"
+#include "nsIFile.h"
+#include "nsIIPCBackgroundChildCreateCallback.h"
+#include "nsIPrincipal.h"
+#include "nsIScriptContext.h"
+#include "nsIScriptSecurityManager.h"
+#include "nsIXPConnect.h"
+#include "nsIXPCScriptable.h"
+#include "nsNetUtil.h"
 #include "nsPIDOMWindow.h"
 #include "nsServiceManagerUtils.h"
 #include "nsThreadUtils.h"
 #include "nsXPCOMCID.h"
-
-#include "ActorsChild.h"
-#include "AsyncConnectionHelper.h"
-#include "CheckPermissionsHelper.h"
-#include "DatabaseInfo.h"
-#include "IDBDatabase.h"
-#include "IDBEvents.h"
-#include "IDBKeyRange.h"
-#include "IndexedDatabaseManager.h"
-#include "Key.h"
 #include "ProfilerHelpers.h"
 #include "ReportInternalError.h"
-#include "nsNetUtil.h"
-
-#include "ipc/IndexedDBChild.h"
 
 #define PREF_INDEXEDDB_ENABLED "dom.indexedDB.enabled"
 
-USING_INDEXEDDB_NAMESPACE
-USING_QUOTA_NAMESPACE
-
-using mozilla::dom::ContentChild;
-using mozilla::dom::ContentParent;
-using mozilla::dom::IDBOpenDBOptions;
-using mozilla::dom::NonNull;
-using mozilla::dom::Optional;
-using mozilla::dom::TabChild;
-using mozilla::ipc::BackgroundChild;
-using mozilla::ErrorResult;
-using mozilla::Preferences;
+using namespace mozilla;
+using namespace mozilla::dom;
+using namespace mozilla::dom::indexedDB;
+using namespace mozilla::dom::quota;
+using namespace mozilla::ipc;
 
 namespace {
 

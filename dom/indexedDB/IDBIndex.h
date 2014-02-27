@@ -7,22 +7,26 @@
 #ifndef mozilla_dom_indexeddb_idbindex_h__
 #define mozilla_dom_indexeddb_idbindex_h__
 
-#include "mozilla/dom/indexedDB/IndexedDatabase.h"
-
+#include "js/RootingAPI.h"
 #include "mozilla/Attributes.h"
 #include "mozilla/dom/IDBCursorBinding.h"
-#include "mozilla/ErrorResult.h"
+#include "nsAutoPtr.h"
 #include "nsCycleCollectionParticipant.h"
+#include "nsTArrayForwardDeclare.h"
 #include "nsWrapperCache.h"
-
-#include "mozilla/dom/indexedDB/IDBObjectStore.h"
-#include "mozilla/dom/indexedDB/IDBRequest.h"
-#include "mozilla/dom/indexedDB/KeyPath.h"
 
 class nsIScriptContext;
 class nsPIDOMWindow;
 
-BEGIN_INDEXEDDB_NAMESPACE
+namespace mozilla {
+
+class ErrorResult;
+
+namespace dom {
+
+template <typename> class Sequence;
+
+namespace indexedDB {
 
 class AsyncConnectionHelper;
 class IDBCursor;
@@ -31,13 +35,28 @@ class IDBObjectStore;
 class IDBRequest;
 class IndexedDBIndexChild;
 class IndexedDBIndexParent;
-class Key;
-
 struct IndexInfo;
+class IndexMetadata;
+class Key;
+class KeyPath;
+struct SerializedStructuredCloneReadInfo;
+struct StructuredCloneFile;
 
-class IDBIndex MOZ_FINAL : public nsISupports,
-                           public nsWrapperCache
+class IDBIndex MOZ_FINAL
+  : public nsISupports
+  , public nsWrapperCache
 {
+  nsRefPtr<IDBObjectStore> mObjectStore;
+
+  JS::Heap<JS::Value> mCachedKeyPath;
+
+  nsAutoPtr<IndexMetadata> mMetadata;
+
+  IndexedDBIndexChild* mActorChild;
+  IndexedDBIndexParent* mActorParent;
+
+  bool mRooted;
+
 public:
   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
   NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS(IDBIndex)
@@ -47,34 +66,29 @@ public:
          const IndexInfo* aIndexInfo,
          bool aCreating);
 
-  IDBObjectStore* ObjectStore()
+  static already_AddRefed<IDBIndex>
+  Create(IDBObjectStore* aObjectStore, const IndexMetadata& aMetadata);
+
+  int64_t
+  Id() const;
+
+  const nsString&
+  Name() const;
+
+  bool
+  Unique() const;
+
+  bool
+  MultiEntry() const;
+
+  const KeyPath&
+  GetKeyPath() const;
+
+  IDBObjectStore*
+  ObjectStore() const
   {
+    AssertIsOnOwningThread();
     return mObjectStore;
-  }
-
-  const int64_t Id() const
-  {
-    return mId;
-  }
-
-  const nsString& Name() const
-  {
-    return mName;
-  }
-
-  bool IsUnique() const
-  {
-    return mUnique;
-  }
-
-  bool IsMultiEntry() const
-  {
-    return mMultiEntry;
-  }
-
-  const KeyPath& GetKeyPath() const
-  {
-    return mKeyPath;
   }
 
   void
@@ -156,42 +170,17 @@ public:
   WrapObject(JSContext* aCx, JS::Handle<JSObject*> aScope) MOZ_OVERRIDE;
 
   // WebIDL
-  IDBObjectStore*
-  GetParentObject() const
-  {
-    return mObjectStore;
-  }
+  nsPIDOMWindow*
+  GetParentObject() const;
 
   void
   GetName(nsString& aName) const
   {
-    NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
-    aName.Assign(mName);
-  }
-
-  IDBObjectStore*
-  ObjectStore() const
-  {
-    NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
-    return mObjectStore;
+    aName = Name();
   }
 
   JS::Value
   GetKeyPath(JSContext* aCx, ErrorResult& aRv);
-
-  bool
-  MultiEntry() const
-  {
-    NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
-    return mMultiEntry;
-  }
-
-  bool
-  Unique() const
-  {
-    NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
-    return mUnique;
-  }
 
   already_AddRefed<IDBRequest>
   OpenCursor(JSContext* aCx, JS::Handle<JS::Value> aRange,
@@ -212,11 +201,7 @@ public:
          ErrorResult& aRv);
 
   void
-  GetStoreName(nsString& aStoreName) const
-  {
-    NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
-    mObjectStore->GetName(aStoreName);
-  }
+  GetStoreName(nsString& aStoreName) const;
 
   already_AddRefed<IDBRequest>
   GetAll(JSContext* aCx, JS::Handle<JS::Value> aKey,
@@ -226,25 +211,21 @@ public:
   GetAllKeys(JSContext* aCx, JS::Handle<JS::Value> aKey,
              const Optional<uint32_t>& aLimit, ErrorResult& aRv);
 
+  void
+  AssertIsOnOwningThread() const
+#ifdef DEBUG
+  ;
+#else
+  { }
+#endif
+
 private:
   IDBIndex();
   ~IDBIndex();
-
-  nsRefPtr<IDBObjectStore> mObjectStore;
-
-  int64_t mId;
-  nsString mName;
-  KeyPath mKeyPath;
-  JS::Heap<JS::Value> mCachedKeyPath;
-
-  IndexedDBIndexChild* mActorChild;
-  IndexedDBIndexParent* mActorParent;
-
-  bool mUnique;
-  bool mMultiEntry;
-  bool mRooted;
 };
 
-END_INDEXEDDB_NAMESPACE
+} // namespace indexedDB
+} // namespace dom
+} // namespace mozilla
 
 #endif // mozilla_dom_indexeddb_idbindex_h__

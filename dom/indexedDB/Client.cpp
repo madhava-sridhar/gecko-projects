@@ -6,14 +6,16 @@
 
 #include "Client.h"
 
+#include "FileManager.h"
+#include "IDBDatabase.h"
+#include "IndexedDatabaseManager.h"
 #include "mozilla/dom/quota/QuotaManager.h"
 #include "mozilla/dom/quota/UsageInfo.h"
 #include "mozilla/dom/quota/Utilities.h"
-
-#include "IDBDatabase.h"
-#include "IndexedDatabaseManager.h"
-#include "TransactionThreadPool.h"
+#include "nsIFile.h"
 #include "nsISimpleEnumerator.h"
+#include "nsString.h"
+#include "TransactionThreadPool.h"
 
 USING_INDEXEDDB_NAMESPACE
 using mozilla::dom::quota::AssertIsOnIOThread;

@@ -15,7 +15,6 @@
 
 #include "mozilla/dom/indexedDB/Key.h"
 #include "mozilla/dom/indexedDB/KeyPath.h"
-#include "mozilla/dom/indexedDB/IDBObjectStore.h"
 
 BEGIN_INDEXEDDB_NAMESPACE
 

@@ -14,6 +14,23 @@
 BEGIN_INDEXEDDB_NAMESPACE
 
 inline
+StructuredCloneFile::StructuredCloneFile()
+{ }
+
+inline
+StructuredCloneFile::~StructuredCloneFile()
+{ }
+
+inline
+bool
+StructuredCloneFile::operator==(const StructuredCloneFile& aOther) const
+{
+  return this->mFile == aOther.mFile &&
+          this->mFileInfo == aOther.mFileInfo &&
+          this->mInputStream == aOther.mInputStream;
+}
+
+inline
 StructuredCloneWriteInfo::StructuredCloneWriteInfo()
 : mTransaction(nullptr),
   mOffsetToKeyProp(0)

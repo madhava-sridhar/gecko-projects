@@ -7,62 +7,98 @@
 #ifndef mozilla_dom_indexeddb_idbdatabase_h__
 #define mozilla_dom_indexeddb_idbdatabase_h__
 
-#include "mozilla/dom/indexedDB/IndexedDatabase.h"
-
-#include "nsIDocument.h"
+#include "mozilla/Attributes.h"
+#include "mozilla/dom/IDBTransactionBinding.h"
+#include "mozilla/dom/indexedDB/IDBWrapperCache.h"
+#include "mozilla/dom/quota/PersistenceType.h"
+#include "nsAutoPtr.h"
+#include "nsHashKeys.h"
 #include "nsIFileStorage.h"
 #include "nsIOfflineStorage.h"
+#include "nsString.h"
+#include "nsTHashtable.h"
 
-#include "mozilla/Attributes.h"
-#include "mozilla/dom/IDBObjectStoreBinding.h"
-#include "mozilla/dom/IDBTransactionBinding.h"
-#include "mozilla/dom/quota/PersistenceType.h"
-#include "nsDOMEventTargetHelper.h"
-
-#include "mozilla/dom/indexedDB/FileManager.h"
-#include "mozilla/dom/indexedDB/IDBRequest.h"
-#include "mozilla/dom/indexedDB/IDBWrapperCache.h"
-
+class nsIDocument;
 class nsIScriptContext;
 class nsPIDOMWindow;
 
 namespace mozilla {
-class EventChainPostVisitor;
-namespace dom {
-class ContentParent;
-namespace quota {
-class Client;
-}
-}
-}
 
-BEGIN_INDEXEDDB_NAMESPACE
+class ErrorResult;
+class EventChainPostVisitor;
+
+namespace dom {
+
+class ContentParent;
+class DOMStringList;
+class IDBObjectStoreParameters;
+template <typename> class Sequence;
+
+namespace quota {
+
+class Client;
+
+} // namespace quota
+
+namespace indexedDB {
 
 class AsyncConnectionHelper;
+class BackgroundDatabaseChild;
 struct DatabaseInfo;
 class DatabaseSpec;
+class FileManager;
 class IDBFactory;
 class IDBIndex;
 class IDBObjectStore;
+class IDBRequest;
 class IDBTransaction;
 class IndexedDatabaseManager;
 class IndexedDBDatabaseChild;
 class IndexedDBDatabaseParent;
 struct ObjectStoreInfoGuts;
-class PBackgroundIDBDatabaseChild;
 
-class IDBDatabase : public IDBWrapperCache,
-                    public nsIOfflineStorage
+class IDBDatabase MOZ_FINAL
+  : public IDBWrapperCache
+  , public nsIOfflineStorage
 {
   friend class AsyncConnectionHelper;
   friend class IndexedDatabaseManager;
   friend class IndexedDBDatabaseChild;
 
+  // The factory must be kept alive when IndexedDB is used in multiple
+  // processes. If it dies then the entire actor tree will be destroyed with it
+  // and the world will explode.
+  nsRefPtr<IDBFactory> mFactory;
+
+  nsAutoPtr<DatabaseSpec> mSpec;
+
+  // Normally null except during a versionchange transaction.
+  nsAutoPtr<DatabaseSpec> mPreviousSpec;
+
+  nsCString mDatabaseId;
+  nsString mFilePath;
+  nsCString mASCIIOrigin;
+
+  nsRefPtr<FileManager> mFileManager;
+
+  IndexedDBDatabaseChild* mActorChild;
+  IndexedDBDatabaseParent* mActorParent;
+
+  BackgroundDatabaseChild* mBackgroundActor;
+
+  ContentParent* mContentParent;
+
+  nsRefPtr<mozilla::dom::quota::Client> mQuotaClient;
+
+  nsTHashtable<nsRefPtrHashKey<IDBTransaction>> mTransactions;
+
+  bool mClosed;
+  bool mInvalidated;
+
 public:
   NS_DECL_ISUPPORTS_INHERITED
   NS_DECL_NSIFILESTORAGE
   NS_DECL_NSIOFFLINESTORAGE
-
   NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(IDBDatabase, IDBWrapperCache)
 
   static already_AddRefed<IDBDatabase>
@@ -71,12 +107,12 @@ public:
          already_AddRefed<DatabaseInfo> aDatabaseInfo,
          const nsACString& aASCIIOrigin,
          FileManager* aFileManager,
-         mozilla::dom::ContentParent* aContentParent);
+         ContentParent* aContentParent);
 
   static already_AddRefed<IDBDatabase>
   Create(IDBWrapperCache* aOwnerCache,
          IDBFactory* aFactory,
-         PBackgroundIDBDatabaseChild* aActor,
+         BackgroundDatabaseChild* aActor,
          DatabaseSpec* aSpec);
 
   void
@@ -91,44 +127,40 @@ public:
   FromStorage(nsIOfflineStorage* aStorage);
 
   static IDBDatabase*
-  FromStorage(nsIFileStorage* aStorage)
-  {
-    nsCOMPtr<nsIOfflineStorage> storage = do_QueryInterface(aStorage);
-    return storage ? FromStorage(storage) : nullptr;
-  }
+  FromStorage(nsIFileStorage* aStorage);
 
   // nsIDOMEventTarget
-  virtual nsresult PostHandleEvent(
-                     EventChainPostVisitor& aVisitor) MOZ_OVERRIDE;
+  virtual nsresult
+  PostHandleEvent(EventChainPostVisitor& aVisitor) MOZ_OVERRIDE;
 
   DatabaseInfo* Info() const
   {
-    return mDatabaseInfo;
+    return nullptr;
   }
 
-  const nsString& Name() const
+  const nsString&
+  Name() const;
+
+  void
+  GetName(nsAString& aName) const
   {
-    return mName;
+    aName = Name();
   }
+
+  uint64_t
+  Version() const;
 
   const nsString& FilePath() const
   {
     return mFilePath;
   }
 
-  already_AddRefed<nsIDocument> GetOwnerDocument()
-  {
-    if (!GetOwner()) {
-      return nullptr;
-    }
-
-    nsCOMPtr<nsIDocument> doc = GetOwner()->GetExtantDoc();
-    return doc.forget();
-  }
+  already_AddRefed<nsIDocument>
+  GetOwnerDocument() const;
 
   void DisconnectFromActorParent();
 
-  void CloseInternal(bool aIsDead);
+  void CloseInternal();
 
   void EnterSetVersionTransaction();
   void ExitSetVersionTransaction();
@@ -169,16 +201,11 @@ public:
     return mActorParent;
   }
 
-  mozilla::dom::ContentParent*
+  ContentParent*
   GetContentParent() const
   {
     return mContentParent;
   }
-
-  already_AddRefed<IDBObjectStore>
-  CreateObjectStoreInternal(IDBTransaction* aTransaction,
-                            const ObjectStoreInfoGuts& aInfo,
-                            ErrorResult& aRv);
 
   IDBFactory*
   Factory() const
@@ -201,50 +228,35 @@ public:
 
   // WebIDL
   nsPIDOMWindow*
-  GetParentObject() const
-  {
-    return GetOwner();
-  }
+  GetParentObject() const;
 
-  void
-  GetName(nsString& aName) const
-  {
-    NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
-    aName.Assign(mName);
-  }
-
-  uint64_t
-  Version() const;
-
-  already_AddRefed<mozilla::dom::DOMStringList>
-  GetObjectStoreNames(ErrorResult& aRv) const;
+  already_AddRefed<DOMStringList>
+  ObjectStoreNames() const;
 
   already_AddRefed<IDBObjectStore>
-  CreateObjectStore(JSContext* aCx, const nsAString& aName,
+  CreateObjectStore(JSContext* aCx,
+                    const nsAString& aName,
                     const IDBObjectStoreParameters& aOptionalParameters,
                     ErrorResult& aRv);
 
   void
   DeleteObjectStore(const nsAString& name, ErrorResult& aRv);
 
-  already_AddRefed<indexedDB::IDBTransaction>
-  Transaction(const nsAString& aStoreName, IDBTransactionMode aMode,
-              ErrorResult& aRv)
-  {
-    Sequence<nsString> list;
-    list.AppendElement(aStoreName);
-    return Transaction(list, aMode, aRv);
-  }
+  already_AddRefed<IDBTransaction>
+  Transaction(const nsAString& aStoreName,
+              IDBTransactionMode aMode,
+              ErrorResult& aRv);
 
-  already_AddRefed<indexedDB::IDBTransaction>
-  Transaction(const Sequence<nsString>& aStoreNames, IDBTransactionMode aMode,
+  already_AddRefed<IDBTransaction>
+  Transaction(const Sequence<nsString>& aStoreNames,
+              IDBTransactionMode aMode,
               ErrorResult& aRv);
 
   IMPL_EVENT_HANDLER(abort)
   IMPL_EVENT_HANDLER(error)
   IMPL_EVENT_HANDLER(versionchange)
 
-  mozilla::dom::StorageType
+  StorageType
   Storage() const
   {
     return PersistenceTypeToStorage(mPersistenceType);
@@ -264,53 +276,27 @@ public:
     mBackgroundActor = nullptr;
   }
 
+  const DatabaseSpec*
+  Spec() const
+  {
+    return mSpec;
+  }
+
 private:
   IDBDatabase(IDBWrapperCache* aOwnerCache);
   ~IDBDatabase();
 
-  void OnUnlink();
+  void Traverse(nsCycleCollectionTraversalCallback& aCallback);
+  void Unlink();
 
   bool RunningVersionChangeTransaction() const
   {
     return !!mPreviousSpec;
   }
-
-  // The factory must be kept alive when IndexedDB is used in multiple
-  // processes. If it dies then the entire actor tree will be destroyed with it
-  // and the world will explode.
-  nsRefPtr<IDBFactory> mFactory;
-
-  nsAutoPtr<DatabaseSpec> mSpec;
-  nsAutoPtr<DatabaseSpec> mPreviousSpec;
-
-  nsRefPtr<DatabaseInfo> mDatabaseInfo;
-
-  // Set to a copy of the existing DatabaseInfo when starting a versionchange
-  // transaction.
-  nsRefPtr<DatabaseInfo> mPreviousDatabaseInfo;
-  nsCString mDatabaseId;
-  nsString mName;
-  nsString mFilePath;
-  nsCString mASCIIOrigin;
-
-  nsRefPtr<FileManager> mFileManager;
-
-  IndexedDBDatabaseChild* mActorChild;
-  IndexedDBDatabaseParent* mActorParent;
-
-  PBackgroundIDBDatabaseChild* mBackgroundActor;
-
-  mozilla::dom::ContentParent* mContentParent;
-
-  nsRefPtr<mozilla::dom::quota::Client> mQuotaClient;
-
-  nsTHashtable<nsRefPtrHashKey<IDBTransaction>> mTransactions;
-
-  bool mInvalidated;
-  bool mRegistered;
-  bool mClosed;
 };
 
-END_INDEXEDDB_NAMESPACE
+} // namespace indexedDB
+} // namespace dom
+} // namespace mozilla
 
 #endif // mozilla_dom_indexeddb_idbdatabase_h__

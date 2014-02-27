@@ -11,10 +11,12 @@
 
 #include "mozilla/Attributes.h"
 #include "js/StructuredClone.h"
+#include "js/TypeDecls.h"
 #include "nsAutoPtr.h"
 #include "nsCOMPtr.h"
 #include "nsDebug.h"
 #include "nsError.h"
+#include "nsISupportsImpl.h"
 #include "nsString.h"
 #include "nsTArray.h"
 #include "nsIInputStream.h"
@@ -38,12 +40,10 @@ class IDBTransaction;
 
 struct StructuredCloneFile
 {
-  bool operator==(const StructuredCloneFile& aOther) const
-  {
-    return this->mFile == aOther.mFile &&
-           this->mFileInfo == aOther.mFileInfo &&
-           this->mInputStream == aOther.mInputStream;
-  }
+  StructuredCloneFile();
+  ~StructuredCloneFile();
+
+  bool operator==(const StructuredCloneFile& aOther) const;
 
   nsCOMPtr<nsIDOMBlob> mFile;
   nsRefPtr<FileInfo> mFileInfo;

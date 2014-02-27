@@ -4,16 +4,20 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "base/basictypes.h"
-
 #include "IDBCursor.h"
 
+#include "mozilla/ErrorResult.h"
 #include "mozilla/storage.h"
+#include "mozilla/dom/ContentParent.h"
+#include "mozilla/dom/PBlobParent.h"
 #include "nsComponentManagerUtils.h"
 #include "nsJSUtils.h"
 #include "nsThreadUtils.h"
 
 #include "AsyncConnectionHelper.h"
+#include "FileInfo.h"
+#include "FileManager.h"
+#include "IndexedDatabaseManager.h"
 #include "IDBEvents.h"
 #include "IDBIndex.h"
 #include "IDBObjectStore.h"
@@ -28,6 +32,7 @@
 #include "IndexedDatabaseInlines.h"
 #include "mozilla/dom/BindingDeclarations.h"
 #include "mozilla/dom/UnionTypes.h"
+#include "nsTArray.h"
 
 USING_INDEXEDDB_NAMESPACE
 using namespace mozilla::dom::indexedDB::ipc;
@@ -562,6 +567,12 @@ IDBCursor::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aScope)
     default:
       MOZ_ASSUME_UNREACHABLE("Bad type!");
   }
+}
+
+nsPIDOMWindow*
+IDBCursor::GetParentObject() const
+{
+  return mTransaction->GetParentObject();
 }
 
 mozilla::dom::IDBCursorDirection

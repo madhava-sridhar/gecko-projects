@@ -7,22 +7,26 @@
 #ifndef mozilla_dom_indexeddb_idbfactory_h__
 #define mozilla_dom_indexeddb_idbfactory_h__
 
+#include "mozilla/Attributes.h"
 #include "mozilla/dom/BindingDeclarations.h" // for Optional
 #include "mozilla/dom/StorageTypeBinding.h"
 #include "mozilla/dom/quota/PersistenceType.h"
 #include "mozilla/dom/quota/StoragePrivilege.h"
 #include "nsCOMPtr.h"
 #include "nsCycleCollectionParticipant.h"
+#include "nsISupports.h"
+#include "nsString.h"
+#include "nsTArray.h"
 #include "nsWrapperCache.h"
 
 class mozIStorageConnection;
-template<typename> class nsAutoPtr;
+template <typename> class nsAutoPtr;
 class nsIEventTarget;
 class nsIFile;
 class nsIFileURL;
 class nsIPrincipal;
 class nsPIDOMWindow;
-template<typename> class nsRefPtr;
+template <typename> class nsRefPtr;
 
 namespace mozilla {
 
@@ -48,8 +52,9 @@ class IDBDatabase;
 class IDBOpenDBRequest;
 struct ObjectStoreInfo;
 
-class IDBFactory MOZ_FINAL : public nsISupports,
-                             public nsWrapperCache
+class IDBFactory MOZ_FINAL
+  : public nsISupports
+  , public nsWrapperCache
 {
   typedef mozilla::dom::ContentParent ContentParent;
   typedef mozilla::dom::quota::PersistenceType PersistenceType;
@@ -59,6 +64,29 @@ class IDBFactory MOZ_FINAL : public nsISupports,
 
   class BackgroundCreateCallback;
   struct PendingRequestInfo;
+
+  nsCString mGroup;
+  nsCString mASCIIOrigin;
+  StoragePrivilege mPrivilege;
+  PersistenceType mDefaultPersistenceType;
+
+  // If this factory lives on a window then mWindow must be non-null. Otherwise
+  // mOwningObject must be non-null.
+  nsCOMPtr<nsPIDOMWindow> mWindow;
+  JS::Heap<JSObject*> mOwningObject;
+
+  nsTArray<nsAutoPtr<PendingRequestInfo>> mPendingRequests;
+
+  BackgroundFactoryChild* mBackgroundActor;
+
+  mozilla::dom::ContentParent* mContentParent;
+
+#ifdef DEBUG
+  nsCOMPtr<nsIEventTarget> mOwningThread;
+#endif
+
+  bool mRootedOwningObject;
+  bool mBackgroundActorFailed;
 
 public:
   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
@@ -231,29 +259,6 @@ private:
   nsresult
   InitiateRequest(IDBOpenDBRequest* aRequest,
                   const FactoryRequestParams& aParams);
-
-#ifdef DEBUG
-  nsCOMPtr<nsIEventTarget> mOwningThread;
-#endif
-
-  nsCString mGroup;
-  nsCString mASCIIOrigin;
-  StoragePrivilege mPrivilege;
-  PersistenceType mDefaultPersistenceType;
-
-  // If this factory lives on a window then mWindow must be non-null. Otherwise
-  // mOwningObject must be non-null.
-  nsCOMPtr<nsPIDOMWindow> mWindow;
-  JS::Heap<JSObject*> mOwningObject;
-
-  nsTArray<nsAutoPtr<PendingRequestInfo>> mPendingRequests;
-
-  BackgroundFactoryChild* mBackgroundActor;
-
-  mozilla::dom::ContentParent* mContentParent;
-
-  bool mRootedOwningObject;
-  bool mBackgroundActorFailed;
 };
 
 } // namespace indexedDB

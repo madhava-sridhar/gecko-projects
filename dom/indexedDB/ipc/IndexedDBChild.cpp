@@ -2,8 +2,6 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "base/basictypes.h"
-
 #include "IndexedDBChild.h"
 
 #include "nsIInputStream.h"
@@ -498,27 +496,8 @@ IndexedDBDatabaseChild::RecvPIndexedDBTransactionConstructor(
     new IPCOpenDatabaseHelper(mDatabase, mRequest);
 
   Sequence<nsString> storesToOpen;
-  nsRefPtr<IDBTransaction> transaction =
-    IDBTransaction::CreateInternal(mDatabase, storesToOpen,
-                                   IDBTransaction::VERSION_CHANGE, false, true);
-  NS_ENSURE_TRUE(transaction, false);
 
-  nsRefPtr<IPCSetVersionHelper> versionHelper =
-    new IPCSetVersionHelper(transaction, mRequest, oldVersion, mVersion);
-
-  mDatabase->EnterSetVersionTransaction();
-  mDatabase->mPreviousDatabaseInfo->version = oldVersion;
-
-  actor->SetTransaction(transaction);
-
-  ImmediateRunEventTarget target;
-  if (NS_FAILED(versionHelper->Dispatch(&target))) {
-    NS_WARNING("Dispatch of IPCSetVersionHelper failed!");
-    return false;
-  }
-
-  mOpenHelper = helper.forget();
-  return true;
+  MOZ_CRASH("Remove me!");
 }
 
 PIndexedDBTransactionChild*

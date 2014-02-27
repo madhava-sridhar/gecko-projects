@@ -21,12 +21,12 @@ parent:
   Abort(nsresult resultCode);
 
   CreateObjectStore(ObjectStoreMetadata metadata);
-  DeleteObjectStore(nsString name);
+  DeleteObjectStore(int64_t objectStoreId);
 
-  CreateIndex(nsString objectStoreName,
+  CreateIndex(int64_t objectStoreId,
               IndexMetadata metadata);
-  DeleteIndex(nsString objectStoreName,
-              nsString indexName);
+  DeleteIndex(int64_t objectStoreId,
+              int64_t indexId);
 
 child:
   __delete__();

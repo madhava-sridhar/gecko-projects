@@ -13,7 +13,6 @@
 
 #include "mozilla/dom/Event.h"
 #include "mozilla/dom/Nullable.h"
-#include "mozilla/dom/indexedDB/IDBObjectStore.h"
 #include "mozilla/dom/IDBVersionChangeEventBinding.h"
 
 #define SUCCESS_EVT_STR "success"

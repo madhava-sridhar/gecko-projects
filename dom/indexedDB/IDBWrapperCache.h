@@ -7,11 +7,16 @@
 #ifndef mozilla_dom_indexeddb_idbwrappercache_h__
 #define mozilla_dom_indexeddb_idbwrappercache_h__
 
-#include "mozilla/dom/indexedDB/IndexedDatabase.h"
-
+#include "js/RootingAPI.h"
+#include "nsCycleCollectionParticipant.h"
 #include "nsDOMEventTargetHelper.h"
+#include "nsWrapperCache.h"
 
-BEGIN_INDEXEDDB_NAMESPACE
+class nsPIDOMWindow;
+
+namespace mozilla {
+namespace dom {
+namespace indexedDB {
 
 class IDBWrapperCache : public nsDOMEventTargetHelper
 {
@@ -21,40 +26,28 @@ public:
                                                    IDBWrapperCache,
                                                    nsDOMEventTargetHelper)
 
-  JSObject* GetScriptOwner() const
+  JSObject*
+  GetScriptOwner() const
   {
     return mScriptOwner;
   }
-  void SetScriptOwner(JSObject* aScriptOwner);
 
-  JSObject* GetParentObject()
-  {
-    if (mScriptOwner) {
-      return mScriptOwner;
-    }
+  void
+  SetScriptOwner(JSObject* aScriptOwner);
 
-    // Do what nsEventTargetSH::PreCreate does.
-    nsCOMPtr<nsIScriptGlobalObject> parent;
-    nsDOMEventTargetHelper::GetParentObject(getter_AddRefs(parent));
+  JSObject*
+  GetParentObject();
 
-    return parent ? parent->GetGlobalJSObject() : nullptr;
-  }
-
+  void AssertIsRooted() const
 #ifdef DEBUG
-  void AssertIsRooted() const;
+  ;
 #else
-  inline void AssertIsRooted() const
-  {
-  }
+  { }
 #endif
 
 protected:
-  IDBWrapperCache(nsDOMEventTargetHelper* aOwner)
-    : nsDOMEventTargetHelper(aOwner), mScriptOwner(nullptr)
-  { }
-  IDBWrapperCache(nsPIDOMWindow* aOwner)
-    : nsDOMEventTargetHelper(aOwner), mScriptOwner(nullptr)
-  { }
+  IDBWrapperCache(nsDOMEventTargetHelper* aOwner);
+  IDBWrapperCache(nsPIDOMWindow* aOwner);
 
   virtual ~IDBWrapperCache();
 
@@ -62,6 +55,8 @@ private:
   JS::Heap<JSObject*> mScriptOwner;
 };
 
-END_INDEXEDDB_NAMESPACE
+} // namespace indexedDB
+} // namespace dom
+} // namespace mozilla
 
 #endif // mozilla_dom_indexeddb_idbwrappercache_h__

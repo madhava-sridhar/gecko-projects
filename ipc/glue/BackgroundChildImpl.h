@@ -11,6 +11,14 @@
 template <class> class nsAutoPtr;
 
 namespace mozilla {
+namespace dom {
+namespace indexedDB {
+
+class IDBTransaction;
+
+} // namespace indexedDB
+} // namespace dom
+
 namespace ipc {
 
 // Instances of this class should never be created directly. This class is meant
@@ -18,7 +26,7 @@ namespace ipc {
 class BackgroundChildImpl : public PBackgroundChild
 {
 public:
-  class ThreadLocal;
+  struct ThreadLocal;
 
   // Get the ThreadLocal for the current thread if
   // BackgroundChild::GetOrCreateForCurrentThread() has been called and true was
@@ -52,16 +60,16 @@ protected:
                                     MOZ_OVERRIDE;
 };
 
-class BackgroundChildImpl::ThreadLocal
+struct BackgroundChildImpl::ThreadLocal
 {
-  friend class nsAutoPtr<ThreadLocal>;
-
-  // Add any members needed here.
+  mozilla::dom::indexedDB::IDBTransaction* mCurrentTransaction;
 
 public:
   ThreadLocal();
 
 private:
+  friend class nsAutoPtr<ThreadLocal>;
+
   // Only destroyed by nsAutoPtr<ThreadLocal>.
   virtual ~ThreadLocal();
 };
