@@ -4,7 +4,6 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-DIRS += ['ipc']
 TEST_DIRS += ['test']
 
 XPIDL_SOURCES += [
@@ -35,6 +34,7 @@ EXPORTS.mozilla.dom.indexedDB += [
     'IndexedDatabaseManager.h',
     'Key.h',
     'KeyPath.h',
+    'SerializationHelpers.h',
 ]
 
 SOURCES += [
@@ -66,10 +66,10 @@ SOURCES += [
 ]
 
 IPDL_SOURCES += [
-    'IndexedDBParams.ipdlh',
     'PBackgroundIDBDatabase.ipdl',
     'PBackgroundIDBFactory.ipdl',
     'PBackgroundIDBFactoryRequest.ipdl',
+    'PBackgroundIDBRequest.ipdl',
     'PBackgroundIDBSharedTypes.ipdlh',
     'PBackgroundIDBTransaction.ipdl',
     'PBackgroundIDBVersionChangeTransaction.ipdl',

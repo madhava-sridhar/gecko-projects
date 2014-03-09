@@ -7,22 +7,31 @@
 #ifndef mozilla_dom_indexeddb_checkpermissionshelper_h__
 #define mozilla_dom_indexeddb_checkpermissionshelper_h__
 
-// Only meant to be included in IndexedDB source files, not exported.
-#include "OpenDatabaseHelper.h"
-
+#include "nsAutoPtr.h"
+#include "nsCOMPtr.h"
 #include "nsIInterfaceRequestor.h"
 #include "nsIObserver.h"
 #include "nsIRunnable.h"
 
 class nsIDOMWindow;
-class nsIThread;
 
-BEGIN_INDEXEDDB_NAMESPACE
+namespace mozilla {
+namespace dom {
+namespace indexedDB {
 
-class CheckPermissionsHelper MOZ_FINAL : public nsIRunnable,
-                                         public nsIInterfaceRequestor,
-                                         public nsIObserver
+class OpenDatabaseHelper;
+
+class CheckPermissionsHelper MOZ_FINAL
+  : public nsIRunnable
+  , public nsIInterfaceRequestor
+  , public nsIObserver
 {
+  nsRefPtr<OpenDatabaseHelper> mHelper;
+  nsCOMPtr<nsIDOMWindow> mWindow;
+  uint32_t mPromptResult;
+  bool mPromptAllowed;
+  bool mHasPrompted;
+
 public:
   NS_DECL_THREADSAFE_ISUPPORTS
   NS_DECL_NSIRUNNABLE
@@ -30,28 +39,14 @@ public:
   NS_DECL_NSIOBSERVER
 
   CheckPermissionsHelper(OpenDatabaseHelper* aHelper,
-                         nsIDOMWindow* aWindow)
-  : mHelper(aHelper),
-    mWindow(aWindow),
-    // If we're trying to delete the database, we should never prompt the user.
-    // Anything that would prompt is translated to denied.
-    mPromptAllowed(!aHelper->mForDeletion),
-    mHasPrompted(false),
-    mPromptResult(0)
-  {
-    NS_ASSERTION(aHelper, "Null pointer!");
-    NS_ASSERTION(aHelper->mPersistenceType == quota::PERSISTENCE_TYPE_PERSISTENT,
-                 "Checking permission for non persistent databases?!");
-  }
+                         nsIDOMWindow* aWindow);
 
 private:
-  nsRefPtr<OpenDatabaseHelper> mHelper;
-  nsCOMPtr<nsIDOMWindow> mWindow;
-  bool mPromptAllowed;
-  bool mHasPrompted;
-  uint32_t mPromptResult;
+  ~CheckPermissionsHelper();
 };
 
-END_INDEXEDDB_NAMESPACE
+} // namespace indexedDB
+} // namespace dom
+} // namespace mozilla
 
 #endif // mozilla_dom_indexeddb_checkpermissionshelper_h__

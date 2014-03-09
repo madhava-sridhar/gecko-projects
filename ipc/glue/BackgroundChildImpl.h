@@ -63,6 +63,10 @@ protected:
 struct BackgroundChildImpl::ThreadLocal
 {
   mozilla::dom::indexedDB::IDBTransaction* mCurrentTransaction;
+#ifdef MOZ_ENABLE_PROFILER_SPS
+  uint64_t mNextTransactionSerialNumber;
+  uint64_t mNextRequestSerialNumber;
+#endif
 
 public:
   ThreadLocal();

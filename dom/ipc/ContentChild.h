@@ -114,9 +114,6 @@ public:
     virtual PHalChild* AllocPHalChild() MOZ_OVERRIDE;
     virtual bool DeallocPHalChild(PHalChild*) MOZ_OVERRIDE;
 
-    virtual PIndexedDBChild* AllocPIndexedDBChild() MOZ_OVERRIDE;
-    virtual bool DeallocPIndexedDBChild(PIndexedDBChild* aActor) MOZ_OVERRIDE;
-
     virtual PMemoryReportRequestChild*
     AllocPMemoryReportRequestChild(const uint32_t& generation,
                                    const bool &minimizeMemoryUsage,

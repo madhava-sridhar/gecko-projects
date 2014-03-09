@@ -184,10 +184,6 @@ public:
 
     virtual void OnChannelError() MOZ_OVERRIDE;
 
-    virtual PIndexedDBParent* AllocPIndexedDBParent() MOZ_OVERRIDE;
-    virtual bool
-    RecvPIndexedDBConstructor(PIndexedDBParent* aActor) MOZ_OVERRIDE;
-
     virtual PCrashReporterParent*
     AllocPCrashReporterParent(const NativeThreadId& tid,
                               const uint32_t& processType) MOZ_OVERRIDE;
@@ -356,8 +352,6 @@ private:
                                      InfallibleTArray<uint8_t>* randomValues) MOZ_OVERRIDE;
 
     virtual bool DeallocPHalParent(PHalParent*) MOZ_OVERRIDE;
-
-    virtual bool DeallocPIndexedDBParent(PIndexedDBParent* aActor) MOZ_OVERRIDE;
 
     virtual PMemoryReportRequestParent*
     AllocPMemoryReportRequestParent(const uint32_t& generation,

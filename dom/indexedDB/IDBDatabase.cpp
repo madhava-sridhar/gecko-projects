@@ -17,8 +17,6 @@
 #include "IDBObjectStore.h"
 #include "IDBTransaction.h"
 #include "IDBFactory.h"
-#include "ipc/IndexedDBChild.h"
-#include "ipc/IndexedDBParent.h"
 #include "mozilla/ErrorResult.h"
 #include "mozilla/EventDispatcher.h"
 #include "mozilla/Mutex.h"
@@ -68,39 +66,6 @@ public:
   virtual nsresult OnSuccess() MOZ_OVERRIDE;
 
   virtual void OnError() MOZ_OVERRIDE;
-};
-
-class CreateObjectStoreHelper : public NoRequestDatabaseHelper
-{
-public:
-  CreateObjectStoreHelper(IDBTransaction* aTransaction,
-                          IDBObjectStore* aObjectStore)
-  : NoRequestDatabaseHelper(aTransaction), mObjectStore(aObjectStore)
-  { }
-
-  virtual nsresult DoDatabaseWork(mozIStorageConnection* aConnection)
-                                  MOZ_OVERRIDE;
-
-  virtual void ReleaseMainThreadObjects() MOZ_OVERRIDE;
-
-private:
-  nsRefPtr<IDBObjectStore> mObjectStore;
-};
-
-class DeleteObjectStoreHelper : public NoRequestDatabaseHelper
-{
-public:
-  DeleteObjectStoreHelper(IDBTransaction* aTransaction,
-                          int64_t aObjectStoreId)
-  : NoRequestDatabaseHelper(aTransaction), mObjectStoreId(aObjectStoreId)
-  { }
-
-  virtual nsresult DoDatabaseWork(mozIStorageConnection* aConnection)
-                                  MOZ_OVERRIDE;
-
-private:
-  // In-params.
-  int64_t mObjectStoreId;
 };
 
 class CreateFileHelper : public AsyncConnectionHelper
@@ -282,8 +247,6 @@ IDBDatabase::FromStorage(nsIFileStorage* aStorage)
 
 IDBDatabase::IDBDatabase(IDBWrapperCache* aOwnerCache)
 : IDBWrapperCache(aOwnerCache),
-  mActorChild(nullptr),
-  mActorParent(nullptr),
   mBackgroundActor(nullptr),
   mContentParent(nullptr),
   mClosed(false),
@@ -333,6 +296,8 @@ IDBDatabase::Invalidate()
   CloseInternal();
 }
 
+  /* XXX Remove me!
+
 void
 IDBDatabase::DisconnectFromActorParent()
 {
@@ -348,7 +313,7 @@ IDBDatabase::DisconnectFromActorParent()
     QuotaManager::CancelPromptsForWindow(owner);
   }
 }
-
+*/
 void
 IDBDatabase::CloseInternal()
 {
@@ -398,6 +363,10 @@ IDBDatabase::RevertToPreviousState()
   MOZ_ASSERT(RunningVersionChangeTransaction());
   MOZ_ASSERT(mPreviousSpec);
 
+  // Hold the current spec alive until RefreshTransactionsSpecEnumerator has
+  // finished!
+  nsAutoPtr<DatabaseSpec> currentSpec = mSpec.forget();
+
   mSpec = mPreviousSpec.forget();
 
   mTransactions.EnumerateEntries(RefreshTransactionsSpecEnumerator, nullptr);
@@ -419,6 +388,7 @@ NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN_INHERITED(IDBDatabase, IDBWrapperCache)
   // We've been unlinked, at the very least we should be able to prevent further
   // transactions from starting and unblock any other SetVersion callers.
   tmp->CloseInternal();
+  NS_IMPL_CYCLE_COLLECTION_UNLINK(mTransactions)
 NS_IMPL_CYCLE_COLLECTION_UNLINK_END
 
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION_INHERITED(IDBDatabase)
@@ -567,27 +537,32 @@ IDBDatabase::DeleteObjectStore(const nsAString& aName, ErrorResult& aRv)
 
   nsTArray<ObjectStoreSpec>& objectStores = mSpec->objectStores();
 
-  int64_t id = 0;
+  int64_t objectStoreId = 0;
+  uint64_t objectStoreArrayIndex = 0;
 
-  for (uint32_t count = objectStores.Length(), index = 0;
-       index < count;
-       index++) {
-    const ObjectStoreMetadata& metadata = objectStores[index].metadata();
+  for (uint32_t count = objectStores.Length();
+       objectStoreArrayIndex < count;
+       objectStoreArrayIndex++) {
+    const ObjectStoreMetadata& metadata =
+      objectStores[objectStoreArrayIndex].metadata();
     MOZ_ASSERT(metadata.id());
 
     if (aName == metadata.name()) {
-      id = metadata.id();
-      objectStores.RemoveElementAt(index);
+      objectStoreId = metadata.id();
       break;
     }
   }
 
-  if (!id) {
+  if (!objectStoreId) {
     aRv.Throw(NS_ERROR_DOM_INDEXEDDB_CONSTRAINT_ERR);
     return;
   }
 
-  transaction->DeleteObjectStore(id);
+  MOZ_ASSERT(objectStoreArrayIndex < objectStores.Length());
+
+  transaction->DeleteObjectStore(objectStoreId);
+
+  objectStores.RemoveElementAt(objectStoreArrayIndex);
 
   IDB_PROFILER_MARK("IndexedDB Pseudo-request: "
                     "database(%s).transaction(%s).deleteObjectStore(\"%s\")",
@@ -865,92 +840,6 @@ NoRequestDatabaseHelper::OnError()
 {
   NS_ASSERTION(IndexedDatabaseManager::IsMainProcess(), "Wrong process!");
   mTransaction->Abort(GetResultCode());
-}
-
-nsresult
-CreateObjectStoreHelper::DoDatabaseWork(mozIStorageConnection* aConnection)
-{
-  NS_ASSERTION(!NS_IsMainThread(), "Wrong thread!");
-  NS_ASSERTION(IndexedDatabaseManager::IsMainProcess(), "Wrong process!");
-
-  PROFILER_LABEL("IndexedDB", "CreateObjectStoreHelper::DoDatabaseWork");
-
-  if (IndexedDatabaseManager::InLowDiskSpaceMode()) {
-    NS_WARNING("Refusing to create additional objectStore because disk space "
-               "is low!");
-    return NS_ERROR_DOM_INDEXEDDB_QUOTA_ERR;
-  }
-
-  nsCOMPtr<mozIStorageStatement> stmt =
-    mTransaction->GetCachedStatement(NS_LITERAL_CSTRING(
-    "INSERT INTO object_store (id, auto_increment, name, key_path) "
-    "VALUES (:id, :auto_increment, :name, :key_path)"
-  ));
-  IDB_ENSURE_TRUE(stmt, NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
-
-  mozStorageStatementScoper scoper(stmt);
-
-  nsresult rv = stmt->BindInt64ByName(NS_LITERAL_CSTRING("id"),
-                                       mObjectStore->Id());
-  IDB_ENSURE_SUCCESS(rv, NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
-
-  rv = stmt->BindInt32ByName(NS_LITERAL_CSTRING("auto_increment"),
-                             mObjectStore->AutoIncrement() ? 1 : 0);
-  IDB_ENSURE_SUCCESS(rv, NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
-
-  rv = stmt->BindStringByName(NS_LITERAL_CSTRING("name"), mObjectStore->Name());
-  IDB_ENSURE_SUCCESS(rv, NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
-
-  const KeyPath& keyPath = mObjectStore->GetKeyPath();
-  if (keyPath.IsValid()) {
-    nsAutoString keyPathSerialization;
-    keyPath.SerializeToString(keyPathSerialization);
-    rv = stmt->BindStringByName(NS_LITERAL_CSTRING("key_path"),
-                                keyPathSerialization);
-    IDB_ENSURE_SUCCESS(rv, NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
-  }
-  else {
-    rv = stmt->BindNullByName(NS_LITERAL_CSTRING("key_path"));
-    IDB_ENSURE_SUCCESS(rv, NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
-  }
-
-  rv = stmt->Execute();
-  IDB_ENSURE_SUCCESS(rv, NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
-
-  return NS_OK;
-}
-
-void
-CreateObjectStoreHelper::ReleaseMainThreadObjects()
-{
-  mObjectStore = nullptr;
-  NoRequestDatabaseHelper::ReleaseMainThreadObjects();
-}
-
-nsresult
-DeleteObjectStoreHelper::DoDatabaseWork(mozIStorageConnection* aConnection)
-{
-  NS_ASSERTION(!NS_IsMainThread(), "Wrong thread!");
-  NS_ASSERTION(IndexedDatabaseManager::IsMainProcess(), "Wrong process!");
-
-  PROFILER_LABEL("IndexedDB", "DeleteObjectStoreHelper::DoDatabaseWork");
-
-  nsCOMPtr<mozIStorageStatement> stmt =
-    mTransaction->GetCachedStatement(NS_LITERAL_CSTRING(
-    "DELETE FROM object_store "
-    "WHERE id = :id "
-  ));
-  IDB_ENSURE_TRUE(stmt, NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
-
-  mozStorageStatementScoper scoper(stmt);
-
-  nsresult rv = stmt->BindInt64ByName(NS_LITERAL_CSTRING("id"), mObjectStoreId);
-  IDB_ENSURE_SUCCESS(rv, NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
-
-  rv = stmt->Execute();
-  IDB_ENSURE_SUCCESS(rv, NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
-
-  return NS_OK;
 }
 
 nsresult

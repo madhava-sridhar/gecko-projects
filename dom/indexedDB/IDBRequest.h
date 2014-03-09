@@ -7,42 +7,72 @@
 #ifndef mozilla_dom_indexeddb_idbrequest_h__
 #define mozilla_dom_indexeddb_idbrequest_h__
 
-#include "mozilla/dom/indexedDB/IndexedDatabase.h"
-
-#include "js/TypeDecls.h"
+#include "js/RootingAPI.h"
 #include "mozilla/Attributes.h"
 #include "mozilla/EventForwards.h"
 #include "mozilla/dom/IDBRequestBinding.h"
-#include "nsCycleCollectionParticipant.h"
-#include "nsWrapperCache.h"
-
 #include "mozilla/dom/indexedDB/IDBWrapperCache.h"
+#include "nsAutoPtr.h"
+#include "nsCycleCollectionParticipant.h"
 
-class nsIEventTarget;
-class nsIScriptContext;
 class nsPIDOMWindow;
+struct PRThread;
 
 namespace mozilla {
+
 class ErrorResult;
+
 namespace dom {
+
 class DOMError;
-class OwningIDBObjectStoreOrIDBIndexOrIDBCursor;
 class ErrorEventInit;
-}
-}
+template <typename> class Nullable;
+class OwningIDBObjectStoreOrIDBIndexOrIDBCursor;
 
-BEGIN_INDEXEDDB_NAMESPACE
+namespace indexedDB {
 
-class HelperBase;
 class IDBCursor;
+class IDBDatabase;
 class IDBFactory;
 class IDBIndex;
 class IDBObjectStore;
 class IDBTransaction;
-class IndexedDBRequestParentBase;
 
-class IDBRequest : public IDBWrapperCache
+class IDBRequest
+  : public IDBWrapperCache
 {
+public:
+  typedef nsresult
+    (*GetResultCallback)(JSContext* aCx,
+                         void* aUserData,
+                         JS::MutableHandle<JS::Value> aResult);
+
+protected:
+  // At most one of these three fields can be non-null.
+  nsRefPtr<IDBObjectStore> mSourceAsObjectStore;
+  nsRefPtr<IDBIndex> mSourceAsIndex;
+  nsRefPtr<IDBCursor> mSourceAsCursor;
+
+  nsRefPtr<IDBTransaction> mTransaction;
+
+#ifdef DEBUG
+  PRThread* mOwningThread;
+#endif
+
+  JS::Heap<JS::Value> mResultVal;
+  nsRefPtr<DOMError> mError;
+
+  GetResultCallback mGetResultCallback;
+  void* mGetResultCallbackUserData;
+
+  nsString mFilename;
+#ifdef MOZ_ENABLE_PROFILER_SPS
+  uint64_t mSerialNumber;
+#endif
+  nsresult mErrorCode;
+  uint32_t mLineNo;
+  bool mHaveResultOrErrorCode;
+
 public:
   typedef nsresult
     (*GetResultCallback)(JSContext* aCx,
@@ -53,35 +83,40 @@ public:
   NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS_INHERITED(IDBRequest,
                                                          IDBWrapperCache)
 
-  static
-  already_AddRefed<IDBRequest> Create(IDBDatabase* aDatabase,
-                                      IDBTransaction* aTransaction);
+  static already_AddRefed<IDBRequest>
+  Create(IDBDatabase* aDatabase, IDBTransaction* aTransaction);
 
-  static
-  already_AddRefed<IDBRequest> Create(IDBObjectStore* aSource,
-                                      IDBDatabase* aDatabase,
-                                      IDBTransaction* aTransaction);
+  static already_AddRefed<IDBRequest>
+  Create(IDBObjectStore* aSource,
+         IDBDatabase* aDatabase,
+         IDBTransaction* aTransaction);
 
-  static
-  already_AddRefed<IDBRequest> Create(IDBIndex* aSource,
-                                      IDBDatabase* aDatabase,
-                                      IDBTransaction* aTransaction);
+  static already_AddRefed<IDBRequest>
+  Create(IDBIndex* aSource,
+         IDBDatabase* aDatabase,
+         IDBTransaction* aTransaction);
 
   // nsIDOMEventTarget
-  virtual nsresult PreHandleEvent(EventChainPreVisitor& aVisitor) MOZ_OVERRIDE;
+  virtual nsresult
+  PreHandleEvent(EventChainPreVisitor& aVisitor) MOZ_OVERRIDE;
 
-  void GetSource(Nullable<OwningIDBObjectStoreOrIDBIndexOrIDBCursor>& aSource) const;
+  void
+  GetSource(Nullable<OwningIDBObjectStoreOrIDBIndexOrIDBCursor>& aSource) const;
 
-  void Reset();
+  void
+  Reset();
 
-  void DispatchError(nsresult aErrorCode);
+  void
+  DispatchNonTransactionError(nsresult aErrorCode);
 
-  nsresult NotifyHelperCompleted(HelperBase* aHelper);
-  void NotifyHelperSentResultsToChildProcess(nsresult aRv);
+  void
+  NotifyHelperSentResultsToChildProcess(nsresult aRv);
 
-  void SetError(nsresult aRv);
-  void SetResultCallback(GetResultCallback aCallback,
-                         void* aUserData = nullptr);
+  void
+  SetError(nsresult aRv);
+
+  void
+  SetResultCallback(GetResultCallback aCallback, void* aUserData = nullptr);
 
   nsresult
   GetErrorCode() const
@@ -93,27 +128,16 @@ public:
   }
 #endif
 
-  DOMError* GetError(ErrorResult& aRv);
+  DOMError*
+  GetError(ErrorResult& aRv);
 
-  JSContext* GetJSContext();
-
-  void
-  SetActor(IndexedDBRequestParentBase* aActorParent)
-  {
-    NS_ASSERTION(!aActorParent || !mActorParent,
-                 "Shouldn't have more than one!");
-    mActorParent = aActorParent;
-  }
-
-  IndexedDBRequestParentBase*
-  GetActorParent() const
-  {
-    return mActorParent;
-  }
+  JSContext*
+  GetJSContext();
 
   void CaptureCaller();
 
-  void FillScriptErrorEvent(ErrorEventInit& aEventInit) const;
+  void
+  FillScriptErrorEvent(ErrorEventInit& aEventInit) const;
 
   bool
   IsPending() const
@@ -146,7 +170,7 @@ public:
   IDBTransaction*
   GetTransaction() const
   {
-    NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
+    AssertIsOnOwningThread();
     return mTransaction;
   }
 
@@ -169,42 +193,27 @@ protected:
   IDBRequest(nsPIDOMWindow* aOwner);
   ~IDBRequest();
 
-  void ConstructResult();
+  void
+  InitMembers();
 
-  // At most one of these three fields can be non-null.
-  nsRefPtr<IDBObjectStore> mSourceAsObjectStore;
-  nsRefPtr<IDBIndex> mSourceAsIndex;
-  nsRefPtr<IDBCursor> mSourceAsCursor;
+  void
+  ConstructResult();
 
-  // Check that the above condition holds.
+  void
+  AssertSourceIsCorrect() const
 #ifdef DEBUG
-  void AssertSourceIsCorrect() const;
+  ;
 #else
-  void AssertSourceIsCorrect() const {}
+  { }
 #endif
-
-  nsRefPtr<IDBTransaction> mTransaction;
-
-#ifdef DEBUG
-  nsCOMPtr<nsIEventTarget> mOwningThread;
-#endif
-
-  JS::Heap<JS::Value> mResultVal;
-  nsRefPtr<mozilla::dom::DOMError> mError;
-  GetResultCallback mGetResultCallback;
-  void* mGetResultCallbackUserData;
-  IndexedDBRequestParentBase* mActorParent;
-  nsString mFilename;
-#ifdef MOZ_ENABLE_PROFILER_SPS
-  uint64_t mSerialNumber;
-#endif
-  nsresult mErrorCode;
-  uint32_t mLineNo;
-  bool mHaveResultOrErrorCode;
 };
 
-class IDBOpenDBRequest MOZ_FINAL : public IDBRequest
+class IDBOpenDBRequest MOZ_FINAL
+  : public IDBRequest
 {
+  // Only touched on the owning thread.
+  nsRefPtr<IDBFactory> mFactory;
+
 public:
   NS_DECL_ISUPPORTS_INHERITED
   NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(IDBOpenDBRequest, IDBRequest)
@@ -215,13 +224,15 @@ public:
          nsPIDOMWindow* aOwner,
          JS::Handle<JSObject*> aScriptOwner);
 
-  void SetTransaction(IDBTransaction* aTransaction);
+  void
+  SetTransaction(IDBTransaction* aTransaction);
 
   // nsIDOMEventTarget
-  virtual nsresult PostHandleEvent(
-                     EventChainPostVisitor& aVisitor) MOZ_OVERRIDE;
+  virtual nsresult
+  PostHandleEvent(EventChainPostVisitor& aVisitor) MOZ_OVERRIDE;
 
-  DOMError* GetError(ErrorResult& aRv)
+  DOMError*
+  GetError(ErrorResult& aRv)
   {
     return IDBRequest::GetError(aRv);
   }
@@ -240,14 +251,13 @@ public:
   IMPL_EVENT_HANDLER(blocked);
   IMPL_EVENT_HANDLER(upgradeneeded);
 
-protected:
+private:
   IDBOpenDBRequest(nsPIDOMWindow* aOwner);
   ~IDBOpenDBRequest();
-
-  // Only touched on the main thread.
-  nsRefPtr<IDBFactory> mFactory;
 };
 
-END_INDEXEDDB_NAMESPACE
+} // namespace indexedDB
+} // namespace dom
+} // namespace mozilla
 
 #endif // mozilla_dom_indexeddb_idbrequest_h__

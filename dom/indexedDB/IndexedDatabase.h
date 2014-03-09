@@ -37,65 +37,47 @@ BEGIN_INDEXEDDB_NAMESPACE
 class FileInfo;
 class IDBDatabase;
 class IDBTransaction;
+class SerializedStructuredCloneReadInfo;
+class SerializedStructuredCloneWriteInfo;
 
 struct StructuredCloneFile
 {
-  StructuredCloneFile();
-  ~StructuredCloneFile();
-
-  bool operator==(const StructuredCloneFile& aOther) const;
-
   nsCOMPtr<nsIDOMBlob> mFile;
   nsRefPtr<FileInfo> mFileInfo;
   nsCOMPtr<nsIInputStream> mInputStream;
-};
 
-struct SerializedStructuredCloneReadInfo;
+  // In IndexedDatabaseInlines.h
+  StructuredCloneFile();
+
+  // In IndexedDatabaseInlines.h
+  ~StructuredCloneFile();
+
+  // In IndexedDatabaseInlines.h
+  inline bool
+  operator==(const StructuredCloneFile& aOther) const;
+};
 
 struct StructuredCloneReadInfo
 {
-  // In IndexedDatabaseInlines.h
-  inline StructuredCloneReadInfo();
+  nsTArray<uint8_t> mData;
+  nsTArray<StructuredCloneFile> mFiles;
+  nsCString mDatabaseId;
+  IDBDatabase* mDatabase;
 
+  // XXX Remove!
+  JSAutoStructuredCloneBuffer mCloneBuffer;
+
+  // In IndexedDatabaseInlines.h
+  StructuredCloneReadInfo();
+
+  // In IndexedDatabaseInlines.h
   inline StructuredCloneReadInfo&
-  operator=(StructuredCloneReadInfo&& aCloneReadInfo);
+  operator=(StructuredCloneReadInfo&& aOther);
 
   // In IndexedDatabaseInlines.h
   inline bool
   SetFromSerialized(const SerializedStructuredCloneReadInfo& aOther);
-
-  JSAutoStructuredCloneBuffer mCloneBuffer;
-  nsTArray<StructuredCloneFile> mFiles;
-  IDBDatabase* mDatabase;
 };
-
-struct SerializedStructuredCloneReadInfo
-{
-  SerializedStructuredCloneReadInfo()
-  : data(nullptr), dataLength(0)
-  { }
-
-  bool
-  operator==(const SerializedStructuredCloneReadInfo& aOther) const
-  {
-    return this->data == aOther.data &&
-           this->dataLength == aOther.dataLength;
-  }
-
-  SerializedStructuredCloneReadInfo&
-  operator=(const StructuredCloneReadInfo& aOther)
-  {
-    data = aOther.mCloneBuffer.data();
-    dataLength = aOther.mCloneBuffer.nbytes();
-    return *this;
-  }
-
-  // Make sure to update ipc/SerializationHelpers.h when changing members here!
-  uint64_t* data;
-  size_t dataLength;
-};
-
-struct SerializedStructuredCloneWriteInfo;
 
 struct StructuredCloneWriteInfo
 {
@@ -120,35 +102,6 @@ struct StructuredCloneWriteInfo
   nsTArray<StructuredCloneFile> mFiles;
   IDBTransaction* mTransaction;
   uint64_t mOffsetToKeyProp;
-};
-
-struct SerializedStructuredCloneWriteInfo
-{
-  SerializedStructuredCloneWriteInfo()
-  : data(nullptr), dataLength(0), offsetToKeyProp(0)
-  { }
-
-  bool
-  operator==(const SerializedStructuredCloneWriteInfo& aOther) const
-  {
-    return this->data == aOther.data &&
-           this->dataLength == aOther.dataLength &&
-           this->offsetToKeyProp == aOther.offsetToKeyProp;
-  }
-
-  SerializedStructuredCloneWriteInfo&
-  operator=(const StructuredCloneWriteInfo& aOther)
-  {
-    data = aOther.mCloneBuffer.data();
-    dataLength = aOther.mCloneBuffer.nbytes();
-    offsetToKeyProp = aOther.mOffsetToKeyProp;
-    return *this;
-  }
-
-  // Make sure to update ipc/SerializationHelpers.h when changing members here!
-  uint64_t* data;
-  size_t dataLength;
-  uint64_t offsetToKeyProp;
 };
 
 END_INDEXEDDB_NAMESPACE

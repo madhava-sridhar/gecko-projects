@@ -2,7 +2,15 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+include protocol PBlob;
+
 include "mozilla/dom/indexedDB/SerializationHelpers.h";
+
+using struct mozilla::void_t
+  from "ipc/IPCMessageUtils.h";
+
+using class mozilla::dom::indexedDB::Key
+  from "mozilla/dom/indexedDB/Key.h";
 
 using class mozilla::dom::indexedDB::KeyPath
   from "mozilla/dom/indexedDB/KeyPath.h";
@@ -13,6 +21,38 @@ using mozilla::dom::quota::PersistenceType
 namespace mozilla {
 namespace dom {
 namespace indexedDB {
+
+struct SerializedKeyRange
+{
+  Key lower;
+  Key upper;
+  bool lowerOpen;
+  bool upperOpen;
+  bool isOnly;
+};
+
+struct SerializedStructuredCloneReadInfo
+{
+  uint8_t[] data;
+};
+
+struct SerializedStructuredCloneWriteInfo
+{
+  uint8_t[] data;
+  uint64_t offsetToKeyProp;
+};
+
+struct IndexUpdateInfo
+{
+  int64_t indexId;
+  Key value;
+};
+
+union OptionalKeyRange
+{
+  SerializedKeyRange;
+  void_t;
+};
 
 struct DatabaseMetadata
 {
@@ -48,6 +88,39 @@ struct ObjectStoreSpec
 {
   ObjectStoreMetadata metadata;
   IndexMetadata[] indexes;
+};
+
+struct ObjectStoreGetParams
+{
+  int64_t objectStoreId;
+  SerializedKeyRange keyRange;
+};
+
+struct ObjectStoreAddPutParams
+{
+  int64_t objectStoreId;
+  SerializedStructuredCloneWriteInfo cloneInfo;
+  Key key;
+  IndexUpdateInfo[] indexUpdateInfos;
+  // XXX Fix me!
+  // PBlob[] blobs;
+};
+
+struct ObjectStoreAddParams
+{
+  ObjectStoreAddPutParams commonParams;
+};
+
+struct ObjectStorePutParams
+{
+  ObjectStoreAddPutParams commonParams;
+};
+
+union RequestParams
+{
+  ObjectStoreGetParams;
+  ObjectStoreAddParams;
+  ObjectStorePutParams;
 };
 
 } // namespace indexedDB

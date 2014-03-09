@@ -21,12 +21,12 @@
 
 class mozIStorageConnection;
 template <typename> class nsAutoPtr;
-class nsIEventTarget;
 class nsIFile;
 class nsIFileURL;
 class nsIPrincipal;
 class nsPIDOMWindow;
 template <typename> class nsRefPtr;
+struct PRThread;
 
 namespace mozilla {
 
@@ -50,7 +50,6 @@ struct DatabaseInfo;
 class FactoryRequestParams;
 class IDBDatabase;
 class IDBOpenDBRequest;
-struct ObjectStoreInfo;
 
 class IDBFactory MOZ_FINAL
   : public nsISupports
@@ -60,7 +59,6 @@ class IDBFactory MOZ_FINAL
   typedef mozilla::dom::quota::PersistenceType PersistenceType;
   typedef mozilla::dom::quota::StoragePrivilege StoragePrivilege;
   typedef mozilla::ipc::PBackgroundChild PBackgroundChild;
-  typedef nsTArray<nsRefPtr<ObjectStoreInfo> > ObjectStoreInfoArray;
 
   class BackgroundCreateCallback;
   struct PendingRequestInfo;
@@ -79,10 +77,8 @@ class IDBFactory MOZ_FINAL
 
   BackgroundFactoryChild* mBackgroundActor;
 
-  mozilla::dom::ContentParent* mContentParent;
-
 #ifdef DEBUG
-  nsCOMPtr<nsIEventTarget> mOwningThread;
+  PRThread* mOwningThread;
 #endif
 
   bool mRootedOwningObject;
@@ -120,32 +116,6 @@ public:
   static nsresult Create(ContentParent* aContentParent,
                          IDBFactory** aFactory);
 
-  static already_AddRefed<nsIFileURL>
-  GetDatabaseFileURL(nsIFile* aDatabaseFile,
-                     PersistenceType aPersistenceType,
-                     const nsACString& aGroup,
-                     const nsACString& aOrigin);
-
-  static already_AddRefed<mozIStorageConnection>
-  GetConnection(const nsAString& aDatabaseFilePath,
-                PersistenceType aPersistenceType,
-                const nsACString& aGroup,
-                const nsACString& aOrigin);
-
-  static nsresult
-  SetDefaultPragmas(mozIStorageConnection* aConnection);
-
-  static nsresult
-  LoadDatabaseInformation(mozIStorageConnection* aConnection,
-                          const nsACString& aDatabaseId,
-                          uint64_t* aVersion,
-                          ObjectStoreInfoArray& aObjectStores);
-
-  static nsresult
-  SetDatabaseMetadata(DatabaseInfo* aDatabaseInfo,
-                      uint64_t aVersion,
-                      ObjectStoreInfoArray& aObjectStores);
-
   nsresult
   OpenInternal(const nsAString& aName,
                int64_t aVersion,
@@ -182,12 +152,6 @@ public:
   GetASCIIOrigin() const
   {
     return mASCIIOrigin;
-  }
-
-  bool
-  FromIPC()
-  {
-    return !!mContentParent;
   }
 
   // nsWrapperCache

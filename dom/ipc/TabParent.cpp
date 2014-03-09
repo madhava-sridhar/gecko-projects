@@ -10,7 +10,6 @@
 
 #include "AppProcessChecker.h"
 #include "IDBFactory.h"
-#include "IndexedDBParent.h"
 #include "mozIApplication.h"
 #include "mozilla/BrowserElementParent.h"
 #include "mozilla/docshell/OfflineCacheUpdateParent.h"
@@ -68,7 +67,6 @@ using namespace mozilla::layers;
 using namespace mozilla::layout;
 using namespace mozilla::services;
 using namespace mozilla::widget;
-using namespace mozilla::dom::indexedDB;
 using namespace mozilla::jsipc;
 
 // The flags passed by the webProgress notifications are 16 bits shifted
@@ -273,12 +271,6 @@ TabParent::Destroy()
   // and auto-cleanup will kick in.  Otherwise, the child side will
   // destroy itself and send back __delete__().
   unused << SendDestroy();
-
-  const InfallibleTArray<PIndexedDBParent*>& idbParents =
-    ManagedPIndexedDBParent();
-  for (uint32_t i = 0; i < idbParents.Length(); ++i) {
-    static_cast<IndexedDBParent*>(idbParents[i])->Disconnect();
-  }
 
   const InfallibleTArray<POfflineCacheUpdateParent*>& ocuParents =
     ManagedPOfflineCacheUpdateParent();
@@ -1567,95 +1559,6 @@ TabParent::ReceiveMessage(const nsString& aMessage,
                             aPrincipal,
                             aJSONRetVal);
   }
-  return true;
-}
-
-PIndexedDBParent*
-TabParent::AllocPIndexedDBParent(
-                            const nsCString& aGroup,
-                            const nsCString& aASCIIOrigin, bool* /* aAllowed */)
-{
-  return new IndexedDBParent(this);
-}
-
-bool
-TabParent::DeallocPIndexedDBParent(PIndexedDBParent* aActor)
-{
-  delete aActor;
-  return true;
-}
-
-bool
-TabParent::RecvPIndexedDBConstructor(PIndexedDBParent* aActor,
-                                     const nsCString& aGroup,
-                                     const nsCString& aASCIIOrigin,
-                                     bool* aAllowed)
-{
-  nsRefPtr<IndexedDatabaseManager> mgr = IndexedDatabaseManager::GetOrCreate();
-  NS_ENSURE_TRUE(mgr, false);
-
-  if (!IndexedDatabaseManager::IsMainProcess()) {
-    NS_RUNTIMEABORT("Not supported yet!");
-  }
-
-  nsresult rv;
-
-  // XXXbent Need to make sure we have a whitelist for chrome databases!
-
-  // Verify that the child is requesting to access a database it's allowed to
-  // see.  (aASCIIOrigin here specifies a TabContext + a website origin, and
-  // we're checking that the TabContext may access it.)
-  //
-  // We have to check IsBrowserOrApp() because TabContextMayAccessOrigin will
-  // fail if we're not a browser-or-app, since aASCIIOrigin will be a plain URI,
-  // but TabContextMayAccessOrigin will construct an extended origin using
-  // app-id 0.  Note that as written below, we allow a non browser-or-app child
-  // to read any database.  That's a security hole, but we don't ship a
-  // configuration which creates non browser-or-app children, so it's not a big
-  // deal.
-  if (!aASCIIOrigin.EqualsLiteral("chrome") && IsBrowserOrApp() &&
-      !IndexedDatabaseManager::TabContextMayAccessOrigin(*this, aASCIIOrigin)) {
-
-    NS_WARNING("App attempted to open databases that it does not have "
-               "permission to access!");
-    return false;
-  }
-
-  nsCOMPtr<nsINode> node = do_QueryInterface(GetOwnerElement());
-  NS_ENSURE_TRUE(node, false);
-
-  nsIDocument* doc = node->GetOwnerDocument();
-  NS_ENSURE_TRUE(doc, false);
-
-  nsCOMPtr<nsPIDOMWindow> window = doc->GetInnerWindow();
-  NS_ENSURE_TRUE(window, false);
-
-  // Let's do a current inner check to see if the inner is active or is in
-  // bf cache, and bail out if it's not active.
-  nsCOMPtr<nsPIDOMWindow> outer = doc->GetWindow();
-  if (!outer || outer->GetCurrentInnerWindow() != window) {
-    *aAllowed = false;
-    return true;
-  }
-
-  ContentParent* contentParent = Manager();
-  NS_ASSERTION(contentParent, "Null manager?!");
-
-  nsRefPtr<IDBFactory> factory;
-  rv = IDBFactory::Create(window, aGroup, aASCIIOrigin, contentParent,
-                          getter_AddRefs(factory));
-  NS_ENSURE_SUCCESS(rv, false);
-
-  if (!factory) {
-    *aAllowed = false;
-    return true;
-  }
-
-  IndexedDBParent* actor = static_cast<IndexedDBParent*>(aActor);
-  actor->mFactory = factory;
-  actor->mASCIIOrigin = aASCIIOrigin;
-
-  *aAllowed = true;
   return true;
 }
 

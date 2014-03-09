@@ -1481,6 +1481,8 @@ IndexedDBObjectStoreRequestParent::IsDisconnected()
 bool
 IndexedDBObjectStoreRequestParent::Get(const GetParams& aParams)
 {
+  MOZ_CRASH("Remove me!");
+  /*
   MOZ_ASSERT(mRequestType == ParamsUnionType::TGetParams);
   MOZ_ASSERT(mObjectStore);
 
@@ -1500,7 +1502,7 @@ IndexedDBObjectStoreRequestParent::Get(const GetParams& aParams)
 
   request->SetActor(this);
   mRequest.swap(request);
-
+  */
   return true;
 }
 

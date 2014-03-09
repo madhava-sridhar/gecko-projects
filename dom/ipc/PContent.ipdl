@@ -17,7 +17,6 @@ include protocol PFMRadio;
 include protocol PFileSystemRequest;
 include protocol PHal;
 include protocol PImageBridge;
-include protocol PIndexedDB;
 include protocol PMemoryReportRequest;
 include protocol PNecko;
 include protocol PSms;
@@ -260,7 +259,6 @@ intr protocol PContent
     manages PExternalHelperApp;
     manages PFMRadio;
     manages PHal;
-    manages PIndexedDB;
     manages PMemoryReportRequest;
     manages PNecko;
     manages PSms;
@@ -414,8 +412,6 @@ parent:
         returns (uint8_t[] randomValues);
 
     PHal();
-
-    PIndexedDB();
 
     PNecko();
 

@@ -3,6 +3,9 @@
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 include protocol PBackgroundIDBDatabase;
+include protocol PBackgroundIDBRequest;
+
+include PBackgroundIDBSharedTypes;
 
 namespace mozilla {
 namespace dom {
@@ -11,12 +14,15 @@ namespace indexedDB {
 protocol PBackgroundIDBTransaction
 {
   manager PBackgroundIDBDatabase;
+  manages PBackgroundIDBRequest;
 
 parent:
   DeleteMe();
 
   Commit();
   Abort(nsresult resultCode);
+
+  PBackgroundIDBRequest(RequestParams params);
 
 child:
   __delete__();

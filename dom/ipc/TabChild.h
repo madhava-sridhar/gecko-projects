@@ -380,12 +380,6 @@ protected:
 
     nsEventStatus DispatchWidgetEvent(WidgetGUIEvent& event);
 
-    virtual PIndexedDBChild* AllocPIndexedDBChild(const nsCString& aGroup,
-                                                  const nsCString& aASCIIOrigin,
-                                                  bool* /* aAllowed */) MOZ_OVERRIDE;
-
-    virtual bool DeallocPIndexedDBChild(PIndexedDBChild* aActor) MOZ_OVERRIDE;
-
 private:
     /**
      * Create a new TabChild object.

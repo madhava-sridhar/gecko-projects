@@ -33,8 +33,6 @@ class IDBCursor;
 class IDBKeyRange;
 class IDBObjectStore;
 class IDBRequest;
-class IndexedDBIndexChild;
-class IndexedDBIndexParent;
 struct IndexInfo;
 class IndexMetadata;
 class Key;
@@ -50,21 +48,18 @@ class IDBIndex MOZ_FINAL
 
   JS::Heap<JS::Value> mCachedKeyPath;
 
-  nsAutoPtr<IndexMetadata> mMetadata;
-
-  IndexedDBIndexChild* mActorChild;
-  IndexedDBIndexParent* mActorParent;
+  // This normally points to the IndexMetadata owned by the parent IDBDatabase
+  // object. However, if this index is part of a versionchange transaction and
+  // it gets deleted then the metadata is copied into mDeletedMetadata and
+  // mMetadata is set to point at mDeletedMetadata.
+  const IndexMetadata* mMetadata;
+  nsAutoPtr<IndexMetadata> mDeletedMetadata;
 
   bool mRooted;
 
 public:
   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
   NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS(IDBIndex)
-
-  static already_AddRefed<IDBIndex>
-  Create(IDBObjectStore* aObjectStore,
-         const IndexInfo* aIndexInfo,
-         bool aCreating);
 
   static already_AddRefed<IDBIndex>
   Create(IDBObjectStore* aObjectStore, const IndexMetadata& aMetadata);
@@ -89,33 +84,6 @@ public:
   {
     AssertIsOnOwningThread();
     return mObjectStore;
-  }
-
-  void
-  SetActor(IndexedDBIndexChild* aActorChild)
-  {
-    NS_ASSERTION(!aActorChild || !mActorChild, "Shouldn't have more than one!");
-    mActorChild = aActorChild;
-  }
-
-  void
-  SetActor(IndexedDBIndexParent* aActorParent)
-  {
-    NS_ASSERTION(!aActorParent || !mActorParent,
-                 "Shouldn't have more than one!");
-    mActorParent = aActorParent;
-  }
-
-  IndexedDBIndexChild*
-  GetActorChild() const
-  {
-    return mActorChild;
-  }
-
-  IndexedDBIndexParent*
-  GetActorParent() const
-  {
-    return mActorParent;
   }
 
   already_AddRefed<IDBRequest>
@@ -210,6 +178,12 @@ public:
   already_AddRefed<IDBRequest>
   GetAllKeys(JSContext* aCx, JS::Handle<JS::Value> aKey,
              const Optional<uint32_t>& aLimit, ErrorResult& aRv);
+
+  void
+  RefreshMetadata();
+
+  void
+  NoteDeletion();
 
   void
   AssertIsOnOwningThread() const

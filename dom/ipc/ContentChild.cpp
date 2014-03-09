@@ -114,7 +114,6 @@
 #include "ipc/Nuwa.h"
 #endif
 
-#include "mozilla/dom/indexedDB/PIndexedDBChild.h"
 #include "mozilla/dom/mobilemessage/SmsChild.h"
 #include "mozilla/dom/devicestorage/DeviceStorageRequestChild.h"
 #include "mozilla/dom/PFileSystemRequestChild.h"
@@ -148,7 +147,6 @@ using namespace mozilla::dom::bluetooth;
 using namespace mozilla::dom::devicestorage;
 using namespace mozilla::dom::ipc;
 using namespace mozilla::dom::mobilemessage;
-using namespace mozilla::dom::indexedDB;
 using namespace mozilla::dom::telephony;
 using namespace mozilla::hal_sandbox;
 using namespace mozilla::ipc;
@@ -965,20 +963,6 @@ ContentChild::DeallocPHalChild(PHalChild* aHal)
 {
     delete aHal;
     return true;
-}
-
-PIndexedDBChild*
-ContentChild::AllocPIndexedDBChild()
-{
-  NS_NOTREACHED("Should never get here!");
-  return nullptr;
-}
-
-bool
-ContentChild::DeallocPIndexedDBChild(PIndexedDBChild* aActor)
-{
-  delete aActor;
-  return true;
 }
 
 asmjscache::PAsmJSCacheEntryChild*

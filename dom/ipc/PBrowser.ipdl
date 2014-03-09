@@ -13,7 +13,6 @@ include protocol PContentPermissionRequest;
 include protocol PFilePicker;
 include protocol PRenderFrame;
 include protocol POfflineCacheUpdate;
-include protocol PIndexedDB;
 include DOMTypes;
 include JavaScriptTypes;
 include URIParams;
@@ -77,7 +76,6 @@ intr protocol PBrowser
     manages PFilePicker;
     manages PRenderFrame;
     manages POfflineCacheUpdate;
-    manages PIndexedDB;
 
 both:
     AsyncMessage(nsString aMessage, ClonedMessageData aData, CpowEntry[] aCpows,
@@ -304,9 +302,6 @@ parent:
      * offline-apps.allow_by_default is set to true.
      */
     SetOfflinePermission(Principal principal);
-
-    sync PIndexedDB(nsCString group, nsCString asciiOrigin)
-        returns (bool allowed);
 
     /**
      * window.open from inside <iframe mozbrowser> is special.  When the child

@@ -172,27 +172,6 @@ public:
   NS_INLINE_DECL_THREADSAFE_REFCOUNTING(ObjectStoreInfo)
 };
 
-struct IndexUpdateInfo
-{
-#ifdef NS_BUILD_REFCNT_LOGGING
-  IndexUpdateInfo();
-  IndexUpdateInfo(const IndexUpdateInfo& aOther);
-  ~IndexUpdateInfo();
-#endif
-
-  bool operator==(const IndexUpdateInfo& aOther) const
-  {
-    return this->indexId == aOther.indexId &&
-           this->indexUnique == aOther.indexUnique &&
-           this->value == aOther.value;
-  };
-
-  // Make sure to update ipc/SerializationHelpers.h when changing members here!
-  int64_t indexId;
-  bool indexUnique;
-  Key value;
-};
-
 END_INDEXEDDB_NAMESPACE
 
 #endif // mozilla_dom_indexeddb_databaseinfo_h__

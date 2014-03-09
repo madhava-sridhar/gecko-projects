@@ -18,8 +18,6 @@
 #include "IndexedDatabase.h"
 #include "IndexedDatabaseInlines.h"
 #include "IndexedDatabaseManager.h"
-#include "ipc/IndexedDBChild.h"
-#include "ipc/IndexedDBParent.h"
 #include "mozilla/ErrorResult.h"
 #include "mozilla/dom/ContentChild.h"
 #include "mozilla/dom/ContentParent.h"
@@ -40,6 +38,10 @@ namespace {
 
 class IndexHelper : public AsyncConnectionHelper
 {
+protected:
+  class IndexRequestParams;
+  class IndexedDBIndexRequestChild;
+
 public:
   IndexHelper(IDBTransaction* aTransaction,
               IDBRequest* aRequest,
@@ -349,45 +351,6 @@ GenerateRequest(IDBIndex* aIndex)
 
 } // anonymous namespace
 
-// static
-already_AddRefed<IDBIndex>
-IDBIndex::Create(IDBObjectStore* aObjectStore,
-                 const IndexInfo* aIndexInfo,
-                 bool aCreating)
-{
-  NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
-  NS_ASSERTION(aObjectStore, "Null pointer!");
-  NS_ASSERTION(aIndexInfo, "Null pointer!");
-
-  nsRefPtr<IDBIndex> index = new IDBIndex();
-
-  index->mObjectStore = aObjectStore;
-
-  if (!IndexedDatabaseManager::IsMainProcess()) {
-    IndexedDBObjectStoreChild* objectStoreActor = aObjectStore->GetActorChild();
-    NS_ASSERTION(objectStoreActor, "Must have an actor here!");
-
-    nsAutoPtr<IndexedDBIndexChild> actor(new IndexedDBIndexChild(index));
-
-    IndexConstructorParams params;
-
-    if (aCreating) {
-      CreateIndexParams createParams;
-      createParams.info() = *aIndexInfo;
-      params = createParams;
-    }
-    else {
-      GetIndexParams getParams;
-      getParams.name() = aIndexInfo->name;
-      params = getParams;
-    }
-
-    objectStoreActor->SendPIndexedDBIndexConstructor(actor.forget(), params);
-  }
-
-  return index.forget();
-}
-
 already_AddRefed<IDBIndex>
 IDBIndex::Create(IDBObjectStore* aObjectStore,
                  const IndexMetadata& aMetadata)
@@ -398,16 +361,15 @@ IDBIndex::Create(IDBObjectStore* aObjectStore,
   nsRefPtr<IDBIndex> index = new IDBIndex();
 
   index->mObjectStore = aObjectStore;
-  index->mMetadata = new IndexMetadata(aMetadata);
+  index->mMetadata = &aMetadata;
 
   return index.forget();
 }
 
 IDBIndex::IDBIndex()
-: mCachedKeyPath(JSVAL_VOID),
-  mActorChild(nullptr),
-  mActorParent(nullptr),
-  mRooted(false)
+  : mCachedKeyPath(JSVAL_VOID)
+  , mMetadata(nullptr)
+  , mRooted(false)
 {
   SetIsDOMBinding();
 }
@@ -432,6 +394,47 @@ IDBIndex::AssertIsOnOwningThread() const
 }
 
 #endif // DEBUG
+
+void
+IDBIndex::RefreshMetadata()
+{
+  AssertIsOnOwningThread();
+  MOZ_ASSERT(mMetadata);
+  MOZ_ASSERT(mMetadata != mDeletedMetadata);
+
+  const nsTArray<IndexMetadata>& indexes = mObjectStore->Spec().indexes();
+
+  DebugOnly<bool> found = false;
+
+  for (uint32_t count = indexes.Length(), index = 0;
+       index < count;
+       index++) {
+    const IndexMetadata& metadata = indexes[index];
+
+    if (metadata.id() == Id()) {
+      MOZ_ASSERT(metadata.name() == Name());
+
+      mMetadata = &metadata;
+
+      found = true;
+      break;
+    }
+  }
+
+  MOZ_ASSERT(found);
+}
+
+void
+IDBIndex::NoteDeletion()
+{
+  AssertIsOnOwningThread();
+  MOZ_ASSERT(mMetadata);
+  MOZ_ASSERT(!mDeletedMetadata);
+
+  mDeletedMetadata = new IndexMetadata(*mMetadata);
+
+  mMetadata = mDeletedMetadata;
+}
 
 int64_t
 IDBIndex::Id() const
@@ -811,9 +814,6 @@ IDBIndex::OpenCursorFromChildProcess(
                             IDBCursor** _retval)
 {
   NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
-  NS_ASSERTION((!aCloneInfo.dataLength && !aCloneInfo.data) ||
-               (aCloneInfo.dataLength && aCloneInfo.data),
-               "Inconsistent clone info!");
 
   IDBCursor::Direction direction =
     static_cast<IDBCursor::Direction>(aDirection);
@@ -1111,6 +1111,8 @@ IndexHelper::Dispatch(nsIEventTarget* aDatabaseThread)
     return NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
   }
 
+  MOZ_CRASH("Remove me!");
+  /*
   IndexedDBIndexChild* indexActor = mIndex->GetActorChild();
   NS_ASSERTION(indexActor, "Must have an actor here!");
 
@@ -1124,7 +1126,7 @@ IndexHelper::Dispatch(nsIEventTarget* aDatabaseThread)
 
   mActor = new IndexedDBIndexRequestChild(this, mIndex, params.type());
   indexActor->SendPIndexedDBRequestConstructor(mActor, params);
-
+  */
   return NS_OK;
 }
 
@@ -1204,11 +1206,14 @@ GetKeyHelper::PackArgumentsForParentProcess(IndexRequestParams& aParams)
   PROFILER_MAIN_THREAD_LABEL("IndexedDB",
                              "GetKeyHelper::PackArgumentsForParentProcess");
 
+  MOZ_CRASH("Remove me!");
+  /*
   GetKeyParams params;
 
   mKeyRange->ToSerialized(params.keyRange());
 
   aParams = params;
+  */
   return NS_OK;
 }
 
@@ -1221,6 +1226,8 @@ GetKeyHelper::SendResponseToChildProcess(nsresult aResultCode)
   PROFILER_MAIN_THREAD_LABEL("IndexedDB",
                              "GetKeyHelper::SendResponseToChildProcess");
 
+  MOZ_CRASH("Remove me!");
+  /*
   IndexedDBRequestParentBase* actor = mRequest->GetActorParent();
   NS_ASSERTION(actor, "How did we get this far without an actor?");
 
@@ -1237,7 +1244,7 @@ GetKeyHelper::SendResponseToChildProcess(nsresult aResultCode)
   if (!actor->SendResponse(response)) {
     return Error;
   }
-
+  */
   return Success_Sent;
 }
 
@@ -1245,10 +1252,13 @@ nsresult
 GetKeyHelper::UnpackResponseFromParentProcess(
                                             const ResponseValue& aResponseValue)
 {
+  MOZ_CRASH("Remove me!");
+  /*
   NS_ASSERTION(aResponseValue.type() == ResponseValue::TGetKeyResponse,
                "Bad response type!");
 
   mKey = aResponseValue.get_GetKeyResponse().key();
+  */
   return NS_OK;
 }
 
@@ -1337,11 +1347,14 @@ GetHelper::PackArgumentsForParentProcess(IndexRequestParams& aParams)
                              "GetHelper::PackArgumentsForParentProcess "
                              "[IDBIndex.cpp]");
 
+  MOZ_CRASH("Remove me!");
+  /*
   GetParams params;
 
   mKeyRange->ToSerialized(params.keyRange());
 
   aParams = params;
+  */
   return NS_OK;
 }
 
@@ -1355,6 +1368,8 @@ GetHelper::SendResponseToChildProcess(nsresult aResultCode)
                              "GetHelper::SendResponseToChildProcess "
                              "[IDBIndex.cpp]");
 
+  MOZ_CRASH("Remove me!");
+  /*
   IndexedDBRequestParentBase* actor = mRequest->GetActorParent();
   NS_ASSERTION(actor, "How did we get this far without an actor?");
 
@@ -1394,13 +1409,15 @@ GetHelper::SendResponseToChildProcess(nsresult aResultCode)
   if (!actor->SendResponse(response)) {
     return Error;
   }
-
+  */
   return Success_Sent;
 }
 
 nsresult
 GetHelper::UnpackResponseFromParentProcess(const ResponseValue& aResponseValue)
 {
+  MOZ_CRASH("Remove me!");
+  /*
   NS_ASSERTION(aResponseValue.type() == ResponseValue::TGetResponse,
                "Bad response type!");
 
@@ -1418,6 +1435,7 @@ GetHelper::UnpackResponseFromParentProcess(const ResponseValue& aResponseValue)
 
   IDBObjectStore::ConvertActorsToBlobs(getResponse.blobsChild(),
                                        mCloneReadInfo.mFiles);
+                                       */
   return NS_OK;
 }
 
@@ -1545,6 +1563,8 @@ GetAllKeysHelper::PackArgumentsForParentProcess(IndexRequestParams& aParams)
                              "GetAllKeysHelper::PackArgumentsForParentProcess "
                              "[IDBIndex.cpp]");
 
+  MOZ_CRASH("Remove me!");
+  /*
   GetAllKeysParams params;
 
   if (mKeyRange) {
@@ -1559,6 +1579,7 @@ GetAllKeysHelper::PackArgumentsForParentProcess(IndexRequestParams& aParams)
   params.limit() = mLimit;
 
   aParams = params;
+  */
   return NS_OK;
 }
 
@@ -1572,6 +1593,8 @@ GetAllKeysHelper::SendResponseToChildProcess(nsresult aResultCode)
                              "GetAllKeysHelper::SendResponseToChildProcess "
                              "[IDBIndex.cpp]");
 
+  MOZ_CRASH("Remove me!");
+  /*
   IndexedDBRequestParentBase* actor = mRequest->GetActorParent();
   NS_ASSERTION(actor, "How did we get this far without an actor?");
 
@@ -1588,7 +1611,7 @@ GetAllKeysHelper::SendResponseToChildProcess(nsresult aResultCode)
   if (!actor->SendResponse(response)) {
     return Error;
   }
-
+  */
   return Success_Sent;
 }
 
@@ -1596,11 +1619,14 @@ nsresult
 GetAllKeysHelper::UnpackResponseFromParentProcess(
                                             const ResponseValue& aResponseValue)
 {
+  MOZ_CRASH("Remove me!");
+  /*
   MOZ_ASSERT(NS_IsMainThread());
   MOZ_ASSERT(!IndexedDatabaseManager::IsMainProcess());
   MOZ_ASSERT(aResponseValue.type() == ResponseValue::TGetAllKeysResponse);
 
   mKeys.AppendElements(aResponseValue.get_GetAllKeysResponse().keys());
+  */
   return NS_OK;
 }
 
@@ -1706,6 +1732,8 @@ GetAllHelper::PackArgumentsForParentProcess(IndexRequestParams& aParams)
                              "GetAllHelper::PackArgumentsForParentProcess "
                              "[IDBIndex.cpp]");
 
+  MOZ_CRASH("Remove me!");
+  /*
   GetAllParams params;
 
   if (mKeyRange) {
@@ -1720,6 +1748,7 @@ GetAllHelper::PackArgumentsForParentProcess(IndexRequestParams& aParams)
   params.limit() = mLimit;
 
   aParams = params;
+  */
   return NS_OK;
 }
 
@@ -1733,6 +1762,8 @@ GetAllHelper::SendResponseToChildProcess(nsresult aResultCode)
                              "GetAllHelper::SendResponseToChildProcess "
                              "[IDBIndex.cpp]");
 
+  MOZ_CRASH("Remove me!");
+  /*
   IndexedDBRequestParentBase* actor = mRequest->GetActorParent();
   NS_ASSERTION(actor, "How did we get this far without an actor?");
 
@@ -1794,7 +1825,7 @@ GetAllHelper::SendResponseToChildProcess(nsresult aResultCode)
   if (!actor->SendResponse(response)) {
     return Error;
   }
-
+*/
   return Success_Sent;
 }
 
@@ -1802,6 +1833,8 @@ nsresult
 GetAllHelper::UnpackResponseFromParentProcess(
                                             const ResponseValue& aResponseValue)
 {
+  MOZ_CRASH("Remove me!");
+  /*
   NS_ASSERTION(aResponseValue.type() == ResponseValue::TGetAllResponse,
                "Bad response type!");
 
@@ -1824,7 +1857,7 @@ GetAllHelper::UnpackResponseFromParentProcess(
 
     IDBObjectStore::ConvertActorsToBlobs(blobs, destInfo->mFiles);
   }
-
+*/
   return NS_OK;
 }
 
@@ -1916,7 +1949,7 @@ OpenKeyCursorHelper::DoDatabaseWork(mozIStorageConnection* aConnection)
   switch (mDirection) {
     case IDBCursor::NEXT:
       if (mKeyRange && !mKeyRange->Upper().IsUnset()) {
-        AppendConditionClause(value, rangeKey, true, !mKeyRange->IsUpperOpen(),
+        AppendConditionClause(value, rangeKey, true, !mKeyRange->UpperOpen(),
                               queryStart);
         mRangeKey = mKeyRange->Upper();
       }
@@ -1936,7 +1969,7 @@ OpenKeyCursorHelper::DoDatabaseWork(mozIStorageConnection* aConnection)
 
     case IDBCursor::NEXT_UNIQUE:
       if (mKeyRange && !mKeyRange->Upper().IsUnset()) {
-        AppendConditionClause(value, rangeKey, true, !mKeyRange->IsUpperOpen(),
+        AppendConditionClause(value, rangeKey, true, !mKeyRange->UpperOpen(),
                               queryStart);
         mRangeKey = mKeyRange->Upper();
       }
@@ -1952,7 +1985,7 @@ OpenKeyCursorHelper::DoDatabaseWork(mozIStorageConnection* aConnection)
 
     case IDBCursor::PREV:
       if (mKeyRange && !mKeyRange->Lower().IsUnset()) {
-        AppendConditionClause(value, rangeKey, false, !mKeyRange->IsLowerOpen(),
+        AppendConditionClause(value, rangeKey, false, !mKeyRange->LowerOpen(),
                               queryStart);
         mRangeKey = mKeyRange->Lower();
       }
@@ -1973,7 +2006,7 @@ OpenKeyCursorHelper::DoDatabaseWork(mozIStorageConnection* aConnection)
 
     case IDBCursor::PREV_UNIQUE:
       if (mKeyRange && !mKeyRange->Lower().IsUnset()) {
-        AppendConditionClause(value, rangeKey, false, !mKeyRange->IsLowerOpen(),
+        AppendConditionClause(value, rangeKey, false, !mKeyRange->LowerOpen(),
                               queryStart);
         mRangeKey = mKeyRange->Lower();
       }
@@ -2048,6 +2081,8 @@ OpenKeyCursorHelper::PackArgumentsForParentProcess(IndexRequestParams& aParams)
                              "OpenKeyCursorHelper::"
                              "PackArgumentsForParentProcess [IDBIndex.cpp]");
 
+  MOZ_CRASH("Remove me!");
+  /*
   OpenKeyCursorParams params;
 
   if (mKeyRange) {
@@ -2062,12 +2097,15 @@ OpenKeyCursorHelper::PackArgumentsForParentProcess(IndexRequestParams& aParams)
   params.direction() = mDirection;
 
   aParams = params;
+  */
   return NS_OK;
 }
 
 AsyncConnectionHelper::ChildProcessSendResult
 OpenKeyCursorHelper::SendResponseToChildProcess(nsresult aResultCode)
 {
+  MOZ_CRASH("Remove me!");
+  /*
   NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
   NS_ASSERTION(IndexedDatabaseManager::IsMainProcess(), "Wrong process!");
   NS_ASSERTION(!mCursor, "Shouldn't have this yet!");
@@ -2121,7 +2159,7 @@ OpenKeyCursorHelper::SendResponseToChildProcess(nsresult aResultCode)
   if (!actor->SendResponse(response)) {
     return Error;
   }
-
+  */
   return Success_Sent;
 }
 
@@ -2129,6 +2167,8 @@ nsresult
 OpenKeyCursorHelper::UnpackResponseFromParentProcess(
                                             const ResponseValue& aResponseValue)
 {
+  MOZ_CRASH("Remove me!");
+  /*
   NS_ASSERTION(aResponseValue.type() == ResponseValue::TOpenCursorResponse,
                "Bad response type!");
   NS_ASSERTION(aResponseValue.get_OpenCursorResponse().type() ==
@@ -2158,7 +2198,7 @@ OpenKeyCursorHelper::UnpackResponseFromParentProcess(
     default:
       MOZ_CRASH();
   }
-
+  */
   return NS_OK;
 }
 
@@ -2270,7 +2310,7 @@ OpenCursorHelper::DoDatabaseWork(mozIStorageConnection* aConnection)
   switch (mDirection) {
     case IDBCursor::NEXT:
       if (mKeyRange && !mKeyRange->Upper().IsUnset()) {
-        AppendConditionClause(value, rangeKey, true, !mKeyRange->IsUpperOpen(),
+        AppendConditionClause(value, rangeKey, true, !mKeyRange->UpperOpen(),
                               queryStart);
         mRangeKey = mKeyRange->Upper();
       }
@@ -2288,7 +2328,7 @@ OpenCursorHelper::DoDatabaseWork(mozIStorageConnection* aConnection)
 
     case IDBCursor::NEXT_UNIQUE:
       if (mKeyRange && !mKeyRange->Upper().IsUnset()) {
-        AppendConditionClause(value, rangeKey, true, !mKeyRange->IsUpperOpen(),
+        AppendConditionClause(value, rangeKey, true, !mKeyRange->UpperOpen(),
                               queryStart);
         mRangeKey = mKeyRange->Upper();
       }
@@ -2304,7 +2344,7 @@ OpenCursorHelper::DoDatabaseWork(mozIStorageConnection* aConnection)
 
     case IDBCursor::PREV:
       if (mKeyRange && !mKeyRange->Lower().IsUnset()) {
-        AppendConditionClause(value, rangeKey, false, !mKeyRange->IsLowerOpen(),
+        AppendConditionClause(value, rangeKey, false, !mKeyRange->LowerOpen(),
                               queryStart);
         mRangeKey = mKeyRange->Lower();
       }
@@ -2322,7 +2362,7 @@ OpenCursorHelper::DoDatabaseWork(mozIStorageConnection* aConnection)
 
     case IDBCursor::PREV_UNIQUE:
       if (mKeyRange && !mKeyRange->Lower().IsUnset()) {
-        AppendConditionClause(value, rangeKey, false, !mKeyRange->IsLowerOpen(),
+        AppendConditionClause(value, rangeKey, false, !mKeyRange->LowerOpen(),
                               queryStart);
         mRangeKey = mKeyRange->Lower();
       }
@@ -2350,10 +2390,10 @@ OpenCursorHelper::EnsureCursor()
     return NS_OK;
   }
 
-  mSerializedCloneReadInfo = mCloneReadInfo;
+  MOZ_CRASH("Fix!");
+  //mSerializedCloneReadInfo = mCloneReadInfo;
 
-  NS_ASSERTION(mSerializedCloneReadInfo.data &&
-               mSerializedCloneReadInfo.dataLength,
+  NS_ASSERTION(!mSerializedCloneReadInfo.data().IsEmpty(),
                "Shouldn't be possible!");
 
   nsRefPtr<IDBCursor> cursor =
@@ -2375,8 +2415,7 @@ OpenCursorHelper::ReleaseMainThreadObjects()
 
   // These don't need to be released on the main thread but they're only valid
   // as long as mCursor is set.
-  mSerializedCloneReadInfo.data = nullptr;
-  mSerializedCloneReadInfo.dataLength = 0;
+  mSerializedCloneReadInfo.data().Clear();
 
   OpenKeyCursorHelper::ReleaseMainThreadObjects();
 }
@@ -2391,6 +2430,8 @@ OpenCursorHelper::PackArgumentsForParentProcess(IndexRequestParams& aParams)
                              "OpenCursorHelper::PackArgumentsForParentProcess "
                              "[IDBIndex.cpp]");
 
+  MOZ_CRASH("Remove me!");
+  /*
   OpenCursorParams params;
 
   if (mKeyRange) {
@@ -2405,6 +2446,7 @@ OpenCursorHelper::PackArgumentsForParentProcess(IndexRequestParams& aParams)
   params.direction() = mDirection;
 
   aParams = params;
+  */
   return NS_OK;
 }
 
@@ -2419,6 +2461,8 @@ OpenCursorHelper::SendResponseToChildProcess(nsresult aResultCode)
                              "OpenCursorHelper::SendResponseToChildProcess "
                              "[IDBIndex.cpp]");
 
+  MOZ_CRASH("Remove me!");
+  /*
   IndexedDBRequestParentBase* actor = mRequest->GetActorParent();
   NS_ASSERTION(actor, "How did we get this far without an actor?");
 
@@ -2492,7 +2536,7 @@ OpenCursorHelper::SendResponseToChildProcess(nsresult aResultCode)
   if (!actor->SendResponse(response)) {
     return Error;
   }
-
+  */
   return Success_Sent;
 }
 
@@ -2520,11 +2564,11 @@ CountHelper::DoDatabaseWork(mozIStorageConnection* aConnection)
   if (mKeyRange) {
     if (!mKeyRange->Lower().IsUnset()) {
       AppendConditionClause(value, lowerKeyName, false,
-                            !mKeyRange->IsLowerOpen(), keyRangeClause);
+                            !mKeyRange->LowerOpen(), keyRangeClause);
     }
     if (!mKeyRange->Upper().IsUnset()) {
       AppendConditionClause(value, upperKeyName, true,
-                            !mKeyRange->IsUpperOpen(), keyRangeClause);
+                            !mKeyRange->UpperOpen(), keyRangeClause);
     }
   }
 
@@ -2585,6 +2629,8 @@ CountHelper::PackArgumentsForParentProcess(IndexRequestParams& aParams)
                              "CountHelper::PackArgumentsForParentProcess "
                              "[IDBIndex.cpp]");
 
+  MOZ_CRASH("Remove me!");
+  /*
   CountParams params;
 
   if (mKeyRange) {
@@ -2597,6 +2643,7 @@ CountHelper::PackArgumentsForParentProcess(IndexRequestParams& aParams)
   }
 
   aParams = params;
+  */
   return NS_OK;
 }
 
@@ -2610,6 +2657,8 @@ CountHelper::SendResponseToChildProcess(nsresult aResultCode)
                              "CountHelper::SendResponseToChildProcess "
                              "[IDBIndex.cpp]");
 
+  MOZ_CRASH("Remove me!");
+  /*
   IndexedDBRequestParentBase* actor = mRequest->GetActorParent();
   NS_ASSERTION(actor, "How did we get this far without an actor?");
 
@@ -2625,7 +2674,7 @@ CountHelper::SendResponseToChildProcess(nsresult aResultCode)
   if (!actor->SendResponse(response)) {
     return Error;
   }
-
+  */
   return Success_Sent;
 }
 
@@ -2633,9 +2682,12 @@ nsresult
 CountHelper::UnpackResponseFromParentProcess(
                                             const ResponseValue& aResponseValue)
 {
+  MOZ_CRASH("Remove me!");
+  /*
   NS_ASSERTION(aResponseValue.type() == ResponseValue::TCountResponse,
                "Bad response type!");
 
   mCount = aResponseValue.get_CountResponse().count();
+  */
   return NS_OK;
 }

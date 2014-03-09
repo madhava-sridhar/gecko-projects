@@ -53,8 +53,6 @@ class IDBObjectStore;
 class IDBRequest;
 class IDBTransaction;
 class IndexedDatabaseManager;
-class IndexedDBDatabaseChild;
-class IndexedDBDatabaseParent;
 struct ObjectStoreInfoGuts;
 
 class IDBDatabase MOZ_FINAL
@@ -80,9 +78,6 @@ class IDBDatabase MOZ_FINAL
   nsCString mASCIIOrigin;
 
   nsRefPtr<FileManager> mFileManager;
-
-  IndexedDBDatabaseChild* mActorChild;
-  IndexedDBDatabaseParent* mActorParent;
 
   BackgroundDatabaseChild* mBackgroundActor;
 
@@ -158,8 +153,6 @@ public:
   already_AddRefed<nsIDocument>
   GetOwnerDocument() const;
 
-  void DisconnectFromActorParent();
-
   void CloseInternal();
 
   void EnterSetVersionTransaction();
@@ -172,33 +165,6 @@ public:
   FileManager* Manager() const
   {
     return mFileManager;
-  }
-
-  void
-  SetActor(IndexedDBDatabaseChild* aActorChild)
-  {
-    NS_ASSERTION(!aActorChild || !mActorChild, "Shouldn't have more than one!");
-    mActorChild = aActorChild;
-  }
-
-  void
-  SetActor(IndexedDBDatabaseParent* aActorParent)
-  {
-    NS_ASSERTION(!aActorParent || !mActorParent,
-                 "Shouldn't have more than one!");
-    mActorParent = aActorParent;
-  }
-
-  IndexedDBDatabaseChild*
-  GetActorChild() const
-  {
-    return mActorChild;
-  }
-
-  IndexedDBDatabaseParent*
-  GetActorParent() const
-  {
-    return mActorParent;
   }
 
   ContentParent*

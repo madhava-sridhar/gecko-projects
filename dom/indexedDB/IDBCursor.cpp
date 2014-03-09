@@ -26,9 +26,6 @@
 #include "ReportInternalError.h"
 #include "TransactionThreadPool.h"
 
-#include "ipc/IndexedDBChild.h"
-#include "ipc/IndexedDBParent.h"
-
 #include "IndexedDatabaseInlines.h"
 #include "mozilla/dom/BindingDeclarations.h"
 #include "mozilla/dom/UnionTypes.h"
@@ -47,6 +44,10 @@ namespace {
 
 class CursorHelper : public AsyncConnectionHelper
 {
+protected:
+  class CursorRequestParams;
+  class IndexedDBCursorRequestChild;
+
 public:
   CursorHelper(IDBCursor* aCursor)
   : AsyncConnectionHelper(aCursor->Transaction(), aCursor->Request()),
@@ -426,13 +427,6 @@ IDBCursor::IDBCursor()
 IDBCursor::~IDBCursor()
 {
   NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
-
-  NS_ASSERTION(!mActorParent, "Actor parent owns us, how can we be dying?!");
-  if (mActorChild) {
-    NS_ASSERTION(!IndexedDatabaseManager::IsMainProcess(), "Wrong process!");
-    mActorChild->Send__delete__(mActorChild);
-    NS_ASSERTION(!mActorChild, "Should have cleared in Send__delete__!");
-  }
 
   DropJSObjects();
   IDBObjectStore::ClearCloneReadInfo(mCloneReadInfo);
@@ -1007,6 +1001,8 @@ CursorHelper::Dispatch(nsIEventTarget* aDatabaseThread)
     return NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
   }
 
+  MOZ_CRASH("Remove me!");
+  /*
   IndexedDBCursorChild* cursorActor = mCursor->GetActorChild();
   NS_ASSERTION(cursorActor, "Must have an actor here!");
 
@@ -1020,7 +1016,7 @@ CursorHelper::Dispatch(nsIEventTarget* aDatabaseThread)
 
   mActor = new IndexedDBCursorRequestChild(this, mCursor, params.type());
   cursorActor->SendPIndexedDBRequestConstructor(mActor, params);
-
+  */
   return NS_OK;
 }
 
@@ -1115,12 +1111,15 @@ ContinueHelper::PackArgumentsForParentProcess(CursorRequestParams& aParams)
   PROFILER_MAIN_THREAD_LABEL("IndexedDB",
                              "ContinueHelper::PackArgumentsForParentProcess");
 
+  MOZ_CRASH("Remove me!");
+  /*
   ContinueParams params;
 
   params.key() = mCursor->mContinueToKey;
   params.count() = uint32_t(mCount);
 
   aParams = params;
+  */
   return NS_OK;
 }
 
@@ -1133,6 +1132,8 @@ ContinueHelper::SendResponseToChildProcess(nsresult aResultCode)
   PROFILER_MAIN_THREAD_LABEL("IndexedDB",
                              "ContinueHelper::SendResponseToChildProcess");
 
+  MOZ_CRASH("Remove me!");
+  /*
   IndexedDBRequestParentBase* actor = mRequest->GetActorParent();
   NS_ASSERTION(actor, "How did we get this far without an actor?");
 
@@ -1176,7 +1177,7 @@ ContinueHelper::SendResponseToChildProcess(nsresult aResultCode)
   }
 
   UpdateCursorState();
-
+  */
   return Success_Sent;
 }
 
@@ -1184,6 +1185,8 @@ nsresult
 ContinueHelper::UnpackResponseFromParentProcess(
                                             const ResponseValue& aResponseValue)
 {
+  MOZ_CRASH("Remove me!");
+  /*
   NS_ASSERTION(aResponseValue.type() == ResponseValue::TContinueResponse,
                "Bad response type!");
 
@@ -1202,9 +1205,9 @@ ContinueHelper::UnpackResponseFromParentProcess(
     IDB_WARNING("Failed to copy clone buffer!");
     return NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
   }
-
   IDBObjectStore::ConvertActorsToBlobs(response.blobsChild(),
                                        mCloneReadInfo.mFiles);
+  */
   return NS_OK;
 }
 

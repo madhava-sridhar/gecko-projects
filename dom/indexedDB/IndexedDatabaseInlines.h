@@ -11,6 +11,8 @@
 #error Must include IndexedDatabase.h first
 #endif
 
+#include "mozilla/dom/indexedDB/PBackgroundIDBSharedTypes.h"
+
 BEGIN_INDEXEDDB_NAMESPACE
 
 inline
@@ -54,15 +56,19 @@ bool
 StructuredCloneWriteInfo::SetFromSerialized(
                                const SerializedStructuredCloneWriteInfo& aOther)
 {
-  if (!aOther.dataLength) {
+  if (aOther.data().IsEmpty()) {
     mCloneBuffer.clear();
-  }
-  else if (!mCloneBuffer.copy(aOther.data, aOther.dataLength)) {
-    return false;
+  } else {
+    uint64_t* aOtherBuffer =
+      reinterpret_cast<uint64_t*>(
+        const_cast<uint8_t*>(aOther.data().Elements()));
+    if (!mCloneBuffer.copy(aOtherBuffer, aOther.data().Length())) {
+      return false;
+    }
   }
 
   mFiles.Clear();
-  mOffsetToKeyProp = aOther.offsetToKeyProp;
+  mOffsetToKeyProp = aOther.offsetToKeyProp();
   return true;
 }
 
@@ -90,12 +96,7 @@ bool
 StructuredCloneReadInfo::SetFromSerialized(
                                 const SerializedStructuredCloneReadInfo& aOther)
 {
-  if (aOther.dataLength &&
-      !mCloneBuffer.copy(aOther.data, aOther.dataLength)) {
-    return false;
-  }
-
-  mFiles.Clear();
+  MOZ_CRASH("Remove me!");
   return true;
 }
 

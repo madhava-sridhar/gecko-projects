@@ -37,6 +37,7 @@ class DOMStringList;
 namespace indexedDB {
 
 class AsyncConnectionHelper;
+class BackgroundRequestChild;
 class BackgroundTransactionChild;
 class BackgroundVersionChangeTransactionChild;
 class CommitHelper;
@@ -47,11 +48,10 @@ class IDBObjectStore;
 class IDBRequest;
 class IDBTransaction;
 class IndexedDBDatabaseChild;
-class IndexedDBTransactionChild;
-class IndexedDBTransactionParent;
 class IndexMetadata;
 struct ObjectStoreInfo;
 class ObjectStoreSpec;
+class RequestParams;
 class UpdateRefcountFunction;
 
 class IDBTransactionListener
@@ -121,9 +121,6 @@ private:
   nsRefPtr<UpdateRefcountFunction> mUpdateFileRefcountFunction;
   nsRefPtrHashtable<nsISupportsHashKey, FileInfo> mCreatedFileInfos;
 
-  IndexedDBTransactionChild* mActorChild;
-  IndexedDBTransactionParent* mActorParent;
-
   // Tagged with mMode. If mMode is VERSION_CHANGE then mBackgroundActor will be
   // a BackgroundVersionChangeTransactionChild. Otherwise it will be a
   // BackgroundTransactionChild.
@@ -191,10 +188,15 @@ public:
   }
 
   void
+  StartRequest(BackgroundRequestChild* aBackgroundActor,
+               const RequestParams& aParams);
+
+  void
   RefreshSpec();
 
   // nsIDOMEventTarget
-  virtual nsresult PreHandleEvent(EventChainPreVisitor& aVisitor) MOZ_OVERRIDE;
+  virtual nsresult
+  PreHandleEvent(EventChainPreVisitor& aVisitor) MOZ_OVERRIDE;
 
   void OnNewRequest();
   void OnRequestFinished();
@@ -206,11 +208,11 @@ public:
   nsresult ReleaseSavepoint();
   void RollbackSavepoint();
 
-  // Only meant to be called on mStorageThread!
-  nsresult GetOrCreateConnection(mozIStorageConnection** aConnection);
-
   already_AddRefed<mozIStorageStatement>
-  GetCachedStatement(const nsACString& aQuery);
+  GetCachedStatement(const nsACString& aQuery)
+  {
+    MOZ_CRASH("Remove me!");
+  }
 
   template<int N>
   already_AddRefed<mozIStorageStatement>
@@ -266,11 +268,6 @@ public:
   }
 
   already_AddRefed<IDBObjectStore>
-  GetOrCreateObjectStore(const nsAString& aName,
-                         ObjectStoreInfo* aObjectStoreInfo,
-                         bool aCreating);
-
-  already_AddRefed<IDBObjectStore>
   CreateObjectStore(const ObjectStoreSpec& aSpec);
 
   void
@@ -286,33 +283,6 @@ public:
   void AddFileInfo(nsIDOMBlob* aBlob, FileInfo* aFileInfo);
 
   void ClearCreatedFileInfos();
-
-  void
-  SetActor(IndexedDBTransactionChild* aActorChild)
-  {
-    NS_ASSERTION(!aActorChild || !mActorChild, "Shouldn't have more than one!");
-    mActorChild = aActorChild;
-  }
-
-  void
-  SetActor(IndexedDBTransactionParent* aActorParent)
-  {
-    NS_ASSERTION(!aActorParent || !mActorParent,
-                 "Shouldn't have more than one!");
-    mActorParent = aActorParent;
-  }
-
-  IndexedDBTransactionChild*
-  GetActorChild() const
-  {
-    return mActorChild;
-  }
-
-  IndexedDBTransactionParent*
-  GetActorParent() const
-  {
-    return mActorParent;
-  }
 
   nsresult
   Abort(IDBRequest* aRequest);
@@ -390,8 +360,6 @@ private:
 
   IDBTransaction(IDBDatabase* aDatabase);
   ~IDBTransaction();
-
-  nsresult CommitOrRollback();
 
   void SendCommit();
   void SendAbort(nsresult aResultCode);

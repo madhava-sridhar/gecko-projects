@@ -304,19 +304,6 @@ protected:
 
     virtual void ActorDestroy(ActorDestroyReason why) MOZ_OVERRIDE;
 
-    virtual PIndexedDBParent* AllocPIndexedDBParent(
-                                                  const nsCString& aGroup,
-                                                  const nsCString& aASCIIOrigin,
-                                                  bool* /* aAllowed */) MOZ_OVERRIDE;
-
-    virtual bool DeallocPIndexedDBParent(PIndexedDBParent* aActor) MOZ_OVERRIDE;
-
-    virtual bool
-    RecvPIndexedDBConstructor(PIndexedDBParent* aActor,
-                              const nsCString& aGroup,
-                              const nsCString& aASCIIOrigin,
-                              bool* aAllowed) MOZ_OVERRIDE;
-
     Element* mFrameElement;
     nsCOMPtr<nsIBrowserDOMWindow> mBrowserDOMWindow;
 

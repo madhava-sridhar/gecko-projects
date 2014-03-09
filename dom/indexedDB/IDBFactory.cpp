@@ -16,7 +16,6 @@
 #include "IDBEvents.h"
 #include "IDBKeyRange.h"
 #include "IndexedDatabaseManager.h"
-#include "ipc/IndexedDBChild.h"
 #include "Key.h"
 #include "mozilla/ErrorResult.h"
 #include "mozilla/Preferences.h"
@@ -61,19 +60,6 @@ using namespace mozilla::dom::indexedDB;
 using namespace mozilla::dom::quota;
 using namespace mozilla::ipc;
 
-namespace {
-
-struct ObjectStoreInfoMap
-{
-  ObjectStoreInfoMap()
-  : id(INT64_MIN), info(nullptr) { }
-
-  int64_t id;
-  ObjectStoreInfo* info;
-};
-
-} // anonymous namespace
-
 class IDBFactory::BackgroundCreateCallback MOZ_FINAL :
                                       public nsIIPCBackgroundChildCreateCallback
 {
@@ -110,14 +96,17 @@ struct IDBFactory::PendingRequestInfo
 };
 
 IDBFactory::IDBFactory()
-: mPrivilege(Content), mDefaultPersistenceType(PERSISTENCE_TYPE_TEMPORARY),
-  mOwningObject(nullptr), mBackgroundActor(nullptr), mContentParent(nullptr),
-  mRootedOwningObject(false), mBackgroundActorFailed(false)
+  : mPrivilege(Content)
+  , mDefaultPersistenceType(PERSISTENCE_TYPE_TEMPORARY)
+  , mOwningObject(nullptr)
+  , mBackgroundActor(nullptr)
+  , mRootedOwningObject(false)
+  , mBackgroundActorFailed(false)
 {
 #ifdef DEBUG
-  mOwningThread = NS_GetCurrentThread();
-  AssertIsOnOwningThread();
+  mOwningThread = PR_GetCurrentThread();
 #endif
+  AssertIsOnOwningThread();
 
   SetIsDOMBinding();
 }
@@ -143,10 +132,7 @@ void
 IDBFactory::AssertIsOnOwningThread() const
 {
   MOZ_ASSERT(mOwningThread);
-
-  bool current;
-  MOZ_ASSERT(NS_SUCCEEDED(mOwningThread->IsOnCurrentThread(&current)));
-  MOZ_ASSERT(current);
+  MOZ_ASSERT(PR_GetCurrentThread() == mOwningThread);
 }
 
 #endif // DEBUG
@@ -204,7 +190,6 @@ IDBFactory::Create(nsPIDOMWindow* aWindow,
   factory->mPrivilege = privilege;
   factory->mDefaultPersistenceType = defaultPersistenceType;
   factory->mWindow = aWindow;
-  factory->mContentParent = aContentParent;
 
   factory.forget(aFactory);
   return NS_OK;
@@ -242,7 +227,6 @@ IDBFactory::Create(JSContext* aCx,
   factory->mPrivilege = privilege;
   factory->mDefaultPersistenceType = defaultPersistenceType;
   factory->mOwningObject = aOwningObject;
-  factory->mContentParent = aContentParent;
 
   mozilla::HoldJSObjects(factory.get());
   factory->mRootedOwningObject = true;
@@ -300,274 +284,11 @@ IDBFactory::Create(ContentParent* aContentParent,
   factory->mPrivilege = privilege;
   factory->mDefaultPersistenceType = defaultPersistenceType;
   factory->mOwningObject = global;
-  factory->mContentParent = aContentParent;
 
   mozilla::HoldJSObjects(factory.get());
   factory->mRootedOwningObject = true;
 
   factory.forget(aFactory);
-  return NS_OK;
-}
-
-// static
-already_AddRefed<nsIFileURL>
-IDBFactory::GetDatabaseFileURL(nsIFile* aDatabaseFile,
-                               PersistenceType aPersistenceType,
-                               const nsACString& aGroup,
-                               const nsACString& aOrigin)
-{
-  nsCOMPtr<nsIURI> uri;
-  nsresult rv = NS_NewFileURI(getter_AddRefs(uri), aDatabaseFile);
-  NS_ENSURE_SUCCESS(rv, nullptr);
-
-  nsCOMPtr<nsIFileURL> fileUrl = do_QueryInterface(uri);
-  NS_ASSERTION(fileUrl, "This should always succeed!");
-
-  nsAutoCString type;
-  PersistenceTypeToText(aPersistenceType, type);
-
-  rv = fileUrl->SetQuery(NS_LITERAL_CSTRING("persistenceType=") + type +
-                         NS_LITERAL_CSTRING("&group=") + aGroup +
-                         NS_LITERAL_CSTRING("&origin=") + aOrigin);
-  NS_ENSURE_SUCCESS(rv, nullptr);
-
-  return fileUrl.forget();
-}
-
-// static
-already_AddRefed<mozIStorageConnection>
-IDBFactory::GetConnection(const nsAString& aDatabaseFilePath,
-                          PersistenceType aPersistenceType,
-                          const nsACString& aGroup,
-                          const nsACString& aOrigin)
-{
-  NS_ASSERTION(IndexedDatabaseManager::IsMainProcess(), "Wrong process!");
-  NS_ASSERTION(StringEndsWith(aDatabaseFilePath, NS_LITERAL_STRING(".sqlite")),
-               "Bad file path!");
-
-  nsCOMPtr<nsIFile> dbFile(do_CreateInstance(NS_LOCAL_FILE_CONTRACTID));
-  NS_ENSURE_TRUE(dbFile, nullptr);
-
-  nsresult rv = dbFile->InitWithPath(aDatabaseFilePath);
-  NS_ENSURE_SUCCESS(rv, nullptr);
-
-  bool exists;
-  rv = dbFile->Exists(&exists);
-  NS_ENSURE_SUCCESS(rv, nullptr);
-  NS_ENSURE_TRUE(exists, nullptr);
-
-  nsCOMPtr<nsIFileURL> dbFileUrl =
-    GetDatabaseFileURL(dbFile, aPersistenceType, aGroup, aOrigin);
-  NS_ENSURE_TRUE(dbFileUrl, nullptr);
-
-  nsCOMPtr<mozIStorageService> ss =
-    do_GetService(MOZ_STORAGE_SERVICE_CONTRACTID);
-  NS_ENSURE_TRUE(ss, nullptr);
-
-  nsCOMPtr<mozIStorageConnection> connection;
-  rv = ss->OpenDatabaseWithFileURL(dbFileUrl, getter_AddRefs(connection));
-  NS_ENSURE_SUCCESS(rv, nullptr);
-
-  rv = SetDefaultPragmas(connection);
-  NS_ENSURE_SUCCESS(rv, nullptr);
-
-  return connection.forget();
-}
-
-// static
-nsresult
-IDBFactory::SetDefaultPragmas(mozIStorageConnection* aConnection)
-{
-  NS_ASSERTION(aConnection, "Null connection!");
-
-  static const char query[] =
-#if defined(MOZ_WIDGET_ANDROID) || defined(MOZ_WIDGET_GONK)
-    // Switch the journaling mode to TRUNCATE to avoid changing the directory
-    // structure at the conclusion of every transaction for devices with slower
-    // file systems.
-    "PRAGMA journal_mode = TRUNCATE; "
-#endif
-    // We use foreign keys in lots of places.
-    "PRAGMA foreign_keys = ON; "
-    // The "INSERT OR REPLACE" statement doesn't fire the update trigger,
-    // instead it fires only the insert trigger. This confuses the update
-    // refcount function. This behavior changes with enabled recursive triggers,
-    // so the statement fires the delete trigger first and then the insert
-    // trigger.
-    "PRAGMA recursive_triggers = ON;";
-
-  nsresult rv = aConnection->ExecuteSimpleSQL(NS_LITERAL_CSTRING(query));
-  IDB_ENSURE_SUCCESS(rv, NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
-
-  return NS_OK;
-}
-
-inline
-bool
-IgnoreWhitespace(char16_t c)
-{
-  return false;
-}
-
-// static
-nsresult
-IDBFactory::LoadDatabaseInformation(mozIStorageConnection* aConnection,
-                                    const nsACString& aDatabaseId,
-                                    uint64_t* aVersion,
-                                    ObjectStoreInfoArray& aObjectStores)
-{
-  AssertIsOnIOThread();
-  NS_ASSERTION(aConnection, "Null pointer!");
-
-  aObjectStores.Clear();
-
-   // Load object store names and ids.
-  nsCOMPtr<mozIStorageStatement> stmt;
-  nsresult rv = aConnection->CreateStatement(NS_LITERAL_CSTRING(
-    "SELECT name, id, key_path, auto_increment "
-    "FROM object_store"
-  ), getter_AddRefs(stmt));
-  NS_ENSURE_SUCCESS(rv, rv);
-
-  nsAutoTArray<ObjectStoreInfoMap, 20> infoMap;
-
-  bool hasResult;
-  while (NS_SUCCEEDED((rv = stmt->ExecuteStep(&hasResult))) && hasResult) {
-    nsRefPtr<ObjectStoreInfo>* element =
-      aObjectStores.AppendElement(new ObjectStoreInfo());
-
-    ObjectStoreInfo* info = element->get();
-
-    rv = stmt->GetString(0, info->name);
-    NS_ENSURE_SUCCESS(rv, rv);
-
-    info->id = stmt->AsInt64(1);
-
-    int32_t columnType;
-    nsresult rv = stmt->GetTypeOfIndex(2, &columnType);
-    NS_ENSURE_SUCCESS(rv, rv);
-
-    // NB: We don't have to handle the NULL case, since that is the default
-    // for a new KeyPath.
-    if (columnType != mozIStorageStatement::VALUE_TYPE_NULL) {
-      NS_ASSERTION(columnType == mozIStorageStatement::VALUE_TYPE_TEXT,
-                   "Should be a string");
-      nsString keyPathSerialization;
-      rv = stmt->GetString(2, keyPathSerialization);
-      NS_ENSURE_SUCCESS(rv, rv);
-
-      info->keyPath = KeyPath::DeserializeFromString(keyPathSerialization);
-    }
-
-    info->nextAutoIncrementId = stmt->AsInt64(3);
-    info->comittedAutoIncrementId = info->nextAutoIncrementId;
-
-    info->autoIncrement = !!info->nextAutoIncrementId;
-
-    ObjectStoreInfoMap* mapEntry = infoMap.AppendElement();
-    NS_ENSURE_TRUE(mapEntry, NS_ERROR_OUT_OF_MEMORY);
-
-    mapEntry->id = info->id;
-    mapEntry->info = info;
-  }
-  NS_ENSURE_SUCCESS(rv, rv);
-
-  // Load index information
-  rv = aConnection->CreateStatement(NS_LITERAL_CSTRING(
-    "SELECT object_store_id, id, name, key_path, unique_index, multientry "
-    "FROM object_store_index"
-  ), getter_AddRefs(stmt));
-  NS_ENSURE_SUCCESS(rv, rv);
-
-  while (NS_SUCCEEDED((rv = stmt->ExecuteStep(&hasResult))) && hasResult) {
-    int64_t objectStoreId = stmt->AsInt64(0);
-
-    ObjectStoreInfo* objectStoreInfo = nullptr;
-    for (uint32_t index = 0; index < infoMap.Length(); index++) {
-      if (infoMap[index].id == objectStoreId) {
-        objectStoreInfo = infoMap[index].info;
-        break;
-      }
-    }
-
-    if (!objectStoreInfo) {
-      NS_ERROR("Index for nonexistant object store!");
-      return NS_ERROR_UNEXPECTED;
-    }
-
-    IndexInfo* indexInfo = objectStoreInfo->indexes.AppendElement();
-    NS_ENSURE_TRUE(indexInfo, NS_ERROR_OUT_OF_MEMORY);
-
-    indexInfo->id = stmt->AsInt64(1);
-
-    rv = stmt->GetString(2, indexInfo->name);
-    NS_ENSURE_SUCCESS(rv, rv);
-
-    nsString keyPathSerialization;
-    rv = stmt->GetString(3, keyPathSerialization);
-    NS_ENSURE_SUCCESS(rv, rv);
-
-    // XXX bent wants to assert here
-    indexInfo->keyPath = KeyPath::DeserializeFromString(keyPathSerialization);
-    indexInfo->unique = !!stmt->AsInt32(4);
-    indexInfo->multiEntry = !!stmt->AsInt32(5);
-  }
-  NS_ENSURE_SUCCESS(rv, rv);
-
-  // Load version information.
-  rv = aConnection->CreateStatement(NS_LITERAL_CSTRING(
-    "SELECT version "
-    "FROM database"
-  ), getter_AddRefs(stmt));
-  NS_ENSURE_SUCCESS(rv, rv);
-
-  rv = stmt->ExecuteStep(&hasResult);
-  NS_ENSURE_SUCCESS(rv, rv);
-
-  if (!hasResult) {
-    NS_ERROR("Database has no version!");
-    return NS_ERROR_UNEXPECTED;
-  }
-
-  int64_t version = 0;
-  rv = stmt->GetInt64(0, &version);
-
-  *aVersion = std::max<int64_t>(version, 0);
-
-  return rv;
-}
-
-// static
-nsresult
-IDBFactory::SetDatabaseMetadata(DatabaseInfo* aDatabaseInfo,
-                                uint64_t aVersion,
-                                ObjectStoreInfoArray& aObjectStores)
-{
-  NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
-  NS_ASSERTION(aDatabaseInfo, "Null pointer!");
-
-  ObjectStoreInfoArray objectStores;
-  objectStores.SwapElements(aObjectStores);
-
-#ifdef DEBUG
-  {
-    nsTArray<nsString> existingNames;
-    aDatabaseInfo->GetObjectStoreNames(existingNames);
-    NS_ASSERTION(existingNames.IsEmpty(), "Should be an empty DatabaseInfo");
-  }
-#endif
-
-  aDatabaseInfo->version = aVersion;
-
-  for (uint32_t index = 0; index < objectStores.Length(); index++) {
-    nsRefPtr<ObjectStoreInfo>& info = objectStores[index];
-
-    if (!aDatabaseInfo->PutObjectStore(info)) {
-      NS_WARNING("Out of memory!");
-      return NS_ERROR_OUT_OF_MEMORY;
-    }
-  }
-
   return NS_OK;
 }
 
@@ -690,7 +411,7 @@ IDBFactory::OpenInternal(const nsAString& aName,
     }
   }
 
-#if 0
+#if 0 // XXX Remove me!
   if (IndexedDatabaseManager::IsMainProcess()) {
     nsRefPtr<OpenDatabaseHelper> openHelper =
       new OpenDatabaseHelper(request, aName, aGroup, aASCIIOrigin, aVersion,
@@ -949,7 +670,8 @@ IDBFactory::BackgroundActorFailed()
 
   for (uint32_t index = 0; index < mPendingRequests.Length(); index++) {
     nsAutoPtr<PendingRequestInfo> info = mPendingRequests[index].forget();
-    info->mRequest->DispatchError(NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
+    info->mRequest->
+      DispatchNonTransactionError(NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
   }
 
   mPendingRequests.Clear();
@@ -967,7 +689,7 @@ IDBFactory::InitiateRequest(IDBOpenDBRequest* aRequest,
 
   if (!mBackgroundActor->SendPBackgroundIDBFactoryRequestConstructor(actor,
                                                                      aParams)) {
-    aRequest->DispatchError(NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
+    aRequest->DispatchNonTransactionError(NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
     return NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
   }
 

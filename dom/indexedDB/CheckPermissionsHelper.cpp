@@ -21,6 +21,7 @@
 #include "nsNetUtil.h"
 #include "nsThreadUtils.h"
 #include "mozilla/Services.h"
+#include "OpenDatabaseHelper.h"
 
 #include "IndexedDatabaseManager.h"
 
@@ -79,6 +80,23 @@ GetIndexedDBPermissions(nsIDOMWindow* aWindow)
 }
 
 } // anonymous namespace
+
+CheckPermissionsHelper::CheckPermissionsHelper(OpenDatabaseHelper* aHelper,
+                                               nsIDOMWindow* aWindow)
+  : mHelper(aHelper)
+  , mWindow(aWindow)
+  , mPromptResult(0)
+    // If we're trying to delete the database, we should never prompt the user.
+    // Anything that would prompt is translated to denied.
+  , mPromptAllowed(!aHelper->mForDeletion)
+  , mHasPrompted(false)
+{
+  MOZ_ASSERT(aHelper);
+  MOZ_ASSERT(aHelper->mPersistenceType == quota::PERSISTENCE_TYPE_PERSISTENT);
+}
+
+CheckPermissionsHelper::~CheckPermissionsHelper()
+{ }
 
 NS_IMPL_ISUPPORTS3(CheckPermissionsHelper, nsIRunnable,
                    nsIInterfaceRequestor,

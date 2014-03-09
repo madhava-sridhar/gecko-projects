@@ -22,8 +22,6 @@
 #include "CrashReporterParent.h"
 #include "IHistory.h"
 #include "IDBFactory.h"
-#include "IndexedDBParent.h"
-#include "IndexedDatabaseManager.h"
 #include "mozIApplication.h"
 #include "mozilla/ClearOnShutdown.h"
 #include "mozilla/dom/asmjscache/AsmJSCache.h"
@@ -965,12 +963,6 @@ ContentParent::TransformPreallocatedIntoApp(const nsAString& aAppManifestURL)
 void
 ContentParent::ShutDownProcess(bool aCloseWithError)
 {
-    const InfallibleTArray<PIndexedDBParent*>& idbParents =
-        ManagedPIndexedDBParent();
-    for (uint32_t i = 0; i < idbParents.Length(); ++i) {
-        static_cast<IndexedDBParent*>(idbParents[i])->Disconnect();
-    }
-
     // If Close() fails with an error, we'll end up back in this function, but
     // with aCloseWithError = true.  It's important that we call
     // CloseWithError() in this case; see bug 895204.
@@ -2474,42 +2466,6 @@ ContentParent::DeallocPHalParent(hal_sandbox::PHalParent* aHal)
 {
     delete aHal;
     return true;
-}
-
-PIndexedDBParent*
-ContentParent::AllocPIndexedDBParent()
-{
-  return new IndexedDBParent(this);
-}
-
-bool
-ContentParent::DeallocPIndexedDBParent(PIndexedDBParent* aActor)
-{
-  delete aActor;
-  return true;
-}
-
-bool
-ContentParent::RecvPIndexedDBConstructor(PIndexedDBParent* aActor)
-{
-  nsRefPtr<IndexedDatabaseManager> mgr = IndexedDatabaseManager::GetOrCreate();
-  NS_ENSURE_TRUE(mgr, false);
-
-  if (!IndexedDatabaseManager::IsMainProcess()) {
-    NS_RUNTIMEABORT("Not supported yet!");
-  }
-
-  nsRefPtr<IDBFactory> factory;
-  nsresult rv = IDBFactory::Create(this, getter_AddRefs(factory));
-  NS_ENSURE_SUCCESS(rv, false);
-
-  NS_ASSERTION(factory, "This should never be null!");
-
-  IndexedDBParent* actor = static_cast<IndexedDBParent*>(aActor);
-  actor->mFactory = factory;
-  actor->mASCIIOrigin = factory->GetASCIIOrigin();
-
-  return true;
 }
 
 PMemoryReportRequestParent*

@@ -11,7 +11,6 @@
 #include "mozilla/dom/indexedDB/Key.h"
 #include "mozilla/dom/indexedDB/KeyPath.h"
 #include "mozilla/dom/indexedDB/IDBCursor.h"
-#include "mozilla/dom/indexedDB/IDBKeyRange.h"
 #include "mozilla/dom/indexedDB/IDBTransaction.h"
 #include "mozilla/dom/quota/PersistenceType.h"
 #include "mozilla/dom/quota/StoragePrivilege.h"
@@ -50,51 +49,6 @@ struct ParamTraits<mozilla::dom::indexedDB::Key>
   static void Log(const paramType& aParam, std::wstring* aLog)
   {
     LogParam(aParam.mBuffer, aLog);
-  }
-};
-
-template <>
-struct ParamTraits<mozilla::dom::indexedDB::SerializedKeyRange>
-{
-  typedef mozilla::dom::indexedDB::SerializedKeyRange paramType;
-
-  static void Write(Message* aMsg, const paramType& aParam)
-  {
-    WriteParam(aMsg, aParam.mLower);
-    WriteParam(aMsg, aParam.mIsOnly);
-    if (!aParam.mIsOnly) {
-      WriteParam(aMsg, aParam.mUpper);
-      WriteParam(aMsg, aParam.mLowerOpen);
-      WriteParam(aMsg, aParam.mUpperOpen);
-    }
-  }
-
-  static bool Read(const Message* aMsg, void** aIter, paramType* aResult)
-  {
-    if (!ReadParam(aMsg, aIter, &aResult->mLower) ||
-        !ReadParam(aMsg, aIter, &aResult->mIsOnly)) {
-      return false;
-    }
-
-    if (aResult->mIsOnly) {
-      aResult->mUpper.Unset();
-      aResult->mLowerOpen = false;
-      aResult->mUpperOpen = false;
-      return true;
-    }
-
-    return ReadParam(aMsg, aIter, &aResult->mUpper) &&
-           ReadParam(aMsg, aIter, &aResult->mLowerOpen) &&
-           ReadParam(aMsg, aIter, &aResult->mUpperOpen);
-  }
-
-  static void Log(const paramType& aParam, std::wstring* aLog)
-  {
-    LogParam(aParam.mLower, aLog);
-    LogParam(aParam.mUpper, aLog);
-    LogParam(aParam.mLowerOpen, aLog);
-    LogParam(aParam.mUpperOpen, aLog);
-    LogParam(aParam.mIsOnly, aLog);
   }
 };
 
@@ -243,115 +197,6 @@ struct ParamTraits<mozilla::dom::indexedDB::DatabaseInfoGuts>
     LogParam(aParam.version, aLog);
     LogParam(aParam.nextObjectStoreId, aLog);
     LogParam(aParam.nextIndexId, aLog);
-  }
-};
-
-template <>
-struct ParamTraits<mozilla::dom::indexedDB::IndexUpdateInfo>
-{
-  typedef mozilla::dom::indexedDB::IndexUpdateInfo paramType;
-
-  static void Write(Message* aMsg, const paramType& aParam)
-  {
-    WriteParam(aMsg, aParam.indexId);
-    WriteParam(aMsg, aParam.indexUnique);
-    WriteParam(aMsg, aParam.value);
-  }
-
-  static bool Read(const Message* aMsg, void** aIter, paramType* aResult)
-  {
-    return ReadParam(aMsg, aIter, &aResult->indexId) &&
-           ReadParam(aMsg, aIter, &aResult->indexUnique) &&
-           ReadParam(aMsg, aIter, &aResult->value);
-  }
-
-  static void Log(const paramType& aParam, std::wstring* aLog)
-  {
-    LogParam(aParam.indexId, aLog);
-    LogParam(aParam.indexUnique, aLog);
-    LogParam(aParam.value, aLog);
-  }
-};
-
-template <>
-struct ParamTraits<mozilla::dom::indexedDB::SerializedStructuredCloneReadInfo>
-{
-  typedef mozilla::dom::indexedDB::SerializedStructuredCloneReadInfo paramType;
-
-  static void Write(Message* aMsg, const paramType& aParam)
-  {
-    WriteParam(aMsg, aParam.dataLength);
-    if (aParam.dataLength) {
-      aMsg->WriteBytes(aParam.data, aParam.dataLength);
-    }
-  }
-
-  static bool Read(const Message* aMsg, void** aIter, paramType* aResult)
-  {
-    if (!ReadParam(aMsg, aIter, &aResult->dataLength)) {
-      return false;
-    }
-
-    if (aResult->dataLength) {
-      const char** buffer =
-        const_cast<const char**>(reinterpret_cast<char**>(&aResult->data));
-      if (!aMsg->ReadBytes(aIter, buffer, aResult->dataLength)) {
-        return false;
-      }
-    } else {
-      aResult->data = nullptr;
-    }
-
-    return true;
-  }
-
-  static void Log(const paramType& aParam, std::wstring* aLog)
-  {
-    LogParam(aParam.dataLength, aLog);
-  }
-};
-
-template <>
-struct ParamTraits<mozilla::dom::indexedDB::SerializedStructuredCloneWriteInfo>
-{
-  typedef mozilla::dom::indexedDB::SerializedStructuredCloneWriteInfo paramType;
-
-  static void Write(Message* aMsg, const paramType& aParam)
-  {
-    WriteParam(aMsg, aParam.dataLength);
-    if (aParam.dataLength) {
-      aMsg->WriteBytes(aParam.data, aParam.dataLength);
-    }
-    WriteParam(aMsg, aParam.offsetToKeyProp);
-  }
-
-  static bool Read(const Message* aMsg, void** aIter, paramType* aResult)
-  {
-    if (!ReadParam(aMsg, aIter, &aResult->dataLength)) {
-      return false;
-    }
-
-    if (aResult->dataLength) {
-      const char** buffer =
-        const_cast<const char**>(reinterpret_cast<char**>(&aResult->data));
-      if (!aMsg->ReadBytes(aIter, buffer, aResult->dataLength)) {
-        return false;
-      }
-    } else {
-      aResult->data = nullptr;
-    }
-
-    if (!ReadParam(aMsg, aIter, &aResult->offsetToKeyProp)) {
-      return false;
-    }
-
-    return true;
-  }
-
-  static void Log(const paramType& aParam, std::wstring* aLog)
-  {
-    LogParam(aParam.dataLength, aLog);
-    LogParam(aParam.offsetToKeyProp, aLog);
   }
 };
 

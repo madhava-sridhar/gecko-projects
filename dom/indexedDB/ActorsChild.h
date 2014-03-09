@@ -9,6 +9,7 @@
 #include "mozilla/dom/indexedDB/PBackgroundIDBDatabaseChild.h"
 #include "mozilla/dom/indexedDB/PBackgroundIDBFactoryChild.h"
 #include "mozilla/dom/indexedDB/PBackgroundIDBFactoryRequestChild.h"
+#include "mozilla/dom/indexedDB/PBackgroundIDBRequestChild.h"
 #include "mozilla/dom/indexedDB/PBackgroundIDBTransactionChild.h"
 #include "mozilla/dom/indexedDB/PBackgroundIDBVersionChangeTransactionChild.h"
 #include "nsAutoPtr.h"
@@ -32,34 +33,7 @@ class IDBFactory;
 class IDBOpenDBRequest;
 class IDBRequest;
 class IDBTransaction;
-
-class BackgroundRequestChildBase
-{
-protected:
-  nsRefPtr<IDBRequest> mRequest;
-
-public:
-  void
-  AssertIsOnOwningThread() const
-#ifdef DEBUG
-  ;
-#else
-  { }
-#endif
-
-  IDBRequest*
-  GetDOMObject() const
-  {
-    AssertIsOnOwningThread();
-    return mRequest;
-  }
-
-protected:
-  BackgroundRequestChildBase(IDBRequest* aRequest);
-
-  virtual
-  ~BackgroundRequestChildBase();
-};
+class Key;
 
 class BackgroundFactoryChild MOZ_FINAL
   : public PBackgroundIDBFactoryChild
@@ -124,6 +98,34 @@ private:
 
 class BackgroundDatabaseChild;
 
+class BackgroundRequestChildBase
+{
+protected:
+  nsRefPtr<IDBRequest> mRequest;
+
+public:
+  void
+  AssertIsOnOwningThread() const
+#ifdef DEBUG
+  ;
+#else
+  { }
+#endif
+
+  IDBRequest*
+  GetDOMObject() const
+  {
+    AssertIsOnOwningThread();
+    return mRequest;
+  }
+
+protected:
+  BackgroundRequestChildBase(IDBRequest* aRequest);
+
+  virtual
+  ~BackgroundRequestChildBase();
+};
+
 class BackgroundFactoryRequestChild MOZ_FINAL
   : public BackgroundRequestChildBase
   , public PBackgroundIDBFactoryRequestChild
@@ -135,14 +137,8 @@ class BackgroundFactoryRequestChild MOZ_FINAL
   nsRefPtr<IDBFactory> mFactory;
 
 public:
-  void
-  AssertIsOnOwningThread() const
-  {
-    static_cast<BackgroundFactoryChild*>(Manager())->AssertIsOnOwningThread();
-  }
-
   IDBOpenDBRequest*
-  GetDOMObject() const;
+  GetOpenDBRequest() const;
 
 private:
   // Only created by IDBFactory.
@@ -151,6 +147,15 @@ private:
 
   // Only destroyed by BackgroundFactoryChild.
   ~BackgroundFactoryRequestChild();
+
+  bool
+  HandleResponse(nsresult aResponse);
+
+  bool
+  HandleResponse(const OpenDatabaseRequestResponse& aResponse);
+
+  bool
+  HandleResponse(const DeleteDatabaseRequestResponse& aResponse);
 
   // IPDL methods are only called by IPDL.
   virtual bool
@@ -254,10 +259,21 @@ private:
   RecvInvalidate() MOZ_OVERRIDE;
 };
 
+class BackgroundVersionChangeTransactionChild;
+
 class BackgroundTransactionBase
 {
+  friend class BackgroundVersionChangeTransactionChild;
+
+  // mTemporaryStrongTransaction is strong and is only valid until the end of
+  // NoteComplete() member function or until the NoteActorDestroyed() member
+  // function is called.
+  nsRefPtr<IDBTransaction> mTemporaryStrongTransaction;
+
 protected:
-  nsRefPtr<IDBTransaction> mTransaction;
+  // mTransaction is weak and is valid until the NoteActorDestroyed() member
+  // function is called.
+  IDBTransaction* mTransaction;
 
 public:
 #ifdef DEBUG
@@ -285,6 +301,14 @@ protected:
 
   void
   NoteActorDestroyed();
+
+  void
+  NoteComplete();
+
+private:
+  // Only called by BackgroundVersionChangeTransactionChild.
+  void
+  SetDOMTransaction(IDBTransaction* aDOMObject);
 };
 
 class BackgroundTransactionChild MOZ_FINAL
@@ -316,6 +340,13 @@ private:
 
   bool
   RecvComplete(const nsresult& aResult) MOZ_OVERRIDE;
+
+  virtual PBackgroundIDBRequestChild*
+  AllocPBackgroundIDBRequestChild(const RequestParams& aParams) MOZ_OVERRIDE;
+
+  virtual bool
+  DeallocPBackgroundIDBRequestChild(PBackgroundIDBRequestChild* aActor)
+                                    MOZ_OVERRIDE;
 };
 
 class BackgroundVersionChangeTransactionChild MOZ_FINAL
@@ -342,7 +373,10 @@ private:
 
   // Only called by BackgroundDatabaseChild.
   void
-  SetDOMObject(IDBTransaction* aDOMObject);
+  SetDOMTransaction(IDBTransaction* aDOMObject)
+  {
+    BackgroundTransactionBase::SetDOMTransaction(aDOMObject);
+  }
 
   // IPDL methods are only called by IPDL.
   virtual void
@@ -350,6 +384,44 @@ private:
 
   bool
   RecvComplete(const nsresult& aResult) MOZ_OVERRIDE;
+
+  virtual PBackgroundIDBRequestChild*
+  AllocPBackgroundIDBRequestChild(const RequestParams& aParams) MOZ_OVERRIDE;
+
+  virtual bool
+  DeallocPBackgroundIDBRequestChild(PBackgroundIDBRequestChild* aActor)
+                                    MOZ_OVERRIDE;
+};
+
+class BackgroundRequestChild MOZ_FINAL
+  : public BackgroundRequestChildBase
+  , public PBackgroundIDBRequestChild
+{
+  friend class BackgroundTransactionChild;
+  friend class BackgroundVersionChangeTransactionChild;
+
+  nsRefPtr<IDBTransaction> mTransaction;
+
+public:
+  BackgroundRequestChild(IDBRequest* aRequest);
+
+private:
+  // Only destroyed by BackgroundTransactionChild or
+  // BackgroundVersionChangeTransactionChild.
+  ~BackgroundRequestChild();
+
+  bool
+  HandleResponse(nsresult aResponse);
+
+  bool
+  HandleResponse(const ObjectStoreGetResponse& aResponse);
+
+  bool
+  HandleResponse(const Key& aResponse);
+
+  // IPDL methods are only called by IPDL.
+  virtual bool
+  Recv__delete__(const RequestResponse& aResponse) MOZ_OVERRIDE;
 };
 
 } // namespace indexedDB

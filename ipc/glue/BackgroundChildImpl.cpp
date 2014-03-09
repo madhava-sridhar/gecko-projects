@@ -45,6 +45,10 @@ namespace ipc {
 BackgroundChildImpl::
 ThreadLocal::ThreadLocal()
 : mCurrentTransaction(nullptr)
+#ifdef MOZ_ENABLE_PROFILER_SPS
+, mNextTransactionSerialNumber(1)
+, mNextRequestSerialNumber(1)
+#endif
 {
   // May happen on any thread!
   MOZ_COUNT_CTOR(mozilla::ipc::BackgroundChildImpl::ThreadLocal);

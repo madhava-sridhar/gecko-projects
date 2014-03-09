@@ -10,7 +10,6 @@
 
 #include "Layers.h"
 #include "ContentChild.h"
-#include "IndexedDBChild.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/ClearOnShutdown.h"
 #include "mozilla/EventListenerManager.h"
@@ -90,7 +89,6 @@ using namespace mozilla::ipc;
 using namespace mozilla::layers;
 using namespace mozilla::layout;
 using namespace mozilla::docshell;
-using namespace mozilla::dom::indexedDB;
 using namespace mozilla::widget;
 using namespace mozilla::jsipc;
 
@@ -2206,12 +2204,6 @@ TabChild::RecvDestroy()
   observerService->RemoveObserver(this, BROWSER_ZOOM_TO_RECT);
   observerService->RemoveObserver(this, BEFORE_FIRST_PAINT);
 
-  const InfallibleTArray<PIndexedDBChild*>& idbActors =
-    ManagedPIndexedDBChild();
-  for (uint32_t i = 0; i < idbActors.Length(); ++i) {
-    static_cast<IndexedDBChild*>(idbActors[i])->Disconnect();
-  }
-
   // XXX what other code in ~TabChild() should we be running here?
   DestroyWindow();
 
@@ -2469,22 +2461,6 @@ void
 TabChild::SendRequestFocus(bool aCanFocus)
 {
   PBrowserChild::SendRequestFocus(aCanFocus);
-}
-
-PIndexedDBChild*
-TabChild::AllocPIndexedDBChild(
-                            const nsCString& aGroup,
-                            const nsCString& aASCIIOrigin, bool* /* aAllowed */)
-{
-  NS_NOTREACHED("Should never get here!");
-  return nullptr;
-}
-
-bool
-TabChild::DeallocPIndexedDBChild(PIndexedDBChild* aActor)
-{
-  delete aActor;
-  return true;
 }
 
 bool

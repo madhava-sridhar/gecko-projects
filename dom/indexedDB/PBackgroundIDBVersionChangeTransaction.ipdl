@@ -3,6 +3,7 @@
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 include protocol PBackgroundIDBDatabase;
+include protocol PBackgroundIDBRequest;
 
 include PBackgroundIDBSharedTypes;
 
@@ -13,6 +14,7 @@ namespace indexedDB {
 protocol PBackgroundIDBVersionChangeTransaction
 {
   manager PBackgroundIDBDatabase;
+  manages PBackgroundIDBRequest;
 
 parent:
   DeleteMe();
@@ -27,6 +29,8 @@ parent:
               IndexMetadata metadata);
   DeleteIndex(int64_t objectStoreId,
               int64_t indexId);
+
+  PBackgroundIDBRequest(RequestParams params);
 
 child:
   __delete__();

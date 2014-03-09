@@ -23,9 +23,6 @@
 #include "ReportInternalError.h"
 #include "TransactionThreadPool.h"
 
-#include "ipc/IndexedDBChild.h"
-#include "ipc/IndexedDBParent.h"
-
 using namespace mozilla;
 USING_INDEXEDDB_NAMESPACE
 using mozilla::dom::quota::QuotaManager;
@@ -220,11 +217,11 @@ AsyncConnectionHelper::Run()
       }
 
       case Success_NotSent: {
-        if (mRequest) {
+        if (mRequest) {/*
           nsresult rv = mRequest->NotifyHelperCompleted(this);
           if (NS_SUCCEEDED(mResultCode) && NS_FAILED(rv)) {
             mResultCode = rv;
-          }
+          }*/
 
           IDB_PROFILER_MARK("IndexedDB Request %llu: Running main thread "
                             "response (rv = %lu)",
@@ -250,7 +247,7 @@ AsyncConnectionHelper::Run()
         IDB_WARNING("MaybeSendResultsToChildProcess failed!");
         mResultCode = NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
         if (mRequest) {
-          mRequest->NotifyHelperSentResultsToChildProcess(mResultCode);
+          //mRequest->NotifyHelperSentResultsToChildProcess(mResultCode);
         }
         break;
       }
@@ -287,7 +284,7 @@ AsyncConnectionHelper::Run()
   nsCOMPtr<mozIStorageConnection> connection;
 
   if (mTransaction) {
-    rv = mTransaction->GetOrCreateConnection(getter_AddRefs(connection));
+    //rv = mTransaction->GetOrCreateConnection(getter_AddRefs(connection));
     if (NS_SUCCEEDED(rv)) {
       NS_ASSERTION(connection, "This should never be null!");
     }
@@ -573,6 +570,8 @@ AsyncConnectionHelper::MaybeSendResponseToChildProcess(nsresult aResultCode)
     return Success_NotSent;
   }
 
+  MOZ_CRASH("Remove me!");
+  /*
   // Are we shutting down the child?
   IndexedDBDatabaseParent* dbActor = trans->Database()->GetActorParent();
   if (dbActor && dbActor->IsDisconnected()) {
@@ -582,7 +581,7 @@ AsyncConnectionHelper::MaybeSendResponseToChildProcess(nsresult aResultCode)
   IndexedDBRequestParentBase* actor = mRequest->GetActorParent();
   if (!actor) {
     return Success_NotSent;
-  }
+  }*/
 
   IDB_PROFILER_MARK("IndexedDB Request %llu: Sending response to child "
                     "process (rv = %lu)",
@@ -598,6 +597,8 @@ AsyncConnectionHelper::OnParentProcessRequestComplete(
 {
   NS_ASSERTION(!IndexedDatabaseManager::IsMainProcess(), "Wrong process!");
 
+  MOZ_CRASH("Remove me!");
+/*
   if (aResponseValue.type() == ResponseValue::Tnsresult) {
     NS_ASSERTION(NS_FAILED(aResponseValue.get_nsresult()), "Huh?");
     SetError(aResponseValue.get_nsresult());
@@ -606,7 +607,7 @@ AsyncConnectionHelper::OnParentProcessRequestComplete(
     nsresult rv = UnpackResponseFromParentProcess(aResponseValue);
     NS_ENSURE_SUCCESS(rv, rv);
   }
-
+  */
   return Run();
 }
 
