@@ -38,6 +38,14 @@ struct ObjectStorePutResponse
 struct ObjectStoreDeleteResponse
 { };
 
+struct ObjectStoreClearResponse
+{ };
+
+struct ObjectStoreCountResponse
+{
+  uint64_t count;
+};
+
 union RequestResponse
 {
   nsresult;
@@ -45,6 +53,8 @@ union RequestResponse
   ObjectStoreAddResponse;
   ObjectStorePutResponse;
   ObjectStoreDeleteResponse;
+  ObjectStoreClearResponse;
+  ObjectStoreCountResponse;
 };
 
 protocol PBackgroundIDBRequest

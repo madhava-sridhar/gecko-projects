@@ -3748,6 +3748,8 @@ SPECIALIZE_REQUESTOP_TRAITS(ObjectStoreGet)
 SPECIALIZE_REQUESTOP_TRAITS(ObjectStoreAdd)
 SPECIALIZE_REQUESTOP_TRAITS(ObjectStorePut)
 SPECIALIZE_REQUESTOP_TRAITS(ObjectStoreDelete)
+SPECIALIZE_REQUESTOP_TRAITS(ObjectStoreClear)
+SPECIALIZE_REQUESTOP_TRAITS(ObjectStoreCount)
 
 #undef SPECIALIZE_REQUESTOP_TRAITS
 
@@ -4969,6 +4971,44 @@ TransactionBase::VerifyRequestParams(const RequestParams& aParams) const
       break;
     }
 
+    case RequestParams::TObjectStoreClearParams: {
+      const ObjectStoreClearParams& params =
+        aParams.get_ObjectStoreClearParams();
+      if (NS_WARN_IF(!GetMetadataForObjectStoreId(params.objectStoreId()))) {
+        ASSERT_UNLESS_FUZZING();
+        return false;
+      }
+      break;
+    }
+
+    case RequestParams::TObjectStoreCountParams: {
+      const ObjectStoreCountParams& params =
+        aParams.get_ObjectStoreCountParams();
+      MOZ_ASSERT(params.optionalKeyRange().type() != OptionalKeyRange::T__None);
+      if (NS_WARN_IF(!GetMetadataForObjectStoreId(params.objectStoreId()))) {
+        ASSERT_UNLESS_FUZZING();
+        return false;
+      }
+      switch (params.optionalKeyRange().type()) {
+        case OptionalKeyRange::TSerializedKeyRange: {
+          if (NS_WARN_IF(!VerifyKeyRange(
+                params.optionalKeyRange().get_SerializedKeyRange()))) {
+            ASSERT_UNLESS_FUZZING();
+            return false;
+          }
+          break;
+        }
+        case OptionalKeyRange::Tvoid_t: {
+          break;
+        }
+        default: {
+          ASSERT_UNLESS_FUZZING();
+          return false;
+        }
+      }
+      break;
+    }
+
     default:
       ASSERT_UNLESS_FUZZING();
       return false;
@@ -5189,6 +5229,14 @@ TransactionBase::AllocRequest(const RequestParams& aParams)
 
     case RequestParams::TObjectStoreDeleteParams:
       actor = GenerateRequestOp(aParams.get_ObjectStoreDeleteParams());
+      break;
+
+    case RequestParams::TObjectStoreClearParams:
+      actor = GenerateRequestOp(aParams.get_ObjectStoreClearParams());
+      break;
+
+    case RequestParams::TObjectStoreCountParams:
+      actor = GenerateRequestOp(aParams.get_ObjectStoreCountParams());
       break;
 
     default:
@@ -8975,6 +9023,114 @@ RequestOp<ObjectStoreDeleteParams>::DoDatabaseWork(
   if (NS_WARN_IF(NS_FAILED(rv))) {
     return rv;
   }
+
+  return NS_OK;
+}
+
+template <>
+nsresult
+RequestOp<ObjectStoreClearParams>::DoDatabaseWork(TransactionBase* aTransaction)
+{
+  MOZ_ASSERT(aTransaction);
+  aTransaction->AssertIsOnTransactionThread();
+
+  PROFILER_LABEL("IndexedDB",
+                 "RequestOp<ObjectStoreClearParams>::DoDatabaseWork");
+
+  TransactionBase::AutoSavepoint autoSave;
+  nsresult rv = autoSave.Start(aTransaction, this);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+
+  TransactionBase::CachedStatement stmt;
+  rv = aTransaction->GetCachedStatement(
+    "DELETE FROM object_data "
+    "WHERE object_store_id = :osid",
+    &stmt);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+
+  rv = stmt->BindInt64ByName(NS_LITERAL_CSTRING("osid"),
+                             mParams.objectStoreId());
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+
+  rv = stmt->Execute();
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+
+  return NS_OK;
+}
+
+template <>
+nsresult
+RequestOp<ObjectStoreCountParams>::DoDatabaseWork(TransactionBase* aTransaction)
+{
+  MOZ_ASSERT(aTransaction);
+  aTransaction->AssertIsOnTransactionThread();
+
+  PROFILER_LABEL("IndexedDB",
+                 "RequestOp<ObjectStoreCountParams>::DoDatabaseWork");
+
+  const bool hasKeyRange =
+    mParams.optionalKeyRange().type() == OptionalKeyRange::TSerializedKeyRange;
+
+  nsCString keyRangeClause;
+  if (hasKeyRange) {
+    GetBindingClauseForKeyRange(
+      mParams.optionalKeyRange().get_SerializedKeyRange(),
+      NS_LITERAL_CSTRING("key_value"),
+      keyRangeClause);
+  }
+
+  nsCString query =
+    NS_LITERAL_CSTRING("SELECT count(*) FROM object_data "
+                       "WHERE object_store_id = :osid") +
+    keyRangeClause;
+
+  TransactionBase::CachedStatement stmt;
+  nsresult rv = aTransaction->GetCachedStatement(query, &stmt);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+
+  rv = stmt->BindInt64ByName(NS_LITERAL_CSTRING("osid"),
+                             mParams.objectStoreId());
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+
+  if (hasKeyRange) {
+    rv = BindKeyRangeToStatement(
+      mParams.optionalKeyRange().get_SerializedKeyRange(),
+      stmt);
+    if (NS_WARN_IF(NS_FAILED(rv))) {
+      return rv;
+    }
+  }
+
+  bool hasResult;
+  rv = stmt->ExecuteStep(&hasResult);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+
+  if (NS_WARN_IF(!hasResult)) {
+    IDB_REPORT_INTERNAL_ERR();
+    return NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
+  }
+
+  int64_t count = stmt->AsInt64(0);
+  if (NS_WARN_IF(count < 0)) {
+    IDB_REPORT_INTERNAL_ERR();
+    return NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
+  }
+
+  mResponse.count() = count;
 
   return NS_OK;
 }

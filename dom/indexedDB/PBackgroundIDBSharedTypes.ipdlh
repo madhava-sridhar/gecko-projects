@@ -122,12 +122,25 @@ struct ObjectStoreDeleteParams
   SerializedKeyRange keyRange;
 };
 
+struct ObjectStoreClearParams
+{
+  int64_t objectStoreId;
+};
+
+struct ObjectStoreCountParams
+{
+  int64_t objectStoreId;
+  OptionalKeyRange optionalKeyRange;
+};
+
 union RequestParams
 {
   ObjectStoreGetParams;
   ObjectStoreAddParams;
   ObjectStorePutParams;
   ObjectStoreDeleteParams;
+  ObjectStoreClearParams;
+  ObjectStoreCountParams;
 };
 
 } // namespace indexedDB

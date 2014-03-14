@@ -192,14 +192,6 @@ public:
                      ErrorResult& aRv);
 
   already_AddRefed<IDBRequest>
-  DeleteInternal(IDBKeyRange* aKeyRange,
-                 ErrorResult& aRv);
-
-  already_AddRefed<IDBRequest>
-  CountInternal(IDBKeyRange* aKeyRange,
-                ErrorResult& aRv);
-
-  already_AddRefed<IDBRequest>
   OpenCursorInternal(IDBKeyRange* aKeyRange,
                      size_t aDirection,
                      ErrorResult& aRv);

@@ -251,56 +251,6 @@ private:
   StructuredCloneReadInfo mCloneReadInfo;
 };
 
-class DeleteHelper : public GetHelper
-{
-public:
-  DeleteHelper(IDBTransaction* aTransaction,
-               IDBRequest* aRequest,
-               IDBObjectStore* aObjectStore,
-               IDBKeyRange* aKeyRange)
-  : GetHelper(aTransaction, aRequest, aObjectStore, aKeyRange)
-  { }
-
-  virtual nsresult DoDatabaseWork(mozIStorageConnection* aConnection)
-                                  MOZ_OVERRIDE;
-
-  virtual nsresult GetSuccessResult(JSContext* aCx,
-                                    JS::MutableHandle<JS::Value> aVal) MOZ_OVERRIDE;
-
-  virtual nsresult
-  PackArgumentsForParentProcess(ObjectStoreRequestParams& aParams) MOZ_OVERRIDE;
-
-  virtual ChildProcessSendResult
-  SendResponseToChildProcess(nsresult aResultCode) MOZ_OVERRIDE;
-
-  virtual nsresult
-  UnpackResponseFromParentProcess(const ResponseValue& aResponseValue)
-                                  MOZ_OVERRIDE;
-};
-
-class ClearHelper : public ObjectStoreHelper
-{
-public:
-  ClearHelper(IDBTransaction* aTransaction,
-              IDBRequest* aRequest,
-              IDBObjectStore* aObjectStore)
-  : ObjectStoreHelper(aTransaction, aRequest, aObjectStore)
-  { }
-
-  virtual nsresult DoDatabaseWork(mozIStorageConnection* aConnection)
-                                  MOZ_OVERRIDE;
-
-  virtual nsresult
-  PackArgumentsForParentProcess(ObjectStoreRequestParams& aParams) MOZ_OVERRIDE;
-
-  virtual ChildProcessSendResult
-  SendResponseToChildProcess(nsresult aResultCode) MOZ_OVERRIDE;
-
-  virtual nsresult
-  UnpackResponseFromParentProcess(const ResponseValue& aResponseValue)
-                                  MOZ_OVERRIDE;
-};
-
 class OpenCursorHelper : public ObjectStoreHelper
 {
 public:
@@ -493,40 +443,6 @@ private:
   nsRefPtr<IDBKeyRange> mKeyRange;
   const uint32_t mLimit;
   nsTArray<Key> mKeys;
-};
-
-class CountHelper : public ObjectStoreHelper
-{
-public:
-  CountHelper(IDBTransaction* aTransaction,
-              IDBRequest* aRequest,
-              IDBObjectStore* aObjectStore,
-              IDBKeyRange* aKeyRange)
-  : ObjectStoreHelper(aTransaction, aRequest, aObjectStore),
-    mKeyRange(aKeyRange), mCount(0)
-  { }
-
-  virtual nsresult DoDatabaseWork(mozIStorageConnection* aConnection)
-                                  MOZ_OVERRIDE;
-
-  virtual nsresult GetSuccessResult(JSContext* aCx,
-                                    JS::MutableHandle<JS::Value> aVal) MOZ_OVERRIDE;
-
-  virtual void ReleaseMainThreadObjects() MOZ_OVERRIDE;
-
-  virtual nsresult
-  PackArgumentsForParentProcess(ObjectStoreRequestParams& aParams) MOZ_OVERRIDE;
-
-  virtual ChildProcessSendResult
-  SendResponseToChildProcess(nsresult aResultCode) MOZ_OVERRIDE;
-
-  virtual nsresult
-  UnpackResponseFromParentProcess(const ResponseValue& aResponseValue)
-                                  MOZ_OVERRIDE;
-
-private:
-  nsRefPtr<IDBKeyRange> mKeyRange;
-  uint64_t mCount;
 };
 
 class MOZ_STACK_CLASS AutoRemoveIndex
@@ -2061,50 +1977,9 @@ IDBObjectStore::GetAllKeysInternal(IDBKeyRange* aKeyRange, uint32_t aLimit,
 }
 
 already_AddRefed<IDBRequest>
-IDBObjectStore::DeleteInternal(IDBKeyRange* aKeyRange,
-                               ErrorResult& aRv)
-{
-  NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
-  NS_ASSERTION(aKeyRange, "Null key range!");
-
-  if (!mTransaction->IsOpen()) {
-    aRv.Throw(NS_ERROR_DOM_INDEXEDDB_TRANSACTION_INACTIVE_ERR);
-    return nullptr;
-  }
-
-  if (!IsWriteAllowed()) {
-    aRv.Throw(NS_ERROR_DOM_INDEXEDDB_READ_ONLY_ERR);
-    return nullptr;
-  }
-
-  nsRefPtr<IDBRequest> request = GenerateRequest(this);
-  MOZ_ASSERT(request);
-
-  nsRefPtr<DeleteHelper> helper =
-    new DeleteHelper(mTransaction, request, this, aKeyRange);
-
-  nsresult rv = helper->DispatchToTransactionPool();
-  if (NS_FAILED(rv)) {
-    IDB_WARNING("Failed to dispatch!");
-    aRv.Throw(NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
-    return nullptr;
-  }
-
-  IDB_PROFILER_MARK("IndexedDB Request %llu: "
-                    "database(%s).transaction(%s).objectStore(%s).delete(%s)",
-                    "IDBRequest[%llu] MT IDBObjectStore.delete()",
-                    request->GetSerialNumber(),
-                    IDB_PROFILER_STRING(Transaction()->Database()),
-                    IDB_PROFILER_STRING(Transaction()),
-                    IDB_PROFILER_STRING(this), IDB_PROFILER_STRING(aKeyRange));
-
-  return request.forget();
-}
-
-already_AddRefed<IDBRequest>
 IDBObjectStore::Clear(ErrorResult& aRv)
 {
-  NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
+  AssertIsOnOwningThread();
 
   if (!mTransaction->IsOpen()) {
     aRv.Throw(NS_ERROR_DOM_INDEXEDDB_TRANSACTION_INACTIVE_ERR);
@@ -2119,14 +1994,12 @@ IDBObjectStore::Clear(ErrorResult& aRv)
   nsRefPtr<IDBRequest> request = GenerateRequest(this);
   MOZ_ASSERT(request);
 
-  nsRefPtr<ClearHelper> helper(new ClearHelper(mTransaction, request, this));
+  ObjectStoreClearParams params;
+  params.objectStoreId() = Id();
 
-  nsresult rv = helper->DispatchToTransactionPool();
-  if (NS_FAILED(rv)) {
-    IDB_WARNING("Failed to dispatch!");
-    aRv.Throw(NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
-    return nullptr;
-  }
+  BackgroundRequestChild* actor = new BackgroundRequestChild(request);
+
+  mTransaction->StartRequest(actor, params);
 
   IDB_PROFILER_MARK("IndexedDB Request %llu: "
                     "database(%s).transaction(%s).objectStore(%s).clear()",
@@ -2135,39 +2008,6 @@ IDBObjectStore::Clear(ErrorResult& aRv)
                     IDB_PROFILER_STRING(Transaction()->Database()),
                     IDB_PROFILER_STRING(Transaction()),
                     IDB_PROFILER_STRING(this));
-
-  return request.forget();
-}
-
-already_AddRefed<IDBRequest>
-IDBObjectStore::CountInternal(IDBKeyRange* aKeyRange, ErrorResult& aRv)
-{
-  NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
-
-  if (!mTransaction->IsOpen()) {
-    aRv.Throw(NS_ERROR_DOM_INDEXEDDB_TRANSACTION_INACTIVE_ERR);
-    return nullptr;
-  }
-
-  nsRefPtr<IDBRequest> request = GenerateRequest(this);
-  MOZ_ASSERT(request);
-
-  nsRefPtr<CountHelper> helper =
-    new CountHelper(mTransaction, request, this, aKeyRange);
-  nsresult rv = helper->DispatchToTransactionPool();
-  if (NS_FAILED(rv)) {
-    IDB_WARNING("Failed to dispatch!");
-    aRv.Throw(NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
-    return nullptr;
-  }
-
-  IDB_PROFILER_MARK("IndexedDB Request %llu: "
-                    "database(%s).transaction(%s).objectStore(%s).count(%s)",
-                    "IDBRequest[%llu] MT IDBObjectStore.count()",
-                    request->GetSerialNumber(),
-                    IDB_PROFILER_STRING(Transaction()->Database()),
-                    IDB_PROFILER_STRING(Transaction()),
-                    IDB_PROFILER_STRING(this), IDB_PROFILER_STRING(aKeyRange));
 
   return request.forget();
 }
@@ -2758,9 +2598,37 @@ IDBObjectStore::Count(JSContext* aCx,
 
   nsRefPtr<IDBKeyRange> keyRange;
   aRv = IDBKeyRange::FromJSVal(aCx, aKey, getter_AddRefs(keyRange));
-  ENSURE_SUCCESS(aRv, nullptr);
+  if (aRv.Failed()) {
+    return nullptr;
+  }
 
-  return CountInternal(keyRange, aRv);
+  nsRefPtr<IDBRequest> request = GenerateRequest(this);
+  MOZ_ASSERT(request);
+
+  ObjectStoreCountParams params;
+  params.objectStoreId() = Id();
+
+  if (keyRange) {
+    SerializedKeyRange serializedKeyRange;
+    keyRange->ToSerialized(serializedKeyRange);
+    params.optionalKeyRange() = serializedKeyRange;
+  } else {
+    params.optionalKeyRange() = void_t();
+  }
+
+  BackgroundRequestChild* actor = new BackgroundRequestChild(request);
+
+  mTransaction->StartRequest(actor, params);
+
+  IDB_PROFILER_MARK("IndexedDB Request %llu: "
+                    "database(%s).transaction(%s).objectStore(%s).count(%s)",
+                    "IDBRequest[%llu] MT IDBObjectStore.count()",
+                    request->GetSerialNumber(),
+                    IDB_PROFILER_STRING(Transaction()->Database()),
+                    IDB_PROFILER_STRING(Transaction()),
+                    IDB_PROFILER_STRING(this), IDB_PROFILER_STRING(aKeyRange));
+
+  return request.forget();
 }
 
 already_AddRefed<IDBRequest>
@@ -3524,196 +3392,6 @@ GetHelper::UnpackResponseFromParentProcess(const ResponseValue& aResponseValue)
   IDBObjectStore::ConvertActorsToBlobs(getResponse.blobsChild(),
                                        mCloneReadInfo.mFiles);
                                        */
-  return NS_OK;
-}
-
-nsresult
-DeleteHelper::DoDatabaseWork(mozIStorageConnection* /*aConnection */)
-{
-  NS_ASSERTION(!NS_IsMainThread(), "Wrong thread!");
-  NS_ASSERTION(IndexedDatabaseManager::IsMainProcess(), "Wrong process!");
-  NS_ASSERTION(mKeyRange, "Must have a key range here!");
-
-  PROFILER_LABEL("IndexedDB", "DeleteHelper::DoDatabaseWork");
-
-  nsCString keyRangeClause;
-  mKeyRange->GetBindingClause(NS_LITERAL_CSTRING("key_value"), keyRangeClause);
-
-  NS_ASSERTION(!keyRangeClause.IsEmpty(), "Huh?!");
-
-  nsCString query = NS_LITERAL_CSTRING("DELETE FROM object_data "
-                                       "WHERE object_store_id = :osid") +
-                    keyRangeClause;
-
-  nsCOMPtr<mozIStorageStatement> stmt = mTransaction->GetCachedStatement(query);
-  IDB_ENSURE_TRUE(stmt, NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
-
-  mozStorageStatementScoper scoper(stmt);
-
-  nsresult rv = stmt->BindInt64ByName(NS_LITERAL_CSTRING("osid"),
-                                      mObjectStore->Id());
-  IDB_ENSURE_SUCCESS(rv, NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
-
-  rv = mKeyRange->BindToStatement(stmt);
-  NS_ENSURE_SUCCESS(rv, rv);
-
-  rv = stmt->Execute();
-  IDB_ENSURE_SUCCESS(rv, NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
-
-  return NS_OK;
-}
-
-nsresult
-DeleteHelper::GetSuccessResult(JSContext* aCx,
-                               JS::MutableHandle<JS::Value> aVal)
-{
-  aVal.setUndefined();
-  return NS_OK;
-}
-
-nsresult
-DeleteHelper::PackArgumentsForParentProcess(ObjectStoreRequestParams& aParams)
-{
-  NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
-  NS_ASSERTION(!IndexedDatabaseManager::IsMainProcess(), "Wrong process!");
-  NS_ASSERTION(mKeyRange, "This should never be null!");
-
-  PROFILER_MAIN_THREAD_LABEL("IndexedDB",
-                             "DeleteHelper::PackArgumentsForParentProcess");
-
-  MOZ_CRASH("Remove me!");
-  /*
-  DeleteParams params;
-
-  mKeyRange->ToSerialized(params.keyRange());
-
-  aParams = params;
-  */
-  return NS_OK;
-}
-
-AsyncConnectionHelper::ChildProcessSendResult
-DeleteHelper::SendResponseToChildProcess(nsresult aResultCode)
-{
-  NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
-  NS_ASSERTION(IndexedDatabaseManager::IsMainProcess(), "Wrong process!");
-
-  PROFILER_MAIN_THREAD_LABEL("IndexedDB",
-                             "DeleteHelper::SendResponseToChildProcess");
-
-  MOZ_CRASH("Remove me!");
-  /*
-  IndexedDBRequestParentBase* actor = mRequest->GetActorParent();
-  NS_ASSERTION(actor, "How did we get this far without an actor?");
-
-  ResponseValue response;
-  if (NS_FAILED(aResultCode)) {
-    response = aResultCode;
-  }
-  else {
-    response = DeleteResponse();
-  }
-
-  if (!actor->SendResponse(response)) {
-    return Error;
-  }
-  */
-  return Success_Sent;
-}
-
-nsresult
-DeleteHelper::UnpackResponseFromParentProcess(
-                                            const ResponseValue& aResponseValue)
-{
-  MOZ_CRASH("Remove me!");
-  /*
-  NS_ASSERTION(aResponseValue.type() == ResponseValue::TDeleteResponse,
-               "Bad response type!");
-*/
-  return NS_OK;
-}
-
-nsresult
-ClearHelper::DoDatabaseWork(mozIStorageConnection* aConnection)
-{
-  NS_ASSERTION(!NS_IsMainThread(), "Wrong thread!");
-  NS_ASSERTION(IndexedDatabaseManager::IsMainProcess(), "Wrong process!");
-  NS_ASSERTION(aConnection, "Passed a null connection!");
-
-  PROFILER_LABEL("IndexedDB", "ClearHelper::DoDatabaseWork");
-
-  nsCOMPtr<mozIStorageStatement> stmt =
-    mTransaction->GetCachedStatement(
-      NS_LITERAL_CSTRING("DELETE FROM object_data "
-                         "WHERE object_store_id = :osid"));
-  IDB_ENSURE_TRUE(stmt, NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
-
-  mozStorageStatementScoper scoper(stmt);
-
-  nsresult rv = stmt->BindInt64ByName(NS_LITERAL_CSTRING("osid"),
-                                      mObjectStore->Id());
-  IDB_ENSURE_SUCCESS(rv, NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
-
-  rv = stmt->Execute();
-  IDB_ENSURE_SUCCESS(rv, NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
-
-  return NS_OK;
-}
-
-nsresult
-ClearHelper::PackArgumentsForParentProcess(ObjectStoreRequestParams& aParams)
-{
-  NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
-  NS_ASSERTION(!IndexedDatabaseManager::IsMainProcess(), "Wrong process!");
-
-  PROFILER_MAIN_THREAD_LABEL("IndexedDB",
-                             "ClearHelper::PackArgumentsForParentProcess");
-
-  MOZ_CRASH("Remove me!");
-  /*
-  aParams = ClearParams();
-  */
-  return NS_OK;
-}
-
-AsyncConnectionHelper::ChildProcessSendResult
-ClearHelper::SendResponseToChildProcess(nsresult aResultCode)
-{
-  NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
-  NS_ASSERTION(IndexedDatabaseManager::IsMainProcess(), "Wrong process!");
-
-  PROFILER_MAIN_THREAD_LABEL("IndexedDB",
-                             "ClearHelper::SendResponseToChildProcess");
-
-  MOZ_CRASH("Remove me!");
-  /*
-  IndexedDBRequestParentBase* actor = mRequest->GetActorParent();
-  NS_ASSERTION(actor, "How did we get this far without an actor?");
-
-  ResponseValue response;
-  if (NS_FAILED(aResultCode)) {
-    response = aResultCode;
-  }
-  else {
-    response = ClearResponse();
-  }
-
-  if (!actor->SendResponse(response)) {
-    return Error;
-  }
-  */
-  return Success_Sent;
-}
-
-nsresult
-ClearHelper::UnpackResponseFromParentProcess(
-                                            const ResponseValue& aResponseValue)
-{
-  MOZ_CRASH("Remove me!");
-  /*
-  NS_ASSERTION(aResponseValue.type() == ResponseValue::TClearResponse,
-               "Bad response type!");
-*/
   return NS_OK;
 }
 
@@ -4815,164 +4493,6 @@ GetAllKeysHelper::UnpackResponseFromParentProcess(
   MOZ_ASSERT(aResponseValue.type() == ResponseValue::TGetAllKeysResponse);
 
   mKeys.AppendElements(aResponseValue.get_GetAllKeysResponse().keys());
-  */
-  return NS_OK;
-}
-
-nsresult
-CountHelper::DoDatabaseWork(mozIStorageConnection* aConnection)
-{
-  NS_ASSERTION(!NS_IsMainThread(), "Wrong thread!");
-  NS_ASSERTION(IndexedDatabaseManager::IsMainProcess(), "Wrong process!");
-
-  PROFILER_LABEL("IndexedDB",
-                 "CountHelper::DoDatabaseWork [IDBObjectStore.cpp]");
-
-  NS_NAMED_LITERAL_CSTRING(lowerKeyName, "lower_key");
-  NS_NAMED_LITERAL_CSTRING(upperKeyName, "upper_key");
-
-  nsAutoCString keyRangeClause;
-  if (mKeyRange) {
-    if (!mKeyRange->Lower().IsUnset()) {
-      keyRangeClause = NS_LITERAL_CSTRING(" AND key_value");
-      if (mKeyRange->LowerOpen()) {
-        keyRangeClause.AppendLiteral(" > :");
-      }
-      else {
-        keyRangeClause.AppendLiteral(" >= :");
-      }
-      keyRangeClause.Append(lowerKeyName);
-    }
-
-    if (!mKeyRange->Upper().IsUnset()) {
-      keyRangeClause += NS_LITERAL_CSTRING(" AND key_value");
-      if (mKeyRange->UpperOpen()) {
-        keyRangeClause.AppendLiteral(" < :");
-      }
-      else {
-        keyRangeClause.AppendLiteral(" <= :");
-      }
-      keyRangeClause.Append(upperKeyName);
-    }
-  }
-
-  nsCString query = NS_LITERAL_CSTRING("SELECT count(*) FROM object_data "
-                                       "WHERE object_store_id = :osid") +
-                    keyRangeClause;
-
-  nsCOMPtr<mozIStorageStatement> stmt = mTransaction->GetCachedStatement(query);
-  IDB_ENSURE_TRUE(stmt, NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
-
-  mozStorageStatementScoper scoper(stmt);
-
-  nsresult rv = stmt->BindInt64ByName(NS_LITERAL_CSTRING("osid"),
-                                      mObjectStore->Id());
-  IDB_ENSURE_SUCCESS(rv, NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
-
-  if (mKeyRange) {
-    if (!mKeyRange->Lower().IsUnset()) {
-      rv = mKeyRange->Lower().BindToStatement(stmt, lowerKeyName);
-      NS_ENSURE_SUCCESS(rv, rv);
-    }
-    if (!mKeyRange->Upper().IsUnset()) {
-      rv = mKeyRange->Upper().BindToStatement(stmt, upperKeyName);
-      NS_ENSURE_SUCCESS(rv, rv);
-    }
-  }
-
-  bool hasResult;
-  rv = stmt->ExecuteStep(&hasResult);
-  IDB_ENSURE_SUCCESS(rv, NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
-  IDB_ENSURE_TRUE(hasResult, NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
-
-  mCount = stmt->AsInt64(0);
-  return NS_OK;
-}
-
-nsresult
-CountHelper::GetSuccessResult(JSContext* aCx,
-                              JS::MutableHandle<JS::Value> aVal)
-{
-  aVal.setNumber(static_cast<double>(mCount));
-  return NS_OK;
-}
-
-void
-CountHelper::ReleaseMainThreadObjects()
-{
-  mKeyRange = nullptr;
-  ObjectStoreHelper::ReleaseMainThreadObjects();
-}
-
-nsresult
-CountHelper::PackArgumentsForParentProcess(ObjectStoreRequestParams& aParams)
-{
-  NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
-  NS_ASSERTION(!IndexedDatabaseManager::IsMainProcess(), "Wrong process!");
-
-  PROFILER_MAIN_THREAD_LABEL("IndexedDB",
-                             "CountHelper::PackArgumentsForParentProcess "
-                             "[IDBObjectStore.cpp]");
-
-  MOZ_CRASH("Remove me!");
-  /*
-  CountParams params;
-
-  if (mKeyRange) {
-    SerializedKeyRange keyRange;
-    mKeyRange->ToSerialized(keyRange);
-    params.optionalKeyRange() = keyRange;
-  }
-  else {
-    params.optionalKeyRange() = mozilla::void_t();
-  }
-
-  aParams = params;
-  */
-  return NS_OK;
-}
-
-AsyncConnectionHelper::ChildProcessSendResult
-CountHelper::SendResponseToChildProcess(nsresult aResultCode)
-{
-  NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
-  NS_ASSERTION(IndexedDatabaseManager::IsMainProcess(), "Wrong process!");
-
-  PROFILER_MAIN_THREAD_LABEL("IndexedDB",
-                             "CountHelper::SendResponseToChildProcess "
-                             "[IDBObjectStore.cpp]");
-
-  MOZ_CRASH("Remove me!");
-  /*
-  IndexedDBRequestParentBase* actor = mRequest->GetActorParent();
-  NS_ASSERTION(actor, "How did we get this far without an actor?");
-
-  ResponseValue response;
-  if (NS_FAILED(aResultCode)) {
-    response = aResultCode;
-  }
-  else {
-    CountResponse countResponse = mCount;
-    response = countResponse;
-  }
-
-  if (!actor->SendResponse(response)) {
-    return Error;
-  }
-  */
-  return Success_Sent;
-}
-
-nsresult
-CountHelper::UnpackResponseFromParentProcess(
-                                            const ResponseValue& aResponseValue)
-{
-  MOZ_CRASH("Remove me!");
-  /*
-  NS_ASSERTION(aResponseValue.type() == ResponseValue::TCountResponse,
-               "Bad response type!");
-
-  mCount = aResponseValue.get_CountResponse().count();
   */
   return NS_OK;
 }

@@ -1124,7 +1124,8 @@ BackgroundRequestChild::Recv__delete__(const RequestResponse& aResponse)
     case RequestResponse::TObjectStorePutResponse:
       return HandleResponse(aResponse.get_ObjectStorePutResponse().key());
 
-    case RequestResponse::TObjectStoreDeleteResponse: {
+    case RequestResponse::TObjectStoreDeleteResponse:
+    case RequestResponse::TObjectStoreClearResponse: {
       JSContext* cx = domRequest->GetJSContext();
       MOZ_ASSERT(cx);
 
@@ -1132,6 +1133,22 @@ BackgroundRequestChild::Recv__delete__(const RequestResponse& aResponse)
 
       JS::Rooted<JS::Value> value(cx);
       value.setUndefined();
+
+      return HandleResponse(value);
+    }
+
+    case RequestResponse::TObjectStoreCountResponse: {
+      const ObjectStoreCountResponse& response =
+        aResponse.get_ObjectStoreCountResponse();
+      MOZ_ASSERT(response.count() >= 0);
+
+      JSContext* cx = domRequest->GetJSContext();
+      MOZ_ASSERT(cx);
+
+      JSAutoRequest ar(cx);
+
+      JS::Rooted<JS::Value> value(cx);
+      value.setNumber(static_cast<double>(response.count()));
 
       return HandleResponse(value);
     }
