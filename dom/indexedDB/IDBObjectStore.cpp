@@ -1883,6 +1883,8 @@ IDBObjectStore::AddOrPutInternal(
                       bool aOverwrite,
                       IDBRequest** _retval)
 {
+  MOZ_CRASH("Remove me!");
+  /*
   NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
   NS_ASSERTION(IndexedDatabaseManager::IsMainProcess(), "Wrong process!");
 
@@ -1981,6 +1983,7 @@ IDBObjectStore::AddOrPutInternal(
 
   request.forget(_retval);
   return NS_OK;
+  */
 }
 
 already_AddRefed<IDBRequest>
@@ -2516,10 +2519,11 @@ IDBObjectStore::GetAll(JSContext* aCx,
 }
 
 already_AddRefed<IDBRequest>
-IDBObjectStore::Delete(JSContext* aCx, JS::Handle<JS::Value> aKey,
+IDBObjectStore::Delete(JSContext* aCx,
+                       JS::Handle<JS::Value> aKey,
                        ErrorResult& aRv)
 {
-  NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
+  AssertIsOnOwningThread();
 
   if (!mTransaction->IsOpen()) {
     aRv.Throw(NS_ERROR_DOM_INDEXEDDB_TRANSACTION_INACTIVE_ERR);
@@ -2533,7 +2537,9 @@ IDBObjectStore::Delete(JSContext* aCx, JS::Handle<JS::Value> aKey,
 
   nsRefPtr<IDBKeyRange> keyRange;
   aRv = IDBKeyRange::FromJSVal(aCx, aKey, getter_AddRefs(keyRange));
-  ENSURE_SUCCESS(aRv, nullptr);
+  if (NS_WARN_IF((aRv.Failed()))) {
+    return nullptr;
+  }
 
   if (!keyRange) {
     // Must specify a key or keyRange for delete().
@@ -2541,7 +2547,26 @@ IDBObjectStore::Delete(JSContext* aCx, JS::Handle<JS::Value> aKey,
     return nullptr;
   }
 
-  return DeleteInternal(keyRange, aRv);
+  nsRefPtr<IDBRequest> request = GenerateRequest(this);
+  MOZ_ASSERT(request);
+
+  ObjectStoreDeleteParams params;
+  params.objectStoreId() = Id();
+  keyRange->ToSerialized(params.keyRange());
+
+  BackgroundRequestChild* actor = new BackgroundRequestChild(request);
+
+  mTransaction->StartRequest(actor, params);
+
+  IDB_PROFILER_MARK("IndexedDB Request %llu: "
+                    "database(%s).transaction(%s).objectStore(%s).delete(%s)",
+                    "IDBRequest[%llu] MT IDBObjectStore.delete()",
+                    request->GetSerialNumber(),
+                    IDB_PROFILER_STRING(Transaction()->Database()),
+                    IDB_PROFILER_STRING(Transaction()),
+                    IDB_PROFILER_STRING(this), IDB_PROFILER_STRING(aKeyRange));
+
+  return request.forget();
 }
 
 already_AddRefed<IDBRequest>

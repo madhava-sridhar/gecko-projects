@@ -74,13 +74,15 @@ class MOZ_STACK_CLASS ResultHelper MOZ_FINAL
     nsISupports* mISupports;
     StructuredCloneReadInfo* mStructuredClone;
     const Key* mKey;
+    JS::Handle<JS::Value>* mJSVal;
   } mResult;
 
   enum
   {
     ResultTypeISupports,
     ResultTypeStructuredClone,
-    ResultTypeKey
+    ResultTypeKey,
+    ResultTypeJSVal,
   } mResultType;
 
 public:
@@ -120,6 +122,19 @@ public:
     MOZ_ASSERT(aResult);
 
     mResult.mKey = aResult;
+  }
+
+  ResultHelper(IDBRequest* aRequest,
+               IDBTransaction* aTransaction,
+               JS::Handle<JS::Value>* aResult)
+    : mRequest(aRequest)
+    , mAutoTransaction(aTransaction)
+    , mResultType(ResultTypeJSVal)
+  {
+    MOZ_ASSERT(aRequest);
+    MOZ_ASSERT(!aResult->isGCThing());
+
+    mResult.mJSVal = aResult;
   }
 
   IDBRequest*
@@ -181,6 +196,11 @@ public:
         if (NS_WARN_IF(NS_FAILED(rv))) {
           return rv;
         }
+        break;
+      }
+
+      case ResultTypeJSVal: {
+        aResult.set(*helper->mResult.mJSVal);
         break;
       }
 
@@ -1070,11 +1090,26 @@ BackgroundRequestChild::HandleResponse(const Key& aResponse)
 }
 
 bool
+BackgroundRequestChild::HandleResponse(JS::Handle<JS::Value> aResponse)
+{
+  AssertIsOnOwningThread();
+  MOZ_ASSERT(!aResponse.isGCThing());
+
+  ResultHelper helper(mRequest, mTransaction, &aResponse);
+
+  DispatchSuccessEvent(&helper);
+  return true;
+}
+
+bool
 BackgroundRequestChild::Recv__delete__(const RequestResponse& aResponse)
 {
   AssertIsOnOwningThread();
   MOZ_ASSERT(mRequest);
   MOZ_ASSERT(mTransaction);
+
+  nsRefPtr<IDBRequest> domRequest = GetDOMObject();
+  MOZ_ASSERT(domRequest);
 
   switch (aResponse.type()) {
     case RequestResponse::Tnsresult:
@@ -1088,6 +1123,18 @@ BackgroundRequestChild::Recv__delete__(const RequestResponse& aResponse)
 
     case RequestResponse::TObjectStorePutResponse:
       return HandleResponse(aResponse.get_ObjectStorePutResponse().key());
+
+    case RequestResponse::TObjectStoreDeleteResponse: {
+      JSContext* cx = domRequest->GetJSContext();
+      MOZ_ASSERT(cx);
+
+      JSAutoRequest ar(cx);
+
+      JS::Rooted<JS::Value> value(cx);
+      value.setUndefined();
+
+      return HandleResponse(value);
+    }
 
     default:
       MOZ_CRASH("Unknown response type!");

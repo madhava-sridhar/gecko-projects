@@ -116,11 +116,18 @@ struct ObjectStorePutParams
   ObjectStoreAddPutParams commonParams;
 };
 
+struct ObjectStoreDeleteParams
+{
+  int64_t objectStoreId;
+  SerializedKeyRange keyRange;
+};
+
 union RequestParams
 {
   ObjectStoreGetParams;
   ObjectStoreAddParams;
   ObjectStorePutParams;
+  ObjectStoreDeleteParams;
 };
 
 } // namespace indexedDB

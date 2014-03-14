@@ -5,6 +5,7 @@
 #ifndef mozilla_dom_indexeddb_actorschild_h__
 #define mozilla_dom_indexeddb_actorschild_h__
 
+#include "js/RootingAPI.h"
 #include "mozilla/Attributes.h"
 #include "mozilla/dom/indexedDB/PBackgroundIDBDatabaseChild.h"
 #include "mozilla/dom/indexedDB/PBackgroundIDBFactoryChild.h"
@@ -418,6 +419,9 @@ private:
 
   bool
   HandleResponse(const Key& aResponse);
+
+  bool
+  HandleResponse(JS::Handle<JS::Value> aResponse);
 
   // IPDL methods are only called by IPDL.
   virtual bool

@@ -35,12 +35,16 @@ struct ObjectStorePutResponse
   Key key;
 };
 
+struct ObjectStoreDeleteResponse
+{ };
+
 union RequestResponse
 {
   nsresult;
   ObjectStoreGetResponse;
   ObjectStoreAddResponse;
   ObjectStorePutResponse;
+  ObjectStoreDeleteResponse;
 };
 
 protocol PBackgroundIDBRequest

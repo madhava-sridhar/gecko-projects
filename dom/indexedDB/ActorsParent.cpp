@@ -3747,6 +3747,7 @@ struct RequestOpTraits<_requestPrefix##Params>                                 \
 SPECIALIZE_REQUESTOP_TRAITS(ObjectStoreGet)
 SPECIALIZE_REQUESTOP_TRAITS(ObjectStoreAdd)
 SPECIALIZE_REQUESTOP_TRAITS(ObjectStorePut)
+SPECIALIZE_REQUESTOP_TRAITS(ObjectStoreDelete)
 
 #undef SPECIALIZE_REQUESTOP_TRAITS
 
@@ -4954,6 +4955,20 @@ TransactionBase::VerifyRequestParams(const RequestParams& aParams) const
       break;
     }
 
+    case RequestParams::TObjectStoreDeleteParams: {
+      const ObjectStoreDeleteParams& params =
+        aParams.get_ObjectStoreDeleteParams();
+      if (NS_WARN_IF(!GetMetadataForObjectStoreId(params.objectStoreId()))) {
+        ASSERT_UNLESS_FUZZING();
+        return false;
+      }
+      if (NS_WARN_IF(!VerifyKeyRange(params.keyRange()))) {
+        ASSERT_UNLESS_FUZZING();
+        return false;
+      }
+      break;
+    }
+
     default:
       ASSERT_UNLESS_FUZZING();
       return false;
@@ -5170,6 +5185,10 @@ TransactionBase::AllocRequest(const RequestParams& aParams)
 
     case RequestParams::TObjectStorePutParams:
       actor = GenerateRequestOp(aParams.get_ObjectStorePutParams());
+      break;
+
+    case RequestParams::TObjectStoreDeleteParams:
+      actor = GenerateRequestOp(aParams.get_ObjectStoreDeleteParams());
       break;
 
     default:
@@ -8903,6 +8922,58 @@ AddOrPutRequestOp::DoDatabaseWork(TransactionBase* aTransaction)
   if (autoIncrementNum) {
     mMetadata.mNextAutoIncrementId = autoIncrementNum + 1;
     aTransaction->NoteModifiedAutoIncrementObjectStore(&mMetadata);
+  }
+
+  return NS_OK;
+}
+
+template <>
+nsresult
+RequestOp<ObjectStoreDeleteParams>::DoDatabaseWork(
+                                                  TransactionBase* aTransaction)
+{
+  MOZ_ASSERT(aTransaction);
+  aTransaction->AssertIsOnTransactionThread();
+
+  PROFILER_LABEL("IndexedDB",
+                 "RequestOp<ObjectStoreDeleteParams>::DoDatabaseWork");
+
+  TransactionBase::AutoSavepoint autoSave;
+  nsresult rv = autoSave.Start(aTransaction, this);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+
+  nsCString keyRangeClause;
+  GetBindingClauseForKeyRange(mParams.keyRange(),
+                              NS_LITERAL_CSTRING("key_value"),
+                              keyRangeClause);
+
+  nsCString query =
+    NS_LITERAL_CSTRING("DELETE FROM object_data "
+                       "WHERE object_store_id = :osid") +
+    keyRangeClause;
+
+  TransactionBase::CachedStatement stmt;
+  rv = aTransaction->GetCachedStatement(query, &stmt);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+
+  rv = stmt->BindInt64ByName(NS_LITERAL_CSTRING("osid"),
+                             mParams.objectStoreId());
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+
+  rv = BindKeyRangeToStatement(mParams.keyRange(), stmt);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+
+  rv = stmt->Execute();
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
   }
 
   return NS_OK;
