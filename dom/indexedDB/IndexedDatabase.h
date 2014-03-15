@@ -61,13 +61,13 @@ struct StructuredCloneReadInfo
 {
   nsTArray<uint8_t> mData;
   nsTArray<StructuredCloneFile> mFiles;
-  nsCString mDatabaseId;
   IDBDatabase* mDatabase;
 
   // XXX Remove!
   JSAutoStructuredCloneBuffer mCloneBuffer;
 
   // In IndexedDatabaseInlines.h
+  inline
   StructuredCloneReadInfo();
 
   // In IndexedDatabaseInlines.h
@@ -75,8 +75,8 @@ struct StructuredCloneReadInfo
   operator=(StructuredCloneReadInfo&& aOther);
 
   // In IndexedDatabaseInlines.h
-  inline bool
-  SetFromSerialized(const SerializedStructuredCloneReadInfo& aOther);
+  inline
+  StructuredCloneReadInfo(SerializedStructuredCloneReadInfo&& aOther);
 };
 
 struct StructuredCloneWriteInfo

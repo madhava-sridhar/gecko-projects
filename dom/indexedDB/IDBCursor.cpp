@@ -1047,7 +1047,8 @@ ContinueHelper::DoDatabaseWork(mozIStorageConnection* aConnection)
 
   query.AppendInt(mCount);
 
-  nsCOMPtr<mozIStorageStatement> stmt = mTransaction->GetCachedStatement(query);
+  MOZ_CRASH("Remove me!");
+  nsCOMPtr<mozIStorageStatement> stmt;// = mTransaction->GetCachedStatement(query);
   IDB_ENSURE_TRUE(stmt, NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
 
   mozStorageStatementScoper scoper(stmt);

@@ -11,7 +11,9 @@
 #error Must include IndexedDatabase.h first
 #endif
 
+#include "FileInfo.h"
 #include "mozilla/dom/indexedDB/PBackgroundIDBSharedTypes.h"
+#include "nsIDOMFile.h"
 
 BEGIN_INDEXEDDB_NAMESPACE
 
@@ -74,9 +76,16 @@ StructuredCloneWriteInfo::SetFromSerialized(
 
 inline
 StructuredCloneReadInfo::StructuredCloneReadInfo()
-: mDatabase(nullptr)
+  : mDatabase(nullptr)
 {
 }
+
+inline
+StructuredCloneReadInfo::StructuredCloneReadInfo(
+                             SerializedStructuredCloneReadInfo&& aCloneReadInfo)
+  : mData(Move(aCloneReadInfo.data()))
+  , mDatabase(nullptr)
+{ }
 
 inline StructuredCloneReadInfo&
 StructuredCloneReadInfo::operator=(StructuredCloneReadInfo&& aCloneReadInfo)
@@ -89,15 +98,6 @@ StructuredCloneReadInfo::operator=(StructuredCloneReadInfo&& aCloneReadInfo)
   mDatabase = aCloneReadInfo.mDatabase;
   aCloneReadInfo.mDatabase = nullptr;
   return *this;
-}
-
-inline
-bool
-StructuredCloneReadInfo::SetFromSerialized(
-                                const SerializedStructuredCloneReadInfo& aOther)
-{
-  MOZ_CRASH("Remove me!");
-  return true;
 }
 
 inline

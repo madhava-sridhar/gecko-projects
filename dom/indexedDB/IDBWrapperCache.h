@@ -20,6 +20,8 @@ namespace indexedDB {
 
 class IDBWrapperCache : public nsDOMEventTargetHelper
 {
+  JS::Heap<JSObject*> mScriptOwner;
+
 public:
   NS_DECL_ISUPPORTS_INHERITED
   NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS_INHERITED(
@@ -50,9 +52,6 @@ protected:
   IDBWrapperCache(nsPIDOMWindow* aOwner);
 
   virtual ~IDBWrapperCache();
-
-private:
-  JS::Heap<JSObject*> mScriptOwner;
 };
 
 } // namespace indexedDB

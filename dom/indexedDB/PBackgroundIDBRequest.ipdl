@@ -18,13 +18,6 @@ namespace mozilla {
 namespace dom {
 namespace indexedDB {
 
-struct ObjectStoreGetResponse
-{
-  SerializedStructuredCloneReadInfo cloneInfo;
-  // XXX Fix me!
-  //PBlob[] blobs;
-};
-
 struct ObjectStoreAddResponse
 {
   Key key;
@@ -33,6 +26,25 @@ struct ObjectStoreAddResponse
 struct ObjectStorePutResponse
 {
   Key key;
+};
+
+struct ObjectStoreGetResponse
+{
+  SerializedStructuredCloneReadInfo cloneInfo;
+  // XXX Fix me!
+  //PBlob[] blobs;
+};
+
+struct ObjectStoreGetAllResponse
+{
+  SerializedStructuredCloneReadInfo[] cloneInfos;
+  // XXX Fix me!
+  //BlobArray[] blobs;
+};
+
+struct ObjectStoreGetAllKeysResponse
+{
+  Key[] keys;
 };
 
 struct ObjectStoreDeleteResponse
@@ -55,6 +67,8 @@ union RequestResponse
   ObjectStoreDeleteResponse;
   ObjectStoreClearResponse;
   ObjectStoreCountResponse;
+  ObjectStoreGetAllResponse;
+  ObjectStoreGetAllKeysResponse;
 };
 
 protocol PBackgroundIDBRequest

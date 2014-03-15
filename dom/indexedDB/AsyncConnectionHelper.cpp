@@ -150,7 +150,7 @@ AsyncConnectionHelper::AsyncConnectionHelper(IDBDatabase* aDatabase,
 AsyncConnectionHelper::AsyncConnectionHelper(IDBTransaction* aTransaction,
                                              IDBRequest* aRequest)
 : HelperBase(aRequest),
-  mDatabase(aTransaction->mDatabase),
+  //mDatabase(aTransaction->mDatabase),
   mTransaction(aTransaction),
   mResultCode(NS_OK),
   mDispatched(false)
@@ -190,179 +190,7 @@ NS_IMPL_ISUPPORTS2(AsyncConnectionHelper, nsIRunnable,
 NS_IMETHODIMP
 AsyncConnectionHelper::Run()
 {
-  if (NS_IsMainThread()) {
-    PROFILER_MAIN_THREAD_LABEL("IndexedDB", "AsyncConnectionHelper::Run");
-
-    if (mTransaction &&
-        mTransaction->IsAborted()) {
-      // Always fire a "error" event with ABORT_ERR if the transaction was
-      // aborted, even if the request succeeded or failed with another error.
-      mResultCode = NS_ERROR_DOM_INDEXEDDB_ABORT_ERR;
-    }
-
-    IDBTransaction* oldTransaction = gCurrentTransaction;
-    gCurrentTransaction = mTransaction;
-
-    ChildProcessSendResult sendResult =
-      IndexedDatabaseManager::IsMainProcess() ?
-      MaybeSendResponseToChildProcess(mResultCode) :
-      Success_NotSent;
-
-    switch (sendResult) {
-      case Success_Sent: {
-        if (mRequest) {
-          mRequest->NotifyHelperSentResultsToChildProcess(NS_OK);
-        }
-        break;
-      }
-
-      case Success_NotSent: {
-        if (mRequest) {/*
-          nsresult rv = mRequest->NotifyHelperCompleted(this);
-          if (NS_SUCCEEDED(mResultCode) && NS_FAILED(rv)) {
-            mResultCode = rv;
-          }*/
-
-          IDB_PROFILER_MARK("IndexedDB Request %llu: Running main thread "
-                            "response (rv = %lu)",
-                            "IDBRequest[%llu] MT Done",
-                            mRequest->GetSerialNumber(), mResultCode);
-        }
-
-        // Call OnError if the database had an error or if the OnSuccess
-        // handler has an error.
-        if (NS_FAILED(mResultCode) ||
-            NS_FAILED((mResultCode = OnSuccess()))) {
-          OnError();
-        }
-        break;
-      }
-
-      case Success_ActorDisconnected: {
-        // Nothing needs to be done here.
-        break;
-      }
-
-      case Error: {
-        IDB_WARNING("MaybeSendResultsToChildProcess failed!");
-        mResultCode = NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
-        if (mRequest) {
-          //mRequest->NotifyHelperSentResultsToChildProcess(mResultCode);
-        }
-        break;
-      }
-
-      default:
-        MOZ_CRASH("Unknown value for ChildProcessSendResult!");
-    }
-
-    NS_ASSERTION(gCurrentTransaction == mTransaction, "Should be unchanged!");
-    gCurrentTransaction = oldTransaction;
-
-    if (mDispatched && mTransaction) {
-      mTransaction->OnRequestFinished();
-    }
-
-    ReleaseMainThreadObjects();
-
-    NS_ASSERTION(!(mDatabase || mTransaction || mRequest), "Subclass didn't "
-                 "call AsyncConnectionHelper::ReleaseMainThreadObjects!");
-
-    return NS_OK;
-  }
-
-  NS_ASSERTION(IndexedDatabaseManager::IsMainProcess(), "Wrong process!");
-
-  PROFILER_LABEL("IndexedDB", "AsyncConnectionHelper::Run");
-
-  IDB_PROFILER_MARK_IF(mRequest,
-                       "IndexedDB Request %llu: Beginning database work",
-                       "IDBRequest[%llu] DT Start",
-                       mRequest->GetSerialNumber());
-
-  nsresult rv = NS_OK;
-  nsCOMPtr<mozIStorageConnection> connection;
-
-  if (mTransaction) {
-    //rv = mTransaction->GetOrCreateConnection(getter_AddRefs(connection));
-    if (NS_SUCCEEDED(rv)) {
-      NS_ASSERTION(connection, "This should never be null!");
-    }
-  }
-
-  bool setProgressHandler = false;
-  if (connection) {
-    rv = connection->SetProgressHandler(kProgressHandlerGranularity, this,
-                                        getter_AddRefs(mOldProgressHandler));
-    NS_WARN_IF_FALSE(NS_SUCCEEDED(rv), "SetProgressHandler failed!");
-    if (NS_SUCCEEDED(rv)) {
-      setProgressHandler = true;
-    }
-  }
-
-  if (NS_SUCCEEDED(rv)) {
-    bool hasSavepoint = false;
-    if (mDatabase) {
-      QuotaManager::SetCurrentWindow(mDatabase->GetOwner());
-
-      // Make the first savepoint.
-      if (mTransaction) {
-        if (!(hasSavepoint = mTransaction->StartSavepoint())) {
-          NS_WARNING("Failed to make savepoint!");
-        }
-      }
-    }
-
-    mResultCode = DoDatabaseWork(connection);
-
-    if (mDatabase) {
-      // Release or roll back the savepoint depending on the error code.
-      if (hasSavepoint) {
-        NS_ASSERTION(mTransaction, "Huh?!");
-        if (NS_SUCCEEDED(mResultCode)) {
-          mTransaction->ReleaseSavepoint();
-        }
-        else {
-          mTransaction->RollbackSavepoint();
-        }
-      }
-
-      // Don't unset this until we're sure that all SQLite activity has
-      // completed!
-      QuotaManager::SetCurrentWindow(nullptr);
-    }
-  }
-  else {
-    // NS_ERROR_NOT_AVAILABLE is our special code for "database is invalidated"
-    // and we should fail with RECOVERABLE_ERR.
-    if (rv == NS_ERROR_NOT_AVAILABLE) {
-      mResultCode = NS_ERROR_DOM_INDEXEDDB_RECOVERABLE_ERR;
-    }
-    else {
-      IDB_REPORT_INTERNAL_ERR();
-      mResultCode = NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
-    }
-  }
-
-  if (setProgressHandler) {
-    nsCOMPtr<mozIStorageProgressHandler> handler;
-    rv = connection->RemoveProgressHandler(getter_AddRefs(handler));
-    NS_WARN_IF_FALSE(NS_SUCCEEDED(rv), "RemoveProgressHandler failed!");
-#ifdef DEBUG
-    if (NS_SUCCEEDED(rv)) {
-      NS_ASSERTION(SameCOMIdentity(handler, static_cast<nsIRunnable*>(this)),
-                   "Mismatch!");
-    }
-#endif
-  }
-
-  IDB_PROFILER_MARK_IF(mRequest,
-                       "IndexedDB Request %llu: Finished database work "
-                       "(rv = %lu)",
-                       "IDBRequest[%llu] DT Done", mRequest->GetSerialNumber(),
-                       mResultCode);
-
-  return NS_DispatchToMainThread(this, NS_DISPATCH_NORMAL);
+  MOZ_CRASH("Remove me!");
 }
 
 NS_IMETHODIMP
@@ -677,22 +505,7 @@ NS_IMETHODIMP
 TransactionPoolEventTarget::Dispatch(nsIRunnable* aRunnable,
                                      uint32_t aFlags)
 {
-  NS_ASSERTION(aRunnable, "Null pointer!");
-  NS_ASSERTION(aFlags == NS_DISPATCH_NORMAL, "Unsupported!");
-
-  TransactionThreadPool* pool = TransactionThreadPool::GetOrCreate();
-  NS_ENSURE_TRUE(pool, NS_ERROR_UNEXPECTED);
-
-  if (mTransaction->Database()->IsInvalidated()) {
-    return NS_ERROR_NOT_AVAILABLE;
-  }
-
-  nsresult rv = pool->Dispatch(mTransaction->Id(),
-                               mTransaction->Database()->Id(),
-                               mTransaction->ObjectStoreNamesInternal(),
-                               mTransaction->GetMode(),
-                               aRunnable, false, nullptr);
-  NS_ENSURE_SUCCESS(rv, rv);
+  MOZ_CRASH("Remove me!");
 
   return NS_OK;
 }

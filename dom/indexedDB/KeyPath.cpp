@@ -180,8 +180,9 @@ GetJSValFromKeyPathString(JSContext* aCx,
         obj = dummy;
       }
       else {
-        JS::Rooted<JSObject*> dummy(aCx, JS_NewObject(aCx, &IDBObjectStore::sDummyPropJSClass,
-                                                      JS::NullPtr(), JS::NullPtr()));
+        JS::Rooted<JSObject*> dummy(aCx,
+          JS_NewObject(aCx, IDBObjectStore::DummyPropClass(), JS::NullPtr(),
+                       JS::NullPtr()));
         if (!dummy) {
           IDB_REPORT_INTERNAL_ERR();
           rv = NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;

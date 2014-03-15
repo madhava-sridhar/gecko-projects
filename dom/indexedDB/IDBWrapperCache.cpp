@@ -8,6 +8,8 @@
 
 #include "mozilla/HoldDropJSObjects.h"
 #include "nsCOMPtr.h"
+#include "nsIScriptGlobalObject.h";
+#include "nsPIDOMWindow.h"
 
 #ifdef DEBUG
 #include "nsCycleCollector.h"
@@ -63,7 +65,7 @@ IDBWrapperCache::~IDBWrapperCache()
 void
 IDBWrapperCache::SetScriptOwner(JSObject* aScriptOwner)
 {
-  NS_ASSERTION(aScriptOwner, "This should never be null!");
+  MOZ_ASSERT(aScriptOwner);
 
   mScriptOwner = aScriptOwner;
   mozilla::HoldJSObjects(this);

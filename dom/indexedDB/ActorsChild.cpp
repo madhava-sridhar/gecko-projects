@@ -12,6 +12,7 @@
 #include "IDBRequest.h"
 #include "IDBTransaction.h"
 #include "IndexedDatabase.h"
+#include "IndexedDatabaseInlines.h"
 #include "mozilla/BasicEvents.h"
 #include "nsCOMPtr.h"
 #include "nsContentUtils.h"
@@ -73,7 +74,9 @@ class MOZ_STACK_CLASS ResultHelper MOZ_FINAL
   {
     nsISupports* mISupports;
     StructuredCloneReadInfo* mStructuredClone;
+    const nsTArray<StructuredCloneReadInfo>* mStructuredCloneArray;
     const Key* mKey;
+    const nsTArray<Key>* mKeyArray;
     JS::Handle<JS::Value>* mJSVal;
   } mResult;
 
@@ -81,7 +84,9 @@ class MOZ_STACK_CLASS ResultHelper MOZ_FINAL
   {
     ResultTypeISupports,
     ResultTypeStructuredClone,
+    ResultTypeStructuredCloneArray,
     ResultTypeKey,
+    ResultTypeKeyArray,
     ResultTypeJSVal,
   } mResultType;
 
@@ -113,6 +118,19 @@ public:
 
   ResultHelper(IDBRequest* aRequest,
                IDBTransaction* aTransaction,
+               const nsTArray<StructuredCloneReadInfo>* aResult)
+    : mRequest(aRequest)
+    , mAutoTransaction(aTransaction)
+    , mResultType(ResultTypeStructuredCloneArray)
+  {
+    MOZ_ASSERT(aRequest);
+    MOZ_ASSERT(aResult);
+
+    mResult.mStructuredCloneArray = aResult;
+  }
+
+  ResultHelper(IDBRequest* aRequest,
+               IDBTransaction* aTransaction,
                const Key* aResult)
     : mRequest(aRequest)
     , mAutoTransaction(aTransaction)
@@ -122,6 +140,19 @@ public:
     MOZ_ASSERT(aResult);
 
     mResult.mKey = aResult;
+  }
+
+  ResultHelper(IDBRequest* aRequest,
+               IDBTransaction* aTransaction,
+               const nsTArray<Key>* aResult)
+    : mRequest(aRequest)
+    , mAutoTransaction(aTransaction)
+    , mResultType(ResultTypeKeyArray)
+  {
+    MOZ_ASSERT(aRequest);
+    MOZ_ASSERT(aResult);
+
+    mResult.mKeyArray = aResult;
   }
 
   ResultHelper(IDBRequest* aRequest,
@@ -155,59 +186,168 @@ public:
     MOZ_ASSERT(helper->mRequest);
 
     switch (helper->mResultType) {
-      case ResultTypeISupports: {
-        if (nsISupports* result = helper->mResult.mISupports) {
-          auto* wrapperCache = static_cast<IDBWrapperCache*>(helper->mRequest);
+      case ResultTypeISupports:
+        return helper->GetResult(aCx, helper->mResult.mISupports, aResult);
 
-          JS::Rooted<JSObject*> global(aCx, wrapperCache->GetParentObject());
-          MOZ_ASSERT(global);
+      case ResultTypeStructuredClone:
+        return helper->GetResult(aCx, helper->mResult.mStructuredClone,
+                                 aResult);
 
-          nsresult rv =
-            nsContentUtils::WrapNative(aCx, global, result, aResult);
-          if (NS_WARN_IF(NS_FAILED(rv))) {
-            IDB_REPORT_INTERNAL_ERR();
-            return NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
-          }
-        } else {
-          aResult.setNull();
-        }
-        break;
-      }
+      case ResultTypeStructuredCloneArray:
+        return helper->GetResult(aCx, helper->mResult.mStructuredCloneArray,
+                                 aResult);
 
-      case ResultTypeStructuredClone: {
-        StructuredCloneReadInfo* result = helper->mResult.mStructuredClone;
-        MOZ_ASSERT(result);
+      case ResultTypeKey:
+        return helper->GetResult(aCx, helper->mResult.mKey, aResult);
 
-        bool ok = IDBObjectStore::DeserializeValue(aCx, *result, aResult);
+      case ResultTypeKeyArray:
+        return helper->GetResult(aCx, helper->mResult.mKeyArray, aResult);
 
-        result->mCloneBuffer.clear();
-
-        if (NS_WARN_IF(!ok)) {
-          return NS_ERROR_DOM_DATA_CLONE_ERR;
-        }
-        break;
-      }
-
-      case ResultTypeKey: {
-        const Key* result = helper->mResult.mKey;
-        MOZ_ASSERT(result);
-
-        nsresult rv = result->ToJSVal(aCx, aResult);
-        if (NS_WARN_IF(NS_FAILED(rv))) {
-          return rv;
-        }
-        break;
-      }
-
-      case ResultTypeJSVal: {
+      case ResultTypeJSVal:
         aResult.set(*helper->mResult.mJSVal);
-        break;
-      }
+        return NS_OK;
 
       default:
         MOZ_CRASH("Unknown result type!");
     }
 
+    MOZ_ASSUME_UNREACHABLE("Should never get here!");
+  }
+
+private:
+  nsresult
+  GetResult(JSContext* aCx,
+            nsISupports* aUserData,
+            JS::MutableHandle<JS::Value> aResult)
+  {
+    if (!aUserData) {
+      aResult.setNull();
+      return NS_OK;
+    }
+
+    auto* wrapperCache = static_cast<IDBWrapperCache*>(mRequest);
+
+    JS::Rooted<JSObject*> global(aCx, wrapperCache->GetParentObject());
+    MOZ_ASSERT(global);
+
+    nsresult rv =
+      nsContentUtils::WrapNative(aCx, global, aUserData, aResult);
+    if (NS_WARN_IF(NS_FAILED(rv))) {
+      IDB_REPORT_INTERNAL_ERR();
+      return NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
+    }
+
+    return NS_OK;
+  }
+
+  nsresult
+  GetResult(JSContext* aCx,
+            StructuredCloneReadInfo* aUserData,
+            JS::MutableHandle<JS::Value> aResult)
+  {
+    bool ok = IDBObjectStore::DeserializeValue(aCx, *aUserData, aResult);
+
+    aUserData->mCloneBuffer.clear();
+
+    if (NS_WARN_IF(!ok)) {
+      return NS_ERROR_DOM_DATA_CLONE_ERR;
+    }
+
+    return NS_OK;
+  }
+
+  nsresult
+  GetResult(JSContext* aCx,
+            const nsTArray<StructuredCloneReadInfo>* aUserData,
+            JS::MutableHandle<JS::Value> aResult)
+  {
+    JS::Rooted<JSObject*> array(aCx, JS_NewArrayObject(aCx, 0));
+    if (NS_WARN_IF(!array)) {
+      IDB_REPORT_INTERNAL_ERR();
+      return NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
+    }
+
+    if (!aUserData->IsEmpty()) {
+      const uint32_t count = aUserData->Length();
+
+      if (NS_WARN_IF(!JS_SetArrayLength(aCx, array, count))) {
+        IDB_REPORT_INTERNAL_ERR();
+        return NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
+      }
+
+      for (uint32_t index = 0; index < count; index++) {
+        auto& cloneInfo =
+          const_cast<StructuredCloneReadInfo&>(aUserData->ElementAt(index));
+
+        JS::Rooted<JS::Value> value(aCx);
+        bool ok = IDBObjectStore::DeserializeValue(aCx, cloneInfo, &value);
+
+        cloneInfo.mData.Clear();
+
+        if (NS_WARN_IF(!ok)) {
+          return NS_ERROR_DOM_DATA_CLONE_ERR;
+        }
+
+        if (NS_WARN_IF(!JS_SetElement(aCx, array, index, value))) {
+          IDB_REPORT_INTERNAL_ERR();
+          return NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
+        }
+      }
+    }
+
+    aResult.setObject(*array);
+    return NS_OK;
+  }
+
+  nsresult
+  GetResult(JSContext* aCx,
+            const Key* aUserData,
+            JS::MutableHandle<JS::Value> aResult)
+  {
+    nsresult rv = aUserData->ToJSVal(aCx, aResult);
+    if (NS_WARN_IF(NS_FAILED(rv))) {
+      return rv;
+    }
+    return NS_OK;
+  }
+
+  nsresult
+  GetResult(JSContext* aCx,
+            const nsTArray<Key>* aUserData,
+            JS::MutableHandle<JS::Value> aResult)
+  {
+    JS::Rooted<JSObject*> array(aCx, JS_NewArrayObject(aCx, 0));
+    if (NS_WARN_IF(!array)) {
+      IDB_REPORT_INTERNAL_ERR();
+      return NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
+    }
+
+    if (!aUserData->IsEmpty()) {
+      const uint32_t count = aUserData->Length();
+
+      if (NS_WARN_IF(!JS_SetArrayLength(aCx, array, count))) {
+        IDB_REPORT_INTERNAL_ERR();
+        return NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
+      }
+
+      for (uint32_t index = 0; index < count; index++) {
+        const Key& key = aUserData->ElementAt(index);
+        MOZ_ASSERT(!key.IsUnset());
+
+        JS::Rooted<JS::Value> value(aCx);
+        nsresult rv = key.ToJSVal(aCx, &value);
+        if (NS_WARN_IF(NS_FAILED(rv))) {
+          return rv;
+        }
+
+        if (NS_WARN_IF(!JS_SetElement(aCx, array, index, value))) {
+          IDB_REPORT_INTERNAL_ERR();
+          return NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
+        }
+      }
+    }
+
+    aResult.setObject(*array);
     return NS_OK;
   }
 };
@@ -1054,17 +1194,25 @@ BackgroundRequestChild::HandleResponse(nsresult aResponse)
 }
 
 bool
+BackgroundRequestChild::HandleResponse(const Key& aResponse)
+{
+  AssertIsOnOwningThread();
+
+  ResultHelper helper(mRequest, mTransaction, &aResponse);
+
+  DispatchSuccessEvent(&helper);
+  return true;
+}
+
+bool
 BackgroundRequestChild::HandleResponse(const ObjectStoreGetResponse& aResponse)
 {
   AssertIsOnOwningThread();
 
-  const SerializedStructuredCloneReadInfo& cloneInfo = aResponse.cloneInfo();
+  auto& cloneInfo =
+    const_cast<SerializedStructuredCloneReadInfo&>(aResponse.cloneInfo());
 
-  StructuredCloneReadInfo cloneReadInfo;
-  if (!cloneReadInfo.SetFromSerialized(cloneInfo)) {
-    IDB_WARNING("Failed to copy clone buffer!");
-    return HandleResponse(NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
-  }
+  StructuredCloneReadInfo cloneReadInfo(Move(cloneInfo));
 
   // XXX Fix blobs!
   /*
@@ -1079,11 +1227,44 @@ BackgroundRequestChild::HandleResponse(const ObjectStoreGetResponse& aResponse)
 }
 
 bool
-BackgroundRequestChild::HandleResponse(const Key& aResponse)
+BackgroundRequestChild::HandleResponse(
+                                     const ObjectStoreGetAllResponse& aResponse)
 {
   AssertIsOnOwningThread();
 
-  ResultHelper helper(mRequest, mTransaction, &aResponse);
+  nsTArray<StructuredCloneReadInfo> cloneInfos;
+
+  if (!aResponse.cloneInfos().IsEmpty()) {
+    const uint32_t count = aResponse.cloneInfos().Length();
+
+    cloneInfos.SetCapacity(count);
+
+    for (uint32_t index = 0; index < count; index++) {
+      auto& serializedCloneInfo =
+        const_cast<SerializedStructuredCloneReadInfo&>(
+          aResponse.cloneInfos()[index]);
+
+      // XXX This should work but doesn't yet.
+      // cloneInfos.AppendElement(Move(serializedCloneInfo));
+
+      StructuredCloneReadInfo* cloneInfo = cloneInfos.AppendElement();
+      cloneInfo->mData.SwapElements(serializedCloneInfo.data());
+    }
+  }
+
+  ResultHelper helper(mRequest, mTransaction, &cloneInfos);
+
+  DispatchSuccessEvent(&helper);
+  return true;
+}
+
+bool
+BackgroundRequestChild::HandleResponse(
+                                 const ObjectStoreGetAllKeysResponse& aResponse)
+{
+  AssertIsOnOwningThread();
+
+  ResultHelper helper(mRequest, mTransaction, &aResponse.keys());
 
   DispatchSuccessEvent(&helper);
   return true;
@@ -1115,14 +1296,20 @@ BackgroundRequestChild::Recv__delete__(const RequestResponse& aResponse)
     case RequestResponse::Tnsresult:
       return HandleResponse(aResponse.get_nsresult());
 
-    case RequestResponse::TObjectStoreGetResponse:
-      return HandleResponse(aResponse.get_ObjectStoreGetResponse());
-
     case RequestResponse::TObjectStoreAddResponse:
       return HandleResponse(aResponse.get_ObjectStoreAddResponse().key());
 
     case RequestResponse::TObjectStorePutResponse:
       return HandleResponse(aResponse.get_ObjectStorePutResponse().key());
+
+    case RequestResponse::TObjectStoreGetResponse:
+      return HandleResponse(aResponse.get_ObjectStoreGetResponse());
+
+    case RequestResponse::TObjectStoreGetAllResponse:
+      return HandleResponse(aResponse.get_ObjectStoreGetAllResponse());
+
+    case RequestResponse::TObjectStoreGetAllKeysResponse:
+      return HandleResponse(aResponse.get_ObjectStoreGetAllKeysResponse());
 
     case RequestResponse::TObjectStoreDeleteResponse:
     case RequestResponse::TObjectStoreClearResponse: {

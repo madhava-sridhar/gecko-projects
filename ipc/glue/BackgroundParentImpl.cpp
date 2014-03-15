@@ -121,7 +121,7 @@ BackgroundParentImpl::AllocPBackgroundIDBFactoryParent(
   nsRefPtr<indexedDB::BackgroundFactoryParent> actor =
     indexedDB::BackgroundFactoryParent::Create(aGroup, aASCIIOrigin,
                                                aPrivilege);
-  return actor.forget().get();
+  return actor.forget().take();
 }
 
 bool

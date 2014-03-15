@@ -415,10 +415,16 @@ private:
   HandleResponse(nsresult aResponse);
 
   bool
+  HandleResponse(const Key& aResponse);
+
+  bool
   HandleResponse(const ObjectStoreGetResponse& aResponse);
 
   bool
-  HandleResponse(const Key& aResponse);
+  HandleResponse(const ObjectStoreGetAllResponse& aResponse);
+
+  bool
+  HandleResponse(const ObjectStoreGetAllKeysResponse& aResponse);
 
   bool
   HandleResponse(JS::Handle<JS::Value> aResponse);

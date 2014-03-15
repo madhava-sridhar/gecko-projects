@@ -2855,20 +2855,16 @@ protected:
   VerifyRequestParams(const RequestParams& aParams) const;
 
   bool
-  VerifyKeyRange(const SerializedKeyRange& aKeyRange) const;
+  VerifyRequestParams(const SerializedKeyRange& aKeyRange) const;
 
   bool
-  VerifyAddOrPutParams(const ObjectStoreAddPutParams& aParams) const;
+  VerifyRequestParams(const ObjectStoreAddPutParams& aParams) const;
+
+  bool
+  VerifyRequestParams(const OptionalKeyRange& aKeyRange) const;
 
   PBackgroundIDBRequestParent*
   AllocRequest(const RequestParams& aParams);
-
-  template <class RequestParamsType>
-  RequestOp<RequestParamsType>*
-  GenerateRequestOp(const RequestParamsType& aParams)
-  {
-    return new RequestOp<RequestParamsType>(this, aParams);
-  }
 
   bool
   StartRequest(PBackgroundIDBRequestParent* aActor,
@@ -3706,93 +3702,22 @@ private:
   ActorDestroy(ActorDestroyReason aWhy) MOZ_OVERRIDE;
 };
 
-// Requires ParamsType and ResponseType typedefs:
-//
-//   typedef FooParams ParamsType;
-//   typedef FooResponse ResponseType;
-template <class RequestParamsType>
-struct RequestOpTraits
-{ };
-
-// Specialize if extra members or functions are needed for the database op.
-//
-// The base can cast itself to the derived class as follows:
-//
-//   Derived*
-//   GetDerived() const
-//   {
-//     return static_cast<Derived*>(const_cast<RequestOpBase*>(this));
-//   }
-template <class RequestParamsType, class Derived>
-class RequestOpBase
-{
-protected:
-  RequestOpBase(TransactionBase* aTransaction,
-                const RequestParamsType& aParams)
-  { }
-
-  virtual
-  ~RequestOpBase()
-  { }
-};
-
-#define SPECIALIZE_REQUESTOP_TRAITS(_requestPrefix)                            \
-template <>                                                                    \
-struct RequestOpTraits<_requestPrefix##Params>                                 \
-{                                                                              \
-  typedef _requestPrefix##Params ParamsType;                                   \
-  typedef _requestPrefix##Response ResponseType;                               \
-};
-
-SPECIALIZE_REQUESTOP_TRAITS(ObjectStoreGet)
-SPECIALIZE_REQUESTOP_TRAITS(ObjectStoreAdd)
-SPECIALIZE_REQUESTOP_TRAITS(ObjectStorePut)
-SPECIALIZE_REQUESTOP_TRAITS(ObjectStoreDelete)
-SPECIALIZE_REQUESTOP_TRAITS(ObjectStoreClear)
-SPECIALIZE_REQUESTOP_TRAITS(ObjectStoreCount)
-
-#undef SPECIALIZE_REQUESTOP_TRAITS
-
-template <class Derived>
-class RequestOpBase<ObjectStoreGetParams, Derived>
-{
-protected:
-  nsRefPtr<FileManager> mFileManager;
-  nsCString mDatabaseId;
-
-  RequestOpBase(TransactionBase* aTransaction,
-                const ObjectStoreGetParams& aParams)
-    : mFileManager(aTransaction->GetDatabase()->Manager())
-    , mDatabaseId(aTransaction->GetDatabase()->Id())
-  { }
-
-  virtual
-  ~RequestOpBase()
-  { }
-};
-
-template <class RequestParamsType>
-class RequestOp MOZ_FINAL
+template <class ParamsType, class ResponseType>
+class GenericRequestOp MOZ_FINAL
   : public NormalTransactionOp
-  , public RequestOpBase<RequestParamsType, RequestOp<RequestParamsType>>
 {
   friend class TransactionBase;
-  friend class RequestOpBase<RequestParamsType, RequestOp<RequestParamsType>>;
 
-  const typename RequestOpTraits<RequestParamsType>::ParamsType mParams;
-  typename RequestOpTraits<RequestParamsType>::ResponseType mResponse;
+  const ParamsType mParams;
+  ResponseType mResponse;
 
 private:
-  // Only created by TransactionBase.
-  RequestOp(TransactionBase* aTransaction, const RequestParamsType& aParams)
+  GenericRequestOp(TransactionBase* aTransaction, const ParamsType& aParams)
     : NormalTransactionOp(aTransaction)
-    , RequestOpBase<RequestParamsType,
-                    RequestOp<RequestParamsType>>(aTransaction, aParams)
     , mParams(aParams)
   { }
 
-  // Reference counted.
-  ~RequestOp()
+  ~GenericRequestOp()
   { }
 
   virtual nsresult
@@ -3801,15 +3726,15 @@ private:
   virtual void
   GetResponse(RequestResponse& aResponse) MOZ_OVERRIDE
   {
-    AssertIsOnOwningThread();
     aResponse = mResponse;
   }
 };
 
-class AddOrPutRequestOp
+class ObjectStoreAddOrPutRequestOp MOZ_FINAL
   : public NormalTransactionOp
 {
-protected:
+  friend class TransactionBase;
+
   const ObjectStoreAddPutParams mParams;
 
   // This must be non-const so that we can update the mNextAutoIncrementId field
@@ -3819,12 +3744,12 @@ protected:
   Key mResponse;
   const bool mOverwrite;
 
-protected:
-  AddOrPutRequestOp(TransactionBase* aTransaction,
-                    const RequestParams& aParams);
+private:
+  // Only created by TransactionBase.
+  ObjectStoreAddOrPutRequestOp(TransactionBase* aTransaction,
+                               const RequestParams& aParams);
 
-  virtual
-  ~AddOrPutRequestOp()
+  ~ObjectStoreAddOrPutRequestOp()
   { }
 
   virtual nsresult
@@ -3842,35 +3767,118 @@ protected:
   }
 };
 
-template <>
-class RequestOp<ObjectStoreAddParams> MOZ_FINAL
-  : public AddOrPutRequestOp
+class GetRequestOpBase
+  : public NormalTransactionOp
 {
-  friend class TransactionBase;
+protected:
+  nsRefPtr<FileManager> mFileManager;
 
-private:
-  RequestOp(TransactionBase* aTransaction, const RequestParams& aParams)
-    : AddOrPutRequestOp(aTransaction, aParams)
-  { }
+protected:
+  // Only created by TransactionBase.
+  GetRequestOpBase(TransactionBase* aTransaction)
+    : NormalTransactionOp(aTransaction)
+    , mFileManager(aTransaction->GetDatabase()->Manager())
+  {
+    MOZ_ASSERT(mFileManager);
+  }
 
-  ~RequestOp()
+  virtual
+  ~GetRequestOpBase()
   { }
 };
 
-template <>
-class RequestOp<ObjectStorePutParams> MOZ_FINAL
-  : public AddOrPutRequestOp
+class ObjectStoreGetRequestOp MOZ_FINAL
+  : public GetRequestOpBase
 {
   friend class TransactionBase;
 
+  const ObjectStoreGetParams mParams;
+  StructuredCloneReadInfo mResponse;
+
 private:
-  RequestOp(TransactionBase* aTransaction, const RequestParams& aParams)
-    : AddOrPutRequestOp(aTransaction, aParams)
+  // Only created by TransactionBase.
+  ObjectStoreGetRequestOp(TransactionBase* aTransaction,
+                          const ObjectStoreGetParams& aParams)
+    : GetRequestOpBase(aTransaction)
+    , mParams(aParams)
   { }
 
-  ~RequestOp()
+  ~ObjectStoreGetRequestOp()
   { }
+
+  virtual nsresult
+  DoDatabaseWork(TransactionBase* aTransaction) MOZ_OVERRIDE;
+
+  virtual void
+  GetResponse(RequestResponse& aResponse) MOZ_OVERRIDE;
 };
+
+class ObjectStoreGetAllRequestOp MOZ_FINAL
+  : public GetRequestOpBase
+{
+  friend class TransactionBase;
+
+  const ObjectStoreGetAllParams mParams;
+  FallibleTArray<StructuredCloneReadInfo> mResponse;
+
+private:
+  // Only created by TransactionBase.
+  ObjectStoreGetAllRequestOp(TransactionBase* aTransaction,
+                             const ObjectStoreGetAllParams& aParams)
+    : GetRequestOpBase(aTransaction)
+    , mParams(aParams)
+  { }
+
+  ~ObjectStoreGetAllRequestOp()
+  { }
+
+  virtual nsresult
+  DoDatabaseWork(TransactionBase* aTransaction) MOZ_OVERRIDE;
+
+  virtual void
+  GetResponse(RequestResponse& aResponse) MOZ_OVERRIDE;
+};
+
+class ObjectStoreGetAllKeysRequestOp MOZ_FINAL
+  : public GetRequestOpBase
+{
+  friend class TransactionBase;
+
+  const ObjectStoreGetAllKeysParams mParams;
+  FallibleTArray<Key> mResponse;
+
+private:
+  // Only created by TransactionBase.
+  ObjectStoreGetAllKeysRequestOp(TransactionBase* aTransaction,
+                                 const ObjectStoreGetAllKeysParams& aParams)
+    : GetRequestOpBase(aTransaction)
+    , mParams(aParams)
+  { }
+
+  ~ObjectStoreGetAllKeysRequestOp()
+  { }
+
+  virtual nsresult
+  DoDatabaseWork(TransactionBase* aTransaction) MOZ_OVERRIDE;
+
+  virtual void
+  GetResponse(RequestResponse& aResponse) MOZ_OVERRIDE
+  {
+    aResponse = ObjectStoreGetAllKeysResponse();
+    nsTArray<Key>& response =
+      aResponse.get_ObjectStoreGetAllKeysResponse().keys();
+    mResponse.SwapElements(response);
+  }
+};
+
+typedef GenericRequestOp<ObjectStoreDeleteParams, ObjectStoreDeleteResponse>
+  ObjectStoreDeleteRequestOp;
+
+typedef GenericRequestOp<ObjectStoreClearParams, ObjectStoreClearResponse>
+  ObjectStoreClearRequestOp;
+
+typedef GenericRequestOp<ObjectStoreCountParams, ObjectStoreCountResponse>
+  ObjectStoreCountRequestOp;
 
 } // anonymous namespace
 
@@ -4028,13 +4036,11 @@ GetStructuredCloneReadInfoFromStatement(mozIStorageStatement* aStatement,
                                         uint32_t aDataIndex,
                                         uint32_t aFileIdsIndex,
                                         FileManager* aFileManager,
-                                        const nsACString& aDatabaseId,
                                         StructuredCloneReadInfo* aInfo)
 {
   MOZ_ASSERT(!IsOnBackgroundThread());
   MOZ_ASSERT(aStatement);
   MOZ_ASSERT(aFileManager);
-  MOZ_ASSERT(!aDatabaseId.IsEmpty());
 
   PROFILER_LABEL("IndexedDB", "GetStructuredCloneReadInfoFromStatement");
 
@@ -4106,8 +4112,6 @@ GetStructuredCloneReadInfoFromStatement(mozIStorageStatement* aStatement,
       file->mFileInfo.swap(fileInfo);
     }
   }
-
-  aInfo->mDatabaseId = aDatabaseId;
 
   return NS_OK;
 }
@@ -4404,7 +4408,7 @@ BackgroundFactoryParent::AllocPBackgroundIDBFactoryRequestParent(
   MOZ_ASSERT(actor);
 
   // Transfer ownership to IPDL.
-  return actor.forget().get();
+  return actor.forget().take();
 }
 
 bool
@@ -4623,7 +4627,7 @@ Database::AllocPBackgroundIDBTransactionParent(
 
   MOZ_ASSERT(infallibleObjectStores.IsEmpty());
 
-  return transaction.forget().get();
+  return transaction.forget().take();
 }
 
 bool
@@ -4924,23 +4928,10 @@ TransactionBase::VerifyRequestParams(const RequestParams& aParams) const
   }
 
   switch (aParams.type()) {
-    case RequestParams::TObjectStoreGetParams: {
-      const ObjectStoreGetParams& params = aParams.get_ObjectStoreGetParams();
-      if (NS_WARN_IF(!GetMetadataForObjectStoreId(params.objectStoreId()))) {
-        ASSERT_UNLESS_FUZZING();
-        return false;
-      }
-      if (NS_WARN_IF(!VerifyKeyRange(params.keyRange()))) {
-        ASSERT_UNLESS_FUZZING();
-        return false;
-      }
-      break;
-    }
-
     case RequestParams::TObjectStoreAddParams: {
       const ObjectStoreAddPutParams& params =
         aParams.get_ObjectStoreAddParams().commonParams();
-      if (NS_WARN_IF(!VerifyAddOrPutParams(params))) {
+      if (NS_WARN_IF(!VerifyRequestParams(params))) {
         ASSERT_UNLESS_FUZZING();
         return false;
       }
@@ -4950,7 +4941,48 @@ TransactionBase::VerifyRequestParams(const RequestParams& aParams) const
     case RequestParams::TObjectStorePutParams: {
       const ObjectStoreAddPutParams& params =
         aParams.get_ObjectStorePutParams().commonParams();
-      if (NS_WARN_IF(!VerifyAddOrPutParams(params))) {
+      if (NS_WARN_IF(!VerifyRequestParams(params))) {
+        ASSERT_UNLESS_FUZZING();
+        return false;
+      }
+      break;
+    }
+
+    case RequestParams::TObjectStoreGetParams: {
+      const ObjectStoreGetParams& params = aParams.get_ObjectStoreGetParams();
+      if (NS_WARN_IF(!GetMetadataForObjectStoreId(params.objectStoreId()))) {
+        ASSERT_UNLESS_FUZZING();
+        return false;
+      }
+      if (NS_WARN_IF(!VerifyRequestParams(params.keyRange()))) {
+        ASSERT_UNLESS_FUZZING();
+        return false;
+      }
+      break;
+    }
+
+    case RequestParams::TObjectStoreGetAllParams: {
+      const ObjectStoreGetAllParams& params =
+        aParams.get_ObjectStoreGetAllParams();
+      if (NS_WARN_IF(!GetMetadataForObjectStoreId(params.objectStoreId()))) {
+        ASSERT_UNLESS_FUZZING();
+        return false;
+      }
+      if (NS_WARN_IF(!VerifyRequestParams(params.optionalKeyRange()))) {
+        ASSERT_UNLESS_FUZZING();
+        return false;
+      }
+      break;
+    }
+
+    case RequestParams::TObjectStoreGetAllKeysParams: {
+      const ObjectStoreGetAllKeysParams& params =
+        aParams.get_ObjectStoreGetAllKeysParams();
+      if (NS_WARN_IF(!GetMetadataForObjectStoreId(params.objectStoreId()))) {
+        ASSERT_UNLESS_FUZZING();
+        return false;
+      }
+      if (NS_WARN_IF(!VerifyRequestParams(params.optionalKeyRange()))) {
         ASSERT_UNLESS_FUZZING();
         return false;
       }
@@ -4964,7 +4996,7 @@ TransactionBase::VerifyRequestParams(const RequestParams& aParams) const
         ASSERT_UNLESS_FUZZING();
         return false;
       }
-      if (NS_WARN_IF(!VerifyKeyRange(params.keyRange()))) {
+      if (NS_WARN_IF(!VerifyRequestParams(params.keyRange()))) {
         ASSERT_UNLESS_FUZZING();
         return false;
       }
@@ -4984,27 +5016,13 @@ TransactionBase::VerifyRequestParams(const RequestParams& aParams) const
     case RequestParams::TObjectStoreCountParams: {
       const ObjectStoreCountParams& params =
         aParams.get_ObjectStoreCountParams();
-      MOZ_ASSERT(params.optionalKeyRange().type() != OptionalKeyRange::T__None);
       if (NS_WARN_IF(!GetMetadataForObjectStoreId(params.objectStoreId()))) {
         ASSERT_UNLESS_FUZZING();
         return false;
       }
-      switch (params.optionalKeyRange().type()) {
-        case OptionalKeyRange::TSerializedKeyRange: {
-          if (NS_WARN_IF(!VerifyKeyRange(
-                params.optionalKeyRange().get_SerializedKeyRange()))) {
-            ASSERT_UNLESS_FUZZING();
-            return false;
-          }
-          break;
-        }
-        case OptionalKeyRange::Tvoid_t: {
-          break;
-        }
-        default: {
-          ASSERT_UNLESS_FUZZING();
-          return false;
-        }
+      if (NS_WARN_IF(!VerifyRequestParams(params.optionalKeyRange()))) {
+        ASSERT_UNLESS_FUZZING();
+        return false;
       }
       break;
     }
@@ -5018,31 +5036,31 @@ TransactionBase::VerifyRequestParams(const RequestParams& aParams) const
 }
 
 bool
-TransactionBase::VerifyKeyRange(const SerializedKeyRange& aKeyRange) const
+TransactionBase::VerifyRequestParams(const SerializedKeyRange& aParams) const
 {
   AssertIsOnBackgroundThread();
 
   // XXX Check more here?
 
-  if (aKeyRange.isOnly()) {
-    if (NS_WARN_IF(aKeyRange.lower().IsUnset())) {
+  if (aParams.isOnly()) {
+    if (NS_WARN_IF(aParams.lower().IsUnset())) {
       ASSERT_UNLESS_FUZZING();
       return false;
     }
-    if (NS_WARN_IF(!aKeyRange.upper().IsUnset())) {
+    if (NS_WARN_IF(!aParams.upper().IsUnset())) {
       ASSERT_UNLESS_FUZZING();
       return false;
     }
-    if (NS_WARN_IF(aKeyRange.lowerOpen())) {
+    if (NS_WARN_IF(aParams.lowerOpen())) {
       ASSERT_UNLESS_FUZZING();
       return false;
     }
-    if (NS_WARN_IF(aKeyRange.upperOpen())) {
+    if (NS_WARN_IF(aParams.upperOpen())) {
       ASSERT_UNLESS_FUZZING();
       return false;
     }
-  } else if (NS_WARN_IF(aKeyRange.lower().IsUnset() &&
-                        aKeyRange.upper().IsUnset())) {
+  } else if (NS_WARN_IF(aParams.lower().IsUnset() &&
+                        aParams.upper().IsUnset())) {
     ASSERT_UNLESS_FUZZING();
     return false;
   }
@@ -5051,8 +5069,8 @@ TransactionBase::VerifyKeyRange(const SerializedKeyRange& aKeyRange) const
 }
 
 bool
-TransactionBase::VerifyAddOrPutParams(const ObjectStoreAddPutParams& aParams)
-                                      const
+TransactionBase::VerifyRequestParams(const ObjectStoreAddPutParams& aParams)
+                                     const
 {
   AssertIsOnBackgroundThread();
 
@@ -5109,6 +5127,34 @@ TransactionBase::VerifyAddOrPutParams(const ObjectStoreAddPutParams& aParams)
     }
 
     if (NS_WARN_IF(updates[index].value().IsUnset())) {
+      ASSERT_UNLESS_FUZZING();
+      return false;
+    }
+  }
+
+  return true;
+}
+
+bool
+TransactionBase::VerifyRequestParams(const OptionalKeyRange& aParams) const
+{
+  AssertIsOnBackgroundThread();
+  MOZ_ASSERT(aParams.type() != OptionalKeyRange::T__None);
+
+  switch (aParams.type()) {
+    case OptionalKeyRange::TSerializedKeyRange: {
+      if (NS_WARN_IF(!VerifyRequestParams(aParams.get_SerializedKeyRange()))) {
+        ASSERT_UNLESS_FUZZING();
+        return false;
+      }
+      break;
+    }
+
+    case OptionalKeyRange::Tvoid_t: {
+      break;
+    }
+
+    default: {
       ASSERT_UNLESS_FUZZING();
       return false;
     }
@@ -5215,28 +5261,47 @@ TransactionBase::AllocRequest(const RequestParams& aParams)
   nsRefPtr<NormalTransactionOp> actor;
 
   switch (aParams.type()) {
-    case RequestParams::TObjectStoreGetParams:
-      actor = GenerateRequestOp(aParams.get_ObjectStoreGetParams());
-      break;
-
     case RequestParams::TObjectStoreAddParams:
-      actor = GenerateRequestOp(aParams.get_ObjectStoreAddParams());
+      actor = new ObjectStoreAddOrPutRequestOp(this, aParams);
       break;
 
     case RequestParams::TObjectStorePutParams:
-      actor = GenerateRequestOp(aParams.get_ObjectStorePutParams());
+      actor = new ObjectStoreAddOrPutRequestOp(this, aParams);
+      break;
+
+    case RequestParams::TObjectStoreGetParams:
+      actor =
+        new ObjectStoreGetRequestOp(this, aParams.get_ObjectStoreGetParams());
+      break;
+
+    case RequestParams::TObjectStoreGetAllParams:
+      actor =
+        new ObjectStoreGetAllRequestOp(this,
+                                       aParams.get_ObjectStoreGetAllParams());
+      break;
+
+    case RequestParams::TObjectStoreGetAllKeysParams:
+      actor =
+        new ObjectStoreGetAllKeysRequestOp(this,
+                                     aParams.get_ObjectStoreGetAllKeysParams());
       break;
 
     case RequestParams::TObjectStoreDeleteParams:
-      actor = GenerateRequestOp(aParams.get_ObjectStoreDeleteParams());
+      actor =
+        new ObjectStoreDeleteRequestOp(this,
+                                       aParams.get_ObjectStoreDeleteParams());
       break;
 
     case RequestParams::TObjectStoreClearParams:
-      actor = GenerateRequestOp(aParams.get_ObjectStoreClearParams());
+      actor =
+        new ObjectStoreClearRequestOp(this,
+                                      aParams.get_ObjectStoreClearParams());
       break;
 
     case RequestParams::TObjectStoreCountParams:
-      actor = GenerateRequestOp(aParams.get_ObjectStoreCountParams());
+      actor =
+        new ObjectStoreCountRequestOp(this,
+                                      aParams.get_ObjectStoreCountParams());
       break;
 
     default:
@@ -5247,7 +5312,7 @@ TransactionBase::AllocRequest(const RequestParams& aParams)
   MOZ_ASSERT(actor);
 
   // Transfer ownership to IPDL.
-  return actor.forget().get();
+  return actor.forget().take();
 }
 
 bool
@@ -5796,10 +5861,6 @@ VersionChangeTransaction::RecvDeleteObjectStore(const int64_t& aObjectStoreId)
 
   foundMetadata->mDeleted = true;
 
-  if (aObjectStoreId == (dbMetadata->mNextObjectStoreId - 1)) {
-    dbMetadata->mNextObjectStoreId = aObjectStoreId;
-  }
-
   nsRefPtr<DeleteObjectStoreOp> op =
     new DeleteObjectStoreOp(this, *foundMetadata);
   op->DispatchToTransactionThreadPool();
@@ -5916,10 +5977,6 @@ VersionChangeTransaction::RecvDeleteIndex(const int64_t& aObjectStoreId,
   }
 
   foundIndexMetadata->mDeleted = true;
-
-  if (aIndexId == (dbMetadata->mNextIndexId - 1)) {
-    dbMetadata->mNextIndexId = aIndexId;
-  }
 
   nsRefPtr<DeleteIndexOp> op =
     new DeleteIndexOp(this, aObjectStoreId, aIndexId);
@@ -8389,7 +8446,7 @@ CreateIndexOp::InsertDataFromObjectStore(TransactionBase* aTransaction)
   do {
     StructuredCloneReadInfo cloneInfo;
     rv = GetStructuredCloneReadInfoFromStatement(stmt, 1, 2, mFileManager,
-                                                 mDatabaseId, &cloneInfo);
+                                                 &cloneInfo);
     if (NS_WARN_IF(NS_FAILED(rv))) {
       return rv;
     }
@@ -8680,67 +8737,9 @@ NormalTransactionOp::ActorDestroy(ActorDestroyReason aWhy)
   NoteActorDestroyed();
 }
 
-template <>
-nsresult
-RequestOp<ObjectStoreGetParams>::DoDatabaseWork(TransactionBase* aTransaction)
-{
-  MOZ_ASSERT(aTransaction);
-  aTransaction->AssertIsOnTransactionThread();
-
-  PROFILER_LABEL("IndexedDB",
-                 "RequestOp<ObjectStoreGetParams>::DoDatabaseWork");
-
-  nsCString keyRangeClause;
-  GetBindingClauseForKeyRange(mParams.keyRange(),
-                              NS_LITERAL_CSTRING("key_value"),
-                              keyRangeClause);
-
-  nsCString query =
-    NS_LITERAL_CSTRING("SELECT data, file_ids "
-                       "FROM object_data "
-                       "WHERE object_store_id = :osid") +
-    keyRangeClause +
-    NS_LITERAL_CSTRING(" LIMIT 1");
-
-  TransactionBase::CachedStatement stmt;
-  nsresult rv = aTransaction->GetCachedStatement(query, &stmt);
-  if (NS_WARN_IF(NS_FAILED(rv))) {
-    return rv;
-  }
-
-  rv = stmt->BindInt64ByName(NS_LITERAL_CSTRING("osid"),
-                             mParams.objectStoreId());
-  if (NS_WARN_IF(NS_FAILED(rv))) {
-    return rv;
-  }
-
-  rv = BindKeyRangeToStatement(mParams.keyRange(), stmt);
-  if (NS_WARN_IF(NS_FAILED(rv))) {
-    return rv;
-  }
-
-  bool hasResult;
-  rv = stmt->ExecuteStep(&hasResult);
-  if (NS_WARN_IF(NS_FAILED(rv))) {
-    return rv;
-  }
-
-  if (hasResult) {
-    StructuredCloneReadInfo cloneInfo;
-    rv = GetStructuredCloneReadInfoFromStatement(stmt, 0, 1, mFileManager,
-                                                 mDatabaseId, &cloneInfo);
-    if (NS_WARN_IF(NS_FAILED(rv))) {
-      return rv;
-    }
-
-    mResponse.cloneInfo().data().SwapElements(cloneInfo.mData);
-  }
-
-  return NS_OK;
-}
-
-AddOrPutRequestOp::AddOrPutRequestOp(TransactionBase* aTransaction,
-                                     const RequestParams& aParams)
+ObjectStoreAddOrPutRequestOp::ObjectStoreAddOrPutRequestOp(
+                                                  TransactionBase* aTransaction,
+                                                  const RequestParams& aParams)
   : NormalTransactionOp(aTransaction)
   , mParams(aParams.type() == RequestParams::TObjectStoreAddParams ?
               aParams.get_ObjectStoreAddParams().commonParams() :
@@ -8754,12 +8753,12 @@ AddOrPutRequestOp::AddOrPutRequestOp(TransactionBase* aTransaction,
 }
 
 nsresult
-AddOrPutRequestOp::DoDatabaseWork(TransactionBase* aTransaction)
+ObjectStoreAddOrPutRequestOp::DoDatabaseWork(TransactionBase* aTransaction)
 {
   MOZ_ASSERT(aTransaction);
   aTransaction->AssertIsOnTransactionThread();
 
-  PROFILER_LABEL("IndexedDB", "AddOrPutRequestOp::DoDatabaseWork");
+  PROFILER_LABEL("IndexedDB", "ObjectStoreAddOrPutRequestOp::DoDatabaseWork");
 
   if (NS_WARN_IF(IndexedDatabaseManager::InLowDiskSpaceMode())) {
     return NS_ERROR_DOM_INDEXEDDB_QUOTA_ERR;
@@ -8975,16 +8974,253 @@ AddOrPutRequestOp::DoDatabaseWork(TransactionBase* aTransaction)
   return NS_OK;
 }
 
-template <>
 nsresult
-RequestOp<ObjectStoreDeleteParams>::DoDatabaseWork(
-                                                  TransactionBase* aTransaction)
+ObjectStoreGetRequestOp::DoDatabaseWork(TransactionBase* aTransaction)
 {
   MOZ_ASSERT(aTransaction);
   aTransaction->AssertIsOnTransactionThread();
 
-  PROFILER_LABEL("IndexedDB",
-                 "RequestOp<ObjectStoreDeleteParams>::DoDatabaseWork");
+  PROFILER_LABEL("IndexedDB", "ObjectStoreGetRequestOp::DoDatabaseWork");
+
+  nsCString keyRangeClause;
+  GetBindingClauseForKeyRange(mParams.keyRange(),
+                              NS_LITERAL_CSTRING("key_value"),
+                              keyRangeClause);
+
+  nsCString query =
+    NS_LITERAL_CSTRING("SELECT data, file_ids "
+                       "FROM object_data "
+                       "WHERE object_store_id = :osid") +
+    keyRangeClause +
+    NS_LITERAL_CSTRING(" LIMIT 1");
+
+  TransactionBase::CachedStatement stmt;
+  nsresult rv = aTransaction->GetCachedStatement(query, &stmt);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+
+  rv = stmt->BindInt64ByName(NS_LITERAL_CSTRING("osid"),
+                             mParams.objectStoreId());
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+
+  rv = BindKeyRangeToStatement(mParams.keyRange(), stmt);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+
+  bool hasResult;
+  rv = stmt->ExecuteStep(&hasResult);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+
+  if (hasResult) {
+    StructuredCloneReadInfo cloneInfo;
+    rv = GetStructuredCloneReadInfoFromStatement(stmt, 0, 1, mFileManager,
+                                                 &cloneInfo);
+    if (NS_WARN_IF(NS_FAILED(rv))) {
+      return rv;
+    }
+
+    mResponse.mData.SwapElements(cloneInfo.mData);
+  }
+
+  return NS_OK;
+}
+
+void
+ObjectStoreGetRequestOp::GetResponse(RequestResponse& aResponse)
+{
+  AssertIsOnBackgroundThread();
+
+  // XXX Construct blobs, etc.
+
+  aResponse = ObjectStoreGetResponse();
+
+  nsTArray<uint8_t>& data =
+    aResponse.get_ObjectStoreGetResponse().cloneInfo().data();
+
+  mResponse.mData.SwapElements(data);
+}
+
+nsresult
+ObjectStoreGetAllRequestOp::DoDatabaseWork(TransactionBase* aTransaction)
+{
+  MOZ_ASSERT(aTransaction);
+  aTransaction->AssertIsOnTransactionThread();
+
+  PROFILER_LABEL("IndexedDB", "ObjectStoreGetAllRequestOp::DoDatabaseWork");
+
+  const bool hasKeyRange =
+    mParams.optionalKeyRange().type() == OptionalKeyRange::TSerializedKeyRange;
+
+  nsCString keyRangeClause;
+  if (hasKeyRange) {
+    GetBindingClauseForKeyRange(
+      mParams.optionalKeyRange().get_SerializedKeyRange(),
+      NS_LITERAL_CSTRING("key_value"),
+      keyRangeClause);
+  }
+
+  nsAutoCString limitClause;
+  if (uint32_t limit = mParams.limit()) {
+    limitClause.AssignLiteral(" LIMIT ");
+    limitClause.AppendInt(limit);
+  }
+
+  nsCString query =
+    NS_LITERAL_CSTRING("SELECT data, file_ids "
+                       "FROM object_data "
+                       "WHERE object_store_id = :osid") +
+    keyRangeClause +
+    NS_LITERAL_CSTRING(" ORDER BY key_value ASC") +
+    limitClause;
+
+  TransactionBase::CachedStatement stmt;
+  nsresult rv = aTransaction->GetCachedStatement(query, &stmt);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+
+  rv = stmt->BindInt64ByName(NS_LITERAL_CSTRING("osid"),
+                             mParams.objectStoreId());
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+
+  if (hasKeyRange) {
+    rv = BindKeyRangeToStatement(
+      mParams.optionalKeyRange().get_SerializedKeyRange(),
+      stmt);
+    if (NS_WARN_IF(NS_FAILED(rv))) {
+      return rv;
+    }
+  }
+
+  bool hasResult;
+  while (NS_SUCCEEDED((rv = stmt->ExecuteStep(&hasResult))) && hasResult) {
+    StructuredCloneReadInfo* cloneInfo = mResponse.AppendElement();
+    if (NS_WARN_IF(!cloneInfo)) {
+      return NS_ERROR_OUT_OF_MEMORY;
+    }
+
+    rv = GetStructuredCloneReadInfoFromStatement(stmt, 0, 1, mFileManager,
+                                                 cloneInfo);
+    if (NS_WARN_IF(NS_FAILED(rv))) {
+      return rv;
+    }
+  }
+
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+
+  return NS_OK;
+}
+
+void
+ObjectStoreGetAllRequestOp::GetResponse(RequestResponse& aResponse)
+{
+  AssertIsOnBackgroundThread();
+
+  // XXX Construct blobs, etc.
+
+  FallibleTArray<SerializedStructuredCloneReadInfo> fallibleCloneInfos;
+  if (NS_WARN_IF(!fallibleCloneInfos.SetLength(mResponse.Length()))) {
+    aResponse = NS_ERROR_OUT_OF_MEMORY;
+    return;
+  }
+
+  for (uint32_t count = mResponse.Length(), index = 0;
+       index < count;
+       index++) {
+    fallibleCloneInfos[index].data().SwapElements(mResponse[index].mData);
+  }
+
+  aResponse = ObjectStoreGetAllResponse();
+
+  nsTArray<SerializedStructuredCloneReadInfo>& cloneInfos =
+    aResponse.get_ObjectStoreGetAllResponse().cloneInfos();
+
+  cloneInfos.SwapElements(fallibleCloneInfos);
+}
+
+nsresult
+ObjectStoreGetAllKeysRequestOp::DoDatabaseWork(TransactionBase* aTransaction)
+{
+  MOZ_ASSERT(aTransaction);
+  aTransaction->AssertIsOnTransactionThread();
+
+  PROFILER_LABEL("IndexedDB", "ObjectStoreGetAllKeysRequestOp::DoDatabaseWork");
+
+  const bool hasKeyRange =
+    mParams.optionalKeyRange().type() == OptionalKeyRange::TSerializedKeyRange;
+
+  nsCString keyRangeClause;
+  if (hasKeyRange) {
+    GetBindingClauseForKeyRange(
+      mParams.optionalKeyRange().get_SerializedKeyRange(),
+      NS_LITERAL_CSTRING("key_value"),
+      keyRangeClause);
+  }
+
+  nsAutoCString limitClause;
+  if (uint32_t limit = mParams.limit()) {
+    limitClause.AssignLiteral(" LIMIT ");
+    limitClause.AppendInt(limit);
+  }
+
+  nsCString query =
+    NS_LITERAL_CSTRING("SELECT key_value "
+                       "FROM object_data "
+                       "WHERE object_store_id = :osid") +
+    keyRangeClause +
+    NS_LITERAL_CSTRING(" ORDER BY key_value ASC") +
+    limitClause;
+
+  TransactionBase::CachedStatement stmt;
+  nsresult rv = aTransaction->GetCachedStatement(query, &stmt);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+
+  rv = stmt->BindInt64ByName(NS_LITERAL_CSTRING("osid"),
+                             mParams.objectStoreId());
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+
+  if (hasKeyRange) {
+    rv = BindKeyRangeToStatement(
+      mParams.optionalKeyRange().get_SerializedKeyRange(),
+      stmt);
+    if (NS_WARN_IF(NS_FAILED(rv))) {
+      return rv;
+    }
+  }
+
+  bool hasResult;
+  while(NS_SUCCEEDED((rv = stmt->ExecuteStep(&hasResult))) && hasResult) {
+    Key* key = mResponse.AppendElement();
+    NS_ASSERTION(key, "This shouldn't fail!");
+
+    rv = key->SetFromStatement(stmt, 0);
+    NS_ENSURE_SUCCESS(rv, rv);
+  }
+  IDB_ENSURE_SUCCESS(rv, NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
+  return NS_OK;
+}
+
+nsresult
+ObjectStoreDeleteRequestOp::DoDatabaseWork(TransactionBase* aTransaction)
+{
+  MOZ_ASSERT(aTransaction);
+  aTransaction->AssertIsOnTransactionThread();
+
+  PROFILER_LABEL("IndexedDB", "ObjectStoreDeleteRequestOp::DoDatabaseWork");
 
   TransactionBase::AutoSavepoint autoSave;
   nsresult rv = autoSave.Start(aTransaction, this);
@@ -9027,15 +9263,13 @@ RequestOp<ObjectStoreDeleteParams>::DoDatabaseWork(
   return NS_OK;
 }
 
-template <>
 nsresult
-RequestOp<ObjectStoreClearParams>::DoDatabaseWork(TransactionBase* aTransaction)
+ObjectStoreClearRequestOp::DoDatabaseWork(TransactionBase* aTransaction)
 {
   MOZ_ASSERT(aTransaction);
   aTransaction->AssertIsOnTransactionThread();
 
-  PROFILER_LABEL("IndexedDB",
-                 "RequestOp<ObjectStoreClearParams>::DoDatabaseWork");
+  PROFILER_LABEL("IndexedDB", "ObjectStoreClearRequestOp::DoDatabaseWork");
 
   TransactionBase::AutoSavepoint autoSave;
   nsresult rv = autoSave.Start(aTransaction, this);
@@ -9066,15 +9300,13 @@ RequestOp<ObjectStoreClearParams>::DoDatabaseWork(TransactionBase* aTransaction)
   return NS_OK;
 }
 
-template <>
 nsresult
-RequestOp<ObjectStoreCountParams>::DoDatabaseWork(TransactionBase* aTransaction)
+ObjectStoreCountRequestOp::DoDatabaseWork(TransactionBase* aTransaction)
 {
   MOZ_ASSERT(aTransaction);
   aTransaction->AssertIsOnTransactionThread();
 
-  PROFILER_LABEL("IndexedDB",
-                 "RequestOp<ObjectStoreCountParams>::DoDatabaseWork");
+  PROFILER_LABEL("IndexedDB", "ObjectStoreCountRequestOp::DoDatabaseWork");
 
   const bool hasKeyRange =
     mParams.optionalKeyRange().type() == OptionalKeyRange::TSerializedKeyRange;

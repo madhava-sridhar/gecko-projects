@@ -1449,80 +1449,6 @@ UpgradeSchemaFrom13_0To14_0(mozIStorageConnection* aConnection)
 
 class VersionChangeEventsRunnable;
 
-class SetVersionHelper : public AsyncConnectionHelper,
-                         public IDBTransactionListener,
-                         public AcquireListener
-{
-  friend class VersionChangeEventsRunnable;
-
-public:
-  SetVersionHelper(IDBTransaction* aTransaction,
-                   IDBOpenDBRequest* aRequest,
-                   OpenDatabaseHelper* aHelper,
-                   uint64_t aRequestedVersion,
-                   uint64_t aCurrentVersion)
-  : AsyncConnectionHelper(aTransaction, aRequest),
-    mOpenRequest(aRequest), mOpenHelper(aHelper),
-    mRequestedVersion(aRequestedVersion),
-    mCurrentVersion(aCurrentVersion)
-  {
-    mTransaction->SetTransactionListener(this);
-  }
-
-  NS_DECL_ISUPPORTS_INHERITED
-
-  virtual nsresult GetSuccessResult(JSContext* aCx,
-                                    JS::MutableHandle<JS::Value> aVal) MOZ_OVERRIDE;
-
-  virtual nsresult
-  OnExclusiveAccessAcquired() MOZ_OVERRIDE;
-
-protected:
-  virtual nsresult Init() MOZ_OVERRIDE;
-
-  virtual nsresult DoDatabaseWork(mozIStorageConnection* aConnection)
-                                  MOZ_OVERRIDE;
-
-  // SetVersionHelper never fires an error event at the request.  It hands that
-  // responsibility back to the OpenDatabaseHelper
-  virtual void OnError() MOZ_OVERRIDE
-  { }
-
-  // Need an upgradeneeded event here.
-  virtual already_AddRefed<nsIDOMEvent> CreateSuccessEvent(
-    mozilla::dom::EventTarget* aOwner) MOZ_OVERRIDE;
-
-  virtual nsresult NotifyTransactionPreComplete(IDBTransaction* aTransaction)
-                                                MOZ_OVERRIDE;
-  virtual nsresult NotifyTransactionPostComplete(IDBTransaction* aTransaction)
-                                                 MOZ_OVERRIDE;
-
-  virtual ChildProcessSendResult
-  SendResponseToChildProcess(nsresult aResultCode) MOZ_OVERRIDE
-  {
-    return Success_NotSent;
-  }
-
-  virtual nsresult UnpackResponseFromParentProcess(
-                                            const ResponseValue& aResponseValue)
-                                            MOZ_OVERRIDE
-  {
-    MOZ_CRASH("Should never get here!");
-  }
-
-  uint64_t RequestedVersion() const
-  {
-    return mRequestedVersion;
-  }
-
-private:
-  // In-params
-  nsRefPtr<IDBOpenDBRequest> mOpenRequest;
-  nsRefPtr<OpenDatabaseHelper> mOpenHelper;
-  uint64_t mRequestedVersion;
-  uint64_t mCurrentVersion;
-};
-
 class DeleteDatabaseHelper : public AsyncConnectionHelper,
                              public AcquireListener
 {
@@ -2072,68 +1998,6 @@ OpenDatabaseHelper::ReleaseMainThreadObjects()
   HelperBase::ReleaseMainThreadObjects();
 }
 
-NS_IMPL_ISUPPORTS_INHERITED0(SetVersionHelper, AsyncConnectionHelper)
-
-nsresult
-SetVersionHelper::Init()
-{
-  // Block transaction creation until we are done.
-  mOpenHelper->BlockDatabase();
-
-  return NS_OK;
-}
-
-nsresult
-SetVersionHelper::DoDatabaseWork(mozIStorageConnection* aConnection)
-{
-  NS_ASSERTION(!NS_IsMainThread(), "Wrong thread!");
-  NS_ASSERTION(IndexedDatabaseManager::IsMainProcess(), "Wrong process!");
-  NS_ASSERTION(aConnection, "Passing a null connection!");
-
-  PROFILER_LABEL("IndexedDB", "SetVersionHelper::DoDatabaseWork");
-
-  nsCOMPtr<mozIStorageStatement> stmt;
-  nsresult rv = aConnection->CreateStatement(NS_LITERAL_CSTRING(
-    "UPDATE database "
-    "SET version = :version"
-  ), getter_AddRefs(stmt));
-  IDB_ENSURE_SUCCESS(rv, NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
-
-  rv = stmt->BindInt64ByName(NS_LITERAL_CSTRING("version"),
-                             mRequestedVersion);
-  IDB_ENSURE_SUCCESS(rv, NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
-
-  if (NS_FAILED(stmt->Execute())) {
-    return NS_ERROR_DOM_INDEXEDDB_CONSTRAINT_ERR;
-  }
-
-  return NS_OK;
-}
-
-nsresult
-SetVersionHelper::GetSuccessResult(JSContext* aCx,
-                                   JS::MutableHandle<JS::Value> aVal)
-{
-  DatabaseInfo* info = mDatabase->Info();
-  info->version = mRequestedVersion;
-
-  NS_ASSERTION(mTransaction, "Better have a transaction!");
-
-  mOpenRequest->SetTransaction(mTransaction);
-
-  return WrapNative(aCx, NS_ISUPPORTS_CAST(EventTarget*, mDatabase),
-                    aVal);
-}
-
-nsresult
-SetVersionHelper::OnExclusiveAccessAcquired()
-{
-  nsresult rv = DispatchToTransactionPool();
-  NS_ENSURE_SUCCESS(rv, rv);
-
-  return NS_OK;
-}
-
 // static
 template <class T>
 void
@@ -2154,52 +2018,6 @@ VersionChangeEventsRunnable::QueueVersionChange(
                                     closure->RequestedVersion());
 
   NS_DispatchToCurrentThread(eventsRunnable);
-}
-
-already_AddRefed<nsIDOMEvent>
-SetVersionHelper::CreateSuccessEvent(mozilla::dom::EventTarget* aOwner)
-{
-  NS_ASSERTION(mCurrentVersion < mRequestedVersion, "Huh?");
-
-  return IDBVersionChangeEvent::CreateUpgradeNeeded(aOwner,
-                                                    mCurrentVersion,
-                                                    mRequestedVersion);
-}
-
-nsresult
-SetVersionHelper::NotifyTransactionPreComplete(IDBTransaction* aTransaction)
-{
-  NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
-  NS_ASSERTION(aTransaction, "This is unexpected.");
-  NS_ASSERTION(mOpenRequest, "Why don't we have a request?");
-
-  return mOpenHelper->NotifySetVersionFinished();
-}
-
-nsresult
-SetVersionHelper::NotifyTransactionPostComplete(IDBTransaction* aTransaction)
-{
-  NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
-  NS_ASSERTION(aTransaction, "This is unexpected.");
-  NS_ASSERTION(mOpenRequest, "Why don't we have a request?");
-
-  // If we hit an error, the OpenDatabaseHelper needs to get that error too.
-  nsresult rv = GetResultCode();
-  if (NS_FAILED(rv)) {
-    mOpenHelper->SetError(rv);
-  }
-
-  // If the transaction was aborted, we should throw an error message.
-  if (aTransaction->IsAborted()) {
-    mOpenHelper->SetError(aTransaction->GetAbortCode());
-  }
-
-  mOpenRequest->SetTransaction(nullptr);
-  mOpenRequest = nullptr;
-
-  mOpenHelper = nullptr;
-
-  return rv;
 }
 
 NS_IMPL_ISUPPORTS_INHERITED0(DeleteDatabaseHelper, AsyncConnectionHelper);

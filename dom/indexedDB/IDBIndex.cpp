@@ -818,6 +818,7 @@ IDBIndex::OpenCursorFromChildProcess(
   IDBCursor::Direction direction =
     static_cast<IDBCursor::Direction>(aDirection);
 
+  MOZ_CRASH("Fix me!");/*
   StructuredCloneReadInfo cloneInfo;
 
   if (!cloneInfo.SetFromSerialized(aCloneInfo)) {
@@ -835,7 +836,7 @@ IDBIndex::OpenCursorFromChildProcess(
 
   NS_ASSERTION(!cloneInfo.mCloneBuffer.data(), "Should have swapped!");
 
-  cursor.forget(_retval);
+  cursor.forget(_retval);*/
   return NS_OK;
 }
 
@@ -1008,6 +1009,9 @@ IDBIndex::OpenCursor(JSContext* aCx,
 {
   NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
 
+  aRv.Throw(NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
+  return nullptr;
+
   IDBTransaction* transaction = mObjectStore->Transaction();
   if (!transaction->IsOpen()) {
     aRv.Throw(NS_ERROR_DOM_INDEXEDDB_TRANSACTION_INACTIVE_ERR);
@@ -1046,6 +1050,9 @@ IDBIndex::OpenKeyCursor(JSContext* aCx,
                         IDBCursorDirection aDirection, ErrorResult& aRv)
 {
   NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
+
+  aRv.Throw(NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
+  return nullptr;
 
   IDBTransaction* transaction = mObjectStore->Transaction();
   if (!transaction->IsOpen()) {
@@ -1158,7 +1165,8 @@ GetKeyHelper::DoDatabaseWork(mozIStorageConnection* /* aConnection */)
                     keyRangeClause +
                     NS_LITERAL_CSTRING(" LIMIT 1");
 
-  nsCOMPtr<mozIStorageStatement> stmt = mTransaction->GetCachedStatement(query);
+  MOZ_CRASH("Remove me!");
+  nsCOMPtr<mozIStorageStatement> stmt;// = mTransaction->GetCachedStatement(query);
   IDB_ENSURE_TRUE(stmt, NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
 
   mozStorageStatementScoper scoper(stmt);
@@ -1292,7 +1300,8 @@ GetHelper::DoDatabaseWork(mozIStorageConnection* /* aConnection */)
                     keyRangeClause +
                     NS_LITERAL_CSTRING(" LIMIT 1");
 
-  nsCOMPtr<mozIStorageStatement> stmt = mTransaction->GetCachedStatement(query);
+  MOZ_CRASH("Remove me!");
+  nsCOMPtr<mozIStorageStatement> stmt;// = mTransaction->GetCachedStatement(query);
   IDB_ENSURE_TRUE(stmt, NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
 
   mozStorageStatementScoper scoper(stmt);
@@ -1472,7 +1481,8 @@ GetAllKeysHelper::DoDatabaseWork(mozIStorageConnection* /* aConnection */)
                     NS_LITERAL_CSTRING(" WHERE index_id = :index_id") +
                     keyRangeClause + limitClause;
 
-  nsCOMPtr<mozIStorageStatement> stmt = mTransaction->GetCachedStatement(query);
+  MOZ_CRASH("Remove me!");
+  nsCOMPtr<mozIStorageStatement> stmt;// = mTransaction->GetCachedStatement(query);
   IDB_ENSURE_TRUE(stmt, NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
 
   mozStorageStatementScoper scoper(stmt);
@@ -1664,7 +1674,8 @@ GetAllHelper::DoDatabaseWork(mozIStorageConnection* /* aConnection */)
                                        "WHERE index_id = :index_id") +
                     keyRangeClause + limitClause;
 
-  nsCOMPtr<mozIStorageStatement> stmt = mTransaction->GetCachedStatement(query);
+  MOZ_CRASH("Remove me!");
+  nsCOMPtr<mozIStorageStatement> stmt;// = mTransaction->GetCachedStatement(query);
   IDB_ENSURE_TRUE(stmt, NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
 
   mozStorageStatementScoper scoper(stmt);
@@ -1909,8 +1920,9 @@ OpenKeyCursorHelper::DoDatabaseWork(mozIStorageConnection* aConnection)
                          keyRangeClause + directionClause +
                          NS_LITERAL_CSTRING(" LIMIT 1");
 
-  nsCOMPtr<mozIStorageStatement> stmt =
-    mTransaction->GetCachedStatement(firstQuery);
+  MOZ_CRASH("Remove me!");
+  nsCOMPtr<mozIStorageStatement> stmt;/* =
+    mTransaction->GetCachedStatement(firstQuery);*/
   IDB_ENSURE_TRUE(stmt, NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
 
   mozStorageStatementScoper scoper(stmt);
@@ -2260,8 +2272,9 @@ OpenCursorHelper::DoDatabaseWork(mozIStorageConnection* aConnection)
     keyRangeClause + directionClause +
     NS_LITERAL_CSTRING(" LIMIT 1");
 
-  nsCOMPtr<mozIStorageStatement> stmt =
-    mTransaction->GetCachedStatement(firstQuery);
+  MOZ_CRASH("Remove me!");
+  nsCOMPtr<mozIStorageStatement> stmt;/* =
+    mTransaction->GetCachedStatement(firstQuery);*/
   IDB_ENSURE_TRUE(stmt, NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
 
   mozStorageStatementScoper scoper(stmt);
@@ -2576,7 +2589,8 @@ CountHelper::DoDatabaseWork(mozIStorageConnection* aConnection)
                     NS_LITERAL_CSTRING(" WHERE index_id = :id") +
                     keyRangeClause;
 
-  nsCOMPtr<mozIStorageStatement> stmt = mTransaction->GetCachedStatement(query);
+  MOZ_CRASH("Remove me!");
+  nsCOMPtr<mozIStorageStatement> stmt;// = mTransaction->GetCachedStatement(query);
   IDB_ENSURE_TRUE(stmt, NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
 
   mozStorageStatementScoper scoper(stmt);
