@@ -72,6 +72,7 @@ private:
   nsRefPtr<DOMError> mError;
   nsTArray<nsString> mObjectStoreNames;
   nsTArray<nsRefPtr<IDBObjectStore>> mObjectStores;
+  nsTArray<nsRefPtr<IDBObjectStore>> mDeletedObjectStores;
   nsRefPtrHashtable<nsISupportsHashKey, FileInfo> mCreatedFileInfos;
 
   // Tagged with mMode. If mMode is VERSION_CHANGE then mBackgroundActor will be
@@ -100,14 +101,11 @@ private:
   bool mCreating;
 
 #ifdef DEBUG
+  bool mSentCommitOrAbort;
   bool mFiredCompleteOrAbort;
 #endif
 
 public:
-  NS_DECL_ISUPPORTS_INHERITED
-  NS_DECL_NSIRUNNABLE
-  NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(IDBTransaction, IDBWrapperCache)
-
   static already_AddRefed<IDBTransaction>
   CreateVersionChange(IDBDatabase* aDatabase,
                       BackgroundVersionChangeTransactionChild* aActor,
@@ -150,11 +148,7 @@ public:
                const RequestParams& aParams);
 
   void
-  RefreshSpec();
-
-  // nsIDOMEventTarget
-  virtual nsresult
-  PreHandleEvent(EventChainPreVisitor& aVisitor) MOZ_OVERRIDE;
+  RefreshSpec(bool aMayDelete);
 
   void
   OnNewRequest();
@@ -250,11 +244,6 @@ public:
   }
 #endif
 
-  // nsWrapperCache
-  virtual JSObject*
-  WrapObject(JSContext* aCx, JS::Handle<JSObject*> aScope) MOZ_OVERRIDE;
-
-  // WebIDL
   nsPIDOMWindow*
   GetParentObject() const;
 
@@ -287,6 +276,18 @@ public:
   // Only for VERSION_CHANGE transactions.
   int64_t
   NextIndexId();
+
+  NS_DECL_ISUPPORTS_INHERITED
+  NS_DECL_NSIRUNNABLE
+  NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(IDBTransaction, IDBWrapperCache)
+
+  // nsWrapperCache
+  virtual JSObject*
+  WrapObject(JSContext* aCx, JS::Handle<JSObject*> aScope) MOZ_OVERRIDE;
+
+  // nsIDOMEventTarget
+  virtual nsresult
+  PreHandleEvent(EventChainPreVisitor& aVisitor) MOZ_OVERRIDE;
 
 private:
   IDBTransaction(IDBDatabase* aDatabase, Mode aMode);

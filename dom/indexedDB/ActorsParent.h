@@ -28,17 +28,19 @@ class BackgroundFactoryParent MOZ_FINAL
 
   typedef mozilla::dom::quota::StoragePrivilege StoragePrivilege;
 
-  nsCString mGroup;
-  nsCString mOrigin;
-  StoragePrivilege mPrivilege;
-
   // Counts the number of "live" BackgroundFactoryParent instances that have not
   // yet had ActorDestroy called.
   static uint64_t sFactoryInstanceCount;
 
-public:
-  NS_INLINE_DECL_THREADSAFE_REFCOUNTING(BackgroundFactoryParent)
+  nsCString mGroup;
+  nsCString mOrigin;
+  StoragePrivilege mPrivilege;
 
+#ifdef DEBUG
+  bool mActorDestroyed;
+#endif
+
+public:
   const nsCString&
   Group() const
   {
@@ -57,12 +59,9 @@ public:
     return mPrivilege;
   }
 
-  // Only created by mozilla::ipc::BackgroundParentImpl.
-  static already_AddRefed<BackgroundFactoryParent>
-  Create(const nsCString& aGroup,
-         const nsCString& aOrigin,
-         const StoragePrivilege& aPrivilege);
+  NS_INLINE_DECL_THREADSAFE_REFCOUNTING(BackgroundFactoryParent)
 
+private:
   // Only constructed in Create().
   BackgroundFactoryParent(const nsCString& aGroup,
                           const nsCString& aOrigin,
@@ -70,6 +69,12 @@ public:
 
   // Reference counted.
   ~BackgroundFactoryParent();
+
+  // Only created by mozilla::ipc::BackgroundParentImpl.
+  static already_AddRefed<BackgroundFactoryParent>
+  Create(const nsCString& aGroup,
+         const nsCString& aOrigin,
+         const StoragePrivilege& aPrivilege);
 
   // IPDL methods are only called by IPDL.
   virtual void

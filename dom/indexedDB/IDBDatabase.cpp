@@ -114,96 +114,32 @@ private:
   nsRefPtr<FileInfo> mFileInfo;
 };
 
-class MOZ_STACK_CLASS AutoRemoveObjectStore
-{
-public:
-  AutoRemoveObjectStore(DatabaseInfo* aInfo, const nsAString& aName)
-  : mInfo(aInfo), mName(aName)
-  { }
-
-  ~AutoRemoveObjectStore()
-  {
-    if (mInfo) {
-      mInfo->RemoveObjectStore(mName);
-    }
-  }
-
-  void forget()
-  {
-    mInfo = nullptr;
-  }
-
-private:
-  DatabaseInfo* mInfo;
-  nsString mName;
-};
-
-static PLDHashOperator
-AbortTransactionsEnumerator(nsRefPtrHashKey<IDBTransaction>* aTransaction,
-                            void* /* aClosure */)
-{
-  MOZ_ASSERT(aTransaction);
-  aTransaction->GetKey()->AssertIsOnOwningThread();
-
-  // This can fail, for example if the transaction is in the process of
-  // being committed. That is expected and fine, so we ignore any returned
-  // errors.
-  ErrorResult rv;
-  aTransaction->GetKey()->Abort(rv);
-
-  return PL_DHASH_NEXT;
-}
-
-static PLDHashOperator
-RefreshTransactionsSpecEnumerator(nsRefPtrHashKey<IDBTransaction>* aTransaction,
-                                  void* /* aClosure */)
-{
-  MOZ_ASSERT(aTransaction);
-  aTransaction->GetKey()->AssertIsOnOwningThread();
-
-  aTransaction->GetKey()->RefreshSpec();
-
-  return PL_DHASH_NEXT;
-}
-
-
 } // anonymous namespace
 
-// static
-already_AddRefed<IDBDatabase>
-IDBDatabase::Create(IDBWrapperCache* aOwnerCache,
-                    IDBFactory* aFactory,
-                    already_AddRefed<DatabaseInfo> aDatabaseInfo,
-                    const nsACString& aASCIIOrigin,
-                    FileManager* aFileManager,
-                    mozilla::dom::ContentParent* aContentParent)
+IDBDatabase::IDBDatabase(IDBWrapperCache* aOwnerCache,
+                         IDBFactory* aFactory,
+                         BackgroundDatabaseChild* aActor,
+                         DatabaseSpec* aSpec)
+  : IDBWrapperCache(aOwnerCache)
+  , mFactory(aFactory)
+  , mSpec(aSpec)
+  , mBackgroundActor(aActor)
+  , mClosed(false)
+  , mInvalidated(false)
 {
-  NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
-  NS_ASSERTION(aFactory, "Null pointer!");
-  NS_ASSERTION(!aASCIIOrigin.IsEmpty(), "Empty origin!");
+  MOZ_ASSERT(aOwnerCache);
+  MOZ_ASSERT(aFactory);
+  aFactory->AssertIsOnOwningThread();
+  MOZ_ASSERT(aActor);
+  MOZ_ASSERT(aSpec);
 
-  nsRefPtr<DatabaseInfo> databaseInfo(aDatabaseInfo);
-  NS_ASSERTION(databaseInfo, "Null pointer!");
+  SetIsDOMBinding();
+}
 
-  nsRefPtr<IDBDatabase> db(new IDBDatabase(aOwnerCache));
-
-  db->SetScriptOwner(aOwnerCache->GetScriptOwner());
-  db->mFactory = aFactory;
-  db->mDatabaseId = databaseInfo->id;
-  db->mFilePath = databaseInfo->filePath;
-  db->mPersistenceType = databaseInfo->persistenceType;
-  db->mGroup = databaseInfo->group;
-  db->mASCIIOrigin = aASCIIOrigin;
-  db->mFileManager = aFileManager;
-  db->mContentParent = aContentParent;
-
-  QuotaManager* quotaManager = QuotaManager::Get();
-  NS_ASSERTION(quotaManager, "This should never be null!");
-
-  db->mQuotaClient = quotaManager->GetClient(Client::IDB);
-  NS_ASSERTION(db->mQuotaClient, "This shouldn't fail!");
-
-  return db.forget();
+IDBDatabase::~IDBDatabase()
+{
+  AssertIsOnOwningThread();
+  MOZ_ASSERT(!mBackgroundActor);
 }
 
 // static
@@ -219,12 +155,10 @@ IDBDatabase::Create(IDBWrapperCache* aOwnerCache,
   MOZ_ASSERT(aActor);
   MOZ_ASSERT(aSpec);
 
-  nsRefPtr<IDBDatabase> db = new IDBDatabase(aOwnerCache);
+  nsRefPtr<IDBDatabase> db =
+    new IDBDatabase(aOwnerCache, aFactory, aActor, aSpec);
 
   db->SetScriptOwner(aOwnerCache->GetScriptOwner());
-  db->mFactory = aFactory;
-  db->mBackgroundActor = aActor;
-  db->mSpec = aSpec;
 
   return db.forget();
 }
@@ -245,22 +179,6 @@ IDBDatabase::FromStorage(nsIFileStorage* aStorage)
   return storage ? FromStorage(storage) : nullptr;
 }
 
-IDBDatabase::IDBDatabase(IDBWrapperCache* aOwnerCache)
-: IDBWrapperCache(aOwnerCache),
-  mBackgroundActor(nullptr),
-  mContentParent(nullptr),
-  mClosed(false),
-  mInvalidated(false)
-{
-  SetIsDOMBinding();
-}
-
-IDBDatabase::~IDBDatabase()
-{
-  AssertIsOnOwningThread();
-  MOZ_ASSERT(!mBackgroundActor);
-}
-
 #ifdef DEBUG
 
 void
@@ -272,48 +190,6 @@ IDBDatabase::AssertIsOnOwningThread() const
 
 #endif // DEBUG
 
-void
-IDBDatabase::LastRelease()
-{
-  AssertIsOnOwningThread();
-
-  CloseInternal();
-
-  if (mBackgroundActor) {
-    mBackgroundActor->SendDeleteMe();
-    mBackgroundActor = nullptr;
-  }
-}
-
-NS_IMETHODIMP_(void)
-IDBDatabase::Invalidate()
-{
-  AssertIsOnOwningThread();
-  MOZ_ASSERT(!mInvalidated);
-
-  mInvalidated = true;
-
-  CloseInternal();
-}
-
-  /* XXX Remove me!
-
-void
-IDBDatabase::DisconnectFromActorParent()
-{
-  NS_ASSERTION(IndexedDatabaseManager::IsMainProcess(), "Wrong process!");
-  NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
-
-  // Make sure we're closed too.
-  CloseInternal();
-
-  // Kill any outstanding prompts.
-  nsPIDOMWindow* owner = GetOwner();
-  if (owner) {
-    QuotaManager::CancelPromptsForWindow(owner);
-  }
-}
-*/
 void
 IDBDatabase::CloseInternal()
 {
@@ -336,14 +212,17 @@ IDBDatabase::IsClosed()
 }
 
 void
-IDBDatabase::EnterSetVersionTransaction()
+IDBDatabase::EnterSetVersionTransaction(uint64_t aNewVersion)
 {
   AssertIsOnOwningThread();
+  MOZ_ASSERT(aNewVersion);
   MOZ_ASSERT(!RunningVersionChangeTransaction());
   MOZ_ASSERT(mSpec);
   MOZ_ASSERT(!mPreviousSpec);
 
   mPreviousSpec = new DatabaseSpec(*mSpec);
+
+  mSpec->metadata().version() = aNewVersion;
 }
 
 void
@@ -369,40 +248,35 @@ IDBDatabase::RevertToPreviousState()
 
   mSpec = mPreviousSpec.forget();
 
-  mTransactions.EnumerateEntries(RefreshTransactionsSpecEnumerator, nullptr);
+  RefreshSpec(/* aMayDelete */ true);
 }
 
-NS_IMPL_CYCLE_COLLECTION_CLASS(IDBDatabase)
-
-NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(IDBDatabase, IDBWrapperCache)
-  tmp->AssertIsOnOwningThread();
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mFactory)
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mTransactions)
-NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
-
-NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN_INHERITED(IDBDatabase, IDBWrapperCache)
-  tmp->AssertIsOnOwningThread();
-
-  // Don't unlink mFactory!
-
-  // We've been unlinked, at the very least we should be able to prevent further
-  // transactions from starting and unblock any other SetVersion callers.
-  tmp->CloseInternal();
-  NS_IMPL_CYCLE_COLLECTION_UNLINK(mTransactions)
-NS_IMPL_CYCLE_COLLECTION_UNLINK_END
-
-NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION_INHERITED(IDBDatabase)
-  NS_INTERFACE_MAP_ENTRY(nsIFileStorage)
-  NS_INTERFACE_MAP_ENTRY(nsIOfflineStorage)
-NS_INTERFACE_MAP_END_INHERITING(IDBWrapperCache)
-
-NS_IMPL_ADDREF_INHERITED(IDBDatabase, IDBWrapperCache)
-NS_IMPL_RELEASE_INHERITED(IDBDatabase, IDBWrapperCache)
-
-JSObject*
-IDBDatabase::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aScope)
+void
+IDBDatabase::RefreshSpec(bool aMayDelete)
 {
-  return IDBDatabaseBinding::Wrap(aCx, aScope, this);
+  AssertIsOnOwningThread();
+
+  class MOZ_STACK_CLASS Helper MOZ_FINAL
+  {
+  public:
+    static PLDHashOperator
+    RefreshTransactionsSpec(nsPtrHashKey<IDBTransaction>* aTransaction,
+                            void* aClosure)
+    {
+      MOZ_ASSERT(aTransaction);
+      aTransaction->GetKey()->AssertIsOnOwningThread();
+      MOZ_ASSERT(aClosure);
+
+      bool mayDelete = *static_cast<bool*>(aClosure);
+
+      nsRefPtr<IDBTransaction> transaction = aTransaction->GetKey();
+      transaction->RefreshSpec(mayDelete);
+
+      return PL_DHASH_NEXT;
+    }
+  };
+
+  mTransactions.EnumerateEntries(Helper::RefreshTransactionsSpec, &aMayDelete);
 }
 
 nsPIDOMWindow*
@@ -501,10 +375,22 @@ IDBDatabase::CreateObjectStore(
     return nullptr;
   }
 
+  const ObjectStoreSpec* oldSpecElements =
+    objectStores.IsEmpty() ? nullptr : objectStores.Elements();
+
   ObjectStoreSpec* newSpec = objectStores.AppendElement();
   newSpec->metadata() =
     ObjectStoreMetadata(transaction->NextObjectStoreId(), nsString(aName),
                         keyPath, aOptionalParameters.mAutoIncrement);
+
+  if (oldSpecElements &&
+      oldSpecElements != objectStores.Elements()) {
+    MOZ_ASSERT(objectStores.Length() > 1);
+
+    // Array got moved, update the spec pointers for all live objectStores and
+    // indexes.
+    RefreshSpec(/* aMayDelete */ false);
+  }
 
   nsRefPtr<IDBObjectStore> objectStore =
     transaction->CreateObjectStore(*newSpec);
@@ -535,34 +421,33 @@ IDBDatabase::DeleteObjectStore(const nsAString& aName, ErrorResult& aRv)
 
   MOZ_ASSERT(transaction->IsOpen());
 
-  nsTArray<ObjectStoreSpec>& objectStores = mSpec->objectStores();
+  nsTArray<ObjectStoreSpec>& specArray = mSpec->objectStores();
 
   int64_t objectStoreId = 0;
-  uint64_t objectStoreArrayIndex = 0;
 
-  for (uint32_t count = objectStores.Length();
-       objectStoreArrayIndex < count;
-       objectStoreArrayIndex++) {
-    const ObjectStoreMetadata& metadata =
-      objectStores[objectStoreArrayIndex].metadata();
+  for (uint32_t specCount = specArray.Length(), specIndex = 0;
+       specIndex < specCount;
+       specIndex++) {
+    const ObjectStoreMetadata& metadata = specArray[specIndex].metadata();
     MOZ_ASSERT(metadata.id());
 
     if (aName == metadata.name()) {
       objectStoreId = metadata.id();
+
+      // Must do this before altering the metadata array!
+      transaction->DeleteObjectStore(objectStoreId);
+
+      specArray.RemoveElementAt(specIndex);
+
+      RefreshSpec(/* aMayDelete */ false);
       break;
     }
   }
 
   if (!objectStoreId) {
-    aRv.Throw(NS_ERROR_DOM_INDEXEDDB_CONSTRAINT_ERR);
+    aRv.Throw(NS_ERROR_DOM_INDEXEDDB_NOT_FOUND_ERR);
     return;
   }
-
-  MOZ_ASSERT(objectStoreArrayIndex < objectStores.Length());
-
-  transaction->DeleteObjectStore(objectStoreId);
-
-  objectStores.RemoveElementAt(objectStoreArrayIndex);
 
   IDB_PROFILER_MARK("IndexedDB Pseudo-request: "
                     "database(%s).transaction(%s).deleteObjectStore(\"%s\")",
@@ -684,6 +569,10 @@ IDBDatabase::MozCreateFileHandle(const nsAString& aName,
 {
   NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
 
+  // XXX Fix!
+  aRv.Throw(NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
+  return nullptr;
+
   if (!IndexedDatabaseManager::IsMainProcess()) {
     IDB_WARNING("Not supported yet!");
     aRv.Throw(NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
@@ -720,6 +609,132 @@ IDBDatabase::MozCreateFileHandle(const nsAString& aName,
   return request.forget();
 }
 
+void
+IDBDatabase::RegisterTransaction(IDBTransaction* aTransaction)
+{
+  AssertIsOnOwningThread();
+  MOZ_ASSERT(aTransaction);
+  aTransaction->AssertIsOnOwningThread();
+  MOZ_ASSERT(!mTransactions.Contains(aTransaction));
+
+  mTransactions.PutEntry(aTransaction);
+}
+
+void
+IDBDatabase::UnregisterTransaction(IDBTransaction* aTransaction)
+{
+  AssertIsOnOwningThread();
+  MOZ_ASSERT(aTransaction);
+  aTransaction->AssertIsOnOwningThread();
+  MOZ_ASSERT(mTransactions.Contains(aTransaction));
+
+  mTransactions.RemoveEntry(aTransaction);
+}
+
+void
+IDBDatabase::AbortTransactions()
+{
+  AssertIsOnOwningThread();
+
+  class MOZ_STACK_CLASS Helper MOZ_FINAL
+  {
+  public:
+    static void
+    AbortTransactions(nsTHashtable<nsPtrHashKey<IDBTransaction>>& aTable)
+    {
+      const uint32_t count = aTable.Count();
+      if (!count) {
+        return;
+      }
+
+      nsTArray<nsRefPtr<IDBTransaction>> transactions;
+      transactions.SetCapacity(count);
+
+      aTable.EnumerateEntries(Collect, &transactions);
+
+      MOZ_ASSERT(transactions.Length() == count);
+
+      for (uint32_t index = 0; index < count; index++) {
+        nsRefPtr<IDBTransaction> transaction = transactions[index].forget();
+        MOZ_ASSERT(transaction);
+
+        // This can fail, for example if the transaction is in the process of
+        // being committed. That is expected and fine, so we ignore any returned
+        // errors.
+        ErrorResult rv;
+        transaction->Abort(rv);
+      }
+    }
+
+  private:
+    static PLDHashOperator
+    Collect(nsPtrHashKey<IDBTransaction>* aTransaction, void* aClosure)
+    {
+      MOZ_ASSERT(aTransaction);
+      aTransaction->GetKey()->AssertIsOnOwningThread();
+      MOZ_ASSERT(aClosure);
+
+      auto* array = static_cast<nsTArray<nsRefPtr<IDBTransaction>>*>(aClosure);
+      array->AppendElement(aTransaction->GetKey());
+
+      return PL_DHASH_NEXT;
+    }
+  };
+
+  Helper::AbortTransactions(mTransactions);
+}
+
+NS_IMPL_ADDREF_INHERITED(IDBDatabase, IDBWrapperCache)
+NS_IMPL_RELEASE_INHERITED(IDBDatabase, IDBWrapperCache)
+
+NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION_INHERITED(IDBDatabase)
+  NS_INTERFACE_MAP_ENTRY(nsIFileStorage)
+  NS_INTERFACE_MAP_ENTRY(nsIOfflineStorage)
+NS_INTERFACE_MAP_END_INHERITING(IDBWrapperCache)
+
+NS_IMPL_CYCLE_COLLECTION_CLASS(IDBDatabase)
+
+NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(IDBDatabase, IDBWrapperCache)
+  tmp->AssertIsOnOwningThread();
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mFactory)
+NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
+
+NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN_INHERITED(IDBDatabase, IDBWrapperCache)
+  tmp->AssertIsOnOwningThread();
+
+  // Don't unlink mFactory!
+
+  // We've been unlinked, at the very least we should be able to prevent further
+  // transactions from starting and unblock any other SetVersion callers.
+  tmp->CloseInternal();
+NS_IMPL_CYCLE_COLLECTION_UNLINK_END
+
+void
+IDBDatabase::LastRelease()
+{
+  AssertIsOnOwningThread();
+
+  CloseInternal();
+
+  if (mBackgroundActor) {
+    mBackgroundActor->SendDeleteMe();
+    mBackgroundActor = nullptr;
+  }
+}
+
+NS_IMETHODIMP_(void)
+IDBDatabase::Invalidate()
+{
+  AssertIsOnOwningThread();
+  MOZ_ASSERT(!mInvalidated);
+
+  mInvalidated = true;
+
+  AbortTransactions();
+
+  CloseInternal();
+}
+
 NS_IMETHODIMP
 IDBDatabase::Close()
 {
@@ -732,7 +747,7 @@ IDBDatabase::Close()
 NS_IMETHODIMP_(const nsACString&)
 IDBDatabase::Id()
 {
-  return mDatabaseId;
+  MOZ_CRASH("Remove me!");
 }
 
 NS_IMETHODIMP_(bool)
@@ -775,7 +790,7 @@ IDBDatabase::IsOwned(nsPIDOMWindow* aOwner)
 NS_IMETHODIMP_(const nsACString&)
 IDBDatabase::Origin()
 {
-  return mASCIIOrigin;
+  MOZ_CRASH("Remove me!");
 }
 
 nsresult
@@ -784,34 +799,10 @@ IDBDatabase::PostHandleEvent(EventChainPostVisitor& aVisitor)
   return IndexedDatabaseManager::FireWindowOnError(GetOwner(), aVisitor);
 }
 
-void
-IDBDatabase::RegisterTransaction(IDBTransaction* aTransaction)
+JSObject*
+IDBDatabase::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aScope)
 {
-  AssertIsOnOwningThread();
-  MOZ_ASSERT(aTransaction);
-  aTransaction->AssertIsOnOwningThread();
-  MOZ_ASSERT(!mTransactions.Contains(aTransaction));
-
-  mTransactions.PutEntry(aTransaction);
-}
-
-void
-IDBDatabase::UnregisterTransaction(IDBTransaction* aTransaction)
-{
-  AssertIsOnOwningThread();
-  MOZ_ASSERT(aTransaction);
-  aTransaction->AssertIsOnOwningThread();
-  MOZ_ASSERT(mTransactions.Contains(aTransaction));
-
-  mTransactions.RemoveEntry(aTransaction);
-}
-
-void
-IDBDatabase::AbortTransactions()
-{
-  AssertIsOnOwningThread();
-
-  mTransactions.EnumerateEntries(AbortTransactionsEnumerator, nullptr);
+  return IDBDatabaseBinding::Wrap(aCx, aScope, this);
 }
 
 AsyncConnectionHelper::ChildProcessSendResult
@@ -855,6 +846,7 @@ CreateFileHelper::DoDatabaseWork(mozIStorageConnection* aConnection)
     return NS_ERROR_DOM_INDEXEDDB_QUOTA_ERR;
   }
 
+  MOZ_CRASH("Move me!");/*
   FileManager* fileManager = mDatabase->Manager();
 
   mFileInfo = fileManager->GetNewFileInfo();
@@ -879,7 +871,7 @@ CreateFileHelper::DoDatabaseWork(mozIStorageConnection* aConnection)
 
   rv = file->Create(nsIFile::NORMAL_FILE_TYPE, 0644);
   IDB_ENSURE_SUCCESS(rv, NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
-
+  */
   return NS_OK;
 }
 

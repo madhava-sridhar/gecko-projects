@@ -39,11 +39,15 @@ interface IDBIndex {
 };
 
 partial interface IDBIndex {
-    readonly attribute DOMString storeName;
-
     [Throws]
     IDBRequest mozGetAll (any key, optional unsigned long limit);
 
     [Throws]
     IDBRequest mozGetAllKeys (any key, optional unsigned long limit);
+
+    [Pref="dom.indexedDB.experimental", Throws]
+    IDBRequest getAll (any key, optional unsigned long limit);
+
+    [Pref="dom.indexedDB.experimental", Throws]
+    IDBRequest getAllKeys (any key, optional unsigned long limit);
 };

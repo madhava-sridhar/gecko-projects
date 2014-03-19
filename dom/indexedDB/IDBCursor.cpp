@@ -1257,10 +1257,12 @@ ContinueObjectStoreHelper::GatherResultsFromStatement(
   nsresult rv = mKey.SetFromStatement(aStatement, 0);
   NS_ENSURE_SUCCESS(rv, rv);
 
+  MOZ_CRASH("Remove me!");
+  /*
   rv = IDBObjectStore::GetStructuredCloneReadInfoFromStatement(aStatement, 1, 2,
                                                                mDatabase,
                                                                mCloneReadInfo);
-  NS_ENSURE_SUCCESS(rv, rv);
+  NS_ENSURE_SUCCESS(rv, rv);*/
 
   return NS_OK;
 }
@@ -1341,9 +1343,10 @@ ContinueIndexObjectHelper::GatherResultsFromStatement(
   rv = mObjectKey.SetFromStatement(aStatement, 1);
   NS_ENSURE_SUCCESS(rv, rv);
 
+  MOZ_CRASH("Remove me!");/*
   rv = IDBObjectStore::GetStructuredCloneReadInfoFromStatement(aStatement, 2, 3,
     mDatabase, mCloneReadInfo);
-  NS_ENSURE_SUCCESS(rv, rv);
+  NS_ENSURE_SUCCESS(rv, rv);*/
 
   return NS_OK;
 }

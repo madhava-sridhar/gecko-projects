@@ -14,15 +14,10 @@
 #include "nsAutoPtr.h"
 #include "nsCycleCollectionParticipant.h"
 #include "nsISupports.h"
-#include "nsISupportsImpl.h"
 #include "nsString.h"
 #include "nsTArray.h"
 #include "nsWrapperCache.h"
 
-class JSAutoStructuredCloneBuffer;
-class mozIStorageStatement;
-template <typename> class nsCOMPtr;
-class nsIDOMBlob;
 class nsPIDOMWindow;
 
 namespace mozilla {
@@ -40,7 +35,6 @@ template <typename> class Sequence;
 namespace indexedDB {
 
 class FileManager;
-class IDBDatabase;
 class IDBKeyRange;
 class IDBRequest;
 class IDBTransaction;
@@ -72,12 +66,10 @@ class IDBObjectStore MOZ_FINAL
 
   nsTArray<nsRefPtr<IDBIndex>> mIndexes;
 
+  const int64_t mId;
   bool mRooted;
 
 public:
-  NS_DECL_CYCLE_COLLECTING_ISUPPORTS
-  NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS(IDBObjectStore)
-
   static already_AddRefed<IDBObjectStore>
   Create(IDBTransaction* aTransaction, const ObjectStoreSpec& aSpec);
 
@@ -89,13 +81,6 @@ public:
                         JSContext* aCx,
                         JS::Handle<JS::Value> aObject,
                         nsTArray<IndexUpdateInfo>& aUpdateInfoArray);
-
-  static nsresult
-  GetStructuredCloneReadInfoFromStatement(mozIStorageStatement* aStatement,
-                                          uint32_t aDataIndex,
-                                          uint32_t aFileIdsIndex,
-                                          IDBDatabase* aDatabase,
-                                          StructuredCloneReadInfo& aInfo);
 
   static void
   ClearCloneReadInfo(StructuredCloneReadInfo& aReadInfo);
@@ -146,17 +131,27 @@ public:
     return &sDummyPropJSClass;
   }
 
+  void
+  AssertIsOnOwningThread() const
+#ifdef DEBUG
+  ;
+#else
+  { }
+#endif
+
+  int64_t
+  Id() const
+  {
+    AssertIsOnOwningThread();
+
+    return mId;
+  }
+
   const nsString&
   Name() const;
 
   bool
   AutoIncrement() const;
-
-  bool
-  IsWriteAllowed() const;
-
-  int64_t
-  Id() const;
 
   const KeyPath&
   GetKeyPath() const;
@@ -267,6 +262,8 @@ public:
          const Optional<uint32_t>& aLimit,
          ErrorResult& aRv)
   {
+    AssertIsOnOwningThread();
+
     return GetAllInternal(/* aKeysOnly */ false, aCx, aKey, aLimit, aRv);
   }
 
@@ -276,6 +273,8 @@ public:
              const Optional<uint32_t>& aLimit,
              ErrorResult& aRv)
   {
+    AssertIsOnOwningThread();
+
     return GetAllInternal(/* aKeysOnly */ true, aCx, aKey, aLimit, aRv);
   }
 
@@ -286,15 +285,7 @@ public:
                 ErrorResult& aRv);
 
   void
-  AssertIsOnOwningThread() const
-#ifdef DEBUG
-  ;
-#else
-  { }
-#endif
-
-  void
-  RefreshSpec();
+  RefreshSpec(bool aMayDelete);
 
   const ObjectStoreSpec&
   Spec() const;
@@ -302,12 +293,16 @@ public:
   void
   NoteDeletion();
 
+  NS_DECL_CYCLE_COLLECTING_ISUPPORTS
+  NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS(IDBObjectStore)
+
   // nsWrapperCache
   virtual JSObject*
   WrapObject(JSContext* aCx, JS::Handle<JSObject*> aScope) MOZ_OVERRIDE;
 
 private:
-  IDBObjectStore();
+  IDBObjectStore(IDBTransaction* aTransaction, const ObjectStoreSpec* aSpec);
+
   ~IDBObjectStore();
 
   nsresult

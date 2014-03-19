@@ -1936,7 +1936,7 @@ OpenDatabaseHelper::BlockDatabase()
   NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
   NS_ASSERTION(mDatabase, "This is going bad fast.");
 
-  mDatabase->EnterSetVersionTransaction();
+  mDatabase->EnterSetVersionTransaction(0);
 }
 
 void

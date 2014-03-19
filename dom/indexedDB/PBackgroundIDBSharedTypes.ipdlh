@@ -147,6 +147,43 @@ struct ObjectStoreCountParams
   OptionalKeyRange optionalKeyRange;
 };
 
+struct IndexGetParams
+{
+  int64_t objectStoreId;
+  int64_t indexId;
+  SerializedKeyRange keyRange;
+};
+
+struct IndexGetKeyParams
+{
+  int64_t objectStoreId;
+  int64_t indexId;
+  SerializedKeyRange keyRange;
+};
+
+struct IndexGetAllParams
+{
+  int64_t objectStoreId;
+  int64_t indexId;
+  OptionalKeyRange optionalKeyRange;
+  uint32_t limit;
+};
+
+struct IndexGetAllKeysParams
+{
+  int64_t objectStoreId;
+  int64_t indexId;
+  OptionalKeyRange optionalKeyRange;
+  uint32_t limit;
+};
+
+struct IndexCountParams
+{
+  int64_t objectStoreId;
+  int64_t indexId;
+  OptionalKeyRange optionalKeyRange;
+};
+
 union RequestParams
 {
   ObjectStoreAddParams;
@@ -157,6 +194,11 @@ union RequestParams
   ObjectStoreDeleteParams;
   ObjectStoreClearParams;
   ObjectStoreCountParams;
+  IndexGetParams;
+  IndexGetKeyParams;
+  IndexGetAllParams;
+  IndexGetAllKeysParams;
+  IndexCountParams;
 };
 
 } // namespace indexedDB

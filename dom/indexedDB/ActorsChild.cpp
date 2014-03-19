@@ -16,8 +16,11 @@
 #include "mozilla/BasicEvents.h"
 #include "nsCOMPtr.h"
 #include "nsContentUtils.h"
+#include "nsIBFCacheEntry.h"
+#include "nsIDocument.h"
 #include "nsIDOMEvent.h"
 #include "nsIEventTarget.h"
+#include "nsPIDOMWindow.h"
 #include "nsThreadUtils.h"
 #include "nsTraceRefcnt.h"
 #include "ProfilerHelpers.h"
@@ -38,12 +41,12 @@ class MOZ_STACK_CLASS AutoSetCurrentTransaction MOZ_FINAL
   typedef mozilla::ipc::BackgroundChildImpl BackgroundChildImpl;
 
   BackgroundChildImpl::ThreadLocal* mThreadLocal;
-  const DebugOnly<IDBTransaction*> mDEBUGTransaction;
+  IDBTransaction* mTransaction;
 
 public:
   AutoSetCurrentTransaction(IDBTransaction* aTransaction)
     : mThreadLocal(nullptr)
-    , mDEBUGTransaction(aTransaction)
+    , mTransaction(aTransaction)
   {
     if (aTransaction) {
       mThreadLocal = BackgroundChildImpl::GetThreadLocalForCurrentThread();
@@ -56,12 +59,18 @@ public:
 
   ~AutoSetCurrentTransaction()
   {
-    MOZ_ASSERT((mThreadLocal && mDEBUGTransaction) ||
-               (!mThreadLocal && !mDEBUGTransaction));
+    MOZ_ASSERT((mThreadLocal && mTransaction) ||
+               (!mThreadLocal && !mTransaction));
     if (mThreadLocal) {
-      MOZ_ASSERT(mDEBUGTransaction == mThreadLocal->mCurrentTransaction);
+      MOZ_ASSERT(mTransaction == mThreadLocal->mCurrentTransaction);
       mThreadLocal->mCurrentTransaction = nullptr;
     }
+  }
+
+  IDBTransaction*
+  Transaction() const
+  {
+    return mTransaction;
   }
 };
 
@@ -72,7 +81,7 @@ class MOZ_STACK_CLASS ResultHelper MOZ_FINAL
 
   union
   {
-    nsISupports* mISupports;
+    IDBDatabase* mDatabase;
     StructuredCloneReadInfo* mStructuredClone;
     const nsTArray<StructuredCloneReadInfo>* mStructuredCloneArray;
     const Key* mKey;
@@ -82,7 +91,7 @@ class MOZ_STACK_CLASS ResultHelper MOZ_FINAL
 
   enum
   {
-    ResultTypeISupports,
+    ResultTypeDatabase,
     ResultTypeStructuredClone,
     ResultTypeStructuredCloneArray,
     ResultTypeKey,
@@ -93,14 +102,15 @@ class MOZ_STACK_CLASS ResultHelper MOZ_FINAL
 public:
   ResultHelper(IDBRequest* aRequest,
                IDBTransaction* aTransaction,
-               nsISupports* aResult)
+               IDBDatabase* aResult)
     : mRequest(aRequest)
     , mAutoTransaction(aTransaction)
-    , mResultType(ResultTypeISupports)
+    , mResultType(ResultTypeDatabase)
   {
     MOZ_ASSERT(aRequest);
+    MOZ_ASSERT(aResult);
 
-    mResult.mISupports = aResult;
+    mResult.mDatabase = aResult;
   }
 
   ResultHelper(IDBRequest* aRequest,
@@ -174,6 +184,12 @@ public:
     return mRequest;
   }
 
+  IDBTransaction*
+  Transaction() const
+  {
+    return mAutoTransaction.Transaction();
+  }
+
   static nsresult
   GetResult(JSContext* aCx,
             void* aUserData,
@@ -186,8 +202,8 @@ public:
     MOZ_ASSERT(helper->mRequest);
 
     switch (helper->mResultType) {
-      case ResultTypeISupports:
-        return helper->GetResult(aCx, helper->mResult.mISupports, aResult);
+      case ResultTypeDatabase:
+        return helper->GetResult(aCx, helper->mResult.mDatabase, aResult);
 
       case ResultTypeStructuredClone:
         return helper->GetResult(aCx, helper->mResult.mStructuredClone,
@@ -217,7 +233,7 @@ public:
 private:
   nsresult
   GetResult(JSContext* aCx,
-            nsISupports* aUserData,
+            IDBDatabase* aUserData,
             JS::MutableHandle<JS::Value> aResult)
   {
     if (!aUserData) {
@@ -231,7 +247,9 @@ private:
     MOZ_ASSERT(global);
 
     nsresult rv =
-      nsContentUtils::WrapNative(aCx, global, aUserData, aResult);
+      nsContentUtils::WrapNative(aCx, global,
+                                 static_cast<IDBWrapperCache*>(aUserData),
+                                 aResult);
     if (NS_WARN_IF(NS_FAILED(rv))) {
       IDB_REPORT_INTERNAL_ERR();
       return NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
@@ -362,16 +380,17 @@ namespace {
 
 void
 DispatchSuccessEvent(ResultHelper* aResultHelper,
-                     IDBTransaction* aTransaction = nullptr,
                      nsIDOMEvent* aEvent = nullptr)
 {
   MOZ_ASSERT(aResultHelper);
 
   PROFILER_LABEL("IndexedDB", "DispatchSuccessEvent");
 
-  IDBRequest* request = aResultHelper->Request();
+  nsRefPtr<IDBRequest> request = aResultHelper->Request();
   MOZ_ASSERT(request);
   request->AssertIsOnOwningThread();
+
+  nsRefPtr<IDBTransaction> transaction = aResultHelper->Transaction();
 
   nsCOMPtr<nsIDOMEvent> newEvent;
   if (!aEvent) {
@@ -387,7 +406,7 @@ DispatchSuccessEvent(ResultHelper* aResultHelper,
   request->SetResultCallback(&ResultHelper::GetResult, aResultHelper);
 
   MOZ_ASSERT(aEvent);
-  MOZ_ASSERT_IF(aTransaction, aTransaction->IsOpen());
+  MOZ_ASSERT_IF(transaction, transaction->IsOpen());
 
   bool dummy;
   nsresult rv = request->DispatchEvent(aEvent, &dummy);
@@ -395,17 +414,17 @@ DispatchSuccessEvent(ResultHelper* aResultHelper,
     return;
   }
 
-  MOZ_ASSERT_IF(aTransaction,
-                aTransaction->IsOpen() || aTransaction->IsAborted());
+  MOZ_ASSERT_IF(transaction,
+                transaction->IsOpen() || transaction->IsAborted());
 
   WidgetEvent* internalEvent = aEvent->GetInternalNSEvent();
   MOZ_ASSERT(internalEvent);
 
-  if (aTransaction &&
-      aTransaction->IsOpen() &&
+  if (transaction &&
+      transaction->IsOpen() &&
       internalEvent->mFlags.mExceptionHasBeenRisen) {
     MOZ_ALWAYS_TRUE(
-      NS_SUCCEEDED(aTransaction->Abort(NS_ERROR_DOM_INDEXEDDB_ABORT_ERR)));
+      NS_SUCCEEDED(transaction->Abort(NS_ERROR_DOM_INDEXEDDB_ABORT_ERR)));
   }
 }
 
@@ -416,17 +435,21 @@ DispatchErrorEvent(IDBRequest* aRequest,
                    nsIDOMEvent* aEvent = nullptr)
 {
   MOZ_ASSERT(aRequest);
+  aRequest->AssertIsOnOwningThread();
   MOZ_ASSERT(NS_FAILED(aErrorCode));
   MOZ_ASSERT(NS_ERROR_GET_MODULE(aErrorCode) == NS_ERROR_MODULE_DOM_INDEXEDDB);
 
   PROFILER_LABEL("IndexedDB", "DispatchErrorEvent");
 
-  aRequest->SetError(aErrorCode);
+  nsRefPtr<IDBRequest> request = aRequest;
+  nsRefPtr<IDBTransaction> transaction = aTransaction;
+
+  request->SetError(aErrorCode);
 
   nsCOMPtr<nsIDOMEvent> event = aEvent;
   if (!event) {
     // Make an error event and fire it at the target.
-    event = CreateGenericEvent(aRequest, NS_LITERAL_STRING(ERROR_EVT_STR),
+    event = CreateGenericEvent(request, NS_LITERAL_STRING(ERROR_EVT_STR),
                                eDoesBubble, eCancelable);
     MOZ_ASSERT(event);
   }
@@ -437,26 +460,26 @@ DispatchErrorEvent(IDBRequest* aRequest,
   }
 
   bool doDefault;
-  nsresult rv = aRequest->DispatchEvent(event, &doDefault);
+  nsresult rv = request->DispatchEvent(event, &doDefault);
   if (NS_SUCCEEDED(rv)) {
-    MOZ_ASSERT(!aTransaction ||
-               aTransaction->IsOpen() ||
-               aTransaction->IsAborted());
+    MOZ_ASSERT(!transaction ||
+               transaction->IsOpen() ||
+               transaction->IsAborted());
 
     WidgetEvent* internalEvent = event->GetInternalNSEvent();
     MOZ_ASSERT(internalEvent);
 
     if (internalEvent->mFlags.mExceptionHasBeenRisen &&
-        aTransaction &&
-        aTransaction->IsOpen()) {
+        transaction &&
+        transaction->IsOpen()) {
       NS_WARN_IF(NS_FAILED(
-        aTransaction->Abort(NS_ERROR_DOM_INDEXEDDB_ABORT_ERR)));
+        transaction->Abort(NS_ERROR_DOM_INDEXEDDB_ABORT_ERR)));
     }
 
     if (doDefault &&
-        aTransaction &&
-        aTransaction->IsOpen()) {
-      NS_WARN_IF(NS_FAILED(aTransaction->Abort(aRequest)));
+        transaction &&
+        transaction->IsOpen()) {
+      NS_WARN_IF(NS_FAILED(transaction->Abort(request)));
     }
   } else {
     NS_WARNING("DispatchEvent failed!");
@@ -604,9 +627,11 @@ BackgroundFactoryChild::DeallocPBackgroundIDBDatabaseChild(
 
 BackgroundFactoryRequestChild::BackgroundFactoryRequestChild(
                                                  IDBFactory* aFactory,
-                                                 IDBOpenDBRequest* aOpenRequest)
+                                                 IDBOpenDBRequest* aOpenRequest,
+                                                 uint64_t aRequestedVersion)
   : BackgroundRequestChildBase(aOpenRequest)
   , mFactory(aFactory)
+  , mRequestedVersion(aRequestedVersion)
 {
   // Can't assert owning thread here because IPDL has not yet set our manager!
   MOZ_ASSERT(aFactory);
@@ -666,8 +691,7 @@ BackgroundFactoryRequestChild::HandleResponse(
   IDBDatabase* database = databaseActor->GetDOMObject();
   MOZ_ASSERT(database);
 
-  ResultHelper helper(mRequest, nullptr,
-                      static_cast<IDBWrapperCache*>(database));
+  ResultHelper helper(mRequest, nullptr, database);
 
   DispatchSuccessEvent(&helper);
 
@@ -718,7 +742,16 @@ BackgroundFactoryRequestChild::RecvBlocked(const uint64_t& aCurrentVersion)
     return true;
   }
 
-  MOZ_CRASH("Implement me!");
+  nsRefPtr<IDBRequest> kungFuDeathGrip = mRequest;
+
+  nsCOMPtr<nsIDOMEvent> blockedEvent =
+    IDBVersionChangeEvent::CreateBlocked(mRequest, aCurrentVersion,
+                                         mRequestedVersion);
+  MOZ_ASSERT(blockedEvent);
+
+  bool dummy;
+  NS_WARN_IF(NS_FAILED(mRequest->DispatchEvent(blockedEvent, &dummy)));
+
   return true;
 }
 
@@ -844,7 +877,10 @@ BackgroundDatabaseChild::AllocPBackgroundIDBVersionChangeTransactionChild(
 {
   AssertIsOnOwningThread();
 
-  return new BackgroundVersionChangeTransactionChild();
+  IDBOpenDBRequest* request = mOpenRequestActor->GetOpenDBRequest();
+  MOZ_ASSERT(request);
+
+  return new BackgroundVersionChangeTransactionChild(request);
 }
 
 bool
@@ -876,7 +912,7 @@ BackgroundDatabaseChild::RecvPBackgroundIDBVersionChangeTransactionConstructor(
 
   actor->SetDOMTransaction(transaction);
 
-  mDatabase->EnterSetVersionTransaction();
+  mDatabase->EnterSetVersionTransaction(aRequestedVersion);
 
   nsRefPtr<IDBOpenDBRequest> request = mOpenRequestActor->GetOpenDBRequest();
   MOZ_ASSERT(request);
@@ -887,10 +923,9 @@ BackgroundDatabaseChild::RecvPBackgroundIDBVersionChangeTransactionConstructor(
     IDBVersionChangeEvent::CreateUpgradeNeeded(request, aCurrentVersion,
                                                aRequestedVersion);
 
-  ResultHelper helper(request, transaction,
-                      static_cast<IDBWrapperCache*>(mDatabase));
+  ResultHelper helper(request, transaction, mDatabase);
 
-  DispatchSuccessEvent(&helper, transaction, upgradeNeededEvent);
+  DispatchSuccessEvent(&helper, upgradeNeededEvent);
 
   return true;
 }
@@ -912,11 +947,56 @@ BackgroundDatabaseChild::RecvVersionChange(const uint64_t& aOldVersion,
 {
   AssertIsOnOwningThread();
 
-  if (!mDatabase) {
+  if (!mDatabase || mDatabase->IsClosed()) {
     return true;
   }
 
-  MOZ_CRASH("Implement me!");
+  nsRefPtr<IDBDatabase> kungFuDeathGrip = mDatabase;
+
+  // First check if the document the IDBDatabase is part of is bfcached.
+  nsCOMPtr<nsIDocument> ownerDoc = mDatabase->GetOwnerDocument();
+  nsIBFCacheEntry* bfCacheEntry;
+  if (ownerDoc && (bfCacheEntry = ownerDoc->GetBFCacheEntry())) {
+    bfCacheEntry->RemoveFromBFCacheSync();
+    MOZ_ASSERT(mDatabase->IsClosed(),
+               "Kicking doc out of bfcache should have closed database");
+    return true;
+  }
+
+  // Next check if it's in the process of being bfcached.
+  nsPIDOMWindow* owner = mDatabase->GetOwner();
+  if (owner && owner->IsFrozen()) {
+    // We can't kick the document out of the bfcache because it's not yet fully
+    // in the bfcache. Instead we'll abort everything for the window and mark it
+    // as not-bfcacheable.
+
+    // XXX Fix me!
+    /*
+    QuotaManager* quotaManager = QuotaManager::Get();
+    NS_ASSERTION(quotaManager, "Huh?");
+    quotaManager->AbortCloseStoragesForWindow(owner);
+    */
+
+    MOZ_ASSERT(mDatabase->IsClosed(),
+               "AbortCloseStoragesForWindow should have closed database");
+
+    ownerDoc->DisallowBFCaching();
+    return true;
+  }
+
+  // Otherwise fire a versionchange event.
+  nsCOMPtr<nsIDOMEvent> versionChangeEvent =
+    IDBVersionChangeEvent::Create(mDatabase, aOldVersion, aNewVersion);
+  MOZ_ASSERT(versionChangeEvent);
+
+  bool dummy;
+  NS_WARN_IF(NS_FAILED(mDatabase->DispatchEvent(versionChangeEvent, &dummy)));
+
+  if (!mDatabase->IsClosed()) {
+    SendBlocked();
+  }
+
+  return true;
 }
 
 bool
@@ -924,11 +1004,11 @@ BackgroundDatabaseChild::RecvInvalidate()
 {
   AssertIsOnOwningThread();
 
-  if (!mDatabase) {
-    return true;
+  if (mDatabase) {
+    mDatabase->Invalidate();
   }
 
-  MOZ_CRASH("Implement me!");
+  return true;
 }
 
 /*******************************************************************************
@@ -1077,8 +1157,10 @@ BackgroundTransactionChild::DeallocPBackgroundIDBRequestChild(
  ******************************************************************************/
 
 BackgroundVersionChangeTransactionChild::
-BackgroundVersionChangeTransactionChild()
+BackgroundVersionChangeTransactionChild(IDBOpenDBRequest* aOpenDBRequest)
+  : mOpenDBRequest(aOpenDBRequest)
 {
+  MOZ_ASSERT(aOpenDBRequest);
   // Can't assert owning thread here because IPDL has not yet set our manager!
   MOZ_COUNT_CTOR(mozilla::dom::indexedDB::BackgroundVersionChangeTransactionChild);
 }
@@ -1113,6 +1195,8 @@ BackgroundVersionChangeTransactionChild::ActorDestroy(ActorDestroyReason aWhy)
 {
   AssertIsOnOwningThread();
 
+  mOpenDBRequest = nullptr;
+
   NoteActorDestroyed();
 }
 
@@ -1125,6 +1209,8 @@ BackgroundVersionChangeTransactionChild::RecvComplete(const nsresult& aResult)
     return true;
   }
 
+  MOZ_ASSERT(mOpenDBRequest);
+
   IDBDatabase* database = mTransaction->Database();
   MOZ_ASSERT(database);
 
@@ -1135,6 +1221,9 @@ BackgroundVersionChangeTransactionChild::RecvComplete(const nsresult& aResult)
   }
 
   mTransaction->FireCompleteOrAbortEvents(aResult);
+
+  mOpenDBRequest->SetTransaction(nullptr);
+  mOpenDBRequest = nullptr;
 
   NoteComplete();
   return true;
@@ -1205,12 +1294,24 @@ BackgroundRequestChild::HandleResponse(const Key& aResponse)
 }
 
 bool
-BackgroundRequestChild::HandleResponse(const ObjectStoreGetResponse& aResponse)
+BackgroundRequestChild::HandleResponse(const nsTArray<Key>& aResponse)
 {
   AssertIsOnOwningThread();
 
-  auto& cloneInfo =
-    const_cast<SerializedStructuredCloneReadInfo&>(aResponse.cloneInfo());
+  ResultHelper helper(mRequest, mTransaction, &aResponse);
+
+  DispatchSuccessEvent(&helper);
+  return true;
+}
+
+bool
+BackgroundRequestChild::HandleResponse(
+                             const SerializedStructuredCloneReadInfo& aResponse)
+{
+  AssertIsOnOwningThread();
+
+  // XXX Fix this somehow...
+  auto& cloneInfo = const_cast<SerializedStructuredCloneReadInfo&>(aResponse);
 
   StructuredCloneReadInfo cloneReadInfo(Move(cloneInfo));
 
@@ -1228,43 +1329,32 @@ BackgroundRequestChild::HandleResponse(const ObjectStoreGetResponse& aResponse)
 
 bool
 BackgroundRequestChild::HandleResponse(
-                                     const ObjectStoreGetAllResponse& aResponse)
+                   const nsTArray<SerializedStructuredCloneReadInfo>& aResponse)
 {
   AssertIsOnOwningThread();
 
   nsTArray<StructuredCloneReadInfo> cloneInfos;
 
-  if (!aResponse.cloneInfos().IsEmpty()) {
-    const uint32_t count = aResponse.cloneInfos().Length();
+  if (!aResponse.IsEmpty()) {
+    const uint32_t count = aResponse.Length();
 
     cloneInfos.SetCapacity(count);
 
     for (uint32_t index = 0; index < count; index++) {
+      // XXX Fix this somehow...
       auto& serializedCloneInfo =
-        const_cast<SerializedStructuredCloneReadInfo&>(
-          aResponse.cloneInfos()[index]);
+        const_cast<SerializedStructuredCloneReadInfo&>(aResponse[index]);
 
       // XXX This should work but doesn't yet.
       // cloneInfos.AppendElement(Move(serializedCloneInfo));
 
+      // XXX Fix blobs!
       StructuredCloneReadInfo* cloneInfo = cloneInfos.AppendElement();
       cloneInfo->mData.SwapElements(serializedCloneInfo.data());
     }
   }
 
   ResultHelper helper(mRequest, mTransaction, &cloneInfos);
-
-  DispatchSuccessEvent(&helper);
-  return true;
-}
-
-bool
-BackgroundRequestChild::HandleResponse(
-                                 const ObjectStoreGetAllKeysResponse& aResponse)
-{
-  AssertIsOnOwningThread();
-
-  ResultHelper helper(mRequest, mTransaction, &aResponse.keys());
 
   DispatchSuccessEvent(&helper);
   return true;
@@ -1283,14 +1373,55 @@ BackgroundRequestChild::HandleResponse(JS::Handle<JS::Value> aResponse)
 }
 
 bool
+BackgroundRequestChild::HandleResponse(uint64_t aResponse)
+{
+  AssertIsOnOwningThread();
+
+  nsRefPtr<IDBRequest> domRequest = GetDOMObject();
+  MOZ_ASSERT(domRequest);
+
+  JSContext* cx = domRequest->GetJSContext();
+  MOZ_ASSERT(cx);
+
+  JSAutoRequest ar(cx);
+
+  JS::Rooted<JS::Value> value(cx);
+  value.setNumber(static_cast<double>(aResponse));
+
+  return HandleResponse(value);
+}
+
+bool
+BackgroundRequestChild::HandleUndefinedResponse()
+{
+  AssertIsOnOwningThread();
+
+  nsRefPtr<IDBRequest> domRequest = GetDOMObject();
+  MOZ_ASSERT(domRequest);
+
+  JSContext* cx = domRequest->GetJSContext();
+  MOZ_ASSERT(cx);
+
+  JSAutoRequest ar(cx);
+
+  JS::Rooted<JS::Value> value(cx);
+  value.setUndefined();
+
+  return HandleResponse(value);
+}
+
+bool
 BackgroundRequestChild::Recv__delete__(const RequestResponse& aResponse)
 {
   AssertIsOnOwningThread();
   MOZ_ASSERT(mRequest);
   MOZ_ASSERT(mTransaction);
 
-  nsRefPtr<IDBRequest> domRequest = GetDOMObject();
-  MOZ_ASSERT(domRequest);
+  // Always fire an "error" event with ABORT_ERR if the transaction was aborted,
+  // even if the request succeeded or failed with another error.
+  if (mTransaction->IsAborted()) {
+    return HandleResponse(NS_ERROR_DOM_INDEXEDDB_ABORT_ERR);
+  }
 
   switch (aResponse.type()) {
     case RequestResponse::Tnsresult:
@@ -1303,42 +1434,39 @@ BackgroundRequestChild::Recv__delete__(const RequestResponse& aResponse)
       return HandleResponse(aResponse.get_ObjectStorePutResponse().key());
 
     case RequestResponse::TObjectStoreGetResponse:
-      return HandleResponse(aResponse.get_ObjectStoreGetResponse());
+      return HandleResponse(aResponse.get_ObjectStoreGetResponse().cloneInfo());
 
     case RequestResponse::TObjectStoreGetAllResponse:
-      return HandleResponse(aResponse.get_ObjectStoreGetAllResponse());
+      return HandleResponse(aResponse.get_ObjectStoreGetAllResponse()
+                                     .cloneInfos());
 
     case RequestResponse::TObjectStoreGetAllKeysResponse:
-      return HandleResponse(aResponse.get_ObjectStoreGetAllKeysResponse());
+      return HandleResponse(aResponse.get_ObjectStoreGetAllKeysResponse()
+                                     .keys());
 
     case RequestResponse::TObjectStoreDeleteResponse:
-    case RequestResponse::TObjectStoreClearResponse: {
-      JSContext* cx = domRequest->GetJSContext();
-      MOZ_ASSERT(cx);
+      return HandleUndefinedResponse();
 
-      JSAutoRequest ar(cx);
+    case RequestResponse::TObjectStoreClearResponse:
+      return HandleUndefinedResponse();
 
-      JS::Rooted<JS::Value> value(cx);
-      value.setUndefined();
+    case RequestResponse::TObjectStoreCountResponse:
+      return HandleResponse(aResponse.get_ObjectStoreCountResponse().count());
 
-      return HandleResponse(value);
-    }
+    case RequestResponse::TIndexGetResponse:
+      return HandleResponse(aResponse.get_IndexGetResponse().cloneInfo());
 
-    case RequestResponse::TObjectStoreCountResponse: {
-      const ObjectStoreCountResponse& response =
-        aResponse.get_ObjectStoreCountResponse();
-      MOZ_ASSERT(response.count() >= 0);
+    case RequestResponse::TIndexGetKeyResponse:
+      return HandleResponse(aResponse.get_IndexGetKeyResponse().key());
 
-      JSContext* cx = domRequest->GetJSContext();
-      MOZ_ASSERT(cx);
+    case RequestResponse::TIndexGetAllResponse:
+      return HandleResponse(aResponse.get_IndexGetAllResponse().cloneInfos());
 
-      JSAutoRequest ar(cx);
+    case RequestResponse::TIndexGetAllKeysResponse:
+      return HandleResponse(aResponse.get_IndexGetAllKeysResponse().keys());
 
-      JS::Rooted<JS::Value> value(cx);
-      value.setNumber(static_cast<double>(response.count()));
-
-      return HandleResponse(value);
-    }
+    case RequestResponse::TIndexCountResponse:
+      return HandleResponse(aResponse.get_IndexCountResponse().count());
 
     default:
       MOZ_CRASH("Unknown response type!");

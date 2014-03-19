@@ -35,6 +35,7 @@ class IDBOpenDBRequest;
 class IDBRequest;
 class IDBTransaction;
 class Key;
+class SerializedStructuredCloneReadInfo;
 
 class BackgroundFactoryChild MOZ_FINAL
   : public PBackgroundIDBFactoryChild
@@ -136,6 +137,7 @@ class BackgroundFactoryRequestChild MOZ_FINAL
   friend class BackgroundDatabaseChild;
 
   nsRefPtr<IDBFactory> mFactory;
+  const uint64_t mRequestedVersion;
 
 public:
   IDBOpenDBRequest*
@@ -144,7 +146,8 @@ public:
 private:
   // Only created by IDBFactory.
   BackgroundFactoryRequestChild(IDBFactory* aFactory,
-                                IDBOpenDBRequest* aOpenRequest);
+                                IDBOpenDBRequest* aOpenRequest,
+                                uint64_t aRequestedVersion);
 
   // Only destroyed by BackgroundFactoryChild.
   ~BackgroundFactoryRequestChild();
@@ -356,6 +359,8 @@ class BackgroundVersionChangeTransactionChild MOZ_FINAL
 {
   friend class BackgroundDatabaseChild;
 
+  IDBOpenDBRequest* mOpenDBRequest;
+
 public:
 #ifdef DEBUG
   virtual void
@@ -367,7 +372,7 @@ public:
 
 private:
   // Only created by BackgroundDatabaseChild.
-  BackgroundVersionChangeTransactionChild();
+  BackgroundVersionChangeTransactionChild(IDBOpenDBRequest* aOpenDBRequest);
 
   // Only destroyed by BackgroundDatabaseChild.
   ~BackgroundVersionChangeTransactionChild();
@@ -418,16 +423,22 @@ private:
   HandleResponse(const Key& aResponse);
 
   bool
-  HandleResponse(const ObjectStoreGetResponse& aResponse);
+  HandleResponse(const nsTArray<Key>& aResponse);
 
   bool
-  HandleResponse(const ObjectStoreGetAllResponse& aResponse);
+  HandleResponse(const SerializedStructuredCloneReadInfo& aResponse);
 
   bool
-  HandleResponse(const ObjectStoreGetAllKeysResponse& aResponse);
+  HandleResponse(const nsTArray<SerializedStructuredCloneReadInfo>& aResponse);
 
   bool
   HandleResponse(JS::Handle<JS::Value> aResponse);
+
+  bool
+  HandleResponse(uint64_t aResponse);
+
+  bool
+  HandleUndefinedResponse();
 
   // IPDL methods are only called by IPDL.
   virtual bool

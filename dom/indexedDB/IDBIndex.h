@@ -12,10 +12,10 @@
 #include "mozilla/dom/IDBCursorBinding.h"
 #include "nsAutoPtr.h"
 #include "nsCycleCollectionParticipant.h"
+#include "nsISupports.h"
 #include "nsTArrayForwardDeclare.h"
 #include "nsWrapperCache.h"
 
-class nsIScriptContext;
 class nsPIDOMWindow;
 
 namespace mozilla {
@@ -28,17 +28,11 @@ template <typename> class Sequence;
 
 namespace indexedDB {
 
-class AsyncConnectionHelper;
-class IDBCursor;
-class IDBKeyRange;
 class IDBObjectStore;
 class IDBRequest;
-struct IndexInfo;
 class IndexMetadata;
 class Key;
 class KeyPath;
-struct SerializedStructuredCloneReadInfo;
-struct StructuredCloneFile;
 
 class IDBIndex MOZ_FINAL
   : public nsISupports
@@ -55,6 +49,7 @@ class IDBIndex MOZ_FINAL
   const IndexMetadata* mMetadata;
   nsAutoPtr<IndexMetadata> mDeletedMetadata;
 
+  const int64_t mId;
   bool mRooted;
 
 public:
@@ -65,7 +60,12 @@ public:
   Create(IDBObjectStore* aObjectStore, const IndexMetadata& aMetadata);
 
   int64_t
-  Id() const;
+  Id() const
+  {
+    AssertIsOnOwningThread();
+
+    return mId;
+  }
 
   const nsString&
   Name() const;
@@ -86,58 +86,6 @@ public:
     return mObjectStore;
   }
 
-  already_AddRefed<IDBRequest>
-  GetInternal(IDBKeyRange* aKeyRange,
-              ErrorResult& aRv);
-
-  already_AddRefed<IDBRequest>
-  GetKeyInternal(IDBKeyRange* aKeyRange,
-                 ErrorResult& aRv);
-
-  already_AddRefed<IDBRequest>
-  GetAllInternal(IDBKeyRange* aKeyRange,
-                 uint32_t aLimit,
-                 ErrorResult& aRv);
-
-  already_AddRefed<IDBRequest>
-  GetAllKeysInternal(IDBKeyRange* aKeyRange,
-                     uint32_t aLimit,
-                     ErrorResult& aRv);
-
-  already_AddRefed<IDBRequest>
-  CountInternal(IDBKeyRange* aKeyRange,
-                ErrorResult& aRv);
-
-  nsresult OpenCursorFromChildProcess(
-                            IDBRequest* aRequest,
-                            size_t aDirection,
-                            const Key& aKey,
-                            const Key& aObjectKey,
-                            IDBCursor** _retval);
-
-  already_AddRefed<IDBRequest>
-  OpenKeyCursorInternal(IDBKeyRange* aKeyRange,
-                        size_t aDirection,
-                        ErrorResult& aRv);
-
-  nsresult OpenCursorInternal(IDBKeyRange* aKeyRange,
-                              size_t aDirection,
-                              IDBRequest** _retval);
-
-  nsresult OpenCursorFromChildProcess(
-                            IDBRequest* aRequest,
-                            size_t aDirection,
-                            const Key& aKey,
-                            const Key& aObjectKey,
-                            const SerializedStructuredCloneReadInfo& aCloneInfo,
-                            nsTArray<StructuredCloneFile>& aBlobs,
-                            IDBCursor** _retval);
-
-  // nsWrapperCache
-  virtual JSObject*
-  WrapObject(JSContext* aCx, JS::Handle<JSObject*> aScope) MOZ_OVERRIDE;
-
-  // WebIDL
   nsPIDOMWindow*
   GetParentObject() const;
 
@@ -159,28 +107,45 @@ public:
                 IDBCursorDirection aDirection, ErrorResult& aRv);
 
   already_AddRefed<IDBRequest>
-  Get(JSContext* aCx, JS::Handle<JS::Value> aKey, ErrorResult& aRv);
+  Get(JSContext* aCx, JS::Handle<JS::Value> aKey, ErrorResult& aRv)
+  {
+    AssertIsOnOwningThread();
+
+    return GetInternal(/* aKeyOnly */ false, aCx, aKey, aRv);
+  }
 
   already_AddRefed<IDBRequest>
-  GetKey(JSContext* aCx, JS::Handle<JS::Value> aKey, ErrorResult& aRv);
+  GetKey(JSContext* aCx, JS::Handle<JS::Value> aKey, ErrorResult& aRv)
+  {
+    AssertIsOnOwningThread();
+
+    return GetInternal(/* aKeyOnly */ true, aCx, aKey, aRv);
+  }
 
   already_AddRefed<IDBRequest>
   Count(JSContext* aCx, JS::Handle<JS::Value> aKey,
          ErrorResult& aRv);
 
-  void
-  GetStoreName(nsString& aStoreName) const;
-
   already_AddRefed<IDBRequest>
   GetAll(JSContext* aCx, JS::Handle<JS::Value> aKey,
-         const Optional<uint32_t>& aLimit, ErrorResult& aRv);
+         const Optional<uint32_t>& aLimit, ErrorResult& aRv)
+  {
+    AssertIsOnOwningThread();
+
+    return GetAllInternal(/* aKeysOnly */ false, aCx, aKey, aLimit, aRv);
+  }
 
   already_AddRefed<IDBRequest>
   GetAllKeys(JSContext* aCx, JS::Handle<JS::Value> aKey,
-             const Optional<uint32_t>& aLimit, ErrorResult& aRv);
+             const Optional<uint32_t>& aLimit, ErrorResult& aRv)
+  {
+    AssertIsOnOwningThread();
+
+    return GetAllInternal(/* aKeysOnly */ true, aCx, aKey, aLimit, aRv);
+  }
 
   void
-  RefreshMetadata();
+  RefreshMetadata(bool aMayDelete);
 
   void
   NoteDeletion();
@@ -193,9 +158,27 @@ public:
   { }
 #endif
 
+  // nsWrapperCache
+  virtual JSObject*
+  WrapObject(JSContext* aCx, JS::Handle<JSObject*> aScope) MOZ_OVERRIDE;
+
 private:
-  IDBIndex();
+  IDBIndex(IDBObjectStore* aObjectStore, const IndexMetadata* aMetadata);
+
   ~IDBIndex();
+
+  already_AddRefed<IDBRequest>
+  GetInternal(bool aKeyOnly,
+              JSContext* aCx,
+              JS::Handle<JS::Value> aKey,
+              ErrorResult& aRv);
+
+  already_AddRefed<IDBRequest>
+  GetAllInternal(bool aKeysOnly,
+                 JSContext* aCx,
+                 JS::Handle<JS::Value> aKey,
+                 const Optional<uint32_t>& aLimit,
+                 ErrorResult& aRv);
 };
 
 } // namespace indexedDB

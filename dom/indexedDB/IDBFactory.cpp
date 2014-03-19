@@ -60,8 +60,8 @@ using namespace mozilla::dom::indexedDB;
 using namespace mozilla::dom::quota;
 using namespace mozilla::ipc;
 
-class IDBFactory::BackgroundCreateCallback MOZ_FINAL :
-                                      public nsIIPCBackgroundChildCreateCallback
+class IDBFactory::BackgroundCreateCallback MOZ_FINAL
+  : public nsIIPCBackgroundChildCreateCallback
 {
   nsRefPtr<IDBFactory> mFactory;
 
@@ -125,17 +125,6 @@ IDBFactory::~IDBFactory()
     mozilla::DropJSObjects(this);
   }
 }
-
-#ifdef DEBUG
-
-void
-IDBFactory::AssertIsOnOwningThread() const
-{
-  MOZ_ASSERT(mOwningThread);
-  MOZ_ASSERT(PR_GetCurrentThread() == mOwningThread);
-}
-
-#endif // DEBUG
 
 // static
 nsresult
@@ -292,37 +281,16 @@ IDBFactory::Create(ContentParent* aContentParent,
   return NS_OK;
 }
 
-NS_IMPL_CYCLE_COLLECTING_ADDREF(IDBFactory)
-NS_IMPL_CYCLE_COLLECTING_RELEASE(IDBFactory)
+#ifdef DEBUG
 
-NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(IDBFactory)
-  NS_WRAPPERCACHE_INTERFACE_MAP_ENTRY
-  NS_INTERFACE_MAP_ENTRY(nsISupports)
-NS_INTERFACE_MAP_END
+void
+IDBFactory::AssertIsOnOwningThread() const
+{
+  MOZ_ASSERT(mOwningThread);
+  MOZ_ASSERT(PR_GetCurrentThread() == mOwningThread);
+}
 
-NS_IMPL_CYCLE_COLLECTION_CLASS(IDBFactory)
-
-NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(IDBFactory)
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE_SCRIPT_OBJECTS
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mWindow)
-NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
-
-NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(IDBFactory)
-  NS_IMPL_CYCLE_COLLECTION_UNLINK_PRESERVED_WRAPPER
-  if (tmp->mOwningObject) {
-    tmp->mOwningObject = nullptr;
-  }
-  if (tmp->mRootedOwningObject) {
-    mozilla::DropJSObjects(tmp);
-    tmp->mRootedOwningObject = false;
-  }
-  NS_IMPL_CYCLE_COLLECTION_UNLINK(mWindow)
-NS_IMPL_CYCLE_COLLECTION_UNLINK_END
-
-NS_IMPL_CYCLE_COLLECTION_TRACE_BEGIN(IDBFactory)
-  NS_IMPL_CYCLE_COLLECTION_TRACE_PRESERVED_WRAPPER
-  NS_IMPL_CYCLE_COLLECTION_TRACE_JS_MEMBER_CALLBACK(mOwningObject)
-NS_IMPL_CYCLE_COLLECTION_TRACE_END
+#endif // DEBUG
 
 nsresult
 IDBFactory::OpenInternal(const nsAString& aName,
@@ -477,12 +445,6 @@ IDBFactory::SetBackgroundActor(BackgroundFactoryChild* aBackgroundActor)
   MOZ_ASSERT(!mBackgroundActor);
 
   mBackgroundActor = aBackgroundActor;
-}
-
-JSObject*
-IDBFactory::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aScope)
-{
-  return IDBFactoryBinding::Wrap(aCx, aScope, this);
 }
 
 already_AddRefed<IDBOpenDBRequest>
@@ -685,7 +647,23 @@ IDBFactory::InitiateRequest(IDBOpenDBRequest* aRequest,
   MOZ_ASSERT(mBackgroundActor);
   MOZ_ASSERT(!mBackgroundActorFailed);
 
-  auto actor = new BackgroundFactoryRequestChild(this, aRequest);
+  uint64_t requestedVersion;
+
+  switch (aParams.type()) {
+    case FactoryRequestParams::TDeleteDatabaseRequestParams:
+      requestedVersion =
+        aParams.get_DeleteDatabaseRequestParams().metadata().version();
+      break;
+    case FactoryRequestParams::TOpenDatabaseRequestParams:
+      requestedVersion =
+        aParams.get_OpenDatabaseRequestParams().metadata().version();
+      break;
+    default:
+      MOZ_CRASH("Unknown params type!");
+  }
+
+  auto actor =
+    new BackgroundFactoryRequestChild(this, aRequest, requestedVersion);
 
   if (!mBackgroundActor->SendPBackgroundIDBFactoryRequestConstructor(actor,
                                                                      aParams)) {
@@ -694,6 +672,44 @@ IDBFactory::InitiateRequest(IDBOpenDBRequest* aRequest,
   }
 
   return NS_OK;
+}
+
+NS_IMPL_CYCLE_COLLECTING_ADDREF(IDBFactory)
+NS_IMPL_CYCLE_COLLECTING_RELEASE(IDBFactory)
+
+NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(IDBFactory)
+  NS_WRAPPERCACHE_INTERFACE_MAP_ENTRY
+  NS_INTERFACE_MAP_ENTRY(nsISupports)
+NS_INTERFACE_MAP_END
+
+NS_IMPL_CYCLE_COLLECTION_CLASS(IDBFactory)
+
+NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(IDBFactory)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE_SCRIPT_OBJECTS
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mWindow)
+NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
+
+NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(IDBFactory)
+  NS_IMPL_CYCLE_COLLECTION_UNLINK_PRESERVED_WRAPPER
+  if (tmp->mOwningObject) {
+    tmp->mOwningObject = nullptr;
+  }
+  if (tmp->mRootedOwningObject) {
+    mozilla::DropJSObjects(tmp);
+    tmp->mRootedOwningObject = false;
+  }
+  NS_IMPL_CYCLE_COLLECTION_UNLINK(mWindow)
+NS_IMPL_CYCLE_COLLECTION_UNLINK_END
+
+NS_IMPL_CYCLE_COLLECTION_TRACE_BEGIN(IDBFactory)
+  NS_IMPL_CYCLE_COLLECTION_TRACE_PRESERVED_WRAPPER
+  NS_IMPL_CYCLE_COLLECTION_TRACE_JS_MEMBER_CALLBACK(mOwningObject)
+NS_IMPL_CYCLE_COLLECTION_TRACE_END
+
+JSObject*
+IDBFactory::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aScope)
+{
+  return IDBFactoryBinding::Wrap(aCx, aScope, this);
 }
 
 NS_IMPL_ISUPPORTS1(IDBFactory::BackgroundCreateCallback,

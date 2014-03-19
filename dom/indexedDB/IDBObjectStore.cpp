@@ -617,10 +617,12 @@ public:
                                            const BlobOrFileData& aData)
   {
     MOZ_ASSERT(NS_IsMainThread());
-
     MOZ_ASSERT(aData.tag == SCTAG_DOM_FILE ||
                aData.tag == SCTAG_DOM_FILE_WITHOUT_LASTMODIFIEDDATE ||
                aData.tag == SCTAG_DOM_BLOB);
+
+    MOZ_CRASH("Fix blobs!");
+    /*
 
     nsresult rv = NS_OK;
 
@@ -695,6 +697,7 @@ public:
     }
 
     return JSVAL_TO_OBJECT(wrappedFile);
+    */
   }
 };
 
@@ -838,6 +841,31 @@ ClearStructuredCloneBuffer(JSAutoStructuredCloneBuffer& aBuffer)
 
 } // anonymous namespace
 
+IDBObjectStore::IDBObjectStore(IDBTransaction* aTransaction,
+                               const ObjectStoreSpec* aSpec)
+  : mTransaction(aTransaction)
+  , mCachedKeyPath(JSVAL_VOID)
+  , mSpec(aSpec)
+  , mId(aSpec->metadata().id())
+  , mRooted(false)
+{
+  MOZ_ASSERT(aTransaction);
+  aTransaction->AssertIsOnOwningThread();
+  MOZ_ASSERT(aSpec);
+
+  SetIsDOMBinding();
+}
+
+IDBObjectStore::~IDBObjectStore()
+{
+  AssertIsOnOwningThread();
+
+  if (mRooted) {
+    mCachedKeyPath = JSVAL_VOID;
+    mozilla::DropJSObjects(this);
+  }
+}
+
 const JSClass IDBObjectStore::sDummyPropJSClass = {
   "dummy", 0,
   JS_PropertyStub,  JS_DeletePropertyStub,
@@ -854,10 +882,8 @@ IDBObjectStore::Create(IDBTransaction* aTransaction,
   MOZ_ASSERT(aTransaction);
   aTransaction->AssertIsOnOwningThread();
 
-  nsRefPtr<IDBObjectStore> objectStore = new IDBObjectStore();
-
-  objectStore->mTransaction = aTransaction;
-  objectStore->mSpec = &aSpec;
+  nsRefPtr<IDBObjectStore> objectStore =
+    new IDBObjectStore(aTransaction, &aSpec);
 
   return objectStore.forget();
 }
@@ -941,18 +967,6 @@ IDBObjectStore::AppendIndexUpdateInfo(
   }
 
   return NS_OK;
-}
-
-// static
-nsresult
-IDBObjectStore::GetStructuredCloneReadInfoFromStatement(
-                                           mozIStorageStatement* aStatement,
-                                           uint32_t aDataIndex,
-                                           uint32_t aFileIdsIndex,
-                                           IDBDatabase* aDatabase,
-                                           StructuredCloneReadInfo& aInfo)
-{
-  MOZ_CRASH("Remove me!");
 }
 
 // static
@@ -1107,6 +1121,8 @@ IDBObjectStore::StructuredCloneWriteCallback(JSContext* aCx,
     return JS_WriteBytes(aWriter, &value, sizeof(value));
   }
 
+  // XXX Fix blobs!
+  /*
   IDBTransaction* transaction = cloneWriteInfo->mTransaction;
   FileManager* fileManager = transaction->Database()->Manager();
 
@@ -1237,8 +1253,9 @@ IDBObjectStore::StructuredCloneWriteCallback(JSContext* aCx,
       return true;
     }
   }
+  */
 
-  // try using the runtime callbacks
+  // Try using the runtime callbacks
   const JSStructuredCloneCallbacks* runtimeCallbacks =
     js::GetContextStructuredCloneCallbacks(aCx);
   if (runtimeCallbacks) {
@@ -1330,24 +1347,6 @@ IDBObjectStore::ConvertBlobsToActors(
   }
 
   return NS_OK;
-}
-
-IDBObjectStore::IDBObjectStore()
-  : mCachedKeyPath(JSVAL_VOID)
-  , mSpec(nullptr)
-  , mRooted(false)
-{
-  SetIsDOMBinding();
-}
-
-IDBObjectStore::~IDBObjectStore()
-{
-  AssertIsOnOwningThread();
-
-  if (mRooted) {
-    mCachedKeyPath = JSVAL_VOID;
-    mozilla::DropJSObjects(this);
-  }
 }
 
 #ifdef DEBUG
@@ -1444,7 +1443,7 @@ IDBObjectStore::AddOrPut(JSContext* aCx,
     return nullptr;
   }
 
-  if (!IsWriteAllowed()) {
+  if (!mTransaction->IsWriteAllowed()) {
     aRv.Throw(NS_ERROR_DOM_INDEXEDDB_READ_ONLY_ERR);
     return nullptr;
   }
@@ -1604,7 +1603,7 @@ IDBObjectStore::Clear(ErrorResult& aRv)
     return nullptr;
   }
 
-  if (!IsWriteAllowed()) {
+  if (!mTransaction->IsWriteAllowed()) {
     aRv.Throw(NS_ERROR_DOM_INDEXEDDB_READ_ONLY_ERR);
     return nullptr;
   }
@@ -1910,7 +1909,7 @@ IDBObjectStore::Delete(JSContext* aCx,
     return nullptr;
   }
 
-  if (!IsWriteAllowed()) {
+  if (!mTransaction->IsWriteAllowed()) {
     aRv.Throw(NS_ERROR_DOM_INDEXEDDB_READ_ONLY_ERR);
     return nullptr;
   }
@@ -1956,6 +1955,7 @@ IDBObjectStore::OpenCursor(JSContext* aCx,
 {
   NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
 
+  // XXX Fix!
   aRv.Throw(NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
   return nullptr;
 
@@ -2057,10 +2057,21 @@ IDBObjectStore::CreateIndexInternal(
   }
 #endif
 
+  const IndexMetadata* oldMetadataElements =
+    indexes.IsEmpty() ? nullptr : indexes.Elements();
+
   IndexMetadata* metadata = indexes.AppendElement(
     IndexMetadata(transaction->NextIndexId(), nsString(aName), aKeyPath,
                   aOptionalParameters.mUnique,
                   aOptionalParameters.mMultiEntry));
+
+  if (oldMetadataElements &&
+      oldMetadataElements != indexes.Elements()) {
+    MOZ_ASSERT(indexes.Length() > 1);
+
+    // Array got moved, update the spec pointers for all live indexes.
+    RefreshSpec(/* aMayDelete */ false);
+  }
 
   transaction->CreateIndex(this, *metadata);
 
@@ -2096,18 +2107,35 @@ IDBObjectStore::DeleteIndex(const nsAString& aName, ErrorResult& aRv)
 
   MOZ_ASSERT(transaction->IsOpen());
 
-  auto& indexes = const_cast<nsTArray<IndexMetadata>&>(mSpec->indexes());
+  auto& metadataArray = const_cast<nsTArray<IndexMetadata>&>(mSpec->indexes());
 
   int64_t foundId = 0;
 
-  for (uint32_t count = indexes.Length(), index = 0;
-       index < count;
-       index++) {
-    const IndexMetadata& metadata = indexes[index];
+  for (uint32_t metadataCount = metadataArray.Length(), metadataIndex = 0;
+       metadataIndex < metadataCount;
+       metadataIndex++) {
+    const IndexMetadata& metadata = metadataArray[metadataIndex];
+    MOZ_ASSERT(metadata.id());
 
     if (aName == metadata.name()) {
       foundId = metadata.id();
-      indexes.RemoveElementAt(index);
+
+      // Must do this before altering the metadata array!
+      for (uint32_t indexCount = mIndexes.Length(), indexIndex = 0;
+           indexIndex < indexCount;
+           indexIndex++) {
+        nsRefPtr<IDBIndex>& index = mIndexes[indexIndex];
+
+        if (index->Id() == foundId) {
+          index->NoteDeletion();
+          mIndexes.RemoveElementAt(indexIndex);
+          break;
+        }
+      }
+
+      metadataArray.RemoveElementAt(metadataIndex);
+
+      RefreshSpec(/* aMayDelete */ false);
       break;
     }
   }
@@ -2181,6 +2209,7 @@ IDBObjectStore::OpenKeyCursor(JSContext* aCx,
 {
   MOZ_ASSERT(NS_IsMainThread());
 
+  // XXX Fix!
   aRv.Throw(NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
   return nullptr;
 
@@ -2199,18 +2228,17 @@ IDBObjectStore::OpenKeyCursor(JSContext* aCx,
 }
 
 void
-IDBObjectStore::RefreshSpec()
+IDBObjectStore::RefreshSpec(bool aMayDelete)
 {
   AssertIsOnOwningThread();
-  MOZ_ASSERT(mSpec);
-  MOZ_ASSERT(mSpec != mDeletedSpec);
+  MOZ_ASSERT_IF(mDeletedSpec, mSpec == mDeletedSpec);
 
   const DatabaseSpec* dbSpec = mTransaction->Database()->Spec();
   MOZ_ASSERT(dbSpec);
 
   const nsTArray<ObjectStoreSpec>& objectStores = dbSpec->objectStores();
 
-  DebugOnly<bool> found = false;
+  bool found = false;
 
   for (uint32_t objCount = objectStores.Length(), objIndex = 0;
        objIndex < objCount;
@@ -2218,14 +2246,12 @@ IDBObjectStore::RefreshSpec()
     const ObjectStoreSpec& objSpec = objectStores[objIndex];
 
     if (objSpec.metadata().id() == Id()) {
-      MOZ_ASSERT(objSpec.metadata().name() == Name());
-
       mSpec = &objSpec;
 
       for (uint32_t idxCount = mIndexes.Length(), idxIndex = 0;
            idxIndex < idxCount;
            idxIndex++) {
-        mIndexes[idxIndex]->RefreshMetadata();
+        mIndexes[idxIndex]->RefreshMetadata(aMayDelete);
       }
 
       found = true;
@@ -2233,7 +2259,14 @@ IDBObjectStore::RefreshSpec()
     }
   }
 
-  MOZ_ASSERT(found);
+  MOZ_ASSERT_IF(!aMayDelete && !mDeletedSpec, found);
+
+  if (found) {
+    MOZ_ASSERT(mSpec != mDeletedSpec);
+    mDeletedSpec = nullptr;
+  } else {
+    NoteDeletion();
+  }
 }
 
 const ObjectStoreSpec&
@@ -2250,7 +2283,12 @@ IDBObjectStore::NoteDeletion()
 {
   AssertIsOnOwningThread();
   MOZ_ASSERT(mSpec);
-  MOZ_ASSERT(!mDeletedSpec);
+  MOZ_ASSERT(Id() == mSpec->metadata().id());
+
+  if (mDeletedSpec) {
+    MOZ_ASSERT(mDeletedSpec == mSpec);
+    return;
+  }
 
   // Copy the spec here.
   mDeletedSpec = new ObjectStoreSpec(*mSpec);
@@ -2264,8 +2302,6 @@ IDBObjectStore::NoteDeletion()
          index++) {
       mIndexes[index]->NoteDeletion();
     }
-
-    mIndexes.Clear();
   }
 }
 
@@ -2287,24 +2323,6 @@ IDBObjectStore::AutoIncrement() const
   return mSpec->metadata().autoIncrement();
 }
 
-bool
-IDBObjectStore::IsWriteAllowed() const
-{
-  AssertIsOnOwningThread();
-  MOZ_ASSERT(mTransaction);
-
-  return mTransaction->IsWriteAllowed();
-}
-
-int64_t
-IDBObjectStore::Id() const
-{
-  AssertIsOnOwningThread();
-  MOZ_ASSERT(mSpec);
-
-  return mSpec->metadata().id();
-}
-
 const KeyPath&
 IDBObjectStore::GetKeyPath() const
 {
@@ -2320,7 +2338,7 @@ IDBObjectStore::HasValidKeyPath() const
   AssertIsOnOwningThread();
   MOZ_ASSERT(mSpec);
 
-  return mSpec->metadata().keyPath().IsValid();
+  return GetKeyPath().IsValid();
 }
 
 inline nsresult
@@ -2541,45 +2559,7 @@ AddHelper::UnpackResponseFromParentProcess(const ResponseValue& aResponseValue)
 nsresult
 GetHelper::DoDatabaseWork(mozIStorageConnection* /* aConnection */)
 {
-  NS_ASSERTION(!NS_IsMainThread(), "Wrong thread!");
-  NS_ASSERTION(IndexedDatabaseManager::IsMainProcess(), "Wrong process!");
-  NS_ASSERTION(mKeyRange, "Must have a key range here!");
-
-  PROFILER_LABEL("IndexedDB", "GetHelper::DoDatabaseWork [IDBObjectStore.cpp]");
-
-  nsCString keyRangeClause;
-  mKeyRange->GetBindingClause(NS_LITERAL_CSTRING("key_value"), keyRangeClause);
-
-  NS_ASSERTION(!keyRangeClause.IsEmpty(), "Huh?!");
-
-  nsCString query = NS_LITERAL_CSTRING("SELECT data, file_ids FROM object_data "
-                                       "WHERE object_store_id = :osid") +
-                    keyRangeClause + NS_LITERAL_CSTRING(" LIMIT 1");
-
   MOZ_CRASH("Remove me!");
-  nsCOMPtr<mozIStorageStatement> stmt;// = mTransaction->GetCachedStatement(query);
-  IDB_ENSURE_TRUE(stmt, NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
-
-  mozStorageStatementScoper scoper(stmt);
-
-  nsresult rv =
-    stmt->BindInt64ByName(NS_LITERAL_CSTRING("osid"), mObjectStore->Id());
-  IDB_ENSURE_SUCCESS(rv, NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
-
-  rv = mKeyRange->BindToStatement(stmt);
-  NS_ENSURE_SUCCESS(rv, rv);
-
-  bool hasResult;
-  rv = stmt->ExecuteStep(&hasResult);
-  IDB_ENSURE_SUCCESS(rv, NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
-
-  if (hasResult) {
-    rv = IDBObjectStore::GetStructuredCloneReadInfoFromStatement(stmt, 0, 1,
-      mDatabase, mCloneReadInfo);
-    NS_ENSURE_SUCCESS(rv, rv);
-  }
-
-  return NS_OK;
 }
 
 nsresult
@@ -2686,6 +2666,8 @@ GetHelper::UnpackResponseFromParentProcess(const ResponseValue& aResponseValue)
 nsresult
 OpenCursorHelper::DoDatabaseWork(mozIStorageConnection* aConnection)
 {
+  MOZ_CRASH("Remove me!");
+  /*
   NS_ASSERTION(!NS_IsMainThread(), "Wrong thread!");
   NS_ASSERTION(IndexedDatabaseManager::IsMainProcess(), "Wrong process!");
 
@@ -2721,9 +2703,8 @@ OpenCursorHelper::DoDatabaseWork(mozIStorageConnection* aConnection)
                          keyRangeClause + directionClause +
                          NS_LITERAL_CSTRING(" LIMIT 1");
 
-  MOZ_CRASH("Remove me!");
-  nsCOMPtr<mozIStorageStatement> stmt;/* =
-    mTransaction->GetCachedStatement(firstQuery);*/
+  nsCOMPtr<mozIStorageStatement> stmt =
+    mTransaction->GetCachedStatement(firstQuery);
   IDB_ENSURE_TRUE(stmt, NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
 
   mozStorageStatementScoper scoper(stmt);
@@ -2805,7 +2786,7 @@ OpenCursorHelper::DoDatabaseWork(mozIStorageConnection* aConnection)
 
   mContinueToQuery = queryStart + continueToKeyRangeClause + directionClause +
                      NS_LITERAL_CSTRING(" LIMIT ");
-
+  */
   return NS_OK;
 }
 
@@ -3343,6 +3324,8 @@ OpenKeyCursorHelper::UnpackResponseFromParentProcess(
 nsresult
 GetAllHelper::DoDatabaseWork(mozIStorageConnection* aConnection)
 {
+  MOZ_CRASH("Remove me!");
+  /*
   NS_ASSERTION(!NS_IsMainThread(), "Wrong thread!");
   NS_ASSERTION(IndexedDatabaseManager::IsMainProcess(), "Wrong process!");
 
@@ -3391,8 +3374,7 @@ GetAllHelper::DoDatabaseWork(mozIStorageConnection* aConnection)
 
   mCloneReadInfos.SetCapacity(50);
 
-  MOZ_CRASH("Remove me!");
-  nsCOMPtr<mozIStorageStatement> stmt;// = mTransaction->GetCachedStatement(query);
+  nsCOMPtr<mozIStorageStatement> stmt = mTransaction->GetCachedStatement(query);
   IDB_ENSURE_TRUE(stmt, NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
 
   mozStorageStatementScoper scoper(stmt);
@@ -3426,7 +3408,7 @@ GetAllHelper::DoDatabaseWork(mozIStorageConnection* aConnection)
     NS_ENSURE_SUCCESS(rv, rv);
   }
   IDB_ENSURE_SUCCESS(rv, NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
-
+  */
   return NS_OK;
 }
 

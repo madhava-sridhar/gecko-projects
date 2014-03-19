@@ -18,8 +18,10 @@
 #include "mozilla/dom/DOMError.h"
 #include "mozilla/dom/DOMStringList.h"
 #include "mozilla/ipc/BackgroundChild.h"
+#include "nsHashKeys.h"
 #include "nsIAppShell.h"
 #include "nsPIDOMWindow.h"
+#include "nsTHashtable.h"
 #include "nsWidgetsCID.h"
 #include "ProfilerHelpers.h"
 #include "ReportInternalError.h"
@@ -45,6 +47,7 @@ IDBTransaction::IDBTransaction(IDBDatabase* aDatabase, Mode aMode)
   , mMode(aMode)
   , mCreating(false)
 #ifdef DEBUG
+  , mSentCommitOrAbort(false)
   , mFiredCompleteOrAbort(false)
 #endif
 {
@@ -70,7 +73,10 @@ IDBTransaction::~IDBTransaction()
   AssertIsOnOwningThread();
   MOZ_ASSERT(!mPendingRequestCount);
   MOZ_ASSERT(!mCreating);
+  MOZ_ASSERT(mSentCommitOrAbort);
   MOZ_ASSERT(mFiredCompleteOrAbort);
+
+  mDatabase->UnregisterTransaction(this);
 
   if (mBackgroundActor.mNormalBackgroundActor) {
     mBackgroundActor.mNormalBackgroundActor->SendDeleteMe();
@@ -218,14 +224,20 @@ IDBTransaction::StartRequest(BackgroundRequestChild* aBackgroundActor,
 }
 
 void
-IDBTransaction::RefreshSpec()
+IDBTransaction::RefreshSpec(bool aMayDelete)
 {
   AssertIsOnOwningThread();
 
   for (uint32_t count = mObjectStores.Length(), index = 0;
        index < count;
        index++) {
-    mObjectStores[index]->RefreshSpec();
+    mObjectStores[index]->RefreshSpec(aMayDelete);
+  }
+
+  for (uint32_t count = mDeletedObjectStores.Length(), index = 0;
+       index < count;
+       index++) {
+    mDeletedObjectStores[index]->RefreshSpec(false);
   }
 }
 
@@ -251,7 +263,6 @@ IDBTransaction::OnRequestFinished()
   --mPendingRequestCount;
 
   if (!mPendingRequestCount) {
-    MOZ_ASSERT(NS_FAILED(mAbortCode) || LOADING == mReadyState);
     mReadyState = COMMITTING;
 
     if (NS_SUCCEEDED(mAbortCode)) {
@@ -267,6 +278,8 @@ IDBTransaction::SendCommit()
 {
   AssertIsOnOwningThread();
   MOZ_ASSERT(NS_SUCCEEDED(mAbortCode));
+  MOZ_ASSERT(IsFinished());
+  MOZ_ASSERT(!mSentCommitOrAbort);
 
   if (mMode == VERSION_CHANGE) {
     MOZ_ASSERT(mBackgroundActor.mVersionChangeBackgroundActor);
@@ -275,6 +288,10 @@ IDBTransaction::SendCommit()
     MOZ_ASSERT(mBackgroundActor.mNormalBackgroundActor);
     mBackgroundActor.mNormalBackgroundActor->SendCommit();
   }
+
+#ifdef DEBUG
+  mSentCommitOrAbort = true;
+#endif
 }
 
 void
@@ -282,6 +299,8 @@ IDBTransaction::SendAbort(nsresult aResultCode)
 {
   AssertIsOnOwningThread();
   MOZ_ASSERT(NS_FAILED(aResultCode));
+  MOZ_ASSERT(IsFinished());
+  MOZ_ASSERT(!mSentCommitOrAbort);
 
   if (mMode == VERSION_CHANGE) {
     MOZ_ASSERT(mBackgroundActor.mVersionChangeBackgroundActor);
@@ -290,6 +309,10 @@ IDBTransaction::SendAbort(nsresult aResultCode)
     MOZ_ASSERT(mBackgroundActor.mNormalBackgroundActor);
     mBackgroundActor.mNormalBackgroundActor->SendAbort(aResultCode);
   }
+
+#ifdef DEBUG
+  mSentCommitOrAbort = true;
+#endif
 }
 
 bool
@@ -366,6 +389,11 @@ IDBTransaction::DeleteObjectStore(int64_t aObjectStoreId)
 
     if (objectStore->Id() == aObjectStoreId) {
       objectStore->NoteDeletion();
+
+      nsRefPtr<IDBObjectStore>* deletedObjectStore =
+        mDeletedObjectStores.AppendElement();
+      deletedObjectStore->swap(mObjectStores[index]);
+
       mObjectStores.RemoveElementAt(index);
       break;
     }
@@ -442,11 +470,11 @@ IDBTransaction::AbortInternal(nsresult aAbortCode,
     return NS_ERROR_DOM_INDEXEDDB_NOT_ALLOWED_ERR;
   }
 
-  bool isVersionChange = IDBTransaction::VERSION_CHANGE == mMode;
-  bool needToAbort = IDBTransaction::INITIAL == mReadyState;
+  bool isVersionChange = (VERSION_CHANGE == mMode);
+  bool needToAbort = (INITIAL == mReadyState);
 
   mAbortCode = aAbortCode;
-  mReadyState = IDBTransaction::DONE;
+  mReadyState = DONE;
   mError = error.forget();
 
   if (isVersionChange) {
@@ -454,7 +482,54 @@ IDBTransaction::AbortInternal(nsresult aAbortCode,
     // back to its previous state.
     mDatabase->RevertToPreviousState();
 
-    RefreshSpec();
+    const nsTArray<ObjectStoreSpec>& specArray =
+      mDatabase->Spec()->objectStores();
+
+    if (specArray.IsEmpty()) {
+      mObjectStores.Clear();
+      mDeletedObjectStores.Clear();
+    } else {
+      nsTHashtable<nsUint64HashKey> validIds(specArray.Length());
+
+      for (uint32_t specCount = specArray.Length(), specIndex = 0;
+           specIndex < specCount;
+           specIndex++) {
+        const int64_t objectStoreId = specArray[specIndex].metadata().id();
+        MOZ_ASSERT(objectStoreId);
+
+        validIds.PutEntry(uint64_t(objectStoreId));
+      }
+
+      for (uint32_t objCount = mObjectStores.Length(), objIndex = 0;
+            objIndex < objCount;
+            /* incremented conditionally */) {
+        const int64_t objectStoreId = mObjectStores[objIndex]->Id();
+        MOZ_ASSERT(objectStoreId);
+
+        if (validIds.Contains(uint64_t(objectStoreId))) {
+          objIndex++;
+        } else {
+          mObjectStores.RemoveElementAt(objIndex);
+          objCount--;
+        }
+      }
+
+      if (!mDeletedObjectStores.IsEmpty()) {
+        for (uint32_t objCount = mDeletedObjectStores.Length(), objIndex = 0;
+              objIndex < objCount;
+              objIndex++) {
+          const int64_t objectStoreId = mDeletedObjectStores[objIndex]->Id();
+          MOZ_ASSERT(objectStoreId);
+
+          if (validIds.Contains(uint64_t(objectStoreId))) {
+            nsRefPtr<IDBObjectStore>* objectStore =
+              mObjectStores.AppendElement();
+            objectStore->swap(mDeletedObjectStores[objIndex]);
+          }
+        }
+        mDeletedObjectStores.Clear();
+      }
+    }
   }
 
   // Fire the abort event if there are no outstanding requests. Otherwise the
@@ -503,6 +578,17 @@ void
 IDBTransaction::FireCompleteOrAbortEvents(nsresult aResult)
 {
   AssertIsOnOwningThread();
+  MOZ_ASSERT(!mFiredCompleteOrAbort);
+
+  mReadyState = DONE;
+
+#ifdef DEBUG
+  mFiredCompleteOrAbort = true;
+#endif
+
+  IDB_PROFILER_MARK("IndexedDB Transaction %llu: Complete (rv = %lu)",
+                    "IDBTransaction[%llu] MT Complete",
+                    mTransaction->GetSerialNumber(), mAbortCode);
 
   nsCOMPtr<nsIDOMEvent> event;
   if (NS_SUCCEEDED(aResult)) {
@@ -521,16 +607,8 @@ IDBTransaction::FireCompleteOrAbortEvents(nsresult aResult)
     return;
   }
 
-  IDB_PROFILER_MARK("IndexedDB Transaction %llu: Complete (rv = %lu)",
-                    "IDBTransaction[%llu] MT Complete",
-                    mTransaction->GetSerialNumber(), mAbortCode);
-
   bool dummy;
   NS_WARN_IF(NS_FAILED(DispatchEvent(event, &dummy)));
-
-#ifdef DEBUG
-  mFiredCompleteOrAbort = true;
-#endif
 }
 
 int64_t
@@ -665,6 +743,13 @@ IDBTransaction::ObjectStore(const nsAString& aName, ErrorResult& aRv)
   return objectStore.forget();
 }
 
+NS_IMPL_ADDREF_INHERITED(IDBTransaction, IDBWrapperCache)
+NS_IMPL_RELEASE_INHERITED(IDBTransaction, IDBWrapperCache)
+
+NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION_INHERITED(IDBTransaction)
+  NS_INTERFACE_MAP_ENTRY(nsIRunnable)
+NS_INTERFACE_MAP_END_INHERITING(IDBWrapperCache)
+
 NS_IMPL_CYCLE_COLLECTION_CLASS(IDBTransaction)
 
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(IDBTransaction,
@@ -672,20 +757,15 @@ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(IDBTransaction,
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mDatabase)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mError)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mObjectStores)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mDeletedObjectStores)
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
 
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN_INHERITED(IDBTransaction, IDBWrapperCache)
   // Don't unlink mDatabase!
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mError)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mObjectStores)
+  NS_IMPL_CYCLE_COLLECTION_UNLINK(mDeletedObjectStores)
 NS_IMPL_CYCLE_COLLECTION_UNLINK_END
-
-NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION_INHERITED(IDBTransaction)
-  NS_INTERFACE_MAP_ENTRY(nsIRunnable)
-NS_INTERFACE_MAP_END_INHERITING(IDBWrapperCache)
-
-NS_IMPL_ADDREF_INHERITED(IDBTransaction, IDBWrapperCache)
-NS_IMPL_RELEASE_INHERITED(IDBTransaction, IDBWrapperCache)
 
 JSObject*
 IDBTransaction::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aScope)
@@ -713,9 +793,9 @@ IDBTransaction::Run()
   // We're back at the event loop, no longer newborn.
   mCreating = false;
 
-  // Maybe set the readyState to DONE if there were no requests generated.
+  // Maybe commit if there were no requests generated.
   if (mReadyState == IDBTransaction::INITIAL) {
-    mReadyState = IDBTransaction::DONE;
+    mReadyState = DONE;
 
     SendCommit();
   }

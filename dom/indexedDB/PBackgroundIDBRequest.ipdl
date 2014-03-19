@@ -58,6 +58,35 @@ struct ObjectStoreCountResponse
   uint64_t count;
 };
 
+struct IndexGetResponse
+{
+  SerializedStructuredCloneReadInfo cloneInfo;
+  // XXX Fix me!
+  //PBlob[] blobs;
+};
+
+struct IndexGetKeyResponse
+{
+  Key key;
+};
+
+struct IndexGetAllResponse
+{
+  SerializedStructuredCloneReadInfo[] cloneInfos;
+  // XXX Fix me!
+  //BlobArray[] blobs;
+};
+
+struct IndexGetAllKeysResponse
+{
+  Key[] keys;
+};
+
+struct IndexCountResponse
+{
+  uint64_t count;
+};
+
 union RequestResponse
 {
   nsresult;
@@ -69,6 +98,11 @@ union RequestResponse
   ObjectStoreCountResponse;
   ObjectStoreGetAllResponse;
   ObjectStoreGetAllKeysResponse;
+  IndexGetResponse;
+  IndexGetKeyResponse;
+  IndexGetAllResponse;
+  IndexGetAllKeysResponse;
+  IndexCountResponse;
 };
 
 protocol PBackgroundIDBRequest

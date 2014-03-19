@@ -12,6 +12,7 @@
 #include "mozilla/dom/StorageTypeBinding.h"
 #include "mozilla/dom/quota/PersistenceType.h"
 #include "mozilla/dom/quota/StoragePrivilege.h"
+#include "nsAutoPtr.h"
 #include "nsCOMPtr.h"
 #include "nsCycleCollectionParticipant.h"
 #include "nsISupports.h"
@@ -20,12 +21,10 @@
 #include "nsWrapperCache.h"
 
 class mozIStorageConnection;
-template <typename> class nsAutoPtr;
 class nsIFile;
 class nsIFileURL;
 class nsIPrincipal;
 class nsPIDOMWindow;
-template <typename> class nsRefPtr;
 struct PRThread;
 
 namespace mozilla {
@@ -46,7 +45,6 @@ class IDBOpenDBOptions;
 namespace indexedDB {
 
 class BackgroundFactoryChild;
-struct DatabaseInfo;
 class FactoryRequestParams;
 class IDBDatabase;
 class IDBOpenDBRequest;
@@ -85,9 +83,6 @@ class IDBFactory MOZ_FINAL
   bool mBackgroundActorFailed;
 
 public:
-  NS_DECL_CYCLE_COLLECTING_ISUPPORTS
-  NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS(IDBFactory)
-
   // Called when using IndexedDB from a window in a different process.
   static nsresult Create(nsPIDOMWindow* aWindow,
                          const nsACString& aGroup,
@@ -115,6 +110,14 @@ public:
   // process.
   static nsresult Create(ContentParent* aContentParent,
                          IDBFactory** aFactory);
+
+  void
+  AssertIsOnOwningThread() const
+#ifdef DEBUG
+  ;
+#else
+  { }
+#endif
 
   nsresult
   OpenInternal(const nsAString& aName,
@@ -154,11 +157,6 @@ public:
     return mASCIIOrigin;
   }
 
-  // nsWrapperCache
-  virtual JSObject*
-  WrapObject(JSContext* aCx, JS::Handle<JSObject*> aScope) MOZ_OVERRIDE;
-
-  // WebIDL
   nsPIDOMWindow*
   GetParentObject() const
   {
@@ -173,45 +171,56 @@ public:
   }
 
   already_AddRefed<IDBOpenDBRequest>
-  Open(const nsAString& aName, const IDBOpenDBOptions& aOptions,
+  Open(const nsAString& aName,
+       const IDBOpenDBOptions& aOptions,
        ErrorResult& aRv);
 
   already_AddRefed<IDBOpenDBRequest>
-  DeleteDatabase(const nsAString& aName, const IDBOpenDBOptions& aOptions,
+  DeleteDatabase(const nsAString& aName,
+                 const IDBOpenDBOptions& aOptions,
                  ErrorResult& aRv);
 
   int16_t
-  Cmp(JSContext* aCx, JS::Handle<JS::Value> aFirst,
-      JS::Handle<JS::Value> aSecond, ErrorResult& aRv);
+  Cmp(JSContext* aCx,
+      JS::Handle<JS::Value> aFirst,
+      JS::Handle<JS::Value> aSecond,
+      ErrorResult& aRv);
 
   already_AddRefed<IDBOpenDBRequest>
-  OpenForPrincipal(nsIPrincipal* aPrincipal, const nsAString& aName,
-                   uint64_t aVersion, ErrorResult& aRv);
+  OpenForPrincipal(nsIPrincipal* aPrincipal,
+                   const nsAString& aName,
+                   uint64_t aVersion,
+                   ErrorResult& aRv);
 
   already_AddRefed<IDBOpenDBRequest>
-  OpenForPrincipal(nsIPrincipal* aPrincipal, const nsAString& aName,
-                   const IDBOpenDBOptions& aOptions, ErrorResult& aRv);
+  OpenForPrincipal(nsIPrincipal* aPrincipal,
+                   const nsAString& aName,
+                   const IDBOpenDBOptions& aOptions,
+                   ErrorResult& aRv);
 
   already_AddRefed<IDBOpenDBRequest>
-  DeleteForPrincipal(nsIPrincipal* aPrincipal, const nsAString& aName,
-                     const IDBOpenDBOptions& aOptions, ErrorResult& aRv);
+  DeleteForPrincipal(nsIPrincipal* aPrincipal,
+                     const nsAString& aName,
+                     const IDBOpenDBOptions& aOptions,
+                     ErrorResult& aRv);
 
-  void
-  AssertIsOnOwningThread() const
-#ifdef DEBUG
-  ;
-#else
-  { }
-#endif
+  NS_DECL_CYCLE_COLLECTING_ISUPPORTS
+  NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS(IDBFactory)
+
+  // nsWrapperCache
+  virtual JSObject*
+  WrapObject(JSContext* aCx, JS::Handle<JSObject*> aScope) MOZ_OVERRIDE;
 
 private:
   IDBFactory();
   ~IDBFactory();
 
   already_AddRefed<IDBOpenDBRequest>
-  Open(nsIPrincipal* aPrincipal, const nsAString& aName,
+  Open(nsIPrincipal* aPrincipal,
+       const nsAString& aName,
        const Optional<uint64_t>& aVersion,
-       const Optional<mozilla::dom::StorageType>& aStorageType, bool aDelete,
+       const Optional<mozilla::dom::StorageType>& aStorageType,
+       bool aDelete,
        ErrorResult& aRv);
 
   nsresult
