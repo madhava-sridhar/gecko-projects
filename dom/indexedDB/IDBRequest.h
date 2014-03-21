@@ -79,10 +79,6 @@ public:
                          void* aUserData,
                          JS::MutableHandle<JS::Value> aResult);
 
-  NS_DECL_ISUPPORTS_INHERITED
-  NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS_INHERITED(IDBRequest,
-                                                         IDBWrapperCache)
-
   static already_AddRefed<IDBRequest>
   Create(IDBDatabase* aDatabase, IDBTransaction* aTransaction);
 
@@ -110,9 +106,6 @@ public:
   DispatchNonTransactionError(nsresult aErrorCode);
 
   void
-  NotifyHelperSentResultsToChildProcess(nsresult aRv);
-
-  void
   SetError(nsresult aRv);
 
   void
@@ -134,8 +127,6 @@ public:
   JSContext*
   GetJSContext();
 
-  void CaptureCaller();
-
   void
   FillScriptErrorEvent(ErrorEventInit& aEventInit) const;
 
@@ -153,11 +144,6 @@ public:
   }
 #endif
 
-  // nsWrapperCache
-  virtual JSObject*
-  WrapObject(JSContext* aCx, JS::Handle<JSObject*> aScope) MOZ_OVERRIDE;
-
-  // WebIDL
   nsPIDOMWindow*
   GetParentObject() const
   {
@@ -171,11 +157,15 @@ public:
   GetTransaction() const
   {
     AssertIsOnOwningThread();
+
     return mTransaction;
   }
 
   IDBRequestReadyState
   ReadyState() const;
+
+  void
+  SetSource(IDBCursor* aSource);
 
   IMPL_EVENT_HANDLER(success);
   IMPL_EVENT_HANDLER(error);
@@ -187,6 +177,14 @@ public:
 #else
   { }
 #endif
+
+  NS_DECL_ISUPPORTS_INHERITED
+  NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS_INHERITED(IDBRequest,
+                                                         IDBWrapperCache)
+
+  // nsWrapperCache
+  virtual JSObject*
+  WrapObject(JSContext* aCx, JS::Handle<JSObject*> aScope) MOZ_OVERRIDE;
 
 protected:
   IDBRequest(IDBDatabase* aDatabase);
@@ -200,12 +198,7 @@ protected:
   ConstructResult();
 
   void
-  AssertSourceIsCorrect() const
-#ifdef DEBUG
-  ;
-#else
-  { }
-#endif
+  CaptureCaller();
 };
 
 class IDBOpenDBRequest MOZ_FINAL

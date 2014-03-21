@@ -9,17 +9,10 @@
 
 #include "nsIProgrammingLanguage.h"
 
-#include "mozilla/Attributes.h"
 #include "js/StructuredClone.h"
-#include "js/TypeDecls.h"
 #include "nsAutoPtr.h"
 #include "nsCOMPtr.h"
-#include "nsDebug.h"
-#include "nsError.h"
-#include "nsISupportsImpl.h"
-#include "nsString.h"
 #include "nsTArray.h"
-#include "nsIInputStream.h"
 
 #define BEGIN_INDEXEDDB_NAMESPACE \
   namespace mozilla { namespace dom { namespace indexedDB {
@@ -31,8 +24,11 @@
   using namespace mozilla::dom::indexedDB;
 
 class nsIDOMBlob;
+class nsIInputStream;
 
-BEGIN_INDEXEDDB_NAMESPACE
+namespace mozilla {
+namespace dom {
+namespace indexedDB {
 
 class FileInfo;
 class IDBDatabase;
@@ -104,6 +100,8 @@ struct StructuredCloneWriteInfo
   uint64_t mOffsetToKeyProp;
 };
 
-END_INDEXEDDB_NAMESPACE
+} // namespace indexedDB
+} // namespace dom
+} // namespace mozilla
 
 #endif // mozilla_dom_indexeddb_indexeddatabase_h__

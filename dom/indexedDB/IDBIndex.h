@@ -99,12 +99,28 @@ public:
   GetKeyPath(JSContext* aCx, ErrorResult& aRv);
 
   already_AddRefed<IDBRequest>
-  OpenCursor(JSContext* aCx, JS::Handle<JS::Value> aRange,
-             IDBCursorDirection aDirection, ErrorResult& aRv);
+  OpenCursor(JSContext* aCx,
+             JS::Handle<JS::Value> aRange,
+             IDBCursorDirection aDirection,
+             ErrorResult& aRv)
+  {
+    AssertIsOnOwningThread();
+
+    return OpenCursorInternal(/* aKeysOnly */ false, aCx, aRange, aDirection,
+                              aRv);
+  }
 
   already_AddRefed<IDBRequest>
-  OpenKeyCursor(JSContext* aCx, JS::Handle<JS::Value> aRange,
-                IDBCursorDirection aDirection, ErrorResult& aRv);
+  OpenKeyCursor(JSContext* aCx,
+                JS::Handle<JS::Value> aRange,
+                IDBCursorDirection aDirection,
+                ErrorResult& aRv)
+  {
+    AssertIsOnOwningThread();
+
+    return OpenCursorInternal(/* aKeysOnly */ true, aCx, aRange, aDirection,
+                              aRv);
+  }
 
   already_AddRefed<IDBRequest>
   Get(JSContext* aCx, JS::Handle<JS::Value> aKey, ErrorResult& aRv)
@@ -179,6 +195,13 @@ private:
                  JS::Handle<JS::Value> aKey,
                  const Optional<uint32_t>& aLimit,
                  ErrorResult& aRv);
+
+  already_AddRefed<IDBRequest>
+  OpenCursorInternal(bool aKeysOnly,
+                     JSContext* aCx,
+                     JS::Handle<JS::Value> aRange,
+                     IDBCursorDirection aDirection,
+                     ErrorResult& aRv);
 };
 
 } // namespace indexedDB

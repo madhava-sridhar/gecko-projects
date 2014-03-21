@@ -11,7 +11,9 @@
 
 #include "mozilla/dom/BindingDeclarations.h"
 
-BEGIN_INDEXEDDB_NAMESPACE
+namespace mozilla {
+namespace dom {
+namespace indexedDB {
 
 class IndexMetadata;
 class Key;
@@ -117,6 +119,8 @@ public:
   nsTArray<nsString> mStrings;
 };
 
-END_INDEXEDDB_NAMESPACE
+} // namespace indexedDB
+} // namespace dom
+} // namespace mozilla
 
 #endif /* mozilla_dom_indexeddb_keypath_h__ */

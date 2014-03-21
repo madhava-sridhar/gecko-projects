@@ -159,16 +159,6 @@ public:
   bool
   HasValidKeyPath() const;
 
-  already_AddRefed<IDBRequest>
-  OpenCursorInternal(IDBKeyRange* aKeyRange,
-                     size_t aDirection,
-                     ErrorResult& aRv);
-
-  already_AddRefed<IDBRequest>
-  OpenKeyCursorInternal(IDBKeyRange* aKeyRange,
-                        size_t aDirection,
-                        ErrorResult& aRv);
-
   nsPIDOMWindow*
   GetParentObject() const;
 
@@ -225,12 +215,6 @@ public:
   already_AddRefed<IDBRequest>
   Clear(ErrorResult& aRv);
 
-  already_AddRefed<IDBRequest>
-  OpenCursor(JSContext* aCx,
-             JS::Handle<JS::Value> aRange,
-             IDBCursorDirection aDirection,
-             ErrorResult& aRv);
-
   already_AddRefed<IDBIndex>
   CreateIndex(JSContext* aCx,
               const nsAString& aName,
@@ -279,10 +263,28 @@ public:
   }
 
   already_AddRefed<IDBRequest>
+  OpenCursor(JSContext* aCx,
+             JS::Handle<JS::Value> aRange,
+             IDBCursorDirection aDirection,
+             ErrorResult& aRv)
+  {
+    AssertIsOnOwningThread();
+
+    return OpenCursorInternal(/* aKeysOnly */ false, aCx, aRange, aDirection,
+                              aRv);
+  }
+
+  already_AddRefed<IDBRequest>
   OpenKeyCursor(JSContext* aCx,
                 JS::Handle<JS::Value> aRange,
                 IDBCursorDirection aDirection,
-                ErrorResult& aRv);
+                ErrorResult& aRv)
+  {
+    AssertIsOnOwningThread();
+
+    return OpenCursorInternal(/* aKeysOnly */ true, aCx, aRange, aDirection,
+                              aRv);
+  }
 
   void
   RefreshSpec(bool aMayDelete);
@@ -333,6 +335,13 @@ private:
                       const KeyPath& aKeyPath,
                       const IDBIndexParameters& aOptionalParameters,
                       ErrorResult& aRv);
+
+  already_AddRefed<IDBRequest>
+  OpenCursorInternal(bool aKeysOnly,
+                     JSContext* aCx,
+                     JS::Handle<JS::Value> aRange,
+                     IDBCursorDirection aDirection,
+                     ErrorResult& aRv);
 };
 
 } // namespace indexedDB

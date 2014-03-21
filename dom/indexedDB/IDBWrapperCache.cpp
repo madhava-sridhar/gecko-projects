@@ -8,7 +8,7 @@
 
 #include "mozilla/HoldDropJSObjects.h"
 #include "nsCOMPtr.h"
-#include "nsIScriptGlobalObject.h";
+#include "nsIScriptGlobalObject.h"
 #include "nsPIDOMWindow.h"
 
 #ifdef DEBUG

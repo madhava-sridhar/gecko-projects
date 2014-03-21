@@ -14,8 +14,11 @@
 #include "FileInfo.h"
 #include "mozilla/dom/indexedDB/PBackgroundIDBSharedTypes.h"
 #include "nsIDOMFile.h"
+#include "nsIInputStream.h"
 
-BEGIN_INDEXEDDB_NAMESPACE
+namespace mozilla {
+namespace dom {
+namespace indexedDB {
 
 inline
 StructuredCloneFile::StructuredCloneFile()
@@ -92,6 +95,7 @@ StructuredCloneReadInfo::operator=(StructuredCloneReadInfo&& aCloneReadInfo)
 {
   MOZ_ASSERT(&aCloneReadInfo != this);
 
+  mData = Move(aCloneReadInfo.mData);
   mCloneBuffer = Move(aCloneReadInfo.mCloneBuffer);
   mFiles.Clear();
   mFiles.SwapElements(aCloneReadInfo.mFiles);
@@ -100,31 +104,8 @@ StructuredCloneReadInfo::operator=(StructuredCloneReadInfo&& aCloneReadInfo)
   return *this;
 }
 
-inline
-void
-AppendConditionClause(const nsACString& aColumnName,
-                      const nsACString& aArgName,
-                      bool aLessThan,
-                      bool aEquals,
-                      nsACString& aResult)
-{
-  aResult += NS_LITERAL_CSTRING(" AND ") + aColumnName +
-             NS_LITERAL_CSTRING(" ");
+} // namespace indexedDB
+} // namespace dom
+} // namespace mozilla
 
-  if (aLessThan) {
-    aResult.AppendLiteral("<");
-  }
-  else {
-    aResult.AppendLiteral(">");
-  }
-
-  if (aEquals) {
-    aResult.AppendLiteral("=");
-  }
-
-  aResult += NS_LITERAL_CSTRING(" :") + aArgName;
-}
-
-END_INDEXEDDB_NAMESPACE
-
-#endif
+#endif // IndexedDatabaseInlines_h

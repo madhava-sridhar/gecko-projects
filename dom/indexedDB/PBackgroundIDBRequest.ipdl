@@ -107,7 +107,7 @@ union RequestResponse
 
 protocol PBackgroundIDBRequest
 {
-  manager PBackgroundIDBVersionChangeTransaction or PBackgroundIDBTransaction;
+  manager PBackgroundIDBTransaction or PBackgroundIDBVersionChangeTransaction;
 
 child:
   __delete__(RequestResponse response);

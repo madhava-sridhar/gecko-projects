@@ -7,6 +7,7 @@
 
 #include "js/RootingAPI.h"
 #include "mozilla/Attributes.h"
+#include "mozilla/dom/indexedDB/PBackgroundIDBCursorChild.h"
 #include "mozilla/dom/indexedDB/PBackgroundIDBDatabaseChild.h"
 #include "mozilla/dom/indexedDB/PBackgroundIDBFactoryChild.h"
 #include "mozilla/dom/indexedDB/PBackgroundIDBFactoryRequestChild.h"
@@ -29,11 +30,13 @@ class BackgroundChildImpl;
 namespace dom {
 namespace indexedDB {
 
+class IDBCursor;
 class IDBDatabase;
 class IDBFactory;
 class IDBOpenDBRequest;
 class IDBRequest;
 class IDBTransaction;
+
 class Key;
 class SerializedStructuredCloneReadInfo;
 
@@ -73,7 +76,7 @@ private:
   ~BackgroundFactoryChild();
 
   void
-  SendDeleteMe();
+  SendDeleteMeInternal();
 
   // IPDL methods are only called by IPDL.
   virtual void
@@ -96,6 +99,9 @@ private:
   virtual bool
   DeallocPBackgroundIDBDatabaseChild(PBackgroundIDBDatabaseChild* aActor)
                                      MOZ_OVERRIDE;
+
+  bool
+  SendDeleteMe() MOZ_DELETE;
 };
 
 class BackgroundDatabaseChild;
@@ -211,7 +217,7 @@ private:
   ~BackgroundDatabaseChild();
 
   void
-  SendDeleteMe();
+  SendDeleteMeInternal();
 
   bool
   EnsureDOMObject();
@@ -261,6 +267,9 @@ private:
 
   virtual bool
   RecvInvalidate() MOZ_OVERRIDE;
+
+  bool
+  SendDeleteMe() MOZ_DELETE;
 };
 
 class BackgroundVersionChangeTransactionChild;
@@ -285,7 +294,7 @@ public:
   AssertIsOnOwningThread() const = 0;
 #else
   void
-  AssertIsOnOwningThread() const;
+  AssertIsOnOwningThread() const
   { }
 #endif
 
@@ -329,7 +338,7 @@ public:
 #endif
 
   void
-  SendDeleteMe();
+  SendDeleteMeInternal();
 
 private:
   // Only created by IDBDatabase.
@@ -351,6 +360,16 @@ private:
   virtual bool
   DeallocPBackgroundIDBRequestChild(PBackgroundIDBRequestChild* aActor)
                                     MOZ_OVERRIDE;
+
+  virtual PBackgroundIDBCursorChild*
+  AllocPBackgroundIDBCursorChild(const OpenCursorParams& aParams) MOZ_OVERRIDE;
+
+  virtual bool
+  DeallocPBackgroundIDBCursorChild(PBackgroundIDBCursorChild* aActor)
+                                   MOZ_OVERRIDE;
+
+  bool
+  SendDeleteMe() MOZ_DELETE;
 };
 
 class BackgroundVersionChangeTransactionChild MOZ_FINAL
@@ -368,7 +387,7 @@ public:
 #endif
 
   void
-  SendDeleteMe();
+  SendDeleteMeInternal();
 
 private:
   // Only created by BackgroundDatabaseChild.
@@ -397,16 +416,37 @@ private:
   virtual bool
   DeallocPBackgroundIDBRequestChild(PBackgroundIDBRequestChild* aActor)
                                     MOZ_OVERRIDE;
+
+  virtual PBackgroundIDBCursorChild*
+  AllocPBackgroundIDBCursorChild(const OpenCursorParams& aParams) MOZ_OVERRIDE;
+
+  virtual bool
+  DeallocPBackgroundIDBCursorChild(PBackgroundIDBCursorChild* aActor)
+                                   MOZ_OVERRIDE;
+
+  bool
+  SendDeleteMe() MOZ_DELETE;
+};
+
+class BackgroundTransactionRequestChildBase
+  : public BackgroundRequestChildBase
+{
+protected:
+  nsRefPtr<IDBTransaction> mTransaction;
+
+protected:
+  BackgroundTransactionRequestChildBase(IDBRequest* aRequest);
+
+  virtual
+  ~BackgroundTransactionRequestChildBase();
 };
 
 class BackgroundRequestChild MOZ_FINAL
-  : public BackgroundRequestChildBase
+  : public BackgroundTransactionRequestChildBase
   , public PBackgroundIDBRequestChild
 {
   friend class BackgroundTransactionChild;
   friend class BackgroundVersionChangeTransactionChild;
-
-  nsRefPtr<IDBTransaction> mTransaction;
 
 public:
   BackgroundRequestChild(IDBRequest* aRequest);
@@ -443,6 +483,69 @@ private:
   // IPDL methods are only called by IPDL.
   virtual bool
   Recv__delete__(const RequestResponse& aResponse) MOZ_OVERRIDE;
+};
+
+class BackgroundCursorChild MOZ_FINAL
+  : public BackgroundTransactionRequestChildBase
+  , public PBackgroundIDBCursorChild
+{
+  friend class BackgroundTransactionChild;
+  friend class BackgroundVersionChangeTransactionChild;
+
+  IDBObjectStore* mObjectStore;
+  IDBIndex* mIndex;
+  IDBCursor* mCursor;
+
+  // Only set while a request is in progress.
+  nsRefPtr<IDBCursor> mStrongCursor;
+
+  Direction mDirection;
+
+public:
+  BackgroundCursorChild(IDBRequest* aRequest,
+                        IDBObjectStore* aObjectStore,
+                        Direction aDirection);
+
+  BackgroundCursorChild(IDBRequest* aRequest,
+                        IDBIndex* aIndex,
+                        Direction aDirection);
+
+  void
+  SendContinueInternal(const CursorRequestParams& aParams);
+
+  void
+  SendDeleteMeInternal();
+
+private:
+  // Only destroyed by BackgroundTransactionChild or
+  // BackgroundVersionChangeTransactionChild.
+  ~BackgroundCursorChild();
+
+  void
+  HandleResponse(const ObjectStoreCursorResponse& aResponse);
+
+  void
+  HandleResponse(const ObjectStoreKeyCursorResponse& aResponse);
+
+  void
+  HandleResponse(const IndexCursorResponse& aResponse);
+
+  void
+  HandleResponse(const IndexKeyCursorResponse& aResponse);
+
+  // IPDL methods are only called by IPDL.
+  virtual void
+  ActorDestroy(ActorDestroyReason aWhy) MOZ_OVERRIDE;
+
+  virtual bool
+  RecvResponse(const CursorResponse& aResponse) MOZ_OVERRIDE;
+
+  // Force callers to use SendContinueInternal.
+  bool
+  SendContinue(const CursorRequestParams& aParams) MOZ_DELETE;
+
+  bool
+  SendDeleteMe() MOZ_DELETE;
 };
 
 } // namespace indexedDB

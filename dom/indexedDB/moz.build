@@ -66,6 +66,7 @@ SOURCES += [
 ]
 
 IPDL_SOURCES += [
+    'PBackgroundIDBCursor.ipdl',
     'PBackgroundIDBDatabase.ipdl',
     'PBackgroundIDBFactory.ipdl',
     'PBackgroundIDBFactoryRequest.ipdl',

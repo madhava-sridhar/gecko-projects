@@ -8,6 +8,7 @@
 #include "IDBDatabase.h"
 #include "IDBEvents.h"
 #include "IDBFactory.h"
+#include "IDBIndex.h"
 #include "IDBObjectStore.h"
 #include "IDBRequest.h"
 #include "IDBTransaction.h"
@@ -81,7 +82,7 @@ class MOZ_STACK_CLASS ResultHelper MOZ_FINAL
 
   union
   {
-    IDBDatabase* mDatabase;
+    nsISupports* mISupports;
     StructuredCloneReadInfo* mStructuredClone;
     const nsTArray<StructuredCloneReadInfo>* mStructuredCloneArray;
     const Key* mKey;
@@ -91,7 +92,7 @@ class MOZ_STACK_CLASS ResultHelper MOZ_FINAL
 
   enum
   {
-    ResultTypeDatabase,
+    ResultTypeISupports,
     ResultTypeStructuredClone,
     ResultTypeStructuredCloneArray,
     ResultTypeKey,
@@ -102,15 +103,15 @@ class MOZ_STACK_CLASS ResultHelper MOZ_FINAL
 public:
   ResultHelper(IDBRequest* aRequest,
                IDBTransaction* aTransaction,
-               IDBDatabase* aResult)
+               nsISupports* aResult)
     : mRequest(aRequest)
     , mAutoTransaction(aTransaction)
-    , mResultType(ResultTypeDatabase)
+    , mResultType(ResultTypeISupports)
   {
     MOZ_ASSERT(aRequest);
     MOZ_ASSERT(aResult);
 
-    mResult.mDatabase = aResult;
+    mResult.mISupports = aResult;
   }
 
   ResultHelper(IDBRequest* aRequest,
@@ -173,7 +174,6 @@ public:
     , mResultType(ResultTypeJSVal)
   {
     MOZ_ASSERT(aRequest);
-    MOZ_ASSERT(!aResult->isGCThing());
 
     mResult.mJSVal = aResult;
   }
@@ -202,8 +202,8 @@ public:
     MOZ_ASSERT(helper->mRequest);
 
     switch (helper->mResultType) {
-      case ResultTypeDatabase:
-        return helper->GetResult(aCx, helper->mResult.mDatabase, aResult);
+      case ResultTypeISupports:
+        return helper->GetResult(aCx, helper->mResult.mISupports, aResult);
 
       case ResultTypeStructuredClone:
         return helper->GetResult(aCx, helper->mResult.mStructuredClone,
@@ -233,7 +233,7 @@ public:
 private:
   nsresult
   GetResult(JSContext* aCx,
-            IDBDatabase* aUserData,
+            nsISupports* aUserData,
             JS::MutableHandle<JS::Value> aResult)
   {
     if (!aUserData) {
@@ -246,10 +246,7 @@ private:
     JS::Rooted<JSObject*> global(aCx, wrapperCache->GetParentObject());
     MOZ_ASSERT(global);
 
-    nsresult rv =
-      nsContentUtils::WrapNative(aCx, global,
-                                 static_cast<IDBWrapperCache*>(aUserData),
-                                 aResult);
+    nsresult rv = nsContentUtils::WrapNative(aCx, global, aUserData, aResult);
     if (NS_WARN_IF(NS_FAILED(rv))) {
       IDB_REPORT_INTERNAL_ERR();
       return NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
@@ -495,12 +492,16 @@ BackgroundRequestChildBase::BackgroundRequestChildBase(IDBRequest* aRequest)
   : mRequest(aRequest)
 {
   MOZ_ASSERT(aRequest);
-  MOZ_COUNT_CTOR(mozilla::dom::indexedDB::BackgroundRequestChildBase);
+  aRequest->AssertIsOnOwningThread();
+
+  MOZ_COUNT_CTOR(indexedDB::BackgroundRequestChildBase);
 }
 
 BackgroundRequestChildBase::~BackgroundRequestChildBase()
 {
-  MOZ_COUNT_DTOR(mozilla::dom::indexedDB::BackgroundRequestChildBase);
+  AssertIsOnOwningThread();
+
+  MOZ_COUNT_DTOR(indexedDB::BackgroundRequestChildBase);
 }
 
 #ifdef DEBUG
@@ -528,15 +529,12 @@ BackgroundFactoryChild::BackgroundFactoryChild(IDBFactory* aFactory)
   MOZ_ASSERT(aFactory);
   aFactory->AssertIsOnOwningThread();
 
-  MOZ_COUNT_CTOR(mozilla::dom::indexedDB::BackgroundFactoryChild);
+  MOZ_COUNT_CTOR(indexedDB::BackgroundFactoryChild);
 }
 
 BackgroundFactoryChild::~BackgroundFactoryChild()
 {
-  AssertIsOnOwningThread();
-  MOZ_ASSERT(!mFactory);
-
-  MOZ_COUNT_DTOR(mozilla::dom::indexedDB::BackgroundFactoryChild);
+  MOZ_COUNT_DTOR(indexedDB::BackgroundFactoryChild);
 }
 
 #ifdef DEBUG
@@ -554,11 +552,12 @@ BackgroundFactoryChild::AssertIsOnOwningThread() const
 #endif // DEBUG
 
 void
-BackgroundFactoryChild::SendDeleteMe()
+BackgroundFactoryChild::SendDeleteMeInternal()
 {
   AssertIsOnOwningThread();
 
   if (mFactory) {
+    mFactory->ClearBackgroundActor();
     mFactory = nullptr;
 
     MOZ_ALWAYS_TRUE(PBackgroundIDBFactoryChild::SendDeleteMe());
@@ -590,7 +589,6 @@ bool
 BackgroundFactoryChild::DeallocPBackgroundIDBFactoryRequestChild(
                                       PBackgroundIDBFactoryRequestChild* aActor)
 {
-  AssertIsOnOwningThread();
   MOZ_ASSERT(aActor);
 
   delete static_cast<BackgroundFactoryRequestChild*>(aActor);
@@ -614,7 +612,6 @@ bool
 BackgroundFactoryChild::DeallocPBackgroundIDBDatabaseChild(
                                             PBackgroundIDBDatabaseChild* aActor)
 {
-  AssertIsOnOwningThread();
   MOZ_ASSERT(aActor);
 
   delete static_cast<BackgroundDatabaseChild*>(aActor);
@@ -638,14 +635,12 @@ BackgroundFactoryRequestChild::BackgroundFactoryRequestChild(
   aFactory->AssertIsOnOwningThread();
   MOZ_ASSERT(aOpenRequest);
 
-  MOZ_COUNT_CTOR(mozilla::dom::indexedDB::BackgroundFactoryRequestChild);
+  MOZ_COUNT_CTOR(indexedDB::BackgroundFactoryRequestChild);
 }
 
 BackgroundFactoryRequestChild::~BackgroundFactoryRequestChild()
 {
-  AssertIsOnOwningThread();
-
-  MOZ_COUNT_DTOR(mozilla::dom::indexedDB::BackgroundFactoryRequestChild);
+  MOZ_COUNT_DTOR(indexedDB::BackgroundFactoryRequestChild);
 }
 
 IDBOpenDBRequest*
@@ -691,7 +686,8 @@ BackgroundFactoryRequestChild::HandleResponse(
   IDBDatabase* database = databaseActor->GetDOMObject();
   MOZ_ASSERT(database);
 
-  ResultHelper helper(mRequest, nullptr, database);
+  ResultHelper helper(mRequest, nullptr,
+                      static_cast<IDBWrapperCache*>(database));
 
   DispatchSuccessEvent(&helper);
 
@@ -769,22 +765,23 @@ BackgroundDatabaseChild::BackgroundDatabaseChild(
   // Can't assert owning thread here because IPDL has not yet set our manager!
   MOZ_ASSERT(aOpenRequestActor);
 
-  MOZ_COUNT_CTOR(mozilla::dom::indexedDB::BackgroundDatabaseChild);
+  MOZ_COUNT_CTOR(indexedDB::BackgroundDatabaseChild);
 }
 
 BackgroundDatabaseChild::~BackgroundDatabaseChild()
 {
-  AssertIsOnOwningThread();
-
-  MOZ_COUNT_DTOR(mozilla::dom::indexedDB::BackgroundDatabaseChild);
+  MOZ_COUNT_DTOR(indexedDB::BackgroundDatabaseChild);
 }
 
 void
-BackgroundDatabaseChild::SendDeleteMe()
+BackgroundDatabaseChild::SendDeleteMeInternal()
 {
   AssertIsOnOwningThread();
+  MOZ_ASSERT(!mTemporaryStrongDatabase);
+  MOZ_ASSERT(!mOpenRequestActor);
 
   if (mDatabase) {
+    mDatabase->ClearBackgroundActor();
     mDatabase = nullptr;
 
     MOZ_ALWAYS_TRUE(PBackgroundIDBDatabaseChild::SendDeleteMe());
@@ -861,7 +858,6 @@ bool
 BackgroundDatabaseChild::DeallocPBackgroundIDBTransactionChild(
                                          PBackgroundIDBTransactionChild* aActor)
 {
-  AssertIsOnOwningThread();
   MOZ_ASSERT(aActor);
 
   delete static_cast<BackgroundTransactionChild*>(aActor);
@@ -923,7 +919,8 @@ BackgroundDatabaseChild::RecvPBackgroundIDBVersionChangeTransactionConstructor(
     IDBVersionChangeEvent::CreateUpgradeNeeded(request, aCurrentVersion,
                                                aRequestedVersion);
 
-  ResultHelper helper(request, transaction, mDatabase);
+  ResultHelper helper(request, transaction,
+                      static_cast<IDBWrapperCache*>(mDatabase));
 
   DispatchSuccessEvent(&helper, upgradeNeededEvent);
 
@@ -934,7 +931,6 @@ bool
 BackgroundDatabaseChild::DeallocPBackgroundIDBVersionChangeTransactionChild(
                             PBackgroundIDBVersionChangeTransactionChild* aActor)
 {
-  AssertIsOnOwningThread();
   MOZ_ASSERT(aActor);
 
   delete static_cast<BackgroundVersionChangeTransactionChild*>(aActor);
@@ -1018,6 +1014,7 @@ BackgroundDatabaseChild::RecvInvalidate()
 BackgroundTransactionBase::BackgroundTransactionBase()
 : mTransaction(nullptr)
 {
+  MOZ_COUNT_CTOR(indexedDB::BackgroundTransactionBase);
 }
 
 BackgroundTransactionBase::BackgroundTransactionBase(
@@ -1027,11 +1024,25 @@ BackgroundTransactionBase::BackgroundTransactionBase(
 {
   MOZ_ASSERT(aTransaction);
   aTransaction->AssertIsOnOwningThread();
+
+  MOZ_COUNT_CTOR(indexedDB::BackgroundTransactionBase);
 }
 
 BackgroundTransactionBase::~BackgroundTransactionBase()
 {
+  MOZ_COUNT_DTOR(indexedDB::BackgroundTransactionBase);
 }
+
+#ifdef DEBUG
+
+void
+BackgroundTransactionBase::AssertIsOnOwningThread() const
+{
+  MOZ_ASSERT(mTransaction);
+  mTransaction->AssertIsOnOwningThread();
+}
+
+#endif // DEBUG
 
 void
 BackgroundTransactionBase::NoteActorDestroyed()
@@ -1041,10 +1052,12 @@ BackgroundTransactionBase::NoteActorDestroyed()
 
   if (mTransaction) {
     mTransaction->ClearBackgroundActor();
+
+    // Normally this would be DEBUG-only but NoteActorDestroyed is also called
+    // from SendDeleteMeInternal. In that case we're going to receive an actual
+    // ActorDestroy call later and we don't want to touch a dead object.
     mTemporaryStrongTransaction = nullptr;
-#ifdef DEBUG
     mTransaction = nullptr;
-#endif
   }
 }
 
@@ -1078,18 +1091,15 @@ BackgroundTransactionChild::BackgroundTransactionChild(
                                                    IDBTransaction* aTransaction)
   : BackgroundTransactionBase(aTransaction)
 {
-  // Can't assert owning thread here because IPDL has not yet set our manager!
   MOZ_ASSERT(aTransaction);
   aTransaction->AssertIsOnOwningThread();
 
-  MOZ_COUNT_CTOR(mozilla::dom::indexedDB::BackgroundTransactionChild);
+  MOZ_COUNT_CTOR(indexedDB::BackgroundTransactionChild);
 }
 
 BackgroundTransactionChild::~BackgroundTransactionChild()
 {
-  AssertIsOnOwningThread();
-
-  MOZ_COUNT_DTOR(mozilla::dom::indexedDB::BackgroundTransactionChild);
+  MOZ_COUNT_DTOR(indexedDB::BackgroundTransactionChild);
 }
 
 #ifdef DEBUG
@@ -1103,11 +1113,15 @@ BackgroundTransactionChild::AssertIsOnOwningThread() const
 #endif // DEBUG
 
 void
-BackgroundTransactionChild::SendDeleteMe()
+BackgroundTransactionChild::SendDeleteMeInternal()
 {
   AssertIsOnOwningThread();
 
-  NoteActorDestroyed();
+  if (mTransaction) {
+    NoteActorDestroyed();
+
+    MOZ_ALWAYS_TRUE(PBackgroundIDBTransactionChild::SendDeleteMe());
+  }
 }
 
 void
@@ -1145,10 +1159,28 @@ bool
 BackgroundTransactionChild::DeallocPBackgroundIDBRequestChild(
                                              PBackgroundIDBRequestChild* aActor)
 {
-  AssertIsOnOwningThread();
   MOZ_ASSERT(aActor);
 
   delete static_cast<BackgroundRequestChild*>(aActor);
+  return true;
+}
+
+PBackgroundIDBCursorChild*
+BackgroundTransactionChild::AllocPBackgroundIDBCursorChild(
+                                                const OpenCursorParams& aParams)
+{
+  AssertIsOnOwningThread();
+
+  MOZ_CRASH("PBackgroundIDBCursorChild actors should be manually constructed!");
+}
+
+bool
+BackgroundTransactionChild::DeallocPBackgroundIDBCursorChild(
+                                              PBackgroundIDBCursorChild* aActor)
+{
+  MOZ_ASSERT(aActor);
+
+  delete static_cast<BackgroundCursorChild*>(aActor);
   return true;
 }
 
@@ -1161,15 +1193,17 @@ BackgroundVersionChangeTransactionChild(IDBOpenDBRequest* aOpenDBRequest)
   : mOpenDBRequest(aOpenDBRequest)
 {
   MOZ_ASSERT(aOpenDBRequest);
-  // Can't assert owning thread here because IPDL has not yet set our manager!
-  MOZ_COUNT_CTOR(mozilla::dom::indexedDB::BackgroundVersionChangeTransactionChild);
+  aOpenDBRequest->AssertIsOnOwningThread();
+
+  MOZ_COUNT_CTOR(indexedDB::BackgroundVersionChangeTransactionChild);
 }
 
 BackgroundVersionChangeTransactionChild::
 ~BackgroundVersionChangeTransactionChild()
 {
   AssertIsOnOwningThread();
-  MOZ_COUNT_DTOR(mozilla::dom::indexedDB::BackgroundVersionChangeTransactionChild);
+
+  MOZ_COUNT_DTOR(indexedDB::BackgroundVersionChangeTransactionChild);
 }
 
 #ifdef DEBUG
@@ -1183,11 +1217,16 @@ BackgroundVersionChangeTransactionChild::AssertIsOnOwningThread() const
 #endif // DEBUG
 
 void
-BackgroundVersionChangeTransactionChild::SendDeleteMe()
+BackgroundVersionChangeTransactionChild::SendDeleteMeInternal()
 {
   AssertIsOnOwningThread();
 
-  NoteActorDestroyed();
+  if (mTransaction) {
+    NoteActorDestroyed();
+
+    MOZ_ALWAYS_TRUE(PBackgroundIDBVersionChangeTransactionChild::
+                      SendDeleteMe());
+  }
 }
 
 void
@@ -1241,11 +1280,49 @@ bool
 BackgroundVersionChangeTransactionChild::DeallocPBackgroundIDBRequestChild(
                                              PBackgroundIDBRequestChild* aActor)
 {
-  AssertIsOnOwningThread();
   MOZ_ASSERT(aActor);
 
   delete static_cast<BackgroundRequestChild*>(aActor);
   return true;
+}
+
+PBackgroundIDBCursorChild*
+BackgroundVersionChangeTransactionChild::AllocPBackgroundIDBCursorChild(
+                                                const OpenCursorParams& aParams)
+{
+  AssertIsOnOwningThread();
+
+  MOZ_CRASH("PBackgroundIDBCursorChild actors should be manually constructed!");
+}
+
+bool
+BackgroundVersionChangeTransactionChild::DeallocPBackgroundIDBCursorChild(
+                                              PBackgroundIDBCursorChild* aActor)
+{
+  MOZ_ASSERT(aActor);
+
+  delete static_cast<BackgroundCursorChild*>(aActor);
+  return true;
+}
+
+/*******************************************************************************
+ * BackgroundTransactionRequestChildBase
+ ******************************************************************************/
+
+BackgroundTransactionRequestChildBase::BackgroundTransactionRequestChildBase(
+                                                           IDBRequest* aRequest)
+  : BackgroundRequestChildBase(aRequest)
+  , mTransaction(aRequest->GetTransaction())
+{
+  MOZ_ASSERT(mTransaction);
+  mTransaction->AssertIsOnOwningThread();
+
+  MOZ_COUNT_CTOR(indexedDB::BackgroundTransactionRequestChildBase);
+}
+
+BackgroundTransactionRequestChildBase::~BackgroundTransactionRequestChildBase()
+{
+  MOZ_COUNT_DTOR(indexedDB::BackgroundTransactionRequestChildBase);
 }
 
 /*******************************************************************************
@@ -1253,19 +1330,22 @@ BackgroundVersionChangeTransactionChild::DeallocPBackgroundIDBRequestChild(
  ******************************************************************************/
 
 BackgroundRequestChild::BackgroundRequestChild(IDBRequest* aRequest)
-  : BackgroundRequestChildBase(aRequest)
-  , mTransaction(aRequest->GetTransaction())
+  : BackgroundTransactionRequestChildBase(aRequest)
 {
   MOZ_ASSERT(mTransaction);
-  mTransaction->AssertIsOnOwningThread();
+
+  MOZ_COUNT_CTOR(indexedDB::BackgroundRequestChild);
 
   mTransaction->OnNewRequest();
 }
 
 BackgroundRequestChild::~BackgroundRequestChild()
 {
+  AssertIsOnOwningThread();
   MOZ_ASSERT(mTransaction);
   mTransaction->AssertIsOnOwningThread();
+
+  MOZ_COUNT_DTOR(indexedDB::BackgroundRequestChild);
 
   mTransaction->OnRequestFinished();
 }
@@ -1364,7 +1444,6 @@ bool
 BackgroundRequestChild::HandleResponse(JS::Handle<JS::Value> aResponse)
 {
   AssertIsOnOwningThread();
-  MOZ_ASSERT(!aResponse.isGCThing());
 
   ResultHelper helper(mRequest, mTransaction, &aResponse);
 
@@ -1473,4 +1552,279 @@ BackgroundRequestChild::Recv__delete__(const RequestResponse& aResponse)
   }
 
   MOZ_ASSUME_UNREACHABLE("Should never get here!");
+}
+
+/*******************************************************************************
+ * BackgroundCursorChild
+ ******************************************************************************/
+
+BackgroundCursorChild::BackgroundCursorChild(IDBRequest* aRequest,
+                                             IDBObjectStore* aObjectStore,
+                                             Direction aDirection)
+  : BackgroundTransactionRequestChildBase(aRequest)
+  , mObjectStore(aObjectStore)
+  , mIndex(nullptr)
+  , mCursor(nullptr)
+  , mDirection(aDirection)
+{
+  MOZ_ASSERT(aObjectStore);
+  aObjectStore->AssertIsOnOwningThread();
+  MOZ_ASSERT(mTransaction);
+
+  MOZ_COUNT_CTOR(indexedDB::BackgroundCursorChild);
+}
+
+BackgroundCursorChild::BackgroundCursorChild(IDBRequest* aRequest,
+                                             IDBIndex* aIndex,
+                                             Direction aDirection)
+  : BackgroundTransactionRequestChildBase(aRequest)
+  , mObjectStore(nullptr)
+  , mIndex(aIndex)
+  , mCursor(nullptr)
+  , mDirection(aDirection)
+{
+  MOZ_ASSERT(aIndex);
+  aIndex->AssertIsOnOwningThread();
+  MOZ_ASSERT(mTransaction);
+
+  MOZ_COUNT_CTOR(indexedDB::BackgroundCursorChild);
+}
+
+BackgroundCursorChild::~BackgroundCursorChild()
+{
+  MOZ_COUNT_DTOR(indexedDB::BackgroundCursorChild);
+}
+
+void
+BackgroundCursorChild::SendContinueInternal(const CursorRequestParams& aParams)
+{
+  AssertIsOnOwningThread();
+  MOZ_ASSERT(mRequest);
+  MOZ_ASSERT(mTransaction);
+  MOZ_ASSERT(mCursor);
+  MOZ_ASSERT(!mStrongCursor);
+
+  MOZ_ASSERT(mRequest->ReadyState() == IDBRequestReadyState::Done);
+  mRequest->Reset();
+
+  mTransaction->OnNewRequest();
+
+  MOZ_ALWAYS_TRUE(PBackgroundIDBCursorChild::SendContinue(aParams));
+
+  mStrongCursor = mCursor;
+}
+
+void
+BackgroundCursorChild::SendDeleteMeInternal()
+{
+  AssertIsOnOwningThread();
+  MOZ_ASSERT(!mStrongCursor);
+
+  if (mCursor) {
+    mCursor->ClearBackgroundActor();
+
+    mObjectStore = nullptr;
+    mIndex = nullptr;
+    mCursor = nullptr;
+
+    MOZ_ALWAYS_TRUE(PBackgroundIDBCursorChild::SendDeleteMe());
+  }
+}
+
+void
+BackgroundCursorChild::HandleResponse(
+                                     const ObjectStoreCursorResponse& aResponse)
+{
+  AssertIsOnOwningThread();
+  MOZ_ASSERT(mObjectStore);
+
+  // XXX Fix this somehow...
+  auto& response = const_cast<ObjectStoreCursorResponse&>(aResponse);
+
+  StructuredCloneReadInfo cloneReadInfo(Move(response.cloneInfo()));
+
+  // XXX Fix blobs!
+  /*
+  IDBObjectStore::ConvertActorsToBlobs(aResponse.blobsChild(),
+                                       cloneReadInfo.mFiles);
+  */
+
+  nsRefPtr<IDBCursor> cursor = mCursor;
+
+  if (cursor) {
+    cursor->Reset(Move(response.key()), Move(cloneReadInfo));
+  } else {
+    cursor = IDBCursor::Create(mRequest, mObjectStore, this, mDirection,
+                               Move(response.key()), Move(cloneReadInfo));
+    mCursor = cursor;
+  }
+
+  ResultHelper helper(mRequest, mTransaction, mCursor);
+
+  DispatchSuccessEvent(&helper);
+}
+
+void
+BackgroundCursorChild::HandleResponse(
+                                  const ObjectStoreKeyCursorResponse& aResponse)
+{
+  AssertIsOnOwningThread();
+  MOZ_ASSERT(mObjectStore);
+
+  // XXX Fix this somehow...
+  auto& response = const_cast<ObjectStoreKeyCursorResponse&>(aResponse);
+
+  nsRefPtr<IDBCursor> cursor = mCursor;
+
+  if (cursor) {
+    cursor->Reset(Move(response.key()));
+  } else {
+    cursor = IDBCursor::Create(mRequest, mObjectStore, this, mDirection,
+                               Move(response.key()));
+    mCursor = cursor;
+  }
+
+  ResultHelper helper(mRequest, mTransaction, mCursor);
+
+  DispatchSuccessEvent(&helper);
+}
+
+void
+BackgroundCursorChild::HandleResponse(const IndexCursorResponse& aResponse)
+{
+  AssertIsOnOwningThread();
+  MOZ_ASSERT(mIndex);
+
+  // XXX Fix this somehow...
+  auto& response = const_cast<IndexCursorResponse&>(aResponse);
+
+  StructuredCloneReadInfo cloneReadInfo(Move(response.cloneInfo()));
+
+  // XXX Fix blobs!
+  /*
+  IDBObjectStore::ConvertActorsToBlobs(aResponse.blobsChild(),
+                                       cloneReadInfo.mFiles);
+  */
+
+  nsRefPtr<IDBCursor> cursor = mCursor;
+
+  if (cursor) {
+    cursor->Reset(Move(response.key()), Move(response.objectKey()),
+                  Move(cloneReadInfo));
+  } else {
+    cursor = IDBCursor::Create(mRequest, mIndex, this, mDirection,
+                               Move(response.key()), Move(response.objectKey()),
+                               Move(cloneReadInfo));
+    mCursor = cursor;
+  }
+
+  ResultHelper helper(mRequest, mTransaction, mCursor);
+
+  DispatchSuccessEvent(&helper);
+}
+
+void
+BackgroundCursorChild::HandleResponse(const IndexKeyCursorResponse& aResponse)
+{
+  AssertIsOnOwningThread();
+  MOZ_ASSERT(mIndex);
+
+  // XXX Fix this somehow...
+  auto& response = const_cast<IndexKeyCursorResponse&>(aResponse);
+
+  nsRefPtr<IDBCursor> cursor = mCursor;
+
+  if (cursor) {
+    cursor->Reset(Move(response.key()), Move(response.objectKey()));
+  } else {
+    cursor = IDBCursor::Create(mRequest, mIndex, this, mDirection,
+                               Move(response.key()),
+                               Move(response.objectKey()));
+    mCursor = cursor;
+  }
+
+  ResultHelper helper(mRequest, mTransaction, mCursor);
+
+  DispatchSuccessEvent(&helper);
+}
+
+void
+BackgroundCursorChild::ActorDestroy(ActorDestroyReason aWhy)
+{
+  AssertIsOnOwningThread();
+  MOZ_ASSERT(!mStrongCursor);
+
+  if (mCursor) {
+    mCursor->ClearBackgroundActor();
+#ifdef DEBUG
+    mObjectStore = nullptr;
+    mIndex = nullptr;
+    mCursor = nullptr;
+#endif
+  }
+}
+
+bool
+BackgroundCursorChild::RecvResponse(const CursorResponse& aResponse)
+{
+  AssertIsOnOwningThread();
+  MOZ_ASSERT(aResponse.type() != CursorResponse::T__None);
+  MOZ_ASSERT(mRequest);
+  MOZ_ASSERT(mTransaction);
+  MOZ_ASSERT_IF(mCursor, mStrongCursor);
+
+  nsRefPtr<IDBCursor> cursor;
+  mStrongCursor.swap(cursor);
+
+  switch (aResponse.type()) {
+    case CursorResponse::Tnsresult: {
+      nsresult response = aResponse.get_nsresult();
+      MOZ_ASSERT(NS_FAILED(response));
+      MOZ_ASSERT(NS_ERROR_GET_MODULE(response) ==
+                 NS_ERROR_MODULE_DOM_INDEXEDDB);
+      MOZ_ASSERT(mTransaction);
+
+      DispatchErrorEvent(mRequest, response, mTransaction);
+      break;
+    }
+
+    case CursorResponse::Tvoid_t: {
+      JSContext* cx = mRequest->GetJSContext();
+      MOZ_ASSERT(cx);
+
+      JSAutoRequest ar(cx);
+
+      JS::Rooted<JS::Value> value(cx);
+      value.setNull();
+
+      ResultHelper helper(mRequest, mTransaction,
+                          &static_cast<JS::Handle<JS::Value>>(value));
+
+      DispatchSuccessEvent(&helper);
+      break;
+    }
+
+    case CursorResponse::TObjectStoreCursorResponse:
+      HandleResponse(aResponse.get_ObjectStoreCursorResponse());
+      break;
+
+    case CursorResponse::TObjectStoreKeyCursorResponse:
+      HandleResponse(aResponse.get_ObjectStoreKeyCursorResponse());
+      break;
+
+    case CursorResponse::TIndexCursorResponse:
+      HandleResponse(aResponse.get_IndexCursorResponse());
+      break;
+
+    case CursorResponse::TIndexKeyCursorResponse:
+      HandleResponse(aResponse.get_IndexKeyCursorResponse());
+      break;
+
+    default:
+      MOZ_ASSUME_UNREACHABLE("Should never get here!");
+  }
+
+  mTransaction->OnRequestFinished();
+
+  return true;
 }

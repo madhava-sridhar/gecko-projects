@@ -6,9 +6,9 @@
 
 #include "IDBRequest.h"
 
-#include "AsyncConnectionHelper.h"
 #include "BackgroundChildImpl.h"
 #include "IDBCursor.h"
+#include "IDBDatabase.h"
 #include "IDBEvents.h"
 #include "IDBFactory.h"
 #include "IDBIndex.h"
@@ -20,18 +20,12 @@
 #include "mozilla/dom/ErrorEventBinding.h"
 #include "mozilla/dom/IDBOpenDBRequestBinding.h"
 #include "mozilla/dom/UnionTypes.h"
-#include "nsComponentManagerUtils.h"
 #include "nsCOMPtr.h"
 #include "nsContentUtils.h"
-#include "nsCxPusher.h"
-#include "nsDOMClassInfoID.h"
-#include "nsDOMJSUtils.h"
 #include "nsIScriptContext.h"
 #include "nsJSUtils.h"
 #include "nsPIDOMWindow.h"
 #include "nsString.h"
-#include "nsThreadUtils.h"
-#include "nsWrapperCacheInlines.h"
 #include "ReportInternalError.h"
 
 using namespace mozilla;
@@ -43,6 +37,8 @@ IDBRequest::IDBRequest(IDBDatabase* aDatabase)
   : IDBWrapperCache(aDatabase)
 {
   MOZ_ASSERT(aDatabase);
+  aDatabase->AssertIsOnOwningThread();
+
   InitMembers();
 }
 
@@ -121,6 +117,9 @@ IDBRequest::Create(IDBObjectStore* aSourceAsObjectStore,
                    IDBDatabase* aDatabase,
                    IDBTransaction* aTransaction)
 {
+  MOZ_ASSERT(aSourceAsObjectStore);
+  aSourceAsObjectStore->AssertIsOnOwningThread();
+
   nsRefPtr<IDBRequest> request = Create(aDatabase, aTransaction);
 
   request->mSourceAsObjectStore = aSourceAsObjectStore;
@@ -134,6 +133,9 @@ IDBRequest::Create(IDBIndex* aSourceAsIndex,
                    IDBDatabase* aDatabase,
                    IDBTransaction* aTransaction)
 {
+  MOZ_ASSERT(aSourceAsIndex);
+  aSourceAsIndex->AssertIsOnOwningThread();
+
   nsRefPtr<IDBRequest> request = Create(aDatabase, aTransaction);
 
   request->mSourceAsIndex = aSourceAsIndex;
@@ -141,24 +143,16 @@ IDBRequest::Create(IDBIndex* aSourceAsIndex,
   return request.forget();
 }
 
-#ifdef DEBUG
 void
-IDBRequest::AssertSourceIsCorrect() const
+IDBRequest::GetSource(
+             Nullable<OwningIDBObjectStoreOrIDBIndexOrIDBCursor>& aSource) const
 {
-  // At most one of mSourceAs* is allowed to be non-null.  Check that by
-  // summing the double negation of each one and asserting the sum is at most
-  // 1.
+  AssertIsOnOwningThread();
 
-  MOZ_ASSERT(!!mSourceAsObjectStore + !!mSourceAsIndex + !!mSourceAsCursor <= 1);
-}
-#endif
-
-void
-IDBRequest::GetSource(Nullable<OwningIDBObjectStoreOrIDBIndexOrIDBCursor>& aSource) const
-{
-  MOZ_ASSERT(NS_IsMainThread());
-
-  AssertSourceIsCorrect();
+  // At most one of mSourceAs* is allowed to be non-null.  Check that by summing
+  // the double negation of each one and asserting the sum is at most 1.
+  MOZ_ASSERT(!!mSourceAsObjectStore + !!mSourceAsIndex + !!mSourceAsCursor <=
+             1);
 
   if (mSourceAsObjectStore) {
     aSource.SetValue().SetAsIDBObjectStore() = mSourceAsObjectStore;
@@ -188,6 +182,7 @@ IDBRequest::DispatchNonTransactionError(nsresult aErrorCode)
 {
   AssertIsOnOwningThread();
   MOZ_ASSERT(NS_FAILED(aErrorCode));
+  MOZ_ASSERT(NS_ERROR_GET_MODULE(aErrorCode) == NS_ERROR_MODULE_DOM_INDEXEDDB);
 
   SetError(aErrorCode);
 
@@ -202,30 +197,11 @@ IDBRequest::DispatchNonTransactionError(nsresult aErrorCode)
 }
 
 void
-IDBRequest::NotifyHelperSentResultsToChildProcess(nsresult aRv)
-{
-  NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
-  NS_ASSERTION(!mHaveResultOrErrorCode, "Already called!");
-  NS_ASSERTION(JSVAL_IS_VOID(mResultVal), "Should be undefined!");
-
-  // See if our window is still valid. If not then we're going to pretend that
-  // we never completed.
-  if (NS_FAILED(CheckInnerWindowCorrectness())) {
-    return;
-  }
-
-  mHaveResultOrErrorCode = true;
-
-  if (NS_FAILED(aRv)) {
-    SetError(aRv);
-  }
-}
-
-void
 IDBRequest::SetError(nsresult aRv)
 {
   AssertIsOnOwningThread();
   MOZ_ASSERT(NS_FAILED(aRv));
+  MOZ_ASSERT(NS_ERROR_GET_MODULE(aRv) == NS_ERROR_MODULE_DOM_INDEXEDDB);
   MOZ_ASSERT(!mError);
 
   mHaveResultOrErrorCode = true;
@@ -236,6 +212,7 @@ IDBRequest::SetError(nsresult aRv)
 }
 
 #ifdef DEBUG
+
 nsresult
 IDBRequest::GetErrorCode() const
 {
@@ -244,7 +221,8 @@ IDBRequest::GetErrorCode() const
 
   return mErrorCode;
 }
-#endif
+
+#endif // DEBUG
 
 JSContext*
 IDBRequest::GetJSContext()
@@ -277,8 +255,7 @@ IDBRequest::CaptureCaller()
 
   const char* filename = nullptr;
   uint32_t lineNo = 0;
-  if (!nsJSUtils::GetCallingLocation(cx, &filename, &lineNo)) {
-    NS_WARNING("Failed to get caller.");
+  if (NS_WARN_IF(!nsJSUtils::GetCallingLocation(cx, &filename, &lineNo))) {
     return;
   }
 
@@ -293,16 +270,27 @@ IDBRequest::FillScriptErrorEvent(ErrorEventInit& aEventInit) const
   aEventInit.mFilename = mFilename;
 }
 
-mozilla::dom::IDBRequestReadyState
+IDBRequestReadyState
 IDBRequest::ReadyState() const
 {
-  NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
+  AssertIsOnOwningThread();
 
-  if (IsPending()) {
-    return IDBRequestReadyState::Pending;
-  }
+  return IsPending() ?
+    IDBRequestReadyState::Pending :
+    IDBRequestReadyState::Done;
+}
 
-  return IDBRequestReadyState::Done;
+void
+IDBRequest::SetSource(IDBCursor* aSource)
+{
+  AssertIsOnOwningThread();
+  MOZ_ASSERT(aSource);
+  MOZ_ASSERT(mSourceAsObjectStore || mSourceAsIndex);
+  MOZ_ASSERT(!mSourceAsCursor);
+
+  mSourceAsCursor = aSource;
+  mSourceAsObjectStore = nullptr;
+  mSourceAsIndex = nullptr;
 }
 
 JSObject*

@@ -79,11 +79,13 @@ IDBTransaction::~IDBTransaction()
   mDatabase->UnregisterTransaction(this);
 
   if (mBackgroundActor.mNormalBackgroundActor) {
-    mBackgroundActor.mNormalBackgroundActor->SendDeleteMe();
-    mBackgroundActor.mNormalBackgroundActor = nullptr;
+    mBackgroundActor.mNormalBackgroundActor->SendDeleteMeInternal();
+    MOZ_ASSERT(!mBackgroundActor.mNormalBackgroundActor,
+               "SendDeleteMeInternal should have cleared!");
   } else if (mBackgroundActor.mVersionChangeBackgroundActor) {
-    mBackgroundActor.mVersionChangeBackgroundActor->SendDeleteMe();
-    mBackgroundActor.mVersionChangeBackgroundActor = nullptr;
+    mBackgroundActor.mVersionChangeBackgroundActor->SendDeleteMeInternal();
+    MOZ_ASSERT(!mBackgroundActor.mVersionChangeBackgroundActor,
+               "SendDeleteMeInternal should have cleared!");
   }
 }
 
@@ -221,6 +223,31 @@ IDBTransaction::StartRequest(BackgroundRequestChild* aBackgroundActor,
     mBackgroundActor.mNormalBackgroundActor->
       SendPBackgroundIDBRequestConstructor(aBackgroundActor, aParams);
   }
+}
+
+
+void
+IDBTransaction::OpenCursor(BackgroundCursorChild* aBackgroundActor,
+                           const OpenCursorParams& aParams)
+{
+  AssertIsOnOwningThread();
+  MOZ_ASSERT(aBackgroundActor);
+  MOZ_ASSERT(aParams.type() != OpenCursorParams::T__None);
+
+  if (mMode == VERSION_CHANGE) {
+    MOZ_ASSERT(mBackgroundActor.mVersionChangeBackgroundActor);
+
+    mBackgroundActor.mVersionChangeBackgroundActor->
+      SendPBackgroundIDBCursorConstructor(aBackgroundActor, aParams);
+  } else {
+    MOZ_ASSERT(mBackgroundActor.mNormalBackgroundActor);
+
+    mBackgroundActor.mNormalBackgroundActor->
+      SendPBackgroundIDBCursorConstructor(aBackgroundActor, aParams);
+  }
+
+  // Balanced in BackgroundCursorChild::RecvResponse().
+  OnNewRequest();
 }
 
 void

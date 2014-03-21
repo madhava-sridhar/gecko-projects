@@ -33,6 +33,7 @@ class DOMStringList;
 
 namespace indexedDB {
 
+class BackgroundCursorChild;
 class BackgroundRequestChild;
 class BackgroundTransactionChild;
 class BackgroundVersionChangeTransactionChild;
@@ -42,6 +43,7 @@ class IDBObjectStore;
 class IDBRequest;
 class IndexMetadata;
 class ObjectStoreSpec;
+class OpenCursorParams;
 class RequestParams;
 
 class IDBTransaction MOZ_FINAL
@@ -146,6 +148,10 @@ public:
   void
   StartRequest(BackgroundRequestChild* aBackgroundActor,
                const RequestParams& aParams);
+
+  void
+  OpenCursor(BackgroundCursorChild* aBackgroundActor,
+             const OpenCursorParams& aParams);
 
   void
   RefreshSpec(bool aMayDelete);

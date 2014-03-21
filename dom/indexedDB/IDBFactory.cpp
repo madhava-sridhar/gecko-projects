@@ -115,14 +115,14 @@ IDBFactory::~IDBFactory()
 {
   MOZ_ASSERT_IF(mBackgroundActorFailed, !mBackgroundActor);
 
-  if (mBackgroundActor) {
-    mBackgroundActor->SendDeleteMe();
-    mBackgroundActor = nullptr;
-  }
-
   if (mRootedOwningObject) {
     mOwningObject = nullptr;
     mozilla::DropJSObjects(this);
+  }
+
+  if (mBackgroundActor) {
+    mBackgroundActor->SendDeleteMeInternal();
+    MOZ_ASSERT(!mBackgroundActor, "SendDeleteMeInternal should have cleared!");
   }
 }
 

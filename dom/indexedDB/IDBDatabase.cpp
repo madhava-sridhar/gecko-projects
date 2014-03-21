@@ -717,8 +717,8 @@ IDBDatabase::LastRelease()
   CloseInternal();
 
   if (mBackgroundActor) {
-    mBackgroundActor->SendDeleteMe();
-    mBackgroundActor = nullptr;
+    mBackgroundActor->SendDeleteMeInternal();
+    MOZ_ASSERT(!mBackgroundActor, "SendDeleteMeInternal should have cleared!");
   }
 }
 
