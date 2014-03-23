@@ -503,6 +503,7 @@ nsDisplayListBuilder::AddAnimationsAndTransitionsToLayer(Layer* aLayer,
       }
       AddAnimationsForProperty(aFrame, aProperty, anim,
                                aLayer, data, pending);
+      anim->mIsRunningOnCompositor = true;
     }
     aLayer->SetAnimationGeneration(ea->mAnimationGeneration);
   }
@@ -531,6 +532,7 @@ nsDisplayListBuilder::nsDisplayListBuilder(nsIFrame* aReferenceFrame,
       mAllowMergingAndFlattening(true),
       mWillComputePluginGeometry(false),
       mInTransform(false),
+      mInFixedPos(false),
       mSyncDecodeImages(false),
       mIsPaintingToWindow(false),
       mIsCompositingCheap(false),
@@ -697,7 +699,7 @@ static void RecordFrameMetrics(nsIFrame* aForFrame,
     metrics.mScrollableRect = CSSRect::FromAppUnits(contentBounds);
   }
 
-  metrics.mScrollId = aScrollId;
+  metrics.SetScrollId(aScrollId);
   metrics.mIsRoot = aIsRoot;
 
   // Only the root scrollable frame for a given presShell should pick up
@@ -1122,11 +1124,6 @@ nsDisplayList::ComputeVisibilityForSublist(nsDisplayListBuilder* aBuilder,
 
   bool forceTransparentSurface = false;
 
-  nsIFrame* displayPortRoot = nullptr;
-  if (aDisplayPortFrame) {
-    displayPortRoot = aDisplayPortFrame->PresContext()->PresShell()->GetRootFrame();
-  }
-
   for (int32_t i = elements.Length() - 1; i >= 0; --i) {
     nsDisplayItem* item = elements[i];
     nsDisplayItem* belowItem = i < 1 ? nullptr : elements[i - 1];
@@ -1173,21 +1170,14 @@ nsDisplayList::ComputeVisibilityForSublist(nsDisplayListBuilder* aBuilder,
       // If we're in a displayport, we need to make sure that fixed position
       // items do not subtract from the visible region, as async scrolling
       // may expose these occluded areas.
-      // Recurse up this frame to make sure it isn't fixed position, and if it
-      // is and they're in the same document, don't let it occlude this list.
+      // If the item is fixed pos in the same document as the displayport
+      // then don't let it occlude this list. The only other case possible
+      // is that the fixed pos content is in a child document, in which it
+      // would scroll with the rest of the content.
       bool occlude = true;
-      if (aDisplayPortFrame) {
-        for (nsIFrame* frame = item->Frame(); frame && frame != displayPortRoot;
-             frame = nsLayoutUtils::GetCrossDocParentFrame(frame)) {
-          // Check if this is a fixed position frame on the root frame of the
-          // document.
-          if (frame->StyleDisplay()->mPosition == NS_STYLE_POSITION_FIXED &&
-              frame->GetParent() && !frame->GetParent()->GetParent()) {
-            if (frame->PresContext() == aDisplayPortFrame->PresContext()) {
-              occlude = false;
-            }
-            break;
-          }
+      if (aDisplayPortFrame && item->IsInFixedPos()) {
+        if (item->Frame()->PresContext() == aDisplayPortFrame->PresContext()) {
+          occlude = false;
         }
       }
 
@@ -4642,7 +4632,7 @@ nsDisplayTransform::ShouldPrerenderTransformedContent(nsDisplayListBuilder* aBui
   // Elements whose transform has been modified recently, or which
   // have a compositor-animated transform, can be prerendered. An element
   // might have only just had its transform animated in which case
-  // nsChangeHint_UpdateTransformLayer will not be present yet.
+  // the ActiveLayerManager may not have been notified yet.
   if (!ActiveLayerTracker::IsStyleAnimated(aFrame, eCSSProperty_transform) &&
       (!aFrame->GetContent() ||
        !nsLayoutUtils::HasAnimationsForCompositor(aFrame->GetContent(),
