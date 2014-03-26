@@ -1297,7 +1297,7 @@ IDBObjectStore::Index(const nsAString& aName, ErrorResult &aRv)
   AssertIsOnOwningThread();
 
   if (mTransaction->IsFinished()) {
-    aRv.Throw(NS_ERROR_DOM_INDEXEDDB_TRANSACTION_INACTIVE_ERR);
+    aRv.Throw(NS_ERROR_DOM_INVALID_STATE_ERR);
     return nullptr;
   }
 

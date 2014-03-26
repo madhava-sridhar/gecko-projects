@@ -73,8 +73,6 @@ IDBRequest::InitMembers()
   AssertIsOnOwningThread();
 
   mResultVal.setUndefined();
-  mGetResultCallback = nullptr;
-  mGetResultCallbackUserData = nullptr;
   mErrorCode = NS_OK;
   mLineNo = 0;
   mHaveResultOrErrorCode = false;
@@ -171,8 +169,6 @@ IDBRequest::Reset()
   AssertIsOnOwningThread();
 
   mResultVal.setUndefined();
-  mGetResultCallback = nullptr;
-  mGetResultCallbackUserData = nullptr;
   mHaveResultOrErrorCode = false;
   mError = nullptr;
 }
@@ -305,38 +301,19 @@ IDBRequest::GetResult(JSContext* aCx, mozilla::ErrorResult& aRv)
   AssertIsOnOwningThread();
 
   if (!mHaveResultOrErrorCode) {
-    MOZ_ASSERT(mGetResultCallback);
-
-    ConstructResult();
-
-    MOZ_ASSERT(mHaveResultOrErrorCode);
+    aRv.Throw(NS_ERROR_DOM_INVALID_STATE_ERR);
+    return JS::UndefinedValue();
   }
 
   return mResultVal;
 }
 
 void
-IDBRequest::SetResultCallback(GetResultCallback aCallback,
-                              void* aUserData)
+IDBRequest::SetResult(GetResultCallback aCallback, void* aUserData)
 {
   AssertIsOnOwningThread();
   MOZ_ASSERT(aCallback);
   MOZ_ASSERT(!mHaveResultOrErrorCode);
-  MOZ_ASSERT(!mGetResultCallback);
-  MOZ_ASSERT(!mGetResultCallbackUserData);
-  MOZ_ASSERT(mResultVal.isUndefined());
-  MOZ_ASSERT(!mError);
-
-  mGetResultCallback = aCallback;
-  mGetResultCallbackUserData = aUserData;
-}
-
-void
-IDBRequest::ConstructResult()
-{
-  AssertIsOnOwningThread();
-  MOZ_ASSERT(!mHaveResultOrErrorCode);
-  MOZ_ASSERT(mGetResultCallback);
   MOZ_ASSERT(mResultVal.isUndefined());
   MOZ_ASSERT(!mError);
 
@@ -366,7 +343,7 @@ IDBRequest::ConstructResult()
   AssertIsRooted();
 
   JS::Rooted<JS::Value> result(cx);
-  nsresult rv = mGetResultCallback(cx, mGetResultCallbackUserData, &result);
+  nsresult rv = aCallback(cx, aUserData, &result);
   if (NS_WARN_IF(NS_FAILED(rv))) {
     SetError(rv);
     mResultVal.setUndefined();
@@ -374,9 +351,6 @@ IDBRequest::ConstructResult()
     mError = nullptr;
     mResultVal = result;
   }
-
-  mGetResultCallback = nullptr;
-  mGetResultCallbackUserData = nullptr;
 
   mHaveResultOrErrorCode = true;
 }
@@ -387,14 +361,8 @@ IDBRequest::GetError(mozilla::ErrorResult& aRv)
   AssertIsOnOwningThread();
 
   if (!mHaveResultOrErrorCode) {
-    if (!mGetResultCallback) {
-      aRv.Throw(NS_ERROR_DOM_INVALID_STATE_ERR);
-      return nullptr;
-    }
-
-    ConstructResult();
-
-    MOZ_ASSERT(mHaveResultOrErrorCode);
+    aRv.Throw(NS_ERROR_DOM_INVALID_STATE_ERR);
+    return nullptr;
   }
 
   return mError;

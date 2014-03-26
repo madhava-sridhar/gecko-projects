@@ -138,12 +138,15 @@ class BackgroundFactoryRequestChild MOZ_FINAL
   : public BackgroundRequestChildBase
   , public PBackgroundIDBFactoryRequestChild
 {
+  typedef mozilla::dom::quota::PersistenceType PersistenceType;
+
   friend class IDBFactory;
   friend class BackgroundFactoryChild;
   friend class BackgroundDatabaseChild;
 
   nsRefPtr<IDBFactory> mFactory;
   const uint64_t mRequestedVersion;
+  const PersistenceType mPersistenceType;
 
 public:
   IDBOpenDBRequest*
@@ -153,7 +156,8 @@ private:
   // Only created by IDBFactory.
   BackgroundFactoryRequestChild(IDBFactory* aFactory,
                                 IDBOpenDBRequest* aOpenRequest,
-                                uint64_t aRequestedVersion);
+                                uint64_t aRequestedVersion,
+                                PersistenceType aPersistenceType);
 
   // Only destroyed by BackgroundFactoryChild.
   ~BackgroundFactoryRequestChild();
@@ -178,6 +182,8 @@ private:
 class BackgroundDatabaseChild MOZ_FINAL
   : public PBackgroundIDBDatabaseChild
 {
+  typedef mozilla::dom::quota::PersistenceType PersistenceType;
+
   friend class BackgroundFactoryChild;
   friend class BackgroundFactoryRequestChild;
   friend class IDBDatabase;
@@ -186,6 +192,8 @@ class BackgroundDatabaseChild MOZ_FINAL
   nsRefPtr<IDBDatabase> mTemporaryStrongDatabase;
   BackgroundFactoryRequestChild* mOpenRequestActor;
   IDBDatabase* mDatabase;
+
+  PersistenceType mPersistenceType;
 
 public:
   void
@@ -476,9 +484,6 @@ private:
 
   bool
   HandleResponse(uint64_t aResponse);
-
-  bool
-  HandleUndefinedResponse();
 
   // IPDL methods are only called by IPDL.
   virtual bool

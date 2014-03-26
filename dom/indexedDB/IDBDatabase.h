@@ -58,6 +58,9 @@ class IDBDatabase MOZ_FINAL
   : public IDBWrapperCache
   , public nsIOfflineStorage
 {
+  typedef mozilla::dom::quota::PersistenceType PersistenceType;
+  typedef mozilla::dom::quota::Client QuotaClient;
+
   friend class AsyncConnectionHelper;
   friend class IndexedDatabaseManager;
   friend class IndexedDBDatabaseChild;
@@ -76,7 +79,7 @@ class IDBDatabase MOZ_FINAL
 
   BackgroundDatabaseChild* mBackgroundActor;
 
-  nsRefPtr<mozilla::dom::quota::Client> mQuotaClient;
+  nsRefPtr<QuotaClient> mQuotaClient;
 
   nsTHashtable<nsPtrHashKey<IDBTransaction>> mTransactions;
 
@@ -88,7 +91,8 @@ public:
   Create(IDBWrapperCache* aOwnerCache,
          IDBFactory* aFactory,
          BackgroundDatabaseChild* aActor,
-         DatabaseSpec* aSpec);
+         DatabaseSpec* aSpec,
+         PersistenceType aPersistenceType);
 
   static IDBDatabase*
   FromStorage(nsIOfflineStorage* aStorage);
@@ -227,7 +231,8 @@ private:
   IDBDatabase(IDBWrapperCache* aOwnerCache,
               IDBFactory* aFactory,
               BackgroundDatabaseChild* aActor,
-              DatabaseSpec* aSpec);
+              DatabaseSpec* aSpec,
+              PersistenceType aPersistenceType);
 
   ~IDBDatabase();
 

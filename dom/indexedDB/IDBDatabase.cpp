@@ -119,7 +119,8 @@ private:
 IDBDatabase::IDBDatabase(IDBWrapperCache* aOwnerCache,
                          IDBFactory* aFactory,
                          BackgroundDatabaseChild* aActor,
-                         DatabaseSpec* aSpec)
+                         DatabaseSpec* aSpec,
+                         PersistenceType aPersistenceType)
   : IDBWrapperCache(aOwnerCache)
   , mFactory(aFactory)
   , mSpec(aSpec)
@@ -132,6 +133,9 @@ IDBDatabase::IDBDatabase(IDBWrapperCache* aOwnerCache,
   aFactory->AssertIsOnOwningThread();
   MOZ_ASSERT(aActor);
   MOZ_ASSERT(aSpec);
+
+  // nsIOfflineStorage
+  mPersistenceType = aPersistenceType;
 
   SetIsDOMBinding();
 }
@@ -147,7 +151,8 @@ already_AddRefed<IDBDatabase>
 IDBDatabase::Create(IDBWrapperCache* aOwnerCache,
                     IDBFactory* aFactory,
                     BackgroundDatabaseChild* aActor,
-                    DatabaseSpec* aSpec)
+                    DatabaseSpec* aSpec,
+                    PersistenceType aPersistenceType)
 {
   MOZ_ASSERT(aOwnerCache);
   MOZ_ASSERT(aFactory);
@@ -156,7 +161,7 @@ IDBDatabase::Create(IDBWrapperCache* aOwnerCache,
   MOZ_ASSERT(aSpec);
 
   nsRefPtr<IDBDatabase> db =
-    new IDBDatabase(aOwnerCache, aFactory, aActor, aSpec);
+    new IDBDatabase(aOwnerCache, aFactory, aActor, aSpec, aPersistenceType);
 
   db->SetScriptOwner(aOwnerCache->GetScriptOwner());
 

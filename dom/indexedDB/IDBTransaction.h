@@ -101,6 +101,7 @@ private:
   Mode mMode;
 
   bool mCreating;
+  bool mAbortedByScript;
 
 #ifdef DEBUG
   bool mSentCommitOrAbort;

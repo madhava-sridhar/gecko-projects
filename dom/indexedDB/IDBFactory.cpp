@@ -648,22 +648,31 @@ IDBFactory::InitiateRequest(IDBOpenDBRequest* aRequest,
   MOZ_ASSERT(!mBackgroundActorFailed);
 
   uint64_t requestedVersion;
+  PersistenceType persistenceType;
 
   switch (aParams.type()) {
-    case FactoryRequestParams::TDeleteDatabaseRequestParams:
-      requestedVersion =
-        aParams.get_DeleteDatabaseRequestParams().metadata().version();
+    case FactoryRequestParams::TDeleteDatabaseRequestParams: {
+      const DatabaseMetadata& metadata =
+        aParams.get_DeleteDatabaseRequestParams().metadata();
+      requestedVersion = metadata.version();
+      persistenceType = metadata.persistenceType();
       break;
-    case FactoryRequestParams::TOpenDatabaseRequestParams:
-      requestedVersion =
-        aParams.get_OpenDatabaseRequestParams().metadata().version();
+    }
+    case FactoryRequestParams::TOpenDatabaseRequestParams: {
+      const DatabaseMetadata& metadata =
+        aParams.get_OpenDatabaseRequestParams().metadata();
+      requestedVersion = metadata.version();
+      persistenceType = metadata.persistenceType();
       break;
+    }
+
     default:
-      MOZ_CRASH("Unknown params type!");
+      MOZ_ASSUME_UNREACHABLE("Should never get here!");
   }
 
   auto actor =
-    new BackgroundFactoryRequestChild(this, aRequest, requestedVersion);
+    new BackgroundFactoryRequestChild(this, aRequest, requestedVersion,
+                                      persistenceType);
 
   if (!mBackgroundActor->SendPBackgroundIDBFactoryRequestConstructor(actor,
                                                                      aParams)) {

@@ -165,6 +165,9 @@ public:
   Delete(JSContext* aCx, ErrorResult& aRv);
 
   void
+  Reset();
+
+  void
   Reset(Key&& aKey, StructuredCloneReadInfo&& aValue);
 
   void
@@ -205,9 +208,6 @@ private:
 
   void
   DropJSObjects();
-
-  void
-  Reset();
 };
 
 } // namespace indexedDB

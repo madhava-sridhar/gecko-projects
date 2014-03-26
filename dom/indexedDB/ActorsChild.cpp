@@ -87,7 +87,7 @@ class MOZ_STACK_CLASS ResultHelper MOZ_FINAL
     const nsTArray<StructuredCloneReadInfo>* mStructuredCloneArray;
     const Key* mKey;
     const nsTArray<Key>* mKeyArray;
-    JS::Handle<JS::Value>* mJSVal;
+    const JS::Handle<JS::Value>* mJSVal;
   } mResult;
 
   enum
@@ -168,7 +168,7 @@ public:
 
   ResultHelper(IDBRequest* aRequest,
                IDBTransaction* aTransaction,
-               JS::Handle<JS::Value>* aResult)
+               const JS::Handle<JS::Value>* aResult)
     : mRequest(aRequest)
     , mAutoTransaction(aTransaction)
     , mResultType(ResultTypeJSVal)
@@ -400,7 +400,7 @@ DispatchSuccessEvent(ResultHelper* aResultHelper,
     aEvent = newEvent;
   }
 
-  request->SetResultCallback(&ResultHelper::GetResult, aResultHelper);
+  request->SetResult(&ResultHelper::GetResult, aResultHelper);
 
   MOZ_ASSERT(aEvent);
   MOZ_ASSERT_IF(transaction, transaction->IsOpen());
@@ -623,12 +623,14 @@ BackgroundFactoryChild::DeallocPBackgroundIDBDatabaseChild(
  ******************************************************************************/
 
 BackgroundFactoryRequestChild::BackgroundFactoryRequestChild(
-                                                 IDBFactory* aFactory,
-                                                 IDBOpenDBRequest* aOpenRequest,
-                                                 uint64_t aRequestedVersion)
+                                               IDBFactory* aFactory,
+                                               IDBOpenDBRequest* aOpenRequest,
+                                               uint64_t aRequestedVersion,
+                                               PersistenceType aPersistenceType)
   : BackgroundRequestChildBase(aOpenRequest)
   , mFactory(aFactory)
   , mRequestedVersion(aRequestedVersion)
+  , mPersistenceType(aPersistenceType)
 {
   // Can't assert owning thread here because IPDL has not yet set our manager!
   MOZ_ASSERT(aFactory);
@@ -761,6 +763,7 @@ BackgroundDatabaseChild::BackgroundDatabaseChild(
   : mSpec(new DatabaseSpec(aSpec))
   , mOpenRequestActor(aOpenRequestActor)
   , mDatabase(nullptr)
+  , mPersistenceType(aOpenRequestActor->mPersistenceType)
 {
   // Can't assert owning thread here because IPDL has not yet set our manager!
   MOZ_ASSERT(aOpenRequestActor);
@@ -808,7 +811,8 @@ BackgroundDatabaseChild::EnsureDOMObject()
     static_cast<BackgroundFactoryChild*>(Manager())->GetDOMObject();
   MOZ_ASSERT(factory);
 
-  mTemporaryStrongDatabase = IDBDatabase::Create(request, factory, this, mSpec);
+  mTemporaryStrongDatabase =
+    IDBDatabase::Create(request, factory, this, mSpec, mPersistenceType);
 
   MOZ_ASSERT(mTemporaryStrongDatabase);
   mTemporaryStrongDatabase->AssertIsOnOwningThread();
@@ -1471,25 +1475,6 @@ BackgroundRequestChild::HandleResponse(uint64_t aResponse)
 }
 
 bool
-BackgroundRequestChild::HandleUndefinedResponse()
-{
-  AssertIsOnOwningThread();
-
-  nsRefPtr<IDBRequest> domRequest = GetDOMObject();
-  MOZ_ASSERT(domRequest);
-
-  JSContext* cx = domRequest->GetJSContext();
-  MOZ_ASSERT(cx);
-
-  JSAutoRequest ar(cx);
-
-  JS::Rooted<JS::Value> value(cx);
-  value.setUndefined();
-
-  return HandleResponse(value);
-}
-
-bool
 BackgroundRequestChild::Recv__delete__(const RequestResponse& aResponse)
 {
   AssertIsOnOwningThread();
@@ -1524,10 +1509,10 @@ BackgroundRequestChild::Recv__delete__(const RequestResponse& aResponse)
                                      .keys());
 
     case RequestResponse::TObjectStoreDeleteResponse:
-      return HandleUndefinedResponse();
+      return HandleResponse(JS::UndefinedHandleValue);
 
     case RequestResponse::TObjectStoreClearResponse:
-      return HandleUndefinedResponse();
+      return HandleResponse(JS::UndefinedHandleValue);
 
     case RequestResponse::TObjectStoreCountResponse:
       return HandleResponse(aResponse.get_ObjectStoreCountResponse().count());
@@ -1789,16 +1774,11 @@ BackgroundCursorChild::RecvResponse(const CursorResponse& aResponse)
     }
 
     case CursorResponse::Tvoid_t: {
-      JSContext* cx = mRequest->GetJSContext();
-      MOZ_ASSERT(cx);
+      if (mCursor) {
+        mCursor->Reset();
+      }
 
-      JSAutoRequest ar(cx);
-
-      JS::Rooted<JS::Value> value(cx);
-      value.setNull();
-
-      ResultHelper helper(mRequest, mTransaction,
-                          &static_cast<JS::Handle<JS::Value>>(value));
+      ResultHelper helper(mRequest, mTransaction, &JS::NullHandleValue);
 
       DispatchSuccessEvent(&helper);
       break;

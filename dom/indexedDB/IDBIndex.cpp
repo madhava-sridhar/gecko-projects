@@ -416,7 +416,7 @@ IDBIndex::OpenCursorInternal(bool aKeysOnly,
     params = Move(openParams);
   } else {
     IndexOpenCursorParams openParams;
-    openParams.objectStoreId() = Id();
+    openParams.objectStoreId() = objectStoreId;
     openParams.indexId() = indexId;
     openParams.optionalKeyRange() = Move(optionalKeyRange);
     openParams.direction() = direction;

@@ -20,7 +20,7 @@ function testSteps()
   try {
     request.result;
     ok(false, "Getter should have thrown!");
-  } catch (e if e.result == 0x80660006 /* NS_ERROR_DOM_INDEXEDDB_NOTALLOWED_ERR */) {
+  } catch (e if e.result == 0x8053000b /* NS_ERROR_DOM_INVALID_STATE_ERR */) {
     ok(true, "Getter threw the right exception");
   }
 

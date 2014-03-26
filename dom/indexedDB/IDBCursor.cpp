@@ -292,6 +292,7 @@ IDBCursor::Create(IDBRequest* aRequest,
                   aIndex->ObjectStore()->Transaction(), aBackgroundActor,
                   aDirection, aKey);
 
+  cursor->mPrimaryKey = Move(aPrimaryKey);
   cursor->mCloneInfo = Move(aCloneInfo);
 
   return cursor.forget();
@@ -317,6 +318,8 @@ IDBCursor::Create(IDBRequest* aRequest,
     new IDBCursor(Type_IndexKey, aRequest, nullptr, aIndex,
                   aIndex->ObjectStore()->Transaction(), aBackgroundActor,
                   aDirection, aKey);
+
+  cursor->mPrimaryKey = Move(aPrimaryKey);
 
   return cursor.forget();
 }
@@ -385,6 +388,7 @@ IDBCursor::Reset()
   mHaveCachedPrimaryKey = false;
   mHaveCachedValue = false;
   mHaveValue = false;
+  mContinueCalled = false;
 }
 
 nsPIDOMWindow*
@@ -858,6 +862,8 @@ IDBCursor::Reset(Key&& aKey, StructuredCloneReadInfo&& aValue)
 
   mKey = Move(aKey);
   mCloneInfo = Move(aValue);
+
+  mHaveValue = !mKey.IsUnset();
 }
 
 void
@@ -869,6 +875,8 @@ IDBCursor::Reset(Key&& aKey)
   Reset();
 
   mKey = Move(aKey);
+
+  mHaveValue = !mKey.IsUnset();
 }
 
 void
@@ -884,6 +892,8 @@ IDBCursor::Reset(Key&& aKey,
   mKey = Move(aKey);
   mPrimaryKey = Move(aPrimaryKey);
   mCloneInfo = Move(aValue);
+
+  mHaveValue = !mKey.IsUnset();
 }
 
 void
@@ -896,6 +906,8 @@ IDBCursor::Reset(Key&& aKey, Key&& aPrimaryKey)
 
   mKey = Move(aKey);
   mPrimaryKey = Move(aPrimaryKey);
+
+  mHaveValue = !mKey.IsUnset();
 }
 
 NS_IMPL_CYCLE_COLLECTING_ADDREF(IDBCursor)

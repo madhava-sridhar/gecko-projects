@@ -2677,6 +2677,14 @@ public:
     return mActorWasAlive && mActorDestroyed;
   }
 
+  bool
+  IsClosed() const
+  {
+    AssertIsOnBackgroundThread();
+
+    return mClosed;
+  }
+
 private:
   // Reference counted.
   ~Database()
@@ -3455,28 +3463,17 @@ class OpenDatabaseOp MOZ_FINAL
   nsRefPtr<VersionChangeTransaction> mVersionChangeTransaction;
   nsTArray<Database*> mMaybeBlockedDatabases;
 
+  bool mWasBlocked;
+
 public:
   OpenDatabaseOp(const nsACString& aGroup,
                  const nsACString& aOrigin,
                  StoragePrivilege aPrivilege,
-                 const OpenDatabaseRequestParams& aParams)
-    : FactoryOp(aGroup, aOrigin, aPrivilege, aParams.metadata().name(),
-                aParams.metadata().persistenceType())
-    , mOwnedMetadata(new FullDatabaseMetadata())
-    , mMetadata(mOwnedMetadata)
-    , mRequestedVersion(aParams.metadata().version())
-  {
-    mMetadata->mCommonMetadata = aParams.metadata();
-
-    MOZ_ASSERT(!mDatabaseId.IsEmpty());
-    mMetadata->mDatabaseId = mDatabaseId;
-  }
+                 const OpenDatabaseRequestParams& aParams);
 
 private:
   ~OpenDatabaseOp()
   { }
-
-  NS_DECL_NSIRUNNABLE
 
   nsresult
   DoDatabaseWork();
@@ -3488,7 +3485,7 @@ private:
   BeginVersionChange();
 
   void
-  NoteDatabaseDone(Database* aDatabase);
+  NoteDatabaseClosed(Database* aDatabase);
 
   void
   NoteDatabaseBlocked(Database* aDatabase);
@@ -3518,6 +3515,8 @@ private:
 #else
   { }
 #endif
+
+  NS_DECL_NSIRUNNABLE
 };
 
 class OpenDatabaseOp::VersionChangeOp MOZ_FINAL
@@ -4211,6 +4210,9 @@ private:
   // Reference counted.
   ~OpenOp()
   { }
+
+  void
+  GetRangeKeyInfo(bool aLowerBound, Key* aKey, bool* aOpen);
 
   nsresult
   DoObjectStoreDatabaseWork(TransactionBase* aTransaction);
@@ -5057,17 +5059,8 @@ Database::CloseInternal()
   MOZ_ASSERT(info->mLiveDatabases.Contains(this));
 
   if (info->mWaitingOpenOp) {
-    info->mWaitingOpenOp->NoteDatabaseDone(this);
+    info->mWaitingOpenOp->NoteDatabaseClosed(this);
   }
-
-  MOZ_ALWAYS_TRUE(info->mLiveDatabases.RemoveElement(this));
-
-  if (info->mLiveDatabases.IsEmpty()) {
-    MOZ_ASSERT(!info->mWaitingOpenOp);
-    gLiveDatabaseHashtable->Remove(Id());
-  }
-
-  mMetadata = nullptr;
 
   return true;
 }
@@ -5083,6 +5076,18 @@ Database::ActorDestroy(ActorDestroyReason aWhy)
   if (!mClosed) {
     MOZ_ALWAYS_TRUE(CloseInternal());
   }
+
+  DatabaseActorInfo* info;
+  MOZ_ALWAYS_TRUE(gLiveDatabaseHashtable->Get(Id(), &info));
+
+  MOZ_ALWAYS_TRUE(info->mLiveDatabases.RemoveElement(this));
+
+  if (info->mLiveDatabases.IsEmpty()) {
+    MOZ_ASSERT(!info->mWaitingOpenOp);
+    gLiveDatabaseHashtable->Remove(Id());
+  }
+
+  mMetadata = nullptr;
 }
 
 PBackgroundIDBTransactionParent*
@@ -5255,6 +5260,7 @@ bool
 Database::RecvBlocked()
 {
   AssertIsOnBackgroundThread();
+  MOZ_ASSERT(!mClosed);
 
   // XXX Harden this against being called out of order.
 
@@ -6530,7 +6536,7 @@ VersionChangeTransaction::CopyDatabaseMetadata()
   const FullDatabaseMetadata* origMetadata = mDatabase->Metadata();
   MOZ_ASSERT(origMetadata);
 
-  // FullDatabaseMetadata contains two hashtables of pointers that we need to
+  // FullDatabaseMetadata contains two hash tables of pointers that we need to
   // duplicate so we can't just use the copy constructor.
   nsAutoPtr<FullDatabaseMetadata> newMetadata(new FullDatabaseMetadata());
 
@@ -6548,7 +6554,23 @@ VersionChangeTransaction::CopyDatabaseMetadata()
     return false;
   }
 
-  mOldMetadata = newMetadata.forget();
+  // Replace the live metadata with the new mutable copy.
+  DatabaseActorInfo* info;
+  MOZ_ALWAYS_TRUE(gLiveDatabaseHashtable->Get(origMetadata->mDatabaseId,
+                                              &info));
+  MOZ_ASSERT(!info->mLiveDatabases.IsEmpty());
+  MOZ_ASSERT(info->mMetadata == origMetadata);
+
+  mOldMetadata = info->mMetadata.forget();
+  info->mMetadata = newMetadata.forget();
+
+  // Replace metadata pointers for all live databases.
+  for (uint32_t count = info->mLiveDatabases.Length(), index = 0;
+        index < count;
+        index++) {
+    info->mLiveDatabases[index]->mMetadata = info->mMetadata;
+  }
+
   return true;
 }
 
@@ -6563,22 +6585,11 @@ VersionChangeTransaction::UpdateMetadata(nsresult aResult)
 
   class MOZ_STACK_CLASS Helper MOZ_FINAL
   {
-    static PLDHashOperator
-    PruneDeletedIndexes(const uint64_t& aKey,
-                        nsAutoPtr<FullIndexMetadata>& aValue,
-                        void* /* aClosure */)
-    {
-      MOZ_ASSERT(aKey);
-      MOZ_ASSERT(aValue);
-
-      return aValue->mDeleted ? PL_DHASH_REMOVE : PL_DHASH_NEXT;
-    }
-
   public:
     static PLDHashOperator
-    PruneDeleted(const uint64_t& aKey,
-                 nsAutoPtr<FullObjectStoreMetadata>& aValue,
-                 void* /* aClosure */)
+    Enumerate(const uint64_t& aKey,
+              nsAutoPtr<FullObjectStoreMetadata>& aValue,
+              void* /* aClosure */)
     {
       MOZ_ASSERT(aKey);
       MOZ_ASSERT(aValue);
@@ -6587,39 +6598,49 @@ VersionChangeTransaction::UpdateMetadata(nsresult aResult)
         return PL_DHASH_REMOVE;
       }
 
-      aValue->mIndexes.Enumerate(PruneDeletedIndexes, nullptr);
+      aValue->mIndexes.Enumerate(Enumerate, nullptr);
+#ifdef DEBUG
+      aValue->mIndexes.MarkImmutable();
+#endif
 
       return PL_DHASH_NEXT;
     }
-  };
 
-  if (!mOldMetadata) {
-    MOZ_ASSERT(NS_FAILED(mOpenDatabaseOp->mResultCode));
-    return;
-  }
+  private:
+    static PLDHashOperator
+    Enumerate(const uint64_t& aKey,
+              nsAutoPtr<FullIndexMetadata>& aValue,
+              void* /* aClosure */)
+    {
+      MOZ_ASSERT(aKey);
+      MOZ_ASSERT(aValue);
+
+      return aValue->mDeleted ? PL_DHASH_REMOVE : PL_DHASH_NEXT;
+    }
+  };
 
   nsAutoPtr<FullDatabaseMetadata> oldMetadata = mOldMetadata.forget();
 
-  DatabaseActorInfo* info = nullptr;
-  gLiveDatabaseHashtable->Get(oldMetadata->mDatabaseId, &info);
+  DatabaseActorInfo* info;
+  MOZ_ALWAYS_TRUE(gLiveDatabaseHashtable->Get(oldMetadata->mDatabaseId, &info));
+
+  MOZ_ASSERT(!info->mLiveDatabases.IsEmpty());
 
   if (NS_SUCCEEDED(aResult)) {
-    MOZ_ASSERT(info);
-    MOZ_ASSERT(!info->mLiveDatabases.IsEmpty());
+    // Remove all deleted objectStores and indexes, then mark immutable
+    info->mMetadata->mObjectStores.Enumerate(Helper::Enumerate, nullptr);
+#ifdef DEBUG
+    info->mMetadata->mObjectStores.MarkImmutable();
+#endif
+  } else {
+    // Replace metadata pointers for all live databases.
+    info->mMetadata = oldMetadata.forget();
 
-    // Remove all deleted objectStores and indexes.
-    info->mMetadata->mObjectStores.Enumerate(Helper::PruneDeleted, nullptr);
-    return;
-  }
-
-  if (info) {
     for (uint32_t count = info->mLiveDatabases.Length(), index = 0;
          index < count;
          index++) {
-      info->mLiveDatabases[index]->mMetadata = oldMetadata;
+      info->mLiveDatabases[index]->mMetadata = info->mMetadata;
     }
-
-    info->mMetadata = oldMetadata.forget();
   }
 }
 
@@ -7313,62 +7334,21 @@ FactoryOp::UnblockQuotaManager()
   mState = State_Completed;
 }
 
-NS_IMETHODIMP
-OpenDatabaseOp::Run()
+OpenDatabaseOp::OpenDatabaseOp(const nsACString& aGroup,
+                               const nsACString& aOrigin,
+                               StoragePrivilege aPrivilege,
+                               const OpenDatabaseRequestParams& aParams)
+  : FactoryOp(aGroup, aOrigin, aPrivilege, aParams.metadata().name(),
+              aParams.metadata().persistenceType())
+  , mOwnedMetadata(new FullDatabaseMetadata())
+  , mMetadata(mOwnedMetadata)
+  , mRequestedVersion(aParams.metadata().version())
+  , mWasBlocked(false)
 {
-  nsresult rv;
+  mMetadata->mCommonMetadata = aParams.metadata();
 
-  switch (mState) {
-    case State_Initial:
-      rv = Open();
-      break;
-
-    case State_OpenPending:
-      rv = SendToIOThread();
-      break;
-
-    case State_DatabaseWork:
-      rv = DoDatabaseWork();
-      break;
-
-    case State_BeginVersionChange:
-      rv = BeginVersionChange();
-      break;
-
-    case State_DispatchToTransactionThreadPool:
-      rv = DispatchToTransactionThreadPool();
-      break;
-
-    case State_SendUpgradeNeeded:
-      rv = SendUpgradeNeeded();
-      break;
-
-    case State_SendingResults:
-      SendResults();
-      return NS_OK;
-
-    case State_UnblockingQuotaManager:
-      UnblockQuotaManager();
-      return NS_OK;
-
-    default:
-      MOZ_CRASH("Bad state!");
-  }
-
-  if (NS_WARN_IF(NS_FAILED(rv)) && mState != State_SendingResults) {
-    if (NS_SUCCEEDED(mResultCode)) {
-      mResultCode = rv;
-    }
-
-    // Must set mState before dispatching otherwise we will race with the owning
-    // thread.
-    mState = State_SendingResults;
-
-    MOZ_ALWAYS_TRUE(NS_SUCCEEDED(mOwningThread->Dispatch(this,
-                                                         NS_DISPATCH_NORMAL)));
-  }
-
-  return NS_OK;
+  MOZ_ASSERT(!mDatabaseId.IsEmpty());
+  mMetadata->mDatabaseId = mDatabaseId;
 }
 
 nsresult
@@ -7732,15 +7712,20 @@ OpenDatabaseOp::LoadDatabaseInformation(mozIStorageConnection* aConnection)
       return rv;
     }
 
+    nsAutoString hashName;
+    hashName.AppendInt(indexId);
+    hashName.Append(':');
+    hashName.Append(name);
+
     if (usedNames.empty()) {
       usedNames.construct();
     }
 
-    if (NS_WARN_IF(usedNames.ref().Contains(name))) {
+    if (NS_WARN_IF(usedNames.ref().Contains(hashName))) {
       return NS_ERROR_FILE_CORRUPTED;
     }
 
-    if (NS_WARN_IF(!usedNames.ref().PutEntry(name, fallible))) {
+    if (NS_WARN_IF(!usedNames.ref().PutEntry(hashName, fallible))) {
       return NS_ERROR_OUT_OF_MEMORY;
     }
 
@@ -7817,6 +7802,7 @@ OpenDatabaseOp::BeginVersionChange()
   MOZ_ASSERT(mState == State_BeginVersionChange);
   MOZ_ASSERT(mMaybeBlockedDatabases.IsEmpty());
   MOZ_ASSERT(mMetadata->mCommonMetadata.version() != mRequestedVersion);
+  MOZ_ASSERT(!mDatabase);
 
   if (IsActorDestroyed()) {
     return NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
@@ -7827,12 +7813,15 @@ OpenDatabaseOp::BeginVersionChange()
     return rv;
   }
 
+  MOZ_ASSERT(!mOwnedMetadata);
+  MOZ_ASSERT(!mDatabase->IsClosed());
+
   DatabaseActorInfo* info;
   MOZ_ALWAYS_TRUE(gLiveDatabaseHashtable->Get(mDatabaseId, &info));
 
-  MOZ_ASSERT(!info->mLiveDatabases.IsEmpty());
   MOZ_ASSERT(info->mLiveDatabases.Contains(mDatabase));
   MOZ_ASSERT(!info->mWaitingOpenOp);
+  MOZ_ASSERT(info->mMetadata == mMetadata);
 
   nsRefPtr<VersionChangeTransaction> transaction =
     new VersionChangeTransaction(this);
@@ -7841,10 +7830,37 @@ OpenDatabaseOp::BeginVersionChange()
     return NS_ERROR_OUT_OF_MEMORY;
   }
 
-  // See if any other databases need to be closed.
-  uint32_t count = info->mLiveDatabases.Length();
+  MOZ_ASSERT(info->mMetadata != mMetadata);
+  mMetadata = info->mMetadata;
 
-  if (count == 1) {
+  const uint32_t liveCount = info->mLiveDatabases.Length();
+
+  // See if any other databases need to be closed.
+  uint32_t blockedCount = 0;
+
+  if (liveCount > 1) {
+    FallibleTArray<Database*> maybeBlockedDatabases;
+    if (NS_WARN_IF(!maybeBlockedDatabases.SetCapacity(liveCount - 1))) {
+      return NS_ERROR_OUT_OF_MEMORY;
+    }
+
+    for (uint32_t index = 0; index < liveCount; index++) {
+      Database* database = info->mLiveDatabases[index];
+      if (database != mDatabase && !database->IsClosed()) {
+        if (NS_WARN_IF(!maybeBlockedDatabases.AppendElement(database))) {
+          return NS_ERROR_OUT_OF_MEMORY;
+        }
+      }
+    }
+
+    if (!maybeBlockedDatabases.IsEmpty()) {
+      blockedCount = maybeBlockedDatabases.Length();
+
+      mMaybeBlockedDatabases.SwapElements(maybeBlockedDatabases);
+    }
+  }
+
+  if (!blockedCount) {
     // No other databases need to be notified, we can jump directly to the
     // transaction thread pool.
     mVersionChangeTransaction.swap(transaction);
@@ -7868,22 +7884,13 @@ OpenDatabaseOp::BeginVersionChange()
     return rv;
   }
 
+  mWasBlocked = true;
+
   mDatabase->RegisterTransaction(transaction);
 
-  mMaybeBlockedDatabases.SetCapacity(count - 1);
-
-  for (uint32_t index = 0; index < count; index++) {
-    Database*& actor = info->mLiveDatabases[index];
-    if (actor != mDatabase) {
-      mMaybeBlockedDatabases.AppendElement(actor);
-    }
-  }
-
-  MOZ_ASSERT(mMaybeBlockedDatabases.Length() == count - 1);
-
-  count = mMaybeBlockedDatabases.Length();
-
-  for (uint32_t index = 0; index < count; /* incremented conditionally */) {
+  for (uint32_t index = 0;
+       index < blockedCount;
+       /* incremented conditionally */) {
     if (mMaybeBlockedDatabases[index]->SendVersionChange(
                                            mMetadata->mCommonMetadata.version(),
                                            mRequestedVersion)) {
@@ -7891,7 +7898,7 @@ OpenDatabaseOp::BeginVersionChange()
     } else {
       // We don't want to wait forever if we were not able to send the message.
       mMaybeBlockedDatabases.RemoveElementAt(index);
-      count--;
+      blockedCount--;
     }
   }
 
@@ -7904,7 +7911,7 @@ OpenDatabaseOp::BeginVersionChange()
 }
 
 void
-OpenDatabaseOp::NoteDatabaseDone(Database* aDatabase)
+OpenDatabaseOp::NoteDatabaseClosed(Database* aDatabase)
 {
   AssertIsOnOwningThread();
   MOZ_ASSERT(mState == State_WaitingForOtherDatabasesToClose ||
@@ -7980,7 +7987,9 @@ OpenDatabaseOp::DispatchToTransactionThreadPool()
     return rv;
   }
 
-  mDatabase->RegisterTransaction(mVersionChangeTransaction);
+  if (!mWasBlocked) {
+    mDatabase->RegisterTransaction(mVersionChangeTransaction);
+  }
 
   return NS_OK;
 }
@@ -8054,6 +8063,8 @@ OpenDatabaseOp::SendResults()
     FactoryRequestResponse response;
 
     if (NS_SUCCEEDED(mResultCode)) {
+      MOZ_ASSERT_IF(mDatabase, mDatabase->Metadata() == mMetadata);
+
       // If we just successfully completed a versionchange operation then we
       // need to update the version in our metadata.
       mMetadata->mCommonMetadata.version() = mRequestedVersion;
@@ -8072,6 +8083,13 @@ OpenDatabaseOp::SendResults()
 #endif
       }
     } else {
+#ifdef DEBUG
+      // If something failed then our metadata pointer is now bad. No one should
+      // ever touch it again though so just null it out in DEBUG builds to make
+      // sure we find such cases.
+      MOZ_ASSERT_IF(mDatabase, mDatabase->Metadata() != mMetadata);
+      mMetadata = nullptr;
+#endif
       response = ClampResultCode(mResultCode);
     }
 
@@ -8098,6 +8116,7 @@ OpenDatabaseOp::EnsureDatabaseActor()
   MOZ_ASSERT(!IsActorDestroyed());
 
   if (mDatabase) {
+    MOZ_ASSERT(mDatabase->Metadata() == mMetadata);
     MOZ_ASSERT(!mOwnedMetadata);
     return NS_OK;
   }
@@ -8124,6 +8143,8 @@ OpenDatabaseOp::EnsureDatabaseActor()
     gLiveDatabaseHashtable->Put(mDatabaseId, info);
   }
 
+  MOZ_ASSERT(database->Metadata() == mMetadata);
+
   mDatabase = database;
 
   return NS_OK;
@@ -8142,6 +8163,8 @@ OpenDatabaseOp::EnsureDatabaseActorIsAlive()
   if (NS_WARN_IF(NS_FAILED(rv))) {
     return rv;
   }
+
+  MOZ_ASSERT(mDatabase->Metadata() == mMetadata);
 
   if (mDatabase->IsActorAlive()) {
     return NS_OK;
@@ -8376,6 +8399,64 @@ OpenDatabaseOp::AssertMetadataConsistency(const FullDatabaseMetadata* aMetadata)
 }
 
 #endif // DEBUG
+
+NS_IMETHODIMP
+OpenDatabaseOp::Run()
+{
+  nsresult rv;
+
+  switch (mState) {
+    case State_Initial:
+      rv = Open();
+      break;
+
+    case State_OpenPending:
+      rv = SendToIOThread();
+      break;
+
+    case State_DatabaseWork:
+      rv = DoDatabaseWork();
+      break;
+
+    case State_BeginVersionChange:
+      rv = BeginVersionChange();
+      break;
+
+    case State_DispatchToTransactionThreadPool:
+      rv = DispatchToTransactionThreadPool();
+      break;
+
+    case State_SendUpgradeNeeded:
+      rv = SendUpgradeNeeded();
+      break;
+
+    case State_SendingResults:
+      SendResults();
+      return NS_OK;
+
+    case State_UnblockingQuotaManager:
+      UnblockQuotaManager();
+      return NS_OK;
+
+    default:
+      MOZ_CRASH("Bad state!");
+  }
+
+  if (NS_WARN_IF(NS_FAILED(rv)) && mState != State_SendingResults) {
+    if (NS_SUCCEEDED(mResultCode)) {
+      mResultCode = rv;
+    }
+
+    // Must set mState before dispatching otherwise we will race with the owning
+    // thread.
+    mState = State_SendingResults;
+
+    MOZ_ALWAYS_TRUE(NS_SUCCEEDED(mOwningThread->Dispatch(this,
+                                                         NS_DISPATCH_NORMAL)));
+  }
+
+  return NS_OK;
+}
 
 nsresult
 OpenDatabaseOp::
@@ -11080,6 +11161,29 @@ CursorOpBase::Cleanup()
   CommonDatabaseOperationBase::Cleanup();
 }
 
+void
+Cursor::
+OpenOp::GetRangeKeyInfo(bool aLowerBound, Key* aKey, bool* aOpen)
+{
+  AssertIsOnTransactionThread();
+  MOZ_ASSERT(aKey);
+  MOZ_ASSERT(aKey->IsUnset());
+  MOZ_ASSERT(aOpen);
+  if (mOptionalKeyRange.type() == OptionalKeyRange::TSerializedKeyRange) {
+    const SerializedKeyRange& range =
+      mOptionalKeyRange.get_SerializedKeyRange();
+    if (range.isOnly()) {
+      *aKey = range.lower();
+      *aOpen = false;
+    } else {
+      *aKey = aLowerBound ? range.lower() : range.upper();
+      *aOpen = aLowerBound ? range.lowerOpen() : range.upperOpen();
+    }
+  } else {
+    *aOpen = false;
+  }
+}
+
 nsresult
 Cursor::
 OpenOp::DoObjectStoreDatabaseWork(TransactionBase* aTransaction)
@@ -11193,18 +11297,13 @@ OpenOp::DoObjectStoreDatabaseWork(TransactionBase* aTransaction)
     case IDBCursor::NEXT:
     case IDBCursor::NEXT_UNIQUE: {
       Key upper;
-      bool unset = false;
-      bool open = false;
-      if (usingKeyRange) {
-        upper = mOptionalKeyRange.get_SerializedKeyRange().upper();
-        unset = upper.IsUnset();
-        open = mOptionalKeyRange.get_SerializedKeyRange().upperOpen();
-      }
+      bool open;
+      GetRangeKeyInfo(false, &upper, &open);
       AppendConditionClause(keyValue, currentKey, false, false,
                             keyRangeClause);
       AppendConditionClause(keyValue, currentKey, false, true,
                             continueToKeyRangeClause);
-      if (usingKeyRange && !unset) {
+      if (usingKeyRange && !upper.IsUnset()) {
         AppendConditionClause(keyValue, rangeKey, true, !open, keyRangeClause);
         AppendConditionClause(keyValue, rangeKey, true, !open,
                               continueToKeyRangeClause);
@@ -11216,17 +11315,12 @@ OpenOp::DoObjectStoreDatabaseWork(TransactionBase* aTransaction)
     case IDBCursor::PREV:
     case IDBCursor::PREV_UNIQUE: {
       Key lower;
-      bool unset = false;
-      bool open = false;
-      if (usingKeyRange) {
-        lower = mOptionalKeyRange.get_SerializedKeyRange().lower();
-        unset = lower.IsUnset();
-        open = mOptionalKeyRange.get_SerializedKeyRange().lowerOpen();
-      }
+      bool open;
+      GetRangeKeyInfo(true, &lower, &open);
       AppendConditionClause(keyValue, currentKey, true, false, keyRangeClause);
       AppendConditionClause(keyValue, currentKey, true, true,
                            continueToKeyRangeClause);
-      if (usingKeyRange && !unset) {
+      if (usingKeyRange && !lower.IsUnset()) {
         AppendConditionClause(keyValue, rangeKey, false, !open, keyRangeClause);
         AppendConditionClause(keyValue, rangeKey, false, !open,
                               continueToKeyRangeClause);
@@ -11364,18 +11458,13 @@ OpenOp::DoObjectStoreKeyDatabaseWork(TransactionBase* aTransaction)
     case IDBCursor::NEXT:
     case IDBCursor::NEXT_UNIQUE: {
       Key upper;
-      bool unset = false;
-      bool open = false;
-      if (usingKeyRange) {
-        upper = mOptionalKeyRange.get_SerializedKeyRange().upper();
-        unset = upper.IsUnset();
-        open = mOptionalKeyRange.get_SerializedKeyRange().upperOpen();
-      }
+      bool open;
+      GetRangeKeyInfo(false, &upper, &open);
       AppendConditionClause(keyValue, currentKey, false, false,
                             keyRangeClause);
       AppendConditionClause(keyValue, currentKey, false, true,
                             continueToKeyRangeClause);
-      if (usingKeyRange && !unset) {
+      if (usingKeyRange && !upper.IsUnset()) {
         AppendConditionClause(keyValue, rangeKey, true, !open, keyRangeClause);
         AppendConditionClause(keyValue, rangeKey, true, !open,
                               continueToKeyRangeClause);
@@ -11387,17 +11476,12 @@ OpenOp::DoObjectStoreKeyDatabaseWork(TransactionBase* aTransaction)
     case IDBCursor::PREV:
     case IDBCursor::PREV_UNIQUE: {
       Key lower;
-      bool unset = false;
-      bool open = false;
-      if (usingKeyRange) {
-        lower = mOptionalKeyRange.get_SerializedKeyRange().lower();
-        unset = lower.IsUnset();
-        open = mOptionalKeyRange.get_SerializedKeyRange().lowerOpen();
-      }
+      bool open;
+      GetRangeKeyInfo(true, &lower, &open);
       AppendConditionClause(keyValue, currentKey, true, false, keyRangeClause);
       AppendConditionClause(keyValue, currentKey, true, true,
                             continueToKeyRangeClause);
-      if (usingKeyRange && !unset) {
+      if (usingKeyRange && !lower.IsUnset()) {
         AppendConditionClause(keyValue, rangeKey, false, !open, keyRangeClause);
         AppendConditionClause(keyValue, rangeKey, false, !open,
                               continueToKeyRangeClause);
@@ -11465,15 +11549,15 @@ OpenOp::DoIndexDatabaseWork(TransactionBase* aTransaction)
   switch (mCursor->mDirection) {
     case IDBCursor::NEXT:
     case IDBCursor::NEXT_UNIQUE:
-      directionClause.AppendLiteral("ASC, index_table.object_data_key ASC");
+      directionClause.AppendLiteral(" ASC, index_table.object_data_key ASC");
       break;
 
     case IDBCursor::PREV:
-      directionClause.AppendLiteral("DESC, index_table.object_data_key DESC");
+      directionClause.AppendLiteral(" DESC, index_table.object_data_key DESC");
       break;
 
     case IDBCursor::PREV_UNIQUE:
-      directionClause.AppendLiteral("DESC, index_table.object_data_key ASC");
+      directionClause.AppendLiteral(" DESC, index_table.object_data_key ASC");
       break;
 
     default:
@@ -11554,14 +11638,9 @@ OpenOp::DoIndexDatabaseWork(TransactionBase* aTransaction)
   switch (mCursor->mDirection) {
     case IDBCursor::NEXT: {
       Key upper;
-      bool unset = false;
-      bool open = false;
-      if (usingKeyRange) {
-        upper = mOptionalKeyRange.get_SerializedKeyRange().upper();
-        unset = upper.IsUnset();
-        open = mOptionalKeyRange.get_SerializedKeyRange().upperOpen();
-      }
-      if (usingKeyRange && !unset) {
+      bool open;
+      GetRangeKeyInfo(false, &upper, &open);
+      if (usingKeyRange && !upper.IsUnset()) {
         AppendConditionClause(value, rangeKey, true, !open, queryStart);
         mCursor->mRangeKey = upper;
       }
@@ -11583,14 +11662,9 @@ OpenOp::DoIndexDatabaseWork(TransactionBase* aTransaction)
 
     case IDBCursor::NEXT_UNIQUE: {
       Key upper;
-      bool unset = false;
-      bool open = false;
-      if (usingKeyRange) {
-        upper = mOptionalKeyRange.get_SerializedKeyRange().upper();
-        unset = upper.IsUnset();
-        open = mOptionalKeyRange.get_SerializedKeyRange().upperOpen();
-      }
-      if (usingKeyRange && !unset) {
+      bool open;
+      GetRangeKeyInfo(false, &upper, &open);
+      if (usingKeyRange && !upper.IsUnset()) {
         AppendConditionClause(value, rangeKey, true, !open, queryStart);
         mCursor->mRangeKey = upper;
       }
@@ -11609,14 +11683,9 @@ OpenOp::DoIndexDatabaseWork(TransactionBase* aTransaction)
 
     case IDBCursor::PREV: {
       Key lower;
-      bool unset = false;
-      bool open = false;
-      if (usingKeyRange) {
-        lower = mOptionalKeyRange.get_SerializedKeyRange().lower();
-        unset = lower.IsUnset();
-        open = mOptionalKeyRange.get_SerializedKeyRange().lowerOpen();
-      }
-      if (usingKeyRange && !unset) {
+      bool open;
+      GetRangeKeyInfo(true, &lower, &open);
+      if (usingKeyRange && !lower.IsUnset()) {
         AppendConditionClause(value, rangeKey, false, !open, queryStart);
         mCursor->mRangeKey = lower;
       }
@@ -11638,14 +11707,9 @@ OpenOp::DoIndexDatabaseWork(TransactionBase* aTransaction)
 
     case IDBCursor::PREV_UNIQUE: {
       Key lower;
-      bool unset = false;
-      bool open = false;
-      if (usingKeyRange) {
-        lower = mOptionalKeyRange.get_SerializedKeyRange().lower();
-        unset = lower.IsUnset();
-        open = mOptionalKeyRange.get_SerializedKeyRange().lowerOpen();
-      }
-      if (usingKeyRange && !unset) {
+      bool open;
+      GetRangeKeyInfo(true, &lower, &open);
+      if (usingKeyRange && !lower.IsUnset()) {
         AppendConditionClause(value, rangeKey, false, !open, queryStart);
         mCursor->mRangeKey = lower;
       }
@@ -11790,14 +11854,9 @@ OpenOp::DoIndexKeyDatabaseWork(TransactionBase* aTransaction)
   switch (mCursor->mDirection) {
     case IDBCursor::NEXT: {
       Key upper;
-      bool unset = false;
-      bool open = false;
-      if (usingKeyRange) {
-        upper = mOptionalKeyRange.get_SerializedKeyRange().upper();
-        unset = upper.IsUnset();
-        open = mOptionalKeyRange.get_SerializedKeyRange().upperOpen();
-      }
-      if (usingKeyRange && !unset) {
+      bool open;
+      GetRangeKeyInfo(false, &upper, &open);
+      if (usingKeyRange && !upper.IsUnset()) {
         AppendConditionClause(value, rangeKey, true, !open, queryStart);
         mCursor->mRangeKey = upper;
       }
@@ -11818,14 +11877,9 @@ OpenOp::DoIndexKeyDatabaseWork(TransactionBase* aTransaction)
 
     case IDBCursor::NEXT_UNIQUE: {
       Key upper;
-      bool unset = false;
-      bool open = false;
-      if (usingKeyRange) {
-        upper = mOptionalKeyRange.get_SerializedKeyRange().upper();
-        unset = upper.IsUnset();
-        open = mOptionalKeyRange.get_SerializedKeyRange().upperOpen();
-      }
-      if (usingKeyRange && !unset) {
+      bool open;
+      GetRangeKeyInfo(false, &upper, &open);
+      if (usingKeyRange && !upper.IsUnset()) {
         AppendConditionClause(value, rangeKey, true, !open, queryStart);
         mCursor->mRangeKey = upper;
       }
@@ -11844,14 +11898,9 @@ OpenOp::DoIndexKeyDatabaseWork(TransactionBase* aTransaction)
 
     case IDBCursor::PREV: {
       Key lower;
-      bool unset = false;
-      bool open = false;
-      if (usingKeyRange) {
-        lower = mOptionalKeyRange.get_SerializedKeyRange().lower();
-        unset = lower.IsUnset();
-        open = mOptionalKeyRange.get_SerializedKeyRange().lowerOpen();
-      }
-      if (usingKeyRange && !unset) {
+      bool open;
+      GetRangeKeyInfo(true, &lower, &open);
+      if (usingKeyRange && !lower.IsUnset()) {
         AppendConditionClause(value, rangeKey, false, !open, queryStart);
         mCursor->mRangeKey = lower;
       }
@@ -11873,14 +11922,9 @@ OpenOp::DoIndexKeyDatabaseWork(TransactionBase* aTransaction)
 
     case IDBCursor::PREV_UNIQUE: {
       Key lower;
-      bool unset = false;
-      bool open = false;
-      if (usingKeyRange) {
-        lower = mOptionalKeyRange.get_SerializedKeyRange().lower();
-        unset = lower.IsUnset();
-        open = mOptionalKeyRange.get_SerializedKeyRange().lowerOpen();
-      }
-      if (usingKeyRange && !unset) {
+      bool open;
+      GetRangeKeyInfo(true, &lower, &open);
+      if (usingKeyRange && !lower.IsUnset()) {
         AppendConditionClause(value, rangeKey, false, !open, queryStart);
         mCursor->mRangeKey = lower;
       }

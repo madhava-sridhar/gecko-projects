@@ -46,6 +46,7 @@ IDBTransaction::IDBTransaction(IDBDatabase* aDatabase, Mode aMode)
   , mReadyState(IDBTransaction::INITIAL)
   , mMode(aMode)
   , mCreating(false)
+  , mAbortedByScript(false)
 #ifdef DEBUG
   , mSentCommitOrAbort(false)
   , mFiredCompleteOrAbort(false)
@@ -78,13 +79,15 @@ IDBTransaction::~IDBTransaction()
 
   mDatabase->UnregisterTransaction(this);
 
-  if (mBackgroundActor.mNormalBackgroundActor) {
+  if (VERSION_CHANGE == mMode) {
+    if (mBackgroundActor.mVersionChangeBackgroundActor) {
+      mBackgroundActor.mVersionChangeBackgroundActor->SendDeleteMeInternal();
+      MOZ_ASSERT(!mBackgroundActor.mVersionChangeBackgroundActor,
+                 "SendDeleteMeInternal should have cleared!");
+    }
+  } else if (mBackgroundActor.mNormalBackgroundActor) {
     mBackgroundActor.mNormalBackgroundActor->SendDeleteMeInternal();
     MOZ_ASSERT(!mBackgroundActor.mNormalBackgroundActor,
-               "SendDeleteMeInternal should have cleared!");
-  } else if (mBackgroundActor.mVersionChangeBackgroundActor) {
-    mBackgroundActor.mVersionChangeBackgroundActor->SendDeleteMeInternal();
-    MOZ_ASSERT(!mBackgroundActor.mVersionChangeBackgroundActor,
                "SendDeleteMeInternal should have cleared!");
   }
 }
@@ -599,6 +602,11 @@ IDBTransaction::Abort(ErrorResult& aRv)
   AssertIsOnOwningThread();
 
   aRv = AbortInternal(NS_ERROR_DOM_INDEXEDDB_ABORT_ERR, nullptr);
+
+  if (!aRv.Failed()) {
+    MOZ_ASSERT(!mAbortedByScript);
+    mAbortedByScript = true;
+  }
 }
 
 void
@@ -622,7 +630,7 @@ IDBTransaction::FireCompleteOrAbortEvents(nsresult aResult)
     event = CreateGenericEvent(this, NS_LITERAL_STRING(COMPLETE_EVT_STR),
                                eDoesNotBubble, eNotCancelable);
   } else {
-    if (!mError) {
+    if (!mError && !mAbortedByScript) {
       mError = new DOMError(GetOwner(), aResult);
     }
 
@@ -708,7 +716,7 @@ IDBTransaction::ObjectStoreNames()
   }
 
   nsRefPtr<DOMStringList> list = new DOMStringList();
-  list->CopyList(mObjectStoreNames);
+  list->StringArray() = mObjectStoreNames;
   return list.forget();
 }
 
@@ -718,7 +726,7 @@ IDBTransaction::ObjectStore(const nsAString& aName, ErrorResult& aRv)
   AssertIsOnOwningThread();
 
   if (IsFinished()) {
-    aRv.Throw(NS_ERROR_DOM_INDEXEDDB_TRANSACTION_INACTIVE_ERR);
+    aRv.Throw(NS_ERROR_DOM_INVALID_STATE_ERR);
     return nullptr;
   }
 

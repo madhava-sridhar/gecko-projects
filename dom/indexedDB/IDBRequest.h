@@ -41,12 +41,6 @@ class IDBTransaction;
 class IDBRequest
   : public IDBWrapperCache
 {
-public:
-  typedef nsresult
-    (*GetResultCallback)(JSContext* aCx,
-                         void* aUserData,
-                         JS::MutableHandle<JS::Value> aResult);
-
 protected:
   // At most one of these three fields can be non-null.
   nsRefPtr<IDBObjectStore> mSourceAsObjectStore;
@@ -61,9 +55,6 @@ protected:
 
   JS::Heap<JS::Value> mResultVal;
   nsRefPtr<DOMError> mError;
-
-  GetResultCallback mGetResultCallback;
-  void* mGetResultCallbackUserData;
 
   nsString mFilename;
 #ifdef MOZ_ENABLE_PROFILER_SPS
@@ -106,10 +97,10 @@ public:
   DispatchNonTransactionError(nsresult aErrorCode);
 
   void
-  SetError(nsresult aRv);
+  SetResult(GetResultCallback aCallback, void* aUserData);
 
   void
-  SetResultCallback(GetResultCallback aCallback, void* aUserData = nullptr);
+  SetError(nsresult aRv);
 
   nsresult
   GetErrorCode() const
