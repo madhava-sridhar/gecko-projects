@@ -32,6 +32,7 @@
 #include "mozilla/dom/asmjscache/AsmJSCache.h"
 #include "mozilla/dom/Element.h"
 #include "mozilla/dom/ExternalHelperAppParent.h"
+#include "mozilla/dom/PFileDescriptorSetParent.h"
 #include "mozilla/dom/PMemoryReportRequestParent.h"
 #include "mozilla/dom/power/PowerManagerService.h"
 #include "mozilla/dom/DOMStorageIPC.h"
@@ -40,6 +41,7 @@
 #include "mozilla/dom/devicestorage/DeviceStorageRequestParent.h"
 #include "mozilla/dom/FileSystemRequestParent.h"
 #include "mozilla/dom/GeolocationBinding.h"
+#include "mozilla/dom/FileDescriptorSetParent.h"
 #include "mozilla/dom/telephony/TelephonyParent.h"
 #include "mozilla/dom/time/DateCacheCleaner.h"
 #include "SmsParent.h"
@@ -3198,7 +3200,10 @@ ContentParent::RecvKeywordToURI(const nsCString& aKeyword, OptionalInputStreamPa
     return true;
   }
 
-  SerializeInputStream(postData, *aPostData);
+  nsTArray<mozilla::ipc::FileDescriptor> fds;
+  SerializeInputStream(postData, *aPostData, fds);
+  MOZ_ASSERT(fds.IsEmpty());
+
   SerializeURI(uri, *aURI);
   return true;
 }
@@ -3309,6 +3314,19 @@ ContentParent::RecvBackUpXResources(const FileDescriptor& aXSocketFd)
       mChildXSocketFdDup.reset(aXSocketFd.PlatformHandle());
     }
 #endif
+    return true;
+}
+
+PFileDescriptorSetParent*
+ContentParent::AllocPFileDescriptorSetParent(const FileDescriptor& aFD)
+{
+    return new FileDescriptorSetParent(aFD);
+}
+
+bool
+ContentParent::DeallocPFileDescriptorSetParent(PFileDescriptorSetParent* aActor)
+{
+    delete static_cast<FileDescriptorSetParent*>(aActor);
     return true;
 }
 
