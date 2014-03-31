@@ -322,7 +322,7 @@ IndexedDatabaseManager::FireWindowOnError(nsPIDOMWindow* aOwner,
   nsresult rv = aVisitor.mDOMEvent->GetType(type);
   NS_ENSURE_SUCCESS(rv, rv);
 
-  if (!type.EqualsLiteral(ERROR_EVT_STR)) {
+  if (nsDependentString(kErrorEventType) != type) {
     return NS_OK;
   }
 

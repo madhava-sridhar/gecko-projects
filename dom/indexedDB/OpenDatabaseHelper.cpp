@@ -1596,27 +1596,28 @@ public:
         ownerDoc->DisallowBFCaching();
         continue;
       }
-
+      /*
       // Otherwise fire a versionchange event.
       nsRefPtr<Event> event = 
         IDBVersionChangeEvent::Create(database, mOldVersion, mNewVersion);
       NS_ENSURE_TRUE(event, NS_ERROR_FAILURE);
 
       bool dummy;
-      database->DispatchEvent(event, &dummy);
+      database->DispatchEvent(event, &dummy);*/
     }
 
     // Now check to see if any didn't close. If there are some running still
     // then fire the blocked event.
     for (uint32_t index = 0; index < count; index++) {
       if (!mWaitingDatabases[index]->IsClosed()) {
+        /*
         nsRefPtr<Event> event =
           IDBVersionChangeEvent::CreateBlocked(mRequest,
                                                mOldVersion, mNewVersion);
         NS_ENSURE_TRUE(event, NS_ERROR_FAILURE);
 
         bool dummy;
-        mRequest->DispatchEvent(event, &dummy);
+        mRequest->DispatchEvent(event, &dummy);*/
 
         break;
       }
@@ -1942,49 +1943,11 @@ OpenDatabaseHelper::BlockDatabase()
 void
 OpenDatabaseHelper::DispatchSuccessEvent()
 {
-  NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
-
-  PROFILER_MAIN_THREAD_LABEL("IndexedDB",
-                              "OpenDatabaseHelper::DispatchSuccessEvent");
-
-  nsRefPtr<nsIDOMEvent> event =
-    CreateGenericEvent(mOpenDBRequest, NS_LITERAL_STRING(SUCCESS_EVT_STR),
-                       eDoesNotBubble, eNotCancelable);
-  if (!event) {
-    NS_ERROR("Failed to create event!");
-    return;
-  }
-
-  bool dummy;
-  mOpenDBRequest->DispatchEvent(event, &dummy);
 }
 
 void
 OpenDatabaseHelper::DispatchErrorEvent()
 {
-  NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
-
-  PROFILER_MAIN_THREAD_LABEL("IndexedDB",
-                              "OpenDatabaseHelper::DispatchErrorEvent");
-
-  nsRefPtr<nsIDOMEvent> event =
-    CreateGenericEvent(mOpenDBRequest, NS_LITERAL_STRING(ERROR_EVT_STR),
-                       eDoesBubble, eCancelable);
-  if (!event) {
-    NS_ERROR("Failed to create event!");
-    return;
-  }
-
-  ErrorResult rv;
-  nsRefPtr<DOMError> error = mOpenDBRequest->GetError(rv);
-
-  NS_ASSERTION(!rv.Failed(), "This shouldn't be failing at this point!");
-  if (!error) {
-    mOpenDBRequest->SetError(mResultCode);
-  }
-
-  bool dummy;
-  mOpenDBRequest->DispatchEvent(event, &dummy);
 }
 
 void

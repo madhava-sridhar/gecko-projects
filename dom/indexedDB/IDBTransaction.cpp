@@ -92,7 +92,6 @@ IDBTransaction::~IDBTransaction()
   }
 }
 
-NS_IMETHODIMP_(MozExternalRefCountType) StartTransactionRunnable::Release()
 // static
 already_AddRefed<IDBTransaction>
 IDBTransaction::CreateVersionChange(
@@ -628,15 +627,19 @@ IDBTransaction::FireCompleteOrAbortEvents(nsresult aResult)
 
   nsCOMPtr<nsIDOMEvent> event;
   if (NS_SUCCEEDED(aResult)) {
-    event = CreateGenericEvent(this, NS_LITERAL_STRING(COMPLETE_EVT_STR),
-                               eDoesNotBubble, eNotCancelable);
+    event = CreateGenericEvent(this,
+                               nsDependentString(kCompleteEventType),
+                               eDoesNotBubble,
+                               eNotCancelable);
   } else {
     if (!mError && !mAbortedByScript) {
       mError = new DOMError(GetOwner(), aResult);
     }
 
-    event = CreateGenericEvent(this, NS_LITERAL_STRING(ABORT_EVT_STR),
-                               eDoesBubble, eNotCancelable);
+    event = CreateGenericEvent(this,
+                               nsDependentString(kAbortEventType),
+                               eDoesBubble,
+                               eNotCancelable);
   }
 
   if (NS_WARN_IF(!event)) {

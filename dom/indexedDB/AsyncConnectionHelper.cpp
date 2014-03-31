@@ -271,9 +271,10 @@ AsyncConnectionHelper::Init()
 
 already_AddRefed<nsIDOMEvent>
 AsyncConnectionHelper::CreateSuccessEvent(mozilla::dom::EventTarget* aOwner)
-{
+{/*
   return CreateGenericEvent(mRequest, NS_LITERAL_STRING(SUCCESS_EVT_STR),
-                            eDoesNotBubble, eNotCancelable);
+                            eDoesNotBubble, eNotCancelable);*/
+  return nullptr;
 }
 
 nsresult
@@ -315,48 +316,6 @@ AsyncConnectionHelper::OnSuccess()
 void
 AsyncConnectionHelper::OnError()
 {
-  NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
-  NS_ASSERTION(mRequest, "Null request!");
-
-  PROFILER_MAIN_THREAD_LABEL("IndexedDB", "AsyncConnectionHelper::OnError");
-
-  // Make an error event and fire it at the target.
-  nsRefPtr<nsIDOMEvent> event =
-    CreateGenericEvent(mRequest, NS_LITERAL_STRING(ERROR_EVT_STR), eDoesBubble,
-                       eCancelable);
-  if (!event) {
-    NS_ERROR("Failed to create event!");
-    return;
-  }
-
-  bool doDefault;
-  nsresult rv = mRequest->DispatchEvent(event, &doDefault);
-  if (NS_SUCCEEDED(rv)) {
-    NS_ASSERTION(!mTransaction ||
-                 mTransaction->IsOpen() ||
-                 mTransaction->IsAborted(),
-                 "How else can this be closed?!");
-
-    WidgetEvent* internalEvent = event->GetInternalNSEvent();
-    NS_ASSERTION(internalEvent, "This should never be null!");
-
-    if (internalEvent->mFlags.mExceptionHasBeenRisen &&
-        mTransaction &&
-        mTransaction->IsOpen() &&
-        NS_FAILED(mTransaction->Abort(NS_ERROR_DOM_INDEXEDDB_ABORT_ERR))) {
-      NS_WARNING("Failed to abort transaction!");
-    }
-
-    if (doDefault &&
-        mTransaction &&
-        mTransaction->IsOpen() &&
-        NS_FAILED(mTransaction->Abort(mRequest))) {
-      NS_WARNING("Failed to abort transaction!");
-    }
-  }
-  else {
-    NS_WARNING("DispatchEvent failed!");
-  }
 }
 
 nsresult

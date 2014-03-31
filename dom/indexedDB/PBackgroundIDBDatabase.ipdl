@@ -8,12 +8,21 @@ include protocol PBackgroundIDBVersionChangeTransaction;
 
 include PBackgroundIDBSharedTypes;
 
+using struct mozilla::null_t
+  from "ipc/IPCMessageUtils.h";
+
 using mozilla::dom::indexedDB::IDBTransaction::Mode
   from "mozilla/dom/indexedDB/IDBTransaction.h";
 
 namespace mozilla {
 namespace dom {
 namespace indexedDB {
+
+union NullableVersion
+{
+  null_t;
+  uint64_t;
+};
 
 protocol PBackgroundIDBDatabase
 {
@@ -34,7 +43,7 @@ parent:
 child:
   __delete__();
 
-  VersionChange(uint64_t oldVersion, uint64_t newVersion);
+  VersionChange(uint64_t oldVersion, NullableVersion newVersion);
 
   Invalidate();
 

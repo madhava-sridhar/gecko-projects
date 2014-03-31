@@ -647,6 +647,7 @@ IDBFactory::InitiateRequest(IDBOpenDBRequest* aRequest,
   MOZ_ASSERT(mBackgroundActor);
   MOZ_ASSERT(!mBackgroundActorFailed);
 
+  bool deleting;
   uint64_t requestedVersion;
   PersistenceType persistenceType;
 
@@ -654,13 +655,16 @@ IDBFactory::InitiateRequest(IDBOpenDBRequest* aRequest,
     case FactoryRequestParams::TDeleteDatabaseRequestParams: {
       const DatabaseMetadata& metadata =
         aParams.get_DeleteDatabaseRequestParams().metadata();
+      deleting = true;
       requestedVersion = metadata.version();
       persistenceType = metadata.persistenceType();
       break;
     }
+
     case FactoryRequestParams::TOpenDatabaseRequestParams: {
       const DatabaseMetadata& metadata =
         aParams.get_OpenDatabaseRequestParams().metadata();
+      deleting = false;
       requestedVersion = metadata.version();
       persistenceType = metadata.persistenceType();
       break;
@@ -671,8 +675,8 @@ IDBFactory::InitiateRequest(IDBOpenDBRequest* aRequest,
   }
 
   auto actor =
-    new BackgroundFactoryRequestChild(this, aRequest, requestedVersion,
-                                      persistenceType);
+    new BackgroundFactoryRequestChild(this, aRequest, deleting,
+                                      requestedVersion, persistenceType);
 
   if (!mBackgroundActor->SendPBackgroundIDBFactoryRequestConstructor(actor,
                                                                      aParams)) {

@@ -131,10 +131,10 @@ private:
 class NS_NO_VTABLE TransactionThreadPool::FinishCallback
 {
 public:
-  NS_IMETHOD_(nsrefcnt)
+  NS_IMETHOD_(MozExternalRefCountType)
   AddRef() = 0;
 
-  NS_IMETHOD_(nsrefcnt)
+  NS_IMETHOD_(MozExternalRefCountType)
   Release() = 0;
 
   // Called on the owning thread before any additional transactions are

@@ -389,15 +389,17 @@ DispatchSuccessEvent(ResultHelper* aResultHelper,
 
   nsRefPtr<IDBTransaction> transaction = aResultHelper->Transaction();
 
-  nsCOMPtr<nsIDOMEvent> newEvent;
+  nsCOMPtr<nsIDOMEvent> successEvent;
   if (!aEvent) {
-    newEvent = CreateGenericEvent(request, NS_LITERAL_STRING(SUCCESS_EVT_STR),
-                                  eDoesNotBubble, eNotCancelable);
-    if (NS_WARN_IF(!newEvent)) {
+    successEvent = CreateGenericEvent(request,
+                                      nsDependentString(kSuccessEventType),
+                                      eDoesNotBubble,
+                                      eNotCancelable);
+    if (NS_WARN_IF(!successEvent)) {
       return;
     }
 
-    aEvent = newEvent;
+    aEvent = successEvent;
   }
 
   request->SetResult(&ResultHelper::GetResult, aResultHelper);
@@ -443,12 +445,18 @@ DispatchErrorEvent(IDBRequest* aRequest,
 
   request->SetError(aErrorCode);
 
-  nsCOMPtr<nsIDOMEvent> event = aEvent;
-  if (!event) {
+  nsCOMPtr<nsIDOMEvent> errorEvent;
+  if (!aEvent) {
     // Make an error event and fire it at the target.
-    event = CreateGenericEvent(request, NS_LITERAL_STRING(ERROR_EVT_STR),
-                               eDoesBubble, eCancelable);
-    MOZ_ASSERT(event);
+    errorEvent = CreateGenericEvent(request,
+                                    nsDependentString(kErrorEventType),
+                                    eDoesBubble,
+                                    eCancelable);
+    if (NS_WARN_IF(!errorEvent)) {
+      return;
+    }
+
+    aEvent = errorEvent;
   }
 
   Maybe<AutoSetCurrentTransaction> asct;
@@ -457,13 +465,13 @@ DispatchErrorEvent(IDBRequest* aRequest,
   }
 
   bool doDefault;
-  nsresult rv = request->DispatchEvent(event, &doDefault);
+  nsresult rv = request->DispatchEvent(aEvent, &doDefault);
   if (NS_SUCCEEDED(rv)) {
     MOZ_ASSERT(!transaction ||
                transaction->IsOpen() ||
                transaction->IsAborted());
 
-    WidgetEvent* internalEvent = event->GetInternalNSEvent();
+    WidgetEvent* internalEvent = aEvent->GetInternalNSEvent();
     MOZ_ASSERT(internalEvent);
 
     if (internalEvent->mFlags.mExceptionHasBeenRisen &&
@@ -625,12 +633,14 @@ BackgroundFactoryChild::DeallocPBackgroundIDBDatabaseChild(
 BackgroundFactoryRequestChild::BackgroundFactoryRequestChild(
                                                IDBFactory* aFactory,
                                                IDBOpenDBRequest* aOpenRequest,
+                                               bool aIsDeleteOp,
                                                uint64_t aRequestedVersion,
                                                PersistenceType aPersistenceType)
   : BackgroundRequestChildBase(aOpenRequest)
   , mFactory(aFactory)
   , mRequestedVersion(aRequestedVersion)
   , mPersistenceType(aPersistenceType)
+  , mIsDeleteOp(aIsDeleteOp)
 {
   // Can't assert owning thread here because IPDL has not yet set our manager!
   MOZ_ASSERT(aFactory);
@@ -704,7 +714,19 @@ BackgroundFactoryRequestChild::HandleResponse(
 {
   AssertIsOnOwningThread();
 
-  MOZ_CRASH("Implement me!");
+  ResultHelper helper(mRequest, nullptr, &JS::UndefinedHandleValue);
+
+  nsCOMPtr<nsIDOMEvent> successEvent =
+    IDBVersionChangeEvent::Create(mRequest,
+                                  nsDependentString(kSuccessEventType),
+                                  aResponse.previousVersion());
+  if (NS_WARN_IF(!successEvent)) {
+    return false;
+  }
+
+  DispatchSuccessEvent(&helper, successEvent);
+
+  return true;
 }
 
 bool
@@ -740,12 +762,21 @@ BackgroundFactoryRequestChild::RecvBlocked(const uint64_t& aCurrentVersion)
     return true;
   }
 
-  nsRefPtr<IDBRequest> kungFuDeathGrip = mRequest;
+  const nsDependentString type(kBlockedEventType);
 
   nsCOMPtr<nsIDOMEvent> blockedEvent =
-    IDBVersionChangeEvent::CreateBlocked(mRequest, aCurrentVersion,
-                                         mRequestedVersion);
-  MOZ_ASSERT(blockedEvent);
+    mIsDeleteOp ?
+    IDBVersionChangeEvent::Create(mRequest, type, aCurrentVersion) :
+    IDBVersionChangeEvent::Create(mRequest,
+                                  type,
+                                  aCurrentVersion,
+                                  mRequestedVersion);
+
+  if (NS_WARN_IF(!blockedEvent)) {
+    return false;
+  }
+
+  nsRefPtr<IDBRequest> kungFuDeathGrip = mRequest;
 
   bool dummy;
   NS_WARN_IF(NS_FAILED(mRequest->DispatchEvent(blockedEvent, &dummy)));
@@ -920,8 +951,13 @@ BackgroundDatabaseChild::RecvPBackgroundIDBVersionChangeTransactionConstructor(
   request->SetTransaction(transaction);
 
   nsCOMPtr<nsIDOMEvent> upgradeNeededEvent =
-    IDBVersionChangeEvent::CreateUpgradeNeeded(request, aCurrentVersion,
-                                               aRequestedVersion);
+    IDBVersionChangeEvent::Create(request,
+                                  nsDependentString(kUpgradeNeededEventType),
+                                  aCurrentVersion,
+                                  aRequestedVersion);
+  if (NS_WARN_IF(!upgradeNeededEvent)) {
+    return false;
+  }
 
   ResultHelper helper(request, transaction,
                       static_cast<IDBWrapperCache*>(mDatabase));
@@ -943,7 +979,7 @@ BackgroundDatabaseChild::DeallocPBackgroundIDBVersionChangeTransactionChild(
 
 bool
 BackgroundDatabaseChild::RecvVersionChange(const uint64_t& aOldVersion,
-                                           const uint64_t& aNewVersion)
+                                           const NullableVersion& aNewVersion)
 {
   AssertIsOnOwningThread();
 
@@ -985,9 +1021,31 @@ BackgroundDatabaseChild::RecvVersionChange(const uint64_t& aOldVersion,
   }
 
   // Otherwise fire a versionchange event.
-  nsCOMPtr<nsIDOMEvent> versionChangeEvent =
-    IDBVersionChangeEvent::Create(mDatabase, aOldVersion, aNewVersion);
-  MOZ_ASSERT(versionChangeEvent);
+  const nsDependentString type(kVersionChangeEventType);
+
+  nsCOMPtr<nsIDOMEvent> versionChangeEvent;
+
+  switch (aNewVersion.type()) {
+    case NullableVersion::Tnull_t:
+      versionChangeEvent =
+        IDBVersionChangeEvent::Create(mDatabase, type, aOldVersion);
+      break;
+
+    case NullableVersion::Tuint64_t:
+      versionChangeEvent =
+        IDBVersionChangeEvent::Create(mDatabase,
+                                      type,
+                                      aOldVersion,
+                                      aNewVersion.get_uint64_t());
+      break;
+
+    default:
+      MOZ_ASSUME_UNREACHABLE("Should never get here!");
+  }
+
+  if (NS_WARN_IF(!versionChangeEvent)) {
+    return false;
+  }
 
   bool dummy;
   NS_WARN_IF(NS_FAILED(mDatabase->DispatchEvent(versionChangeEvent, &dummy)));

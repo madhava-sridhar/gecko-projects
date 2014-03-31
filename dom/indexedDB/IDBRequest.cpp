@@ -184,9 +184,13 @@ IDBRequest::DispatchNonTransactionError(nsresult aErrorCode)
 
   // Make an error event and fire it at the target.
   nsCOMPtr<nsIDOMEvent> event =
-    CreateGenericEvent(this, NS_LITERAL_STRING(ERROR_EVT_STR), eDoesBubble,
+    CreateGenericEvent(this,
+                       nsDependentString(kErrorEventType),
+                       eDoesBubble,
                        eCancelable);
-  MOZ_ASSERT(event);
+  if (NS_WARN_IF(!event)) {
+    return;
+  }
 
   bool ignored;
   NS_WARN_IF(NS_FAILED(DispatchEvent(event, &ignored)));

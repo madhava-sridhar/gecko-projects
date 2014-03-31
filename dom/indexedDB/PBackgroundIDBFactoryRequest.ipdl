@@ -15,7 +15,9 @@ struct OpenDatabaseRequestResponse
 };
 
 struct DeleteDatabaseRequestResponse
-{ };
+{
+  uint64_t previousVersion;
+};
 
 union FactoryRequestResponse
 {

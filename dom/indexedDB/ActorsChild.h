@@ -147,6 +147,7 @@ class BackgroundFactoryRequestChild MOZ_FINAL
   nsRefPtr<IDBFactory> mFactory;
   const uint64_t mRequestedVersion;
   const PersistenceType mPersistenceType;
+  const bool mIsDeleteOp;
 
 public:
   IDBOpenDBRequest*
@@ -156,6 +157,7 @@ private:
   // Only created by IDBFactory.
   BackgroundFactoryRequestChild(IDBFactory* aFactory,
                                 IDBOpenDBRequest* aOpenRequest,
+                                bool aIsDeleteOp,
                                 uint64_t aRequestedVersion,
                                 PersistenceType aPersistenceType);
 
@@ -270,7 +272,8 @@ private:
                             MOZ_OVERRIDE;
 
   virtual bool
-  RecvVersionChange(const uint64_t& aOldVersion, const uint64_t& aNewVersion)
+  RecvVersionChange(const uint64_t& aOldVersion,
+                    const NullableVersion& aNewVersion)
                     MOZ_OVERRIDE;
 
   virtual bool
