@@ -92,6 +92,7 @@ IDBTransaction::~IDBTransaction()
   }
 }
 
+NS_IMETHODIMP_(MozExternalRefCountType) StartTransactionRunnable::Release()
 // static
 already_AddRefed<IDBTransaction>
 IDBTransaction::CreateVersionChange(

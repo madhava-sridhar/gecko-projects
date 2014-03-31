@@ -27,6 +27,7 @@
 #include "mozilla/Preferences.h"        // for Preferences
 #include "mozilla/gfx/BasePoint.h"      // for BasePoint
 #include "mozilla/gfx/Matrix.h"         // for Matrix4x4, Matrix
+#include "mozilla/layers/LayerManagerComposite.h"  // for LayerComposite, etc
 #include "mozilla/layers/CompositingRenderTargetOGL.h"
 #include "mozilla/layers/Effects.h"     // for EffectChain, TexturedEffect, etc
 #include "mozilla/layers/TextureHost.h"  // for TextureSource, etc
@@ -43,6 +44,7 @@
 #include "DecomposeIntoNoRepeatTriangles.h"
 #include "ScopedGLHelpers.h"
 #include "GLReadTexImageHelper.h"
+#include "TiledLayerBuffer.h"           // for TiledLayerComposer
 
 #if MOZ_ANDROID_OMTC
 #include "TexturePoolOGL.h"
@@ -280,8 +282,9 @@ CompositorOGL::Initialize()
       LOCAL_GL_NONE
     };
 
-    if (mGLContext->IsGLES2()) {
-        textureTargets[1] = LOCAL_GL_TEXTURE_RECTANGLE_ARB;
+    if (!mGLContext->IsGLES2()) {
+      // No TEXTURE_RECTANGLE_ARB available on ES2
+      textureTargets[1] = LOCAL_GL_TEXTURE_RECTANGLE_ARB;
     }
 
     mFBOTextureTarget = LOCAL_GL_NONE;
@@ -603,17 +606,13 @@ CalculatePOTSize(const IntSize& aSize, GLContext* gl)
 }
 
 void
-CompositorOGL::clearFBRect(const gfx::Rect* aRect)
+CompositorOGL::ClearRect(const gfx::Rect& aRect)
 {
-  if (!aRect) {
-    return;
-  }
-
   // Map aRect to OGL coordinates, origin:bottom-left
-  GLint y = mHeight - (aRect->y + aRect->height);
+  GLint y = mHeight - (aRect.y + aRect.height);
 
   ScopedGLState scopedScissorTestState(mGLContext, LOCAL_GL_SCISSOR_TEST, true);
-  ScopedScissorRect autoScissorRect(mGLContext, aRect->x, y, aRect->width, aRect->height);
+  ScopedScissorRect autoScissorRect(mGLContext, aRect.x, y, aRect.width, aRect.height);
   mGLContext->fClearColor(0.0, 0.0, 0.0, 0.0);
   mGLContext->fClear(LOCAL_GL_COLOR_BUFFER_BIT | LOCAL_GL_DEPTH_BUFFER_BIT);
 }
@@ -1191,19 +1190,34 @@ CompositorOGL::EndFrame()
   // Unbind all textures
   mGLContext->fActiveTexture(LOCAL_GL_TEXTURE0);
   mGLContext->fBindTexture(LOCAL_GL_TEXTURE_2D, 0);
-  mGLContext->fBindTexture(LOCAL_GL_TEXTURE_RECTANGLE_ARB, 0);
+  if (!mGLContext->IsGLES2()) {
+    mGLContext->fBindTexture(LOCAL_GL_TEXTURE_RECTANGLE_ARB, 0);
+  }
+
   mGLContext->fActiveTexture(LOCAL_GL_TEXTURE1);
   mGLContext->fBindTexture(LOCAL_GL_TEXTURE_2D, 0);
-  mGLContext->fBindTexture(LOCAL_GL_TEXTURE_RECTANGLE_ARB, 0);
+  if (!mGLContext->IsGLES2()) {
+    mGLContext->fBindTexture(LOCAL_GL_TEXTURE_RECTANGLE_ARB, 0);
+  }
+
   mGLContext->fActiveTexture(LOCAL_GL_TEXTURE2);
   mGLContext->fBindTexture(LOCAL_GL_TEXTURE_2D, 0);
-  mGLContext->fBindTexture(LOCAL_GL_TEXTURE_RECTANGLE_ARB, 0);
+  if (!mGLContext->IsGLES2()) {
+    mGLContext->fBindTexture(LOCAL_GL_TEXTURE_RECTANGLE_ARB, 0);
+  }
 }
 
 #if defined(MOZ_WIDGET_GONK) && ANDROID_VERSION >= 17
 void
 CompositorOGL::SetFBAcquireFence(Layer* aLayer)
 {
+  // OpenGL does not provide ReleaseFence for rendering.
+  // Instead use FBAcquireFence as layer buffer's ReleaseFence
+  // to prevent flickering and tearing.
+  // FBAcquireFence is FramebufferSurface's AcquireFence.
+  // AcquireFence will be signaled when a buffer's content is available.
+  // See Bug 974152.
+
   if (!aLayer) {
     return;
   }
@@ -1213,7 +1227,7 @@ CompositorOGL::SetFBAcquireFence(Layer* aLayer)
       return;
   }
 
-  // Set FBAcquireFence to child
+  // Set FBAcquireFence on ContainerLayer's childs
   ContainerLayer* container = aLayer->AsContainerLayer();
   if (container) {
     for (Layer* child = container->GetFirstChild(); child; child = child->GetNextSibling()) {
@@ -1222,7 +1236,18 @@ CompositorOGL::SetFBAcquireFence(Layer* aLayer)
     return;
   }
 
-  // Set FBAcquireFence to TexutreHost
+  // Set FBAcquireFence as tiles' ReleaseFence on TiledLayerComposer.
+  TiledLayerComposer* composer = nullptr;
+  LayerComposite* shadow = aLayer->AsLayerComposite();
+  if (shadow) {
+    composer = shadow->GetTiledLayerComposer();
+    if (composer) {
+      composer->SetReleaseFence(new android::Fence(GetGonkDisplay()->GetPrevFBAcquireFd()));
+      return;
+    }
+  }
+
+  // Set FBAcquireFence as layer buffer's ReleaseFence
   LayerRenderState state = aLayer->GetRenderState();
   if (!state.mTexture) {
     return;
@@ -1260,6 +1285,10 @@ CompositorOGL::AbortFrame()
   mGLContext->fBindBuffer(LOCAL_GL_ARRAY_BUFFER, 0);
   mFrameInProgress = false;
   mCurrentRenderTarget = nullptr;
+
+  if (mTexturePool) {
+    mTexturePool->EndFrame();
+  }
 }
 
 void

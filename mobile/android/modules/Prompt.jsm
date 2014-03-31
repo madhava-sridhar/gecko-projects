@@ -148,20 +148,22 @@ Prompt.prototype = {
     });
   },
 
+  addTabs: function(aOptions) {
+    return this._addInput({
+      type: "tabs",
+      items: aOptions.items,
+      id: aOptions.id
+    });
+  },
+
   show: function(callback) {
     this.callback = callback;
     log("Sending message");
-    Services.obs.addObserver(this, "Prompt:Return", false);
     this._innerShow();
   },
 
   _innerShow: function() {
-    sendMessageToJava(this.msg, (aData) => {
-      log("observe " + aData);
-      let data = JSON.parse(aData);
-
-      Services.obs.removeObserver(this, "Prompt:Return", false);
-
+    sendMessageToJava(this.msg, (data) => {
       if (this.callback)
         this.callback(data);
     });
@@ -194,6 +196,12 @@ Prompt.prototype = {
 
       if (item.child)
         obj.inGroup = true;
+
+      if (item.showAsActions)
+        obj.showAsActions = item.showAsActions;
+
+      if (item.icon)
+        obj.icon = item.icon;
 
       this.msg.listitems.push(obj);
 

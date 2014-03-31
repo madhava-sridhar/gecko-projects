@@ -683,20 +683,20 @@ this.UITour = {
 
     let targetQuery = targetObject.query;
     aWindow.PanelUI.ensureReady().then(() => {
+      let node;
       if (typeof targetQuery == "function") {
-        deferred.resolve({
-          addTargetListener: targetObject.addTargetListener,
-          node: targetQuery(aWindow.document),
-          removeTargetListener: targetObject.removeTargetListener,
-          targetName: aTargetName,
-          widgetName: targetObject.widgetName,
-        });
-        return;
+        try {
+          node = targetQuery(aWindow.document);
+        } catch (ex) {
+          node = null;
+        }
+      } else {
+        node = aWindow.document.querySelector(targetQuery);
       }
 
       deferred.resolve({
         addTargetListener: targetObject.addTargetListener,
-        node: aWindow.document.querySelector(targetQuery),
+        node: node,
         removeTargetListener: targetObject.removeTargetListener,
         targetName: aTargetName,
         widgetName: targetObject.widgetName,
@@ -817,6 +817,9 @@ this.UITour = {
           randomEffect--; // On the order of 1 in 2^62 chance of this happening.
         effect = this.highlightEffects[randomEffect];
       }
+      // Toggle the effect attribute to "none" and flush layout before setting it so the effect plays.
+      highlighter.setAttribute("active", "none");
+      aTargetEl.ownerDocument.defaultView.getComputedStyle(highlighter).animationName;
       highlighter.setAttribute("active", effect);
       highlighter.parentElement.setAttribute("targetName", aTarget.targetName);
       highlighter.parentElement.hidden = false;
