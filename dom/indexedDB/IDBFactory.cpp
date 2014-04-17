@@ -605,7 +605,7 @@ IDBFactory::BackgroundActorCreated(PBackgroundChild* aBackgroundActor)
   nsresult rv = NS_OK;
 
   for (uint32_t index = 0; index < mPendingRequests.Length(); index++) {
-    nsAutoPtr<PendingRequestInfo> info = mPendingRequests[index].forget();
+    nsAutoPtr<PendingRequestInfo> info(mPendingRequests[index].forget());
 
     nsresult rv2 = InitiateRequest(info->mRequest, info->mParams);
 
@@ -631,7 +631,7 @@ IDBFactory::BackgroundActorFailed()
   mBackgroundActorFailed = true;
 
   for (uint32_t index = 0; index < mPendingRequests.Length(); index++) {
-    nsAutoPtr<PendingRequestInfo> info = mPendingRequests[index].forget();
+    nsAutoPtr<PendingRequestInfo> info(mPendingRequests[index].forget());
     info->mRequest->
       DispatchNonTransactionError(NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
   }

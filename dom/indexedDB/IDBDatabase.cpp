@@ -249,7 +249,7 @@ IDBDatabase::RevertToPreviousState()
 
   // Hold the current spec alive until RefreshTransactionsSpecEnumerator has
   // finished!
-  nsAutoPtr<DatabaseSpec> currentSpec = mSpec.forget();
+  nsAutoPtr<DatabaseSpec> currentSpec(mSpec.forget());
 
   mSpec = mPreviousSpec.forget();
 

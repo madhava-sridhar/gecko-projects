@@ -5872,7 +5872,7 @@ bool
 TransactionBase::VerifyRequestParams(const CursorRequestParams& aParams) const
 {
   AssertIsOnBackgroundThread();
-  MOZ_ASSERT(aParams.type() != RequestParams::T__None);
+  MOZ_ASSERT(aParams.type() != CursorRequestParams::T__None);
 
   if (mCommittedOrAborted) {
     ASSERT_UNLESS_FUZZING();
@@ -6183,7 +6183,7 @@ TransactionBase::AllocRequest(const RequestParams& aParams)
 
     default:
       ASSERT_UNLESS_FUZZING();
-      return false;
+      return nullptr;
   }
 
   MOZ_ASSERT(actor);
@@ -6707,7 +6707,7 @@ VersionChangeTransaction::UpdateMetadata(nsresult aResult)
     }
   };
 
-  nsAutoPtr<FullDatabaseMetadata> oldMetadata = mOldMetadata.forget();
+  nsAutoPtr<FullDatabaseMetadata> oldMetadata(mOldMetadata.forget());
 
   DatabaseActorInfo* info;
   MOZ_ALWAYS_TRUE(gLiveDatabaseHashtable->Get(oldMetadata->mDatabaseId, &info));
@@ -10765,7 +10765,8 @@ ObjectStoreGetRequestOp::ObjectStoreGetRequestOp(TransactionBase* aTransaction,
   , mOptionalKeyRange(aGetAll ?
                         aParams.get_ObjectStoreGetAllParams()
                                .optionalKeyRange() :
-                        aParams.get_ObjectStoreGetParams().keyRange())
+                        OptionalKeyRange(aParams.get_ObjectStoreGetParams()
+                                                .keyRange()))
   , mLimit(aGetAll ? aParams.get_ObjectStoreGetAllParams().limit() : 1)
   , mGetAll(aGetAll)
 {
@@ -11226,7 +11227,8 @@ IndexGetRequestOp::IndexGetRequestOp(TransactionBase* aTransaction,
   , mFileManager(aTransaction->GetDatabase()->Manager())
   , mOptionalKeyRange(aGetAll ?
                         aParams.get_IndexGetAllParams().optionalKeyRange() :
-                        aParams.get_IndexGetParams().keyRange())
+                        OptionalKeyRange(aParams.get_IndexGetParams()
+                                                .keyRange()))
   , mLimit(aGetAll ? aParams.get_IndexGetAllParams().limit() : 1)
   , mGetAll(aGetAll)
 {
@@ -11376,7 +11378,8 @@ IndexGetKeyRequestOp::IndexGetKeyRequestOp(TransactionBase* aTransaction,
   : IndexRequestOpBase(aTransaction, aParams)
   , mOptionalKeyRange(aGetAll ?
                         aParams.get_IndexGetAllKeysParams().optionalKeyRange() :
-                        aParams.get_IndexGetKeyParams().keyRange())
+                        OptionalKeyRange(aParams.get_IndexGetKeyParams()
+                                                .keyRange()))
   , mLimit(aGetAll ? aParams.get_IndexGetAllKeysParams().limit() : 1)
   , mGetAll(aGetAll)
 {
