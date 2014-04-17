@@ -18,9 +18,7 @@ Cu.import("resource://gre/modules/Promise.jsm");
 Cu.import("resource://gre/modules/osfile.jsm");
 Cu.import("resource://gre/modules/Log.jsm");
 Cu.import("resource://gre/modules/Preferences.jsm");
-Cu.import("resource://services-common/utils.js");
 Cu.import("resource://gre/modules/AsyncShutdown.jsm");
-Cu.import("resource://gre/modules/Metrics.jsm");
 
 XPCOMUtils.defineLazyModuleGetter(this, "UpdateChannel",
                                   "resource://gre/modules/UpdateChannel.jsm");
@@ -30,6 +28,11 @@ XPCOMUtils.defineLazyModuleGetter(this, "TelemetryPing",
                                   "resource://gre/modules/TelemetryPing.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "TelemetryLog",
                                   "resource://gre/modules/TelemetryLog.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "CommonUtils",
+                                  "resource://services-common/utils.js");
+XPCOMUtils.defineLazyModuleGetter(this, "Metrics",
+                                  "resource://gre/modules/Metrics.jsm");
+
 // CertUtils.jsm doesn't expose a single "CertUtils" object like a normal .jsm
 // would.
 XPCOMUtils.defineLazyGetter(this, "CertUtils",
@@ -55,6 +58,7 @@ const MIN_EXPERIMENT_ACTIVE_SECONDS = 60;
 
 const PREF_BRANCH               = "experiments.";
 const PREF_ENABLED              = "enabled"; // experiments.enabled
+const PREF_ACTIVE_EXPERIMENT    = "activeExperiment"; // whether we have an active experiment
 const PREF_LOGGING              = "logging";
 const PREF_LOGGING_LEVEL        = PREF_LOGGING + ".level"; // experiments.logging.level
 const PREF_LOGGING_DUMP         = PREF_LOGGING + ".dump"; // experiments.logging.dump
@@ -67,7 +71,6 @@ const PREF_HEALTHREPORT_ENABLED = "datareporting.healthreport.service.enabled";
 
 const PREF_BRANCH_TELEMETRY     = "toolkit.telemetry.";
 const PREF_TELEMETRY_ENABLED    = "enabled";
-const PREF_TELEMETRY_PRERELEASE = "enabledPreRelease";
 
 const TELEMETRY_LOG = {
   // log(key, [kind, experimentId, details])
@@ -98,6 +101,10 @@ let gLogAppenderDump = null;
 let gPolicyCounter = 0;
 let gExperimentsCounter = 0;
 let gExperimentEntryCounter = 0;
+
+// Tracks active AddonInstall we know about so we can deny external
+// installs.
+let gActiveInstallURLs = new Set();
 
 let gLogger;
 let gLogDumping = false;
@@ -167,8 +174,7 @@ function loadJSONAsync(file, options) {
 }
 
 function telemetryEnabled() {
-  return gPrefsTelemetry.get(PREF_TELEMETRY_ENABLED, false) ||
-         gPrefsTelemetry.get(PREF_TELEMETRY_PRERELEASE, false);
+  return gPrefsTelemetry.get(PREF_TELEMETRY_ENABLED, false);
 }
 
 // Returns a promise that is resolved with the AddonInstall for that URL.
@@ -210,6 +216,10 @@ function uninstallAddons(addons) {
   AddonManager.addAddonListener(listener);
 
   for (let addon of addons) {
+    // Disabling the add-on before uninstalling is necessary to cause tests to
+    // pass. This might be indicative of a bug in XPIProvider.
+    // TODO follow up in bug 992396.
+    addon.userDisabled = true;
     addon.uninstall();
   }
 
@@ -254,7 +264,7 @@ Experiments.Policy.prototype = {
     if (pref !== undefined) {
       let val = Number.parseFloat(pref);
       this._log.debug("random sample forced: " + val);
-      if (IsNaN(val) || val < 0) {
+      if (isNaN(val) || val < 0) {
         return 0;
       }
       if (val > 1) {
@@ -347,6 +357,7 @@ Experiments.Experiments.prototype = {
   QueryInterface: XPCOMUtils.generateQI([Ci.nsITimerCallback, Ci.nsIObserver]),
 
   init: function () {
+    this._shutdown = false;
     configureLogging();
 
     gExperimentsEnabled = gPrefs.get(PREF_ENABLED, false);
@@ -357,12 +368,11 @@ Experiments.Experiments.prototype = {
     gPrefs.observe(PREF_ENABLED, this._toggleExperimentsEnabled, this);
 
     gPrefsTelemetry.observe(PREF_TELEMETRY_ENABLED, this._telemetryStatusChanged, this);
-    gPrefsTelemetry.observe(PREF_TELEMETRY_PRERELEASE, this._telemetryStatusChanged, this);
 
     AsyncShutdown.profileBeforeChange.addBlocker("Experiments.jsm shutdown",
       this.uninit.bind(this));
 
-    AddonManager.addAddonListener(this);
+    this._startWatchingAddons();
 
     this._loadTask = Task.spawn(this._loadFromCache.bind(this));
     this._loadTask.then(
@@ -378,19 +388,27 @@ Experiments.Experiments.prototype = {
   },
 
   /**
+   * Uninitialize this instance.
+   *
+   * This function is susceptible to race conditions. If it is called multiple
+   * times before the previous uninit() has completed or if it is called while
+   * an init() operation is being performed, the object may get in bad state
+   * and/or deadlock could occur.
+   *
    * @return Promise<>
    *         The promise is fulfilled when all pending tasks are finished.
    */
-  uninit: function () {
+  uninit: Task.async(function* () {
+    yield this._loadTask;
+
     if (!this._shutdown) {
-      AddonManager.removeAddonListener(this);
+      this._stopWatchingAddons();
 
       gPrefs.ignore(PREF_LOGGING, configureLogging);
       gPrefs.ignore(PREF_MANIFEST_URI, this.updateManifest, this);
       gPrefs.ignore(PREF_ENABLED, this._toggleExperimentsEnabled, this);
 
       gPrefsTelemetry.ignore(PREF_TELEMETRY_ENABLED, this._telemetryStatusChanged, this);
-      gPrefsTelemetry.ignore(PREF_TELEMETRY_PRERELEASE, this._telemetryStatusChanged, this);
 
       if (this._timer) {
         this._timer.clear();
@@ -399,9 +417,20 @@ Experiments.Experiments.prototype = {
 
     this._shutdown = true;
     if (this._mainTask) {
-      return this._mainTask;
+      yield this._mainTask;
     }
-    return Promise.resolve();
+
+    this._log.info("Completed uninitialization.");
+  }),
+
+  _startWatchingAddons: function () {
+    AddonManager.addAddonListener(this);
+    AddonManager.addInstallListener(this);
+  },
+
+  _stopWatchingAddons: function () {
+    AddonManager.removeInstallListener(this);
+    AddonManager.removeAddonListener(this);
   },
 
   /**
@@ -558,6 +587,10 @@ Experiments.Experiments.prototype = {
     do {
       this._log.trace("_main iteration");
       yield this._loadTask;
+      if (!gExperimentsEnabled) {
+        this._refresh = false;
+      }
+
       if (this._refresh) {
         yield this._loadManifest();
       }
@@ -646,6 +679,42 @@ Experiments.Experiments.prototype = {
       return;
     }
     this.disableExperiment();
+  },
+
+  onInstallStarted: function (install) {
+    if (install.addon.type != "experiment") {
+      return;
+    }
+
+    // We want to be in control of all experiment add-ons: reject installs
+    // for add-ons that we don't know about.
+
+    // We have a race condition of sorts to worry about here. We have 2
+    // onInstallStarted listeners. This one (the global one) and the one
+    // created as part of ExperimentEntry._installAddon. Because of the order
+    // they are registered in, this one likely executes first. Unfortunately,
+    // this means that the add-on ID is not yet set on the ExperimentEntry.
+    // So, we can't just look at this._trackedAddonIds because the new experiment
+    // will have its add-on ID set to null. We work around this by storing a
+    // identifying field - the source URL of the install - in a module-level
+    // variable (so multiple Experiments instances doesn't cancel each other
+    // out).
+
+    if (this._trackedAddonIds.has(install.addon.id)) {
+      this._log.info("onInstallStarted allowing install because add-on ID " +
+                     "tracked by us.");
+      return;
+    }
+
+    if (gActiveInstallURLs.has(install.sourceURI.spec)) {
+      this._log.info("onInstallStarted allowing install because install " +
+                     "tracked by us.");
+      return;
+    }
+
+    this._log.warn("onInstallStarted cancelling install of unknown " +
+                   "experiment add-on: " + install.addon.id);
+    return false;
   },
 
   // END OF ADD-ON LISTENERS.
@@ -815,7 +884,11 @@ Experiments.Experiments.prototype = {
     // Make sure we keep experiments that are or were running.
     // We remove them after KEEP_HISTORY_N_DAYS.
     for (let [id, entry] of this._experiments) {
-      if (experiments.has(id) || !entry.startDate || entry.shouldDiscard()) {
+      if (experiments.has(id)) {
+        continue;
+      }
+
+      if (!entry.startDate || entry.shouldDiscard()) {
         this._log.trace("updateExperiments() - discarding entry for " + id);
         continue;
       }
@@ -855,6 +928,17 @@ Experiments.Experiments.prototype = {
     return this._run();
   },
 
+  /**
+   * The Set of add-on IDs that we know about from manifests.
+   */
+  get _trackedAddonIds() {
+    if (!this._experiments) {
+      return new Set();
+    }
+
+    return new Set([e._addonId for ([,e] of this._experiments) if (e._addonId)]);
+  },
+
   /*
    * Task function to check applicability of experiments, disable the active
    * experiment if needed and activate the first applicable candidate.
@@ -879,7 +963,7 @@ Experiments.Experiments.prototype = {
     // should have some record of it. In the end, we decide to discard all
     // knowledge for these unknown experiment add-ons.
     let installedExperiments = yield installedExperimentAddons();
-    let expectedAddonIds = new Set([e._addonId for ([,e] of this._experiments)]);
+    let expectedAddonIds = this._trackedAddonIds;
     let unknownAddons = [a for (a of installedExperiments) if (!expectedAddonIds.has(a.id))];
     if (unknownAddons.length) {
       this._log.warn("_evaluateExperiments() - unknown add-ons in AddonManager: " +
@@ -891,6 +975,11 @@ Experiments.Experiments.prototype = {
     let activeExperiment = this._getActiveExperiment();
     let activeChanged = false;
     let now = this._policy.now();
+
+    if (!activeExperiment) {
+      // Avoid this pref staying out of sync if there were e.g. crashes.
+      gPrefs.set(PREF_ACTIVE_EXPERIMENT, false);
+    }
 
     if (activeExperiment) {
       this._pendingUninstall = activeExperiment._addonId;
@@ -908,6 +997,8 @@ Experiments.Experiments.prototype = {
                         + activeExperiment.id);
           activeExperiment = null;
           activeChanged = true;
+        } else if (!gExperimentsEnabled) {
+          // No further actions if the feature is disabled.
         } else if (activeExperiment.needsUpdate) {
           this._log.debug("evaluateExperiments() - updating experiment "
                         + activeExperiment.id);
@@ -921,6 +1012,8 @@ Experiments.Experiments.prototype = {
           }
           this._dirty = true;
           activeChanged = true;
+        } else {
+          yield activeExperiment.ensureActive();
         }
       } finally {
         this._pendingUninstall = null;
@@ -928,7 +1021,7 @@ Experiments.Experiments.prototype = {
     }
     this._terminateReason = null;
 
-    if (!activeExperiment) {
+    if (!activeExperiment && gExperimentsEnabled) {
       for (let [id, experiment] of this._experiments) {
         let applicable;
         let reason = null;
@@ -1397,6 +1490,7 @@ Experiments.ExperimentEntry.prototype = {
       }
 
       yield this._installAddon();
+      gPrefs.set(PREF_ACTIVE_EXPERIMENT, true);
     }.bind(this));
   },
 
@@ -1406,11 +1500,14 @@ Experiments.ExperimentEntry.prototype = {
 
     let install = yield addonInstallForURL(this._manifestData.xpiURL,
                                            this._manifestData.xpiHash);
+    gActiveInstallURLs.add(install.sourceURI.spec);
+
     let failureHandler = (install, handler) => {
       let message = "AddonInstall " + handler + " for " + this.id + ", state=" +
                    (install.state || "?") + ", error=" + install.error;
       this._log.error("_installAddon() - " + message);
       this._failedStart = true;
+      gActiveInstallURLs.delete(install.sourceURI.spec);
 
       TelemetryLog.log(TELEMETRY_LOG.ACTIVATION_KEY,
                       [TELEMETRY_LOG.ACTIVATION.INSTALL_FAILURE, this.id]);
@@ -1419,6 +1516,8 @@ Experiments.ExperimentEntry.prototype = {
     };
 
     let listener = {
+      _expectedID: null,
+
       onDownloadEnded: install => {
         this._log.trace("_installAddon() - onDownloadEnded for " + this.id);
 
@@ -1443,13 +1542,12 @@ Experiments.ExperimentEntry.prototype = {
           this._log.error("_installAddon() - onInstallStarted, wrong addon type");
           return false;
         }
-
-        // Experiment add-ons default to userDisabled = true.
-        install.addon.userDisabled = false;
       },
 
       onInstallEnded: install => {
         this._log.trace("_installAddon() - install ended for " + this.id);
+        gActiveInstallURLs.delete(install.sourceURI.spec);
+
         this._lastChangedDate = this._policy.now();
         this._startDate = this._policy.now();
         this._enabled = true;
@@ -1463,6 +1561,26 @@ Experiments.ExperimentEntry.prototype = {
         this._description = addon.description || "";
         this._homepageURL = addon.homepageURL || "";
 
+        // Experiment add-ons default to userDisabled=true. Enable if needed.
+        if (addon.userDisabled) {
+          this._log.trace("Add-on is disabled. Enabling.");
+          listener._expectedID = addon.id;
+          AddonManager.addAddonListener(listener);
+          addon.userDisabled = false;
+        } else {
+          this._log.trace("Add-on is enabled. start() completed.");
+          deferred.resolve();
+        }
+      },
+
+      onEnabled: addon => {
+        this._log.info("onEnabled() for " + addon.id);
+
+        if (addon.id != listener._expectedID) {
+          return;
+        }
+
+        AddonManager.removeAddonListener(listener);
         deferred.resolve();
       },
     };
@@ -1493,6 +1611,8 @@ Experiments.ExperimentEntry.prototype = {
     }
 
     this._enabled = false;
+    gPrefs.set(PREF_ACTIVE_EXPERIMENT, false);
+
     let deferred = Promise.defer();
     let updateDates = () => {
       let now = this._policy.now();
@@ -1500,7 +1620,7 @@ Experiments.ExperimentEntry.prototype = {
       this._endDate = now;
     };
 
-    AddonManager.getAddonByID(this._addonId, addon => {
+    this._getAddon().then((addon) => {
       if (!addon) {
         let message = "could not get Addon for " + this.id;
         this._log.warn("stop() - " + message);
@@ -1513,6 +1633,61 @@ Experiments.ExperimentEntry.prototype = {
       this._logTermination(terminationKind, terminationReason);
       deferred.resolve(uninstallAddons([addon]));
     });
+
+    return deferred.promise;
+  },
+
+  /**
+   * Try to ensure this experiment is active.
+   *
+   * The returned promise will be resolved if the experiment is active
+   * in the Addon Manager or rejected if it isn't.
+   *
+   * @return Promise<>
+   */
+  ensureActive: Task.async(function* () {
+    this._log.trace("ensureActive() for " + this.id);
+
+    let addon = yield this._getAddon();
+    if (!addon) {
+      this._log.warn("Experiment is not installed: " + this._addonId);
+      throw new Error("Experiment is not installed: " + this._addonId);
+    }
+
+    // User disabled likely means the experiment is disabled at startup,
+    // since the permissions don't allow it to be disabled by the user.
+    if (!addon.userDisabled) {
+      return;
+    }
+
+    let deferred = Promise.defer();
+
+    let listener = {
+      onEnabled: enabledAddon => {
+        if (enabledAddon.id != addon.id) {
+          return;
+        }
+
+        AddonManager.removeAddonListener(listener);
+        deferred.resolve();
+      },
+    };
+
+    this._log.info("Activating add-on: " + addon.id);
+    AddonManager.addAddonListener(listener);
+    addon.userDisabled = false;
+    yield deferred.promise;
+  }),
+
+  /**
+   * Obtain the underlying Addon from the Addon Manager.
+   *
+   * @return Promise<Addon|null>
+   */
+  _getAddon: function () {
+    let deferred = Promise.defer();
+
+    AddonManager.getAddonByID(this._addonId, deferred.resolve);
 
     return deferred.promise;
   },
@@ -1542,8 +1717,13 @@ Experiments.ExperimentEntry.prototype = {
    */
   maybeStop: function () {
     this._log.trace("maybeStop()");
+    return Task.spawn(function* ExperimentEntry_maybeStop_task() {
+      if (!gExperimentsEnabled) {
+        this._log.warn("maybeStop() - should not get here");
+        yield this.stop(TELEMETRY_LOG.TERMINATION.FROM_API);
+        return true;
+      }
 
-    return Task.spawn(function ExperimentEntry_maybeStop_task() {
       let result = yield this._shouldStop();
       if (result.shouldStop) {
         let expireReasons = ["endTime", "maxActiveSeconds"];
@@ -1554,7 +1734,7 @@ Experiments.ExperimentEntry.prototype = {
         }
       }
 
-      throw new Task.Result(result.shouldStop);
+      return result.shouldStop;
     }.bind(this));
   },
 
@@ -1680,8 +1860,6 @@ ExperimentsProvider.prototype = Object.freeze({
   ],
 
   postInit: function () {
-    this._experiments = Experiments.instance();
-
     for (let o of this._OBSERVERS) {
       Services.obs.addObserver(this, o, false);
     }
@@ -1710,6 +1888,14 @@ ExperimentsProvider.prototype = Object.freeze({
   },
 
   recordLastActiveExperiment: function () {
+    if (!gExperimentsEnabled) {
+      return Promise.resolve();
+    }
+
+    if (!this._experiments) {
+      this._experiments = Experiments.instance();
+    }
+
     let m = this.getMeasurement(ExperimentsLastActiveMeasurement1.prototype.name,
                                 ExperimentsLastActiveMeasurement1.prototype.version);
 

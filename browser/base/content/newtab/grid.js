@@ -37,7 +37,7 @@ let gGrid = {
   get sites() [cell.site for each (cell in this.cells)],
 
   // Tells whether the grid has already been initialized.
-  get ready() !!this._node,
+  get ready() !!this._ready,
 
   /**
    * Initializes the grid.
@@ -46,7 +46,11 @@ let gGrid = {
   init: function Grid_init() {
     this._node = document.getElementById("newtab-grid");
     this._createSiteFragment();
-    this._render();
+    this._renderGrid();
+    gLinks.populateCache(() => {
+      this._renderSites();
+      this._ready = true;
+    });
     addEventListener("load", this);
     addEventListener("resize", this);
   },
@@ -69,14 +73,6 @@ let gGrid = {
   handleEvent: function Grid_handleEvent(aEvent) {
     switch (aEvent.type) {
       case "load":
-        // Save the cell's computed height/width including margin and border
-        let refCell = document.querySelector(".newtab-cell");
-        this._cellMargin = parseFloat(getComputedStyle(refCell).marginTop) * 2;
-        this._cellHeight = refCell.offsetHeight + this._cellMargin;
-        this._cellWidth = refCell.offsetWidth + this._cellMargin;
-        this._resizeGrid();
-        break;
-
       case "resize":
         this._resizeGrid();
         break;
@@ -97,8 +93,11 @@ let gGrid = {
     }, this);
 
     // Render the grid again.
-    this._render();
-    this._resizeGrid();
+    if (this._shouldRenderGrid()) {
+      this._renderGrid();
+      this._resizeGrid();
+    }
+    this._renderSites();
   },
 
   /**
@@ -162,7 +161,9 @@ let gGrid = {
       '<input type="button" title="' + newTabString("pin") + '"' +
       '       class="newtab-control newtab-control-pin"/>' +
       '<input type="button" title="' + newTabString("block") + '"' +
-      '       class="newtab-control newtab-control-block"/>';
+      '       class="newtab-control newtab-control-block"/>' +
+      '<input type="button" title="' + newTabString("sponsored") + '"' +
+      '       class="newtab-control newtab-control-sponsored"/>';
 
     this._siteFragment = document.createDocumentFragment();
     this._siteFragment.appendChild(site);
@@ -184,20 +185,17 @@ let gGrid = {
   },
 
   /**
-   * Renders the grid.
-   */
-  _render: function Grid_render() {
-    if (this._shouldRenderGrid()) {
-      this._renderGrid();
-    }
-
-    this._renderSites();
-  },
-
-  /**
    * Make sure the correct number of rows and columns are visible
    */
   _resizeGrid: function Grid_resizeGrid() {
+    // Save the cell's computed height/width including margin and border
+    if (this._cellMargin === undefined) {
+      let refCell = document.querySelector(".newtab-cell");
+      this._cellMargin = parseFloat(getComputedStyle(refCell).marginTop) * 2;
+      this._cellHeight = refCell.offsetHeight + this._cellMargin;
+      this._cellWidth = refCell.offsetWidth + this._cellMargin;
+    }
+
     let availSpace = document.documentElement.clientHeight - this._cellMargin -
                      document.querySelector("#newtab-margin-top").offsetHeight;
     let visibleRows = Math.floor(availSpace / this._cellHeight);

@@ -25,6 +25,7 @@
 #include "VideoUtils.h"
 #ifdef MOZ_WIDGET_GONK
 #include "GrallocImages.h"
+#include "mozilla/layers/GrallocTextureClient.h"
 #endif
 #endif
 
@@ -37,7 +38,6 @@
 #include "transportlayerdtls.h"
 #include "transportlayerice.h"
 #include "runnable_utils.h"
-#include "gfxImageSurface.h"
 #include "libyuv/convert.h"
 #include "mozilla/gfx/Point.h"
 #include "mozilla/gfx/Types.h"
@@ -1112,10 +1112,7 @@ void MediaPipelineTransmit::PipelineListener::ProcessVideoChunk(
 #ifdef MOZ_WIDGET_GONK
   if (format == ImageFormat::GRALLOC_PLANAR_YCBCR) {
     layers::GrallocImage *nativeImage = static_cast<layers::GrallocImage*>(img);
-    layers::SurfaceDescriptor handle = nativeImage->GetSurfaceDescriptor();
-    layers::SurfaceDescriptorGralloc grallocHandle = handle.get_SurfaceDescriptorGralloc();
-
-    android::sp<android::GraphicBuffer> graphicBuffer = layers::GrallocBufferActor::GetFrom(grallocHandle);
+    android::sp<android::GraphicBuffer> graphicBuffer = nativeImage->GetGraphicBuffer();
     void *basePtr;
     graphicBuffer->lock(android::GraphicBuffer::USAGE_SW_READ_MASK, &basePtr);
     conduit->SendVideoFrame(static_cast<unsigned char*>(basePtr),

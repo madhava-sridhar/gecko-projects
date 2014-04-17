@@ -521,7 +521,7 @@ NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(IDBIndex)
 NS_IMPL_CYCLE_COLLECTION_UNLINK_END
 
 JSObject*
-IDBIndex::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aScope)
+IDBIndex::WrapObject(JSContext* aCx)
 {
-  return IDBIndexBinding::Wrap(aCx, aScope, this);
+  return IDBIndexBinding::Wrap(aCx, this);
 }

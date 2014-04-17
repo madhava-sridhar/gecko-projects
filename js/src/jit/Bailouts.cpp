@@ -13,6 +13,7 @@
 #include "jit/IonSpewer.h"
 #include "jit/JitCompartment.h"
 #include "jit/Snapshots.h"
+#include "vm/TraceLogging.h"
 
 #include "jit/IonFrameIterator-inl.h"
 #include "vm/Stack-inl.h"
@@ -41,7 +42,9 @@ SnapshotIterator::SnapshotIterator(const IonBailoutIterator &iter)
               iter.snapshotOffset(),
               iter.ionScript()->snapshotsRVATableSize(),
               iter.ionScript()->snapshotsListSize()),
-    recover_(snapshot_),
+    recover_(snapshot_,
+             iter.ionScript()->recovers(),
+             iter.ionScript()->recoversSize()),
     fp_(iter.jsFrame()),
     machine_(iter.machineState()),
     ionScript_(iter.ionScript())
@@ -76,6 +79,9 @@ jit::Bailout(BailoutStack *sp, BaselineBailoutInfo **bailoutInfo)
     IonBailoutIterator iter(jitActivations, sp);
     JitActivation *activation = jitActivations.activation()->asJit();
 
+    TraceLogger *logger = TraceLoggerForMainThread(cx->runtime());
+    TraceLogTimestamp(logger, TraceLogger::Bailout);
+
     IonSpew(IonSpew_Bailouts, "Took bailout! Snapshot offset: %d", iter.snapshotOffset());
 
     JS_ASSERT(IsBaselineEnabled(cx));
@@ -106,6 +112,9 @@ jit::InvalidationBailout(InvalidationBailoutStack *sp, size_t *frameSizeOut,
     JitActivationIterator jitActivations(cx->runtime());
     IonBailoutIterator iter(jitActivations, sp);
     JitActivation *activation = jitActivations.activation()->asJit();
+
+    TraceLogger *logger = TraceLoggerForMainThread(cx->runtime());
+    TraceLogTimestamp(logger, TraceLogger::Invalidation);
 
     IonSpew(IonSpew_Bailouts, "Took invalidation bailout! Snapshot offset: %d", iter.snapshotOffset());
 

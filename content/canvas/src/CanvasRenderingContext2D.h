@@ -54,7 +54,7 @@ public:
 
   nsCOMPtr<nsISupports> GetParentObject() { return mParent; }
 
-  JSObject* WrapObject(JSContext* aCx, JS::Handle<JSObject*> aScope);
+  JSObject* WrapObject(JSContext* aCx);
 
   static already_AddRefed<CanvasPath> Constructor(const GlobalObject& aGlobal,
                                                   ErrorResult& rv);
@@ -96,7 +96,10 @@ private:
   nsCOMPtr<nsISupports> mParent;
   static gfx::Float ToFloat(double aValue) { return gfx::Float(aValue); }
 
+  mutable RefPtr<gfx::Path> mPath;
   mutable RefPtr<gfx::PathBuilder> mPathBuilder;
+
+  void EnsurePathBuilder() const;
 };
 
 struct CanvasBidiProcessor;
@@ -116,8 +119,7 @@ public:
   CanvasRenderingContext2D();
   virtual ~CanvasRenderingContext2D();
 
-  virtual JSObject* WrapObject(JSContext *cx,
-                               JS::Handle<JSObject*> scope) MOZ_OVERRIDE;
+  virtual JSObject* WrapObject(JSContext *cx) MOZ_OVERRIDE;
 
   HTMLCanvasElement* GetCanvas() const
   {

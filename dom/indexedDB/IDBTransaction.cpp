@@ -807,11 +807,11 @@ NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN_INHERITED(IDBTransaction, IDBWrapperCache)
 NS_IMPL_CYCLE_COLLECTION_UNLINK_END
 
 JSObject*
-IDBTransaction::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aScope)
+IDBTransaction::WrapObject(JSContext* aCx)
 {
   AssertIsOnOwningThread();
 
-  return IDBTransactionBinding::Wrap(aCx, aScope, this);
+  return IDBTransactionBinding::Wrap(aCx, this);
 }
 
 nsresult

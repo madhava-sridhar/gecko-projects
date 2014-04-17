@@ -1750,7 +1750,8 @@ OpenDatabaseHelper::StartDelete()
   NS_ASSERTION(quotaManager, "This should never be null!");
 
   rv = quotaManager->AcquireExclusiveAccess(
-         mDatabase, mDatabase->Origin(), helper,
+         mDatabase, mDatabase->Origin(),
+         Nullable<PersistenceType>(mDatabase->Type()), helper,
          &VersionChangeEventsRunnable::QueueVersionChange<DeleteDatabaseHelper>,
          helper);
   IDB_ENSURE_SUCCESS(rv, NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);

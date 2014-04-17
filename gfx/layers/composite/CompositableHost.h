@@ -46,7 +46,6 @@ struct TiledLayerProperties
 };
 
 class Layer;
-class DeprecatedTextureHost;
 class SurfaceDescriptor;
 class Compositor;
 class ISurfaceAllocator;
@@ -57,18 +56,18 @@ struct EffectChain;
 /**
  * A base class for doing CompositableHost and platform dependent task on TextureHost.
  */
-class CompositableBackendSpecificData : public RefCounted<CompositableBackendSpecificData>
+class CompositableBackendSpecificData
 {
+protected:
+  virtual ~CompositableBackendSpecificData() { }
+
 public:
-  MOZ_DECLARE_REFCOUNTED_TYPENAME(CompositableBackendSpecificData)
+  NS_INLINE_DECL_REFCOUNTING(CompositableBackendSpecificData)
+
   CompositableBackendSpecificData()
   {
-    MOZ_COUNT_CTOR(CompositableBackendSpecificData);
   }
-  virtual ~CompositableBackendSpecificData()
-  {
-    MOZ_COUNT_DTOR(CompositableBackendSpecificData);
-  }
+
   virtual void SetCompositor(Compositor* aCompositor) {}
   virtual void ClearData()
   {
@@ -125,13 +124,14 @@ protected:
  * will use its TextureHost(s) and call Compositor::DrawQuad to do the actual
  * rendering.
  */
-class CompositableHost : public RefCounted<CompositableHost>
+class CompositableHost
 {
-public:
-  MOZ_DECLARE_REFCOUNTED_TYPENAME(CompositableHost)
-  CompositableHost(const TextureInfo& aTextureInfo);
-
+protected:
   virtual ~CompositableHost();
+
+public:
+  NS_INLINE_DECL_REFCOUNTING(CompositableHost)
+  CompositableHost(const TextureInfo& aTextureInfo);
 
   static TemporaryRef<CompositableHost> Create(const TextureInfo& aTextureInfo);
 
@@ -158,12 +158,6 @@ public:
                          const gfx::Rect& aClipRect,
                          const nsIntRegion* aVisibleRegion = nullptr,
                          TiledLayerProperties* aLayerProperties = nullptr) = 0;
-
-  /**
-   * @return true if we should schedule a composition.
-   */
-  virtual bool Update(const SurfaceDescriptor& aImage,
-                      SurfaceDescriptor* aResult = nullptr);
 
   /**
    * Update the content host.
@@ -202,29 +196,6 @@ public:
   }
 
   /**
-   * Ensure that a suitable texture host exists in this compositable. The
-   * compositable host may or may not create a new texture host. If a texture
-   * host is replaced, then the compositable is responsible for enusring it is
-   * destroyed correctly (without leaking resources).
-   * aTextureId - identifies the texture within the compositable, how the
-   * compositable chooses to use this is between the compositable client and
-   * host and will vary between types of compositable.
-   * aSurface - the new or existing texture host should support surface
-   * descriptors of the same type and, if necessary, this specific surface
-   * descriptor. Whether it is necessary or not depends on the protocol between
-   * the compositable client and host.
-   * aAllocator - the allocator used to allocate and de-allocate resources.
-   * aTextureInfo - contains flags for the texture.
-   */
-  virtual void EnsureDeprecatedTextureHost(TextureIdentifier aTextureId,
-                                 const SurfaceDescriptor& aSurface,
-                                 ISurfaceAllocator* aAllocator,
-                                 const TextureInfo& aTextureInfo)
-  {
-    MOZ_ASSERT(false, "should be implemented or not used");
-  }
-
-  /**
    * Ensure that a suitable texture host exists in this compsitable.
    *
    * Only used with ContentHostIncremental.
@@ -233,14 +204,12 @@ public:
    * don't have a single surface for the texture contents, and we
    * need to allocate our own one to be updated later.
    */
-  virtual void EnsureDeprecatedTextureHostIncremental(ISurfaceAllocator* aAllocator,
-                                            const TextureInfo& aTextureInfo,
-                                            const nsIntRect& aBufferRect)
+  virtual void CreatedIncrementalTexture(ISurfaceAllocator* aAllocator,
+                                         const TextureInfo& aTextureInfo,
+                                         const nsIntRect& aBufferRect)
   {
     MOZ_ASSERT(false, "should be implemented or not used");
   }
-
-  virtual DeprecatedTextureHost* GetDeprecatedTextureHost() { return nullptr; }
 
   /**
    * Returns the front buffer.
@@ -319,7 +288,6 @@ public:
   virtual void Dump(FILE* aFile=nullptr,
                     const char* aPrefix="",
                     bool aDumpHtml=false) { }
-  static void DumpDeprecatedTextureHost(FILE* aFile, DeprecatedTextureHost* aTexture);
   static void DumpTextureHost(FILE* aFile, TextureHost* aTexture);
 
   virtual TemporaryRef<gfx::DataSourceSurface> GetAsSurface() { return nullptr; }

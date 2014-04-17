@@ -12,8 +12,9 @@
 #include "jit/IonSpewer.h"
 #ifdef TRACK_SNAPSHOTS
 # include "jit/LIR.h"
-# include "jit/MIR.h"
 #endif
+#include "jit/MIR.h"
+#include "jit/Recover.h"
 
 using namespace js;
 using namespace js::jit;
@@ -465,19 +466,25 @@ SnapshotReader::SnapshotReader(const uint8_t *snapshots, uint32_t offset,
 }
 
 #define COMPUTE_SHIFT_AFTER_(name) (name ## _BITS + name ##_SHIFT)
-#define COMPUTE_MASK_(name) (((1 << name ## _BITS) - 1) << name ##_SHIFT)
+#define COMPUTE_MASK_(name) ((uint32_t(1 << name ## _BITS) - 1) << name ##_SHIFT)
 
+// Details of snapshot header packing.
 static const uint32_t SNAPSHOT_BAILOUTKIND_SHIFT = 0;
 static const uint32_t SNAPSHOT_BAILOUTKIND_BITS = 3;
 static const uint32_t SNAPSHOT_BAILOUTKIND_MASK = COMPUTE_MASK_(SNAPSHOT_BAILOUTKIND);
 
-static const uint32_t SNAPSHOT_RESUMEAFTER_SHIFT = COMPUTE_SHIFT_AFTER_(SNAPSHOT_BAILOUTKIND);
-static const uint32_t SNAPSHOT_RESUMEAFTER_BITS = 1;
-static const uint32_t SNAPSHOT_RESUMEAFTER_MASK = COMPUTE_MASK_(SNAPSHOT_RESUMEAFTER);
+static const uint32_t SNAPSHOT_ROFFSET_SHIFT = COMPUTE_SHIFT_AFTER_(SNAPSHOT_BAILOUTKIND);
+static const uint32_t SNAPSHOT_ROFFSET_BITS = 32 - SNAPSHOT_ROFFSET_SHIFT;
+static const uint32_t SNAPSHOT_ROFFSET_MASK = COMPUTE_MASK_(SNAPSHOT_ROFFSET);
 
-static const uint32_t SNAPSHOT_FRAMECOUNT_SHIFT = COMPUTE_SHIFT_AFTER_(SNAPSHOT_RESUMEAFTER);
-static const uint32_t SNAPSHOT_FRAMECOUNT_BITS = 32 - 4;
-static const uint32_t SNAPSHOT_FRAMECOUNT_MASK = COMPUTE_MASK_(SNAPSHOT_FRAMECOUNT);
+// Details of recover header packing.
+static const uint32_t RECOVER_RESUMEAFTER_SHIFT = 0;
+static const uint32_t RECOVER_RESUMEAFTER_BITS = 1;
+static const uint32_t RECOVER_RESUMEAFTER_MASK = COMPUTE_MASK_(RECOVER_RESUMEAFTER);
+
+static const uint32_t RECOVER_RINSCOUNT_SHIFT = COMPUTE_SHIFT_AFTER_(RECOVER_RESUMEAFTER);
+static const uint32_t RECOVER_RINSCOUNT_BITS = 32 - RECOVER_RINSCOUNT_SHIFT;
+static const uint32_t RECOVER_RINSCOUNT_MASK = COMPUTE_MASK_(RECOVER_RINSCOUNT);
 
 #undef COMPUTE_MASK_
 #undef COMPUTE_SHIFT_AFTER_
@@ -486,24 +493,29 @@ void
 SnapshotReader::readSnapshotHeader()
 {
     uint32_t bits = reader_.readUnsigned();
-    frameCount_ = bits >> SNAPSHOT_FRAMECOUNT_SHIFT;
-    JS_ASSERT(frameCount_ > 0);
+
     bailoutKind_ = BailoutKind((bits & SNAPSHOT_BAILOUTKIND_MASK) >> SNAPSHOT_BAILOUTKIND_SHIFT);
-    resumeAfter_ = !!(bits & (1 << SNAPSHOT_RESUMEAFTER_SHIFT));
+    recoverOffset_ = (bits & SNAPSHOT_ROFFSET_MASK) >> SNAPSHOT_ROFFSET_SHIFT;
+
+    IonSpew(IonSpew_Snapshots, "Read snapshot header with bailout kind %u",
+            bailoutKind_);
 
 #ifdef TRACK_SNAPSHOTS
+    readTrackSnapshot();
+#endif
+}
+
+#ifdef TRACK_SNAPSHOTS
+void
+SnapshotReader::readTrackSnapshot()
+{
     pcOpcode_  = reader_.readUnsigned();
     mirOpcode_ = reader_.readUnsigned();
     mirId_     = reader_.readUnsigned();
     lirOpcode_ = reader_.readUnsigned();
     lirId_     = reader_.readUnsigned();
-#endif
-
-    IonSpew(IonSpew_Snapshots, "Read snapshot header with frameCount %u, bailout kind %u (ra: %d)",
-            frameCount_, bailoutKind_, resumeAfter_);
 }
 
-#ifdef TRACK_SNAPSHOTS
 void
 SnapshotReader::spewBailingFrom() const
 {
@@ -519,13 +531,18 @@ SnapshotReader::spewBailingFrom() const
 }
 #endif
 
+uint32_t
+SnapshotReader::readAllocationIndex()
+{
+    allocRead_++;
+    return reader_.readUnsigned();
+}
+
 RValueAllocation
 SnapshotReader::readAllocation()
 {
     IonSpew(IonSpew_Snapshots, "Reading slot %u", allocRead_);
-    allocRead_++;
-
-    uint32_t offset = reader_.readUnsigned() * ALLOCATION_TABLE_ALIGNMENT;
+    uint32_t offset = readAllocationIndex() * ALLOCATION_TABLE_ALIGNMENT;
     allocReader_.seek(allocTable_, offset);
     return RValueAllocation::read(allocReader_);
 }
@@ -539,46 +556,53 @@ SnapshotWriter::init()
     return allocMap_.init(32);
 }
 
-RecoverReader::RecoverReader(SnapshotReader &snapshot)
-  : frameCount_(0),
-    framesRead_(0),
-    allocCount_(0)
+RecoverReader::RecoverReader(SnapshotReader &snapshot, const uint8_t *recovers, uint32_t size)
+  : reader_(nullptr, nullptr),
+    numInstructions_(0),
+    numInstructionsRead_(0)
 {
-    if (!snapshot.reader_.more())
+    if (!recovers)
         return;
-    frameCount_ = snapshot.frameCount_;
-    readFrame(snapshot);
+    reader_ = CompactBufferReader(recovers + snapshot.recoverOffset(), recovers + size);
+    readRecoverHeader();
+    readInstruction();
 }
 
 void
-RecoverReader::readFrame(SnapshotReader &snapshot)
+RecoverReader::readRecoverHeader()
 {
-    JS_ASSERT(moreFrames());
-    JS_ASSERT(snapshot.allocRead_ == allocCount_);
+    uint32_t bits = reader_.readUnsigned();
 
-    pcOffset_ = snapshot.reader_.readUnsigned();
-    allocCount_ = snapshot.reader_.readUnsigned();
-    IonSpew(IonSpew_Snapshots, "Read pc offset %u, nslots %u", pcOffset_, allocCount_);
+    numInstructions_ = (bits & RECOVER_RINSCOUNT_MASK) >> RECOVER_RINSCOUNT_SHIFT;
+    resumeAfter_ = (bits & RECOVER_RESUMEAFTER_MASK) >> RECOVER_RESUMEAFTER_SHIFT;
+    MOZ_ASSERT(numInstructions_);
 
-    framesRead_++;
-    snapshot.allocRead_ = 0;
+    IonSpew(IonSpew_Snapshots, "Read recover header with instructionCount %u (ra: %d)",
+            numInstructions_, resumeAfter_);
+}
+
+void
+RecoverReader::readInstruction()
+{
+    MOZ_ASSERT(moreInstructions());
+    RInstruction::readRecoverData(reader_, &rawData_);
+    numInstructionsRead_++;
 }
 
 SnapshotOffset
-SnapshotWriter::startSnapshot(uint32_t frameCount, BailoutKind kind, bool resumeAfter)
+SnapshotWriter::startSnapshot(RecoverOffset recoverOffset, BailoutKind kind)
 {
     lastStart_ = writer_.length();
+    allocWritten_ = 0;
 
-    IonSpew(IonSpew_Snapshots, "starting snapshot with frameCount %u, bailout kind %u",
-            frameCount, kind);
-    JS_ASSERT(frameCount > 0);
-    JS_ASSERT(frameCount < (1 << SNAPSHOT_FRAMECOUNT_BITS));
+    IonSpew(IonSpew_Snapshots, "starting snapshot with recover offset %u, bailout kind %u",
+            recoverOffset, kind);
+
     JS_ASSERT(uint32_t(kind) < (1 << SNAPSHOT_BAILOUTKIND_BITS));
-
-    uint32_t bits = (uint32_t(kind) << SNAPSHOT_BAILOUTKIND_SHIFT) |
-                    (frameCount << SNAPSHOT_FRAMECOUNT_SHIFT);
-    if (resumeAfter)
-        bits |= (1 << SNAPSHOT_RESUMEAFTER_SHIFT);
+    JS_ASSERT(recoverOffset < (1 << SNAPSHOT_ROFFSET_BITS));
+    uint32_t bits =
+        (uint32_t(kind) << SNAPSHOT_BAILOUTKIND_SHIFT) |
+        (recoverOffset << SNAPSHOT_ROFFSET_SHIFT);
 
     writer_.writeUnsigned(bits);
     return lastStart_;
@@ -637,55 +661,38 @@ SnapshotWriter::endSnapshot()
             uint32_t(writer_.length() - lastStart_), lastStart_);
 }
 
-RecoverWriter::RecoverWriter(SnapshotWriter &snapshot)
-  : snapshot_(snapshot)
-{
-}
-
-SnapshotOffset
-RecoverWriter::startRecover(uint32_t frameCount, BailoutKind kind, bool resumeAfter)
+RecoverOffset
+RecoverWriter::startRecover(uint32_t frameCount, bool resumeAfter)
 {
     MOZ_ASSERT(frameCount);
     nframes_ = frameCount;
     framesWritten_ = 0;
-    return snapshot_.startSnapshot(frameCount, kind, resumeAfter);
+
+    IonSpew(IonSpew_Snapshots, "starting recover with frameCount %u",
+            frameCount);
+
+    MOZ_ASSERT(!(uint32_t(resumeAfter) &~ RECOVER_RESUMEAFTER_MASK));
+    MOZ_ASSERT(frameCount < uint32_t(1 << RECOVER_RINSCOUNT_BITS));
+    uint32_t bits =
+        (uint32_t(resumeAfter) << RECOVER_RESUMEAFTER_SHIFT) |
+        (frameCount << RECOVER_RINSCOUNT_SHIFT);
+
+    RecoverOffset recoverOffset = writer_.length();
+    writer_.writeUnsigned(bits);
+    return recoverOffset;
 }
 
-void
-RecoverWriter::startFrame(JSFunction *fun, JSScript *script,
-                          jsbytecode *pc, uint32_t exprStack)
+bool
+RecoverWriter::writeFrame(const MResumePoint *rp)
 {
-    // Test if we honor the maximum of arguments at all times.
-    // This is a sanity check and not an algorithm limit. So check might be a bit too loose.
-    // +4 to account for scope chain, return value, this value and maybe arguments_object.
-    JS_ASSERT(CountArgSlots(script, fun) < SNAPSHOT_MAX_NARGS + 4);
-
-    uint32_t implicit = StartArgSlot(script);
-    uint32_t formalArgs = CountArgSlots(script, fun);
-
-    nallocs_ = formalArgs + script->nfixed() + exprStack;
-    snapshot_.allocWritten_ = 0;
-
-    IonSpew(IonSpew_Snapshots, "Starting frame; implicit %u, formals %u, fixed %u, exprs %u",
-            implicit, formalArgs - implicit, script->nfixed(), exprStack);
-
-    uint32_t pcoff = script->pcToOffset(pc);
-    IonSpew(IonSpew_Snapshots, "Writing pc offset %u, nslots %u", pcoff, nallocs_);
-    snapshot_.writer_.writeUnsigned(pcoff);
-    snapshot_.writer_.writeUnsigned(nallocs_);
-}
-
-void
-RecoverWriter::endFrame()
-{
-    MOZ_ASSERT(snapshot_.allocWritten_ == nallocs_);
-    nallocs_ = snapshot_.allocWritten_ = 0;
+    if (!rp->writeRecoverData(writer_))
+        return false;
     framesWritten_++;
+    return true;
 }
 
 void
 RecoverWriter::endRecover()
 {
-    snapshot_.endSnapshot();
     JS_ASSERT(nframes_ == framesWritten_);
 }

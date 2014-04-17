@@ -945,18 +945,18 @@ NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(IDBCursor)
 NS_IMPL_CYCLE_COLLECTION_UNLINK_END
 
 JSObject*
-IDBCursor::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aScope)
+IDBCursor::WrapObject(JSContext* aCx)
 {
   AssertIsOnOwningThread();
 
   switch (mType) {
     case Type_ObjectStore:
     case Type_Index:
-      return IDBCursorWithValueBinding::Wrap(aCx, aScope, this);
+      return IDBCursorWithValueBinding::Wrap(aCx, this);
 
     case Type_ObjectStoreKey:
     case Type_IndexKey:
-      return IDBCursorBinding::Wrap(aCx, aScope, this);
+      return IDBCursorBinding::Wrap(aCx, this);
 
     default:
       MOZ_ASSUME_UNREACHABLE("Should never get here!");

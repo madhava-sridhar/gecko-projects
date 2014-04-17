@@ -63,6 +63,7 @@ class IDBDatabase MOZ_FINAL
 
   friend class AsyncConnectionHelper;
   friend class IndexedDatabaseManager;
+  friend class IndexedDBDatabaseParent;
   friend class IndexedDBDatabaseChild;
 
   // The factory must be kept alive when IndexedDB is used in multiple
@@ -215,9 +216,6 @@ public:
   NS_DECL_NSIOFFLINESTORAGE
   NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(IDBDatabase, IDBWrapperCache)
 
-  // nsIDOMEventTarget
-  virtual void
-  LastRelease() MOZ_OVERRIDE;
 
   // nsIDOMEventTarget
   virtual nsresult
@@ -225,7 +223,7 @@ public:
 
   // nsWrapperCache
   virtual JSObject*
-  WrapObject(JSContext* aCx, JS::Handle<JSObject*> aScope) MOZ_OVERRIDE;
+  WrapObject(JSContext* aCx) MOZ_OVERRIDE;
 
 private:
   IDBDatabase(IDBWrapperCache* aOwnerCache,

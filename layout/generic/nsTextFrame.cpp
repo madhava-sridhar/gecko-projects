@@ -1774,14 +1774,10 @@ GetFontGroupForFrame(nsIFrame* aFrame, float aFontSizeInflation,
 }
 
 static already_AddRefed<gfxContext>
-GetReferenceRenderingContext(nsTextFrame* aTextFrame, nsRenderingContext* aRC)
+CreateReferenceThebesContext(nsTextFrame* aTextFrame)
 {
-  nsRefPtr<nsRenderingContext> tmp = aRC;
-  if (!tmp) {
-    tmp = aTextFrame->PresContext()->PresShell()->GetReferenceRenderingContext();
-    if (!tmp)
-      return nullptr;
-  }
+  nsRefPtr<nsRenderingContext> tmp =
+    aTextFrame->PresContext()->PresShell()->CreateReferenceRenderingContext();
 
   nsRefPtr<gfxContext> ctx = tmp->ThebesContext();
   return ctx.forget();
@@ -1795,7 +1791,7 @@ GetHyphenTextRun(gfxTextRun* aTextRun, gfxContext* aContext, nsTextFrame* aTextF
 {
   nsRefPtr<gfxContext> ctx = aContext;
   if (!ctx) {
-    ctx = GetReferenceRenderingContext(aTextFrame, nullptr);
+    ctx = CreateReferenceThebesContext(aTextFrame);
   }
   if (!ctx)
     return nullptr;
@@ -2558,7 +2554,7 @@ nsTextFrame::EnsureTextRun(TextRunType aWhichTextRun,
   } else {
     nsRefPtr<gfxContext> ctx = aReferenceContext;
     if (!ctx) {
-      ctx = GetReferenceRenderingContext(this, nullptr);
+      ctx = CreateReferenceThebesContext(this);
     }
     if (ctx) {
       BuildTextRuns(ctx, this, aLineContainer, aLine, aWhichTextRun);
@@ -2837,6 +2833,14 @@ public:
                                     bool* aBreakBefore);
   virtual int8_t GetHyphensOption() {
     return mTextStyle->mHyphens;
+  }
+
+  virtual already_AddRefed<gfxContext> GetContext() {
+    return CreateReferenceThebesContext(GetFrame());
+  }
+
+  virtual uint32_t GetAppUnitsPerDevUnit() {
+    return mTextRun->GetAppUnitsPerDevUnit();
   }
 
   void GetSpacingInternal(uint32_t aStart, uint32_t aLength, Spacing* aSpacing,
@@ -3194,16 +3198,9 @@ gfxFloat
 PropertyProvider::GetHyphenWidth()
 {
   if (mHyphenWidth < 0) {
-    mHyphenWidth = mLetterSpacing;
-    nsRefPtr<gfxContext> context(GetReferenceRenderingContext(GetFrame(),
-                                                              nullptr));
-    if (context) {
-      mHyphenWidth +=
-        GetFontGroup()->GetHyphenWidth(context,
-                                       mTextRun->GetAppUnitsPerDevUnit());
-    }
+    mHyphenWidth = GetFontGroup()->GetHyphenWidth(this);
   }
-  return mHyphenWidth;
+  return mHyphenWidth + mLetterSpacing;
 }
 
 void
@@ -4440,7 +4437,6 @@ nsTextFrame::CharacterDataChanged(CharacterDataChangeInfo* aInfo)
 nsTextFrame::DidSetStyleContext(nsStyleContext* aOldStyleContext)
 {
   nsFrame::DidSetStyleContext(aOldStyleContext);
-  ClearTextRuns();
 }
 
 class nsDisplayTextGeometry : public nsDisplayItemGenericGeometry

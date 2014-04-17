@@ -26,7 +26,7 @@ namespace ipc {
 class BackgroundChildImpl : public PBackgroundChild
 {
 public:
-  struct ThreadLocal;
+  class ThreadLocal;
 
   // Get the ThreadLocal for the current thread if
   // BackgroundChild::GetOrCreateForCurrentThread() has been called and true was
@@ -60,7 +60,7 @@ protected:
                                     MOZ_OVERRIDE;
 };
 
-struct BackgroundChildImpl::ThreadLocal
+class BackgroundChildImpl::ThreadLocal
 {
   mozilla::dom::indexedDB::IDBTransaction* mCurrentTransaction;
 #ifdef MOZ_ENABLE_PROFILER_SPS

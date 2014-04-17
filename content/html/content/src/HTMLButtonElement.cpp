@@ -17,13 +17,14 @@
 #include "nsFormSubmission.h"
 #include "nsFormSubmissionConstants.h"
 #include "nsIURL.h"
-#include "nsEventStateManager.h"
 #include "nsIFrame.h"
 #include "nsIFormControlFrame.h"
 #include "nsIDOMEvent.h"
 #include "nsIDocument.h"
 #include "mozilla/ContentEvents.h"
 #include "mozilla/EventDispatcher.h"
+#include "mozilla/EventStateManager.h"
+#include "mozilla/EventStates.h"
 #include "mozilla/MouseEvents.h"
 #include "mozilla/TextEvents.h"
 #include "nsUnicharUtils.h"
@@ -288,10 +289,10 @@ HTMLButtonElement::PostHandleEvent(EventChainPostVisitor& aVisitor)
           WidgetMouseEvent* mouseEvent = aVisitor.mEvent->AsMouseEvent();
           if (mouseEvent->button == WidgetMouseEvent::eLeftButton) {
             if (mouseEvent->mFlags.mIsTrusted) {
-              nsEventStateManager* esm =
+              EventStateManager* esm =
                 aVisitor.mPresContext->EventStateManager();
-              nsEventStateManager::SetActiveManager(
-                static_cast<nsEventStateManager*>(esm), this);
+              EventStateManager::SetActiveManager(
+                static_cast<EventStateManager*>(esm), this);
             }
             nsIFocusManager* fm = nsFocusManager::GetFocusManager();
             if (fm)
@@ -526,10 +527,10 @@ HTMLButtonElement::RestoreState(nsPresState* aState)
   return false;
 }
 
-nsEventStates
+EventStates
 HTMLButtonElement::IntrinsicState() const
 {
-  nsEventStates state = nsGenericHTMLFormElementWithState::IntrinsicState();
+  EventStates state = nsGenericHTMLFormElementWithState::IntrinsicState();
 
   if (mForm && !mForm->GetValidity() && IsSubmitControl()) {
     state |= NS_EVENT_STATE_MOZ_SUBMITINVALID;
@@ -539,9 +540,9 @@ HTMLButtonElement::IntrinsicState() const
 }
 
 JSObject*
-HTMLButtonElement::WrapNode(JSContext* aCx, JS::Handle<JSObject*> aScope)
+HTMLButtonElement::WrapNode(JSContext* aCx)
 {
-  return HTMLButtonElementBinding::Wrap(aCx, aScope, this);
+  return HTMLButtonElementBinding::Wrap(aCx, this);
 }
 
 } // namespace dom

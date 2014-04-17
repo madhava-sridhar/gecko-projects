@@ -32,14 +32,15 @@ const PDFJS_EVENT_ID = 'pdf.js.message';
 const PDF_CONTENT_TYPE = 'application/pdf';
 const PREF_PREFIX = 'pdfjs';
 const PDF_VIEWER_WEB_PAGE = 'resource://pdf.js/web/viewer.html';
-const MAX_DATABASE_LENGTH = 4096;
 const MAX_NUMBER_OF_PREFS = 50;
 const MAX_STRING_PREF_LENGTH = 128;
 
 Cu.import('resource://gre/modules/XPCOMUtils.jsm');
 Cu.import('resource://gre/modules/Services.jsm');
 Cu.import('resource://gre/modules/NetUtil.jsm');
-Cu.import('resource://pdf.js/network.js');
+
+XPCOMUtils.defineLazyModuleGetter(this, 'NetworkManager',
+  'resource://pdf.js/network.js');
 
 XPCOMUtils.defineLazyModuleGetter(this, 'PrivateBrowsingUtils',
   'resource://gre/modules/PrivateBrowsingUtils.jsm');
@@ -293,19 +294,6 @@ ChromeActions.prototype = {
       channel.asyncOpen(listener, null);
     });
   },
-  setDatabase: function(data) {
-    if (this.isInPrivateBrowsing())
-      return;
-    // Protect against something sending tons of data to setDatabase.
-    if (data.length > MAX_DATABASE_LENGTH)
-      return;
-    setStringPref(PREF_PREFIX + '.database', data);
-  },
-  getDatabase: function() {
-    if (this.isInPrivateBrowsing())
-      return '{}';
-    return getStringPref(PREF_PREFIX + '.database', '{}');
-  },
   getLocale: function() {
     return getStringPref('general.useragent.locale', 'en-US');
   },
@@ -450,7 +438,7 @@ ChromeActions.prototype = {
     getChromeWindow(this.domWindow).gFindBar
                                    .updateControlState(result, findPrevious);
   },
-  setPreferences: function(prefs) {
+  setPreferences: function(prefs, sendResponse) {
     var defaultBranch = Services.prefs.getDefaultBranch(PREF_PREFIX + '.');
     var numberOfPrefs = 0;
     var prefValue, prefName;
@@ -481,8 +469,11 @@ ChromeActions.prototype = {
           break;
       }
     }
+    if (sendResponse) {
+      sendResponse(true);
+    }
   },
-  getPreferences: function(prefs) {
+  getPreferences: function(prefs, sendResponse) {
     var defaultBranch = Services.prefs.getDefaultBranch(PREF_PREFIX + '.');
     var currentPrefs = {}, numberOfPrefs = 0;
     var prefValue, prefName;
@@ -508,7 +499,11 @@ ChromeActions.prototype = {
           break;
       }
     }
-    return JSON.stringify(currentPrefs);
+    if (sendResponse) {
+      sendResponse(JSON.stringify(currentPrefs));
+    } else {
+      return JSON.stringify(currentPrefs);
+    }
   }
 };
 

@@ -7,6 +7,9 @@ package org.mozilla.gecko.fxa.sync;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.security.NoSuchAlgorithmException;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.EnumSet;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -17,9 +20,9 @@ import org.mozilla.gecko.background.fxa.FxAccountClient20;
 import org.mozilla.gecko.background.fxa.SkewHandler;
 import org.mozilla.gecko.browserid.BrowserIDKeyPair;
 import org.mozilla.gecko.browserid.JSONWebTokenUtils;
-import org.mozilla.gecko.browserid.RSACryptoImplementation;
 import org.mozilla.gecko.browserid.verifier.BrowserIDRemoteVerifierClient;
 import org.mozilla.gecko.browserid.verifier.BrowserIDVerifierDelegate;
+import org.mozilla.gecko.fxa.FirefoxAccounts;
 import org.mozilla.gecko.fxa.FxAccountConstants;
 import org.mozilla.gecko.fxa.authenticator.AccountPickler;
 import org.mozilla.gecko.fxa.authenticator.AndroidFxAccount;
@@ -30,6 +33,7 @@ import org.mozilla.gecko.fxa.login.FxAccountLoginTransition.Transition;
 import org.mozilla.gecko.fxa.login.Married;
 import org.mozilla.gecko.fxa.login.State;
 import org.mozilla.gecko.fxa.login.State.StateLabel;
+import org.mozilla.gecko.fxa.login.StateFactory;
 import org.mozilla.gecko.sync.BackoffHandler;
 import org.mozilla.gecko.sync.ExtendedJSONObject;
 import org.mozilla.gecko.sync.GlobalSession;
@@ -62,7 +66,10 @@ import android.os.SystemClock;
 public class FxAccountSyncAdapter extends AbstractThreadedSyncAdapter {
   private static final String LOG_TAG = FxAccountSyncAdapter.class.getSimpleName();
 
-  public static final int NOTIFICATION_ID = LOG_TAG.hashCode();
+  public static final String SYNC_EXTRAS_RESPECT_LOCAL_RATE_LIMIT = "respect_local_rate_limit";
+  public static final String SYNC_EXTRAS_RESPECT_REMOTE_SERVER_BACKOFF = "respect_remote_server_backoff";
+
+  protected static final int NOTIFICATION_ID = LOG_TAG.hashCode();
 
   // Tracks the last seen storage hostname for backoff purposes.
   private static final String PREF_BACKOFF_STORAGE_HOST = "backoffStorageHost";
@@ -82,17 +89,12 @@ public class FxAccountSyncAdapter extends AbstractThreadedSyncAdapter {
   }
 
   protected static class SyncDelegate {
-    protected final Context context;
     protected final CountDownLatch latch;
     protected final SyncResult syncResult;
     protected final AndroidFxAccount fxAccount;
-    protected final FxAccountNotificationManager notificationManager;
+    protected final Collection<String> stageNamesToSync;
 
-    public SyncDelegate(Context context, CountDownLatch latch, SyncResult syncResult, AndroidFxAccount fxAccount,
-        FxAccountNotificationManager notificationManager) {
-      if (context == null) {
-        throw new IllegalArgumentException("context must not be null");
-      }
+    public SyncDelegate(CountDownLatch latch, SyncResult syncResult, AndroidFxAccount fxAccount, Collection<String> stageNamesToSync) {
       if (latch == null) {
         throw new IllegalArgumentException("latch must not be null");
       }
@@ -102,14 +104,10 @@ public class FxAccountSyncAdapter extends AbstractThreadedSyncAdapter {
       if (fxAccount == null) {
         throw new IllegalArgumentException("fxAccount must not be null");
       }
-      if (notificationManager == null) {
-        throw new IllegalArgumentException("notificationManager must not be null");
-      }
-      this.context = context;
       this.latch = latch;
       this.syncResult = syncResult;
       this.fxAccount = fxAccount;
-      this.notificationManager = notificationManager;
+      this.stageNamesToSync = Collections.unmodifiableCollection(stageNamesToSync);
     }
 
     /**
@@ -201,6 +199,10 @@ public class FxAccountSyncAdapter extends AbstractThreadedSyncAdapter {
      */
     public void rejectSync() {
       latch.countDown();
+    }
+
+    public Collection<String> getStageNamesToSync() {
+      return this.stageNamesToSync;
     }
   }
 
@@ -371,7 +373,10 @@ public class FxAccountSyncAdapter extends AbstractThreadedSyncAdapter {
           final Context context = getContext();
           final SyncConfiguration syncConfig = new SyncConfiguration(token.uid, authHeaderProvider, sharedPrefs, syncKeyBundle);
 
-          globalSession = new FxAccountGlobalSession(token.endpoint, syncConfig, callback, context, extras, clientsDataDelegate);
+          Collection<String> knownStageNames = SyncConfiguration.validEngineNames();
+          syncConfig.stagesToSync = Utils.getStagesToSyncFromBundle(knownStageNames, extras);
+
+          globalSession = new FxAccountGlobalSession(token.endpoint, syncConfig, callback, context, clientsDataDelegate);
           globalSession.start();
         } catch (Exception e) {
           callback.handleError(globalSession, e);
@@ -423,6 +428,14 @@ public class FxAccountSyncAdapter extends AbstractThreadedSyncAdapter {
     Logger.setThreadLogTag(FxAccountConstants.GLOBAL_LOG_TAG);
     Logger.resetLogging();
 
+    Logger.info(LOG_TAG, "Syncing FxAccount" +
+        " account named like " + Utils.obfuscateEmail(account.name) +
+        " for authority " + authority +
+        " with instance " + this + ".");
+
+    final EnumSet<FirefoxAccounts.SyncHint> syncHints = FirefoxAccounts.getHintsToSyncFromBundle(extras);
+    FirefoxAccounts.logSyncHints(syncHints);
+
     // This applies even to forced syncs, but only on success.
     if (this.lastSyncRealtimeMillis > 0L &&
         (this.lastSyncRealtimeMillis + MINIMUM_SYNC_DELAY_MILLIS) > SystemClock.elapsedRealtime()) {
@@ -430,11 +443,6 @@ public class FxAccountSyncAdapter extends AbstractThreadedSyncAdapter {
                            ": minimum interval not met.");
       return;
     }
-
-    Logger.info(LOG_TAG, "Syncing FxAccount" +
-        " account named like " + Utils.obfuscateEmail(account.name) +
-        " for authority " + authority +
-        " with instance " + this + ".");
 
     final Context context = getContext();
     final AndroidFxAccount fxAccount = new AndroidFxAccount(context, account);
@@ -456,7 +464,11 @@ public class FxAccountSyncAdapter extends AbstractThreadedSyncAdapter {
     });
 
     final CountDownLatch latch = new CountDownLatch(1);
-    final SyncDelegate syncDelegate = new SyncDelegate(context, latch, syncResult, fxAccount, notificationManager);
+
+    Collection<String> knownStageNames = SyncConfiguration.validEngineNames();
+    Collection<String> stageNamesToSync = Utils.getStagesToSyncFromBundle(knownStageNames, extras);
+
+    final SyncDelegate syncDelegate = new SyncDelegate(latch, syncResult, fxAccount, stageNamesToSync);
 
     try {
       final State state;
@@ -476,7 +488,7 @@ public class FxAccountSyncAdapter extends AbstractThreadedSyncAdapter {
       // If this sync was triggered by user action, this will be true.
       final boolean isImmediate = (extras != null) &&
                                   (extras.getBoolean(ContentResolver.SYNC_EXTRAS_UPLOAD, false) ||
-                                   extras.getBoolean(ContentResolver.SYNC_EXTRAS_FORCE, false));
+                                   extras.getBoolean(ContentResolver.SYNC_EXTRAS_MANUAL, false));
 
       // If it's not an immediate sync, it must be either periodic or tickled.
       // Check our background rate limiter.
@@ -525,7 +537,7 @@ public class FxAccountSyncAdapter extends AbstractThreadedSyncAdapter {
 
         @Override
         public BrowserIDKeyPair generateKeyPair() throws NoSuchAlgorithmException {
-          return RSACryptoImplementation.generateKeyPair(1024);
+          return StateFactory.generateKeyPair();
         }
 
         @Override

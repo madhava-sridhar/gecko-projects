@@ -805,9 +805,9 @@ IDBDatabase::PostHandleEvent(EventChainPostVisitor& aVisitor)
 }
 
 JSObject*
-IDBDatabase::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aScope)
+IDBDatabase::WrapObject(JSContext* aCx)
 {
-  return IDBDatabaseBinding::Wrap(aCx, aScope, this);
+  return IDBDatabaseBinding::Wrap(aCx, this);
 }
 
 AsyncConnectionHelper::ChildProcessSendResult

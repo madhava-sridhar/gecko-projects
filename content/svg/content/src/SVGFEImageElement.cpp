@@ -5,8 +5,11 @@
 
 #include "mozilla/dom/SVGFEImageElement.h"
 
+#include "mozilla/EventStates.h"
 #include "mozilla/dom/SVGFEImageElementBinding.h"
 #include "mozilla/dom/SVGFilterElement.h"
+#include "mozilla/gfx/2D.h"
+#include "mozilla/RefPtr.h"
 #include "nsContentUtils.h"
 #include "nsLayoutUtils.h"
 #include "nsSVGUtils.h"
@@ -22,9 +25,9 @@ namespace mozilla {
 namespace dom {
 
 JSObject*
-SVGFEImageElement::WrapNode(JSContext *aCx, JS::Handle<JSObject*> aScope)
+SVGFEImageElement::WrapNode(JSContext *aCx)
 {
-  return SVGFEImageElementBinding::Wrap(aCx, aScope, this);
+  return SVGFEImageElementBinding::Wrap(aCx, this);
 }
 
 nsSVGElement::StringInfo SVGFEImageElement::sStringInfo[2] =
@@ -169,7 +172,7 @@ SVGFEImageElement::UnbindFromTree(bool aDeep, bool aNullParent)
   SVGFEImageElementBase::UnbindFromTree(aDeep, aNullParent);
 }
 
-nsEventStates
+EventStates
 SVGFEImageElement::IntrinsicState() const
 {
   return SVGFEImageElementBase::IntrinsicState() |
@@ -210,21 +213,15 @@ SVGFEImageElement::GetPrimitiveDescription(nsSVGFilterInstance* aInstance,
     currentRequest->GetImage(getter_AddRefs(imageContainer));
   }
 
-  nsRefPtr<gfxASurface> currentFrame;
+  RefPtr<SourceSurface> image;
   if (imageContainer) {
-    currentFrame =
-      imageContainer->GetFrame(imgIContainer::FRAME_CURRENT,
-                               imgIContainer::FLAG_SYNC_DECODE);
+    image = imageContainer->GetFrame(imgIContainer::FRAME_CURRENT,
+                                     imgIContainer::FLAG_SYNC_DECODE);
   }
 
-  if (!currentFrame) {
+  if (!image) {
     return FilterPrimitiveDescription(PrimitiveType::Empty);
   }
-
-  gfxPlatform* platform = gfxPlatform::GetPlatform();
-  DrawTarget* dt = platform->ScreenReferenceDrawTarget();
-  RefPtr<SourceSurface> image =
-    platform->GetSourceSurfaceForSurface(dt, currentFrame);
 
   IntSize nativeSize;
   imageContainer->GetWidth(&nativeSize.width);

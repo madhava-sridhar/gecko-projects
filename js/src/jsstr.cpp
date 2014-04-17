@@ -18,6 +18,7 @@
 #include "jsstr.h"
 
 #include "mozilla/Attributes.h"
+#include "mozilla/Casting.h"
 #include "mozilla/CheckedInt.h"
 #include "mozilla/FloatingPoint.h"
 #include "mozilla/PodOperations.h"
@@ -37,7 +38,11 @@
 #include "jstypes.h"
 #include "jsutil.h"
 
+#include "builtin/Intl.h"
 #include "builtin/RegExp.h"
+#if ENABLE_INTL_API
+#include "unicode/unorm.h"
+#endif
 #include "vm/GlobalObject.h"
 #include "vm/Interpreter.h"
 #include "vm/NumericConversions.h"
@@ -63,6 +68,7 @@ using mozilla::IsNaN;
 using mozilla::IsNegativeZero;
 using mozilla::PodCopy;
 using mozilla::PodEqual;
+using mozilla::SafeCast;
 
 typedef Handle<JSLinearString*> HandleLinearString;
 
@@ -834,6 +840,86 @@ str_localeCompare(JSContext *cx, unsigned argc, Value *vp)
         return false;
 
     args.rval().setInt32(result);
+    return true;
+}
+#endif
+
+#if EXPOSE_INTL_API
+static const size_t SB_LENGTH = 32;
+
+/* ES6 20140210 draft 21.1.3.12. */
+static bool
+str_normalize(JSContext *cx, unsigned argc, Value *vp)
+{
+    CallArgs args = CallArgsFromVp(argc, vp);
+
+    // Steps 1-3.
+    RootedString str(cx, ThisToStringForStringProto(cx, args));
+    if (!str)
+        return false;
+
+    // Step 4.
+    UNormalizationMode form;
+    if (!args.hasDefined(0)) {
+        form = UNORM_NFC;
+    } else {
+        // Steps 5-6.
+        Rooted<JSLinearString*> formStr(cx, ArgToRootedString(cx, args, 0));
+        if (!formStr)
+            return false;
+
+        // Step 7.
+        if (formStr == cx->names().NFC) {
+            form = UNORM_NFC;
+        } else if (formStr == cx->names().NFD) {
+            form = UNORM_NFD;
+        } else if (formStr == cx->names().NFKC) {
+            form = UNORM_NFKC;
+        } else if (formStr == cx->names().NFKD) {
+            form = UNORM_NFKD;
+        } else {
+            JS_ReportErrorNumber(cx, js_GetErrorMessage, nullptr,
+                                 JSMSG_INVALID_NORMALIZE_FORM);
+            return false;
+        }
+    }
+
+    // Step 8.
+    Rooted<JSFlatString*> flatStr(cx, str->ensureFlat(cx));
+    if (!flatStr)
+        return false;
+    const UChar *srcChars = JSCharToUChar(flatStr->chars());
+    int32_t srcLen = SafeCast<int32_t>(flatStr->length());
+    StringBuffer chars(cx);
+    if (!chars.resize(SB_LENGTH))
+        return false;
+    UErrorCode status = U_ZERO_ERROR;
+    int32_t size = unorm_normalize(srcChars, srcLen, form, 0,
+                                   JSCharToUChar(chars.begin()), SB_LENGTH,
+                                   &status);
+    if (status == U_BUFFER_OVERFLOW_ERROR) {
+        if (!chars.resize(size))
+            return false;
+        status = U_ZERO_ERROR;
+#ifdef DEBUG
+        int32_t finalSize =
+#endif
+        unorm_normalize(srcChars, srcLen, form, 0,
+                        JSCharToUChar(chars.begin()), size,
+                        &status);
+        MOZ_ASSERT(size == finalSize || U_FAILURE(status), "unorm_normalize behaved inconsistently");
+    }
+    if (U_FAILURE(status))
+        return false;
+    // Trim any unused characters.
+    if (!chars.resize(size))
+        return false;
+    RootedString ns(cx, chars.finishString());
+    if (!ns)
+        return false;
+
+    // Step 9.
+    args.rval().setString(ns);
     return true;
 }
 #endif
@@ -2627,13 +2713,13 @@ struct StringRange
     { }
 };
 
-static inline JSShortString *
+static inline JSFatInlineString *
 FlattenSubstrings(JSContext *cx, const jschar *chars,
                   const StringRange *ranges, size_t rangesLen, size_t outputLen)
 {
-    JS_ASSERT(JSShortString::lengthFits(outputLen));
+    JS_ASSERT(JSFatInlineString::lengthFits(outputLen));
 
-    JSShortString *str = js_NewGCShortString<CanGC>(cx);
+    JSFatInlineString *str = js_NewGCFatInlineString<CanGC>(cx);
     if (!str)
         return nullptr;
     jschar *buf = str->init(outputLen);
@@ -2669,21 +2755,21 @@ AppendSubstrings(JSContext *cx, Handle<JSFlatString*> flatStr,
     RootedString part(cx, nullptr);
     while (i < rangesLen) {
 
-        /* Find maximum range that fits in JSShortString */
+        /* Find maximum range that fits in JSFatInlineString */
         size_t substrLen = 0;
         size_t end = i;
         for (; end < rangesLen; end++) {
-            if (substrLen + ranges[end].length > JSShortString::MAX_SHORT_LENGTH)
+            if (substrLen + ranges[end].length > JSFatInlineString::MAX_FAT_INLINE_LENGTH)
                 break;
             substrLen += ranges[end].length;
         }
 
         if (i == end) {
-            /* Not even one range fits JSShortString, use DependentString */
+            /* Not even one range fits JSFatInlineString, use DependentString */
             const StringRange &sr = ranges[i++];
             part = js_NewDependentString(cx, flatStr, sr.start, sr.length);
         } else {
-            /* Copy the ranges (linearly) into a JSShortString */
+            /* Copy the ranges (linearly) into a JSFatInlineString */
             part = FlattenSubstrings(cx, chars, ranges + i, end - i, substrLen);
             i = end;
         }
@@ -3797,6 +3883,9 @@ static const JSFunctionSpec string_methods[] = {
     JS_FN("localeCompare",     str_localeCompare,     1,JSFUN_GENERIC_NATIVE),
 #endif
     JS_SELF_HOSTED_FN("repeat", "String_repeat",      1,0),
+#if EXPOSE_INTL_API
+    JS_FN("normalize",         str_normalize,         0,JSFUN_GENERIC_NATIVE),
+#endif
 
     /* Perl-ish methods (search is actually Python-esque). */
     JS_FN("match",             str_match,             1,JSFUN_GENERIC_NATIVE),
@@ -4002,8 +4091,8 @@ template <AllowGC allowGC>
 JSFlatString *
 js_NewStringCopyN(ExclusiveContext *cx, const jschar *s, size_t n)
 {
-    if (JSShortString::lengthFits(n))
-        return NewShortString<allowGC>(cx, TwoByteChars(s, n));
+    if (JSFatInlineString::lengthFits(n))
+        return NewFatInlineString<allowGC>(cx, TwoByteChars(s, n));
 
     jschar *news = cx->pod_malloc<jschar>(n + 1);
     if (!news)
@@ -4026,8 +4115,8 @@ template <AllowGC allowGC>
 JSFlatString *
 js_NewStringCopyN(ThreadSafeContext *cx, const char *s, size_t n)
 {
-    if (JSShortString::lengthFits(n))
-        return NewShortString<allowGC>(cx, JS::Latin1Chars(s, n));
+    if (JSFatInlineString::lengthFits(n))
+        return NewFatInlineString<allowGC>(cx, JS::Latin1Chars(s, n));
 
     jschar *chars = InflateString(cx, s, &n);
     if (!chars)
@@ -4049,8 +4138,8 @@ JSFlatString *
 js_NewStringCopyZ(ExclusiveContext *cx, const jschar *s)
 {
     size_t n = js_strlen(s);
-    if (JSShortString::lengthFits(n))
-        return NewShortString<allowGC>(cx, TwoByteChars(s, n));
+    if (JSFatInlineString::lengthFits(n))
+        return NewFatInlineString<allowGC>(cx, TwoByteChars(s, n));
 
     size_t m = (n + 1) * sizeof(jschar);
     jschar *news = (jschar *) cx->malloc_(m);

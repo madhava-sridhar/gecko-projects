@@ -23,10 +23,10 @@ interface IDBIndex {
     readonly    attribute boolean        unique;
 
     [Throws]
-    IDBRequest openCursor (any range, optional IDBCursorDirection direction = "next");
+    IDBRequest openCursor (optional any range, optional IDBCursorDirection direction = "next");
 
     [Throws]
-    IDBRequest openKeyCursor (any range, optional IDBCursorDirection direction = "next");
+    IDBRequest openKeyCursor (optional any range, optional IDBCursorDirection direction = "next");
 
     [Throws]
     IDBRequest get (any key);
@@ -35,19 +35,19 @@ interface IDBIndex {
     IDBRequest getKey (any key);
 
     [Throws]
-    IDBRequest count (any key);
+    IDBRequest count (optional any key);
 };
 
 partial interface IDBIndex {
     [Throws]
-    IDBRequest mozGetAll (any key, optional unsigned long limit);
+    IDBRequest mozGetAll (optional any key, optional unsigned long limit);
 
     [Throws]
-    IDBRequest mozGetAllKeys (any key, optional unsigned long limit);
+    IDBRequest mozGetAllKeys (optional any key, optional unsigned long limit);
 
     [Pref="dom.indexedDB.experimental", Throws]
-    IDBRequest getAll (any key, optional unsigned long limit);
+    IDBRequest getAll (optional any key, optional unsigned long limit);
 
     [Pref="dom.indexedDB.experimental", Throws]
-    IDBRequest getAllKeys (any key, optional unsigned long limit);
+    IDBRequest getAllKeys (optional any key, optional unsigned long limit);
 };

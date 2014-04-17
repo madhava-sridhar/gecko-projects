@@ -37,6 +37,8 @@
 #include "jsobjinlines.h"
 #include "jsscriptinlines.h"
 
+#include "jit/ExecutionMode-inl.h"
+
 using namespace js;
 using namespace js::gc;
 using namespace js::types;
@@ -1761,7 +1763,7 @@ TemporaryTypeSet::isDOMClass()
     unsigned count = getObjectCount();
     for (unsigned i = 0; i < count; i++) {
         const Class *clasp = getObjectClass(i);
-        if (clasp && (!(clasp->flags & JSCLASS_IS_DOMJSCLASS) || clasp->isProxy()))
+        if (clasp && !clasp->isDOMClass())
             return false;
     }
 
@@ -2730,62 +2732,54 @@ UpdatePropertyType(ExclusiveContext *cx, HeapTypeSet *types, JSObject *obj, Shap
     }
 }
 
-bool
-TypeObject::addProperty(ExclusiveContext *cx, jsid id, Property **pprop)
+void
+TypeObject::updateNewPropertyTypes(ExclusiveContext *cx, jsid id, HeapTypeSet *types)
 {
-    JS_ASSERT(!*pprop);
-    Property *base = cx->typeLifoAlloc().new_<Property>(id);
-    if (!base)
-        return false;
-
-    if (singleton() && singleton()->isNative()) {
-        /*
-         * Fill the property in with any type the object already has in an own
-         * property. We are only interested in plain native properties and
-         * dense elements which don't go through a barrier when read by the VM
-         * or jitcode.
-         */
-
-        if (JSID_IS_VOID(id)) {
-            /* Go through all shapes on the object to get integer-valued properties. */
-            RootedShape shape(cx, singleton()->lastProperty());
-            while (!shape->isEmptyShape()) {
-                if (JSID_IS_VOID(IdToTypeId(shape->propid())))
-                    UpdatePropertyType(cx, &base->types, singleton(), shape, true);
-                shape = shape->previous();
-            }
-
-            /* Also get values of any dense elements in the object. */
-            for (size_t i = 0; i < singleton()->getDenseInitializedLength(); i++) {
-                const Value &value = singleton()->getDenseElement(i);
-                if (!value.isMagic(JS_ELEMENTS_HOLE)) {
-                    Type type = GetValueType(value);
-                    base->types.TypeSet::addType(type, &cx->typeLifoAlloc());
-                }
-            }
-        } else if (!JSID_IS_EMPTY(id)) {
-            RootedId rootedId(cx, id);
-            Shape *shape = singleton()->nativeLookup(cx, rootedId);
-            if (shape)
-                UpdatePropertyType(cx, &base->types, singleton(), shape, false);
-        }
-
-        if (singleton()->watched()) {
-            /*
-             * Mark the property as non-data, to inhibit optimizations on it
-             * and avoid bypassing the watchpoint handler.
-             */
-            base->types.setNonDataProperty(cx);
-        }
-    }
-
-    *pprop = base;
-
     InferSpew(ISpewOps, "typeSet: %sT%p%s property %s %s",
-              InferSpewColor(&base->types), &base->types, InferSpewColorReset(),
+              InferSpewColor(types), types, InferSpewColorReset(),
               TypeObjectString(this), TypeIdString(id));
 
-    return true;
+    if (!singleton() || !singleton()->isNative())
+        return;
+
+    /*
+     * Fill the property in with any type the object already has in an own
+     * property. We are only interested in plain native properties and
+     * dense elements which don't go through a barrier when read by the VM
+     * or jitcode.
+     */
+
+    if (JSID_IS_VOID(id)) {
+        /* Go through all shapes on the object to get integer-valued properties. */
+        RootedShape shape(cx, singleton()->lastProperty());
+        while (!shape->isEmptyShape()) {
+            if (JSID_IS_VOID(IdToTypeId(shape->propid())))
+                UpdatePropertyType(cx, types, singleton(), shape, true);
+            shape = shape->previous();
+        }
+
+        /* Also get values of any dense elements in the object. */
+        for (size_t i = 0; i < singleton()->getDenseInitializedLength(); i++) {
+            const Value &value = singleton()->getDenseElement(i);
+            if (!value.isMagic(JS_ELEMENTS_HOLE)) {
+                Type type = GetValueType(value);
+                types->TypeSet::addType(type, &cx->typeLifoAlloc());
+            }
+        }
+    } else if (!JSID_IS_EMPTY(id)) {
+        RootedId rootedId(cx, id);
+        Shape *shape = singleton()->nativeLookup(cx, rootedId);
+        if (shape)
+            UpdatePropertyType(cx, types, singleton(), shape, false);
+    }
+
+    if (singleton()->watched()) {
+        /*
+         * Mark the property as non-data, to inhibit optimizations on it
+         * and avoid bypassing the watchpoint handler.
+         */
+        types->setNonDataProperty(cx);
+    }
 }
 
 bool
@@ -3126,6 +3120,29 @@ TypeObject::clearNewScriptAddendum(ExclusiveContext *cx)
         // Threads with an ExclusiveContext are not allowed to run scripts.
         JS_ASSERT(!cx->perThreadData->activation());
     }
+}
+
+void
+TypeObject::maybeClearNewScriptAddendumOnOOM()
+{
+    if (!isMarked())
+        return;
+
+    if (!addendum || addendum->kind != TypeObjectAddendum::NewScript)
+        return;
+
+    for (unsigned i = 0; i < getPropertyCount(); i++) {
+        Property *prop = getProperty(i);
+        if (!prop)
+            continue;
+        if (prop->types.definiteProperty())
+            prop->types.setNonDataPropertyIgnoringConstraints();
+    }
+
+    // This method is called during GC sweeping, so there is no write barrier
+    // that needs to be triggered.
+    js_free(addendum);
+    addendum.unsafeSet(nullptr);
 }
 
 void
@@ -3951,7 +3968,7 @@ ExclusiveContext::getSingletonType(const Class *clasp, TaggedProto proto)
 /////////////////////////////////////////////////////////////////////
 
 void
-ConstraintTypeSet::sweep(Zone *zone)
+ConstraintTypeSet::sweep(Zone *zone, bool *oom)
 {
     /*
      * Purge references to type objects that are no longer live. Type sets hold
@@ -3972,9 +3989,14 @@ ConstraintTypeSet::sweep(Zone *zone)
                 TypeObjectKey **pentry =
                     HashSetInsert<TypeObjectKey *,TypeObjectKey,TypeObjectKey>
                         (zone->types.typeLifoAlloc, objectSet, objectCount, object);
-                if (!pentry)
-                    CrashAtUnhandlableOOM("OOM in ConstraintTypeSet::sweep");
-                *pentry = object;
+                if (pentry) {
+                    *pentry = object;
+                } else {
+                    *oom = true;
+                    flags |= TYPE_FLAG_ANYOBJECT;
+                    clearObjects();
+                    return;
+                }
             }
         }
         setBaseObjectCount(objectCount);
@@ -3995,10 +4017,12 @@ ConstraintTypeSet::sweep(Zone *zone)
     while (constraint) {
         TypeConstraint *copy;
         if (constraint->sweep(zone->types, &copy)) {
-            if (!copy)
-                CrashAtUnhandlableOOM("OOM in ConstraintTypeSet::sweep");
-            copy->next = constraintList;
-            constraintList = copy;
+            if (copy) {
+                copy->next = constraintList;
+                constraintList = copy;
+            } else {
+                *oom = true;
+            }
         }
         constraint = constraint->next;
     }
@@ -4019,7 +4043,7 @@ TypeObject::clearProperties()
  * so that type objects do not need later finalization.
  */
 inline void
-TypeObject::sweep(FreeOp *fop)
+TypeObject::sweep(FreeOp *fop, bool *oom)
 {
     if (!isMarked()) {
         if (addendum)
@@ -4027,7 +4051,7 @@ TypeObject::sweep(FreeOp *fop)
         return;
     }
 
-    js::LifoAlloc &typeLifoAlloc = zone()->types.typeLifoAlloc;
+    LifoAlloc &typeLifoAlloc = zone()->types.typeLifoAlloc;
 
     /*
      * Properties were allocated from the old arena, and need to be copied over
@@ -4054,17 +4078,21 @@ TypeObject::sweep(FreeOp *fop)
                 }
 
                 Property *newProp = typeLifoAlloc.new_<Property>(*prop);
-                if (!newProp)
-                    CrashAtUnhandlableOOM("OOM in TypeObject::sweep");
+                if (newProp) {
+                    Property **pentry =
+                        HashSetInsert<jsid,Property,Property>
+                            (typeLifoAlloc, propertySet, propertyCount, prop->id);
+                    if (pentry) {
+                        *pentry = newProp;
+                        newProp->types.sweep(zone(), oom);
+                        continue;
+                    }
+                }
 
-                Property **pentry =
-                    HashSetInsert<jsid,Property,Property>
-                        (typeLifoAlloc, propertySet, propertyCount, prop->id);
-                if (!pentry)
-                    CrashAtUnhandlableOOM("OOM in TypeObject::sweep");
-
-                *pentry = newProp;
-                newProp->types.sweep(zone());
+                *oom = true;
+                addFlags(OBJECT_FLAG_DYNAMIC_MASK | OBJECT_FLAG_UNKNOWN_PROPERTIES);
+                clearProperties();
+                return;
             }
         }
         setBasePropertyCount(propertyCount);
@@ -4075,17 +4103,16 @@ TypeObject::sweep(FreeOp *fop)
             clearProperties();
         } else {
             Property *newProp = typeLifoAlloc.new_<Property>(*prop);
-            if (!newProp)
-                CrashAtUnhandlableOOM("OOM in TypeObject::sweep");
-
-            propertySet = (Property **) newProp;
-            newProp->types.sweep(zone());
+            if (newProp) {
+                propertySet = (Property **) newProp;
+                newProp->types.sweep(zone(), oom);
+            } else {
+                *oom = true;
+                addFlags(OBJECT_FLAG_DYNAMIC_MASK | OBJECT_FLAG_UNKNOWN_PROPERTIES);
+                clearProperties();
+                return;
+            }
         }
-    }
-
-    if (basePropertyCount() <= SET_ARRAY_SIZE) {
-        for (unsigned i = 0; i < basePropertyCount(); i++)
-            JS_ASSERT(propertySet[i]);
     }
 }
 
@@ -4204,7 +4231,7 @@ TypeCompartment::~TypeCompartment()
 }
 
 /* static */ void
-TypeScript::Sweep(FreeOp *fop, JSScript *script)
+TypeScript::Sweep(FreeOp *fop, JSScript *script, bool *oom)
 {
     JSCompartment *compartment = script->compartment();
     JS_ASSERT(compartment->zone()->isGCSweeping());
@@ -4214,7 +4241,7 @@ TypeScript::Sweep(FreeOp *fop, JSScript *script)
 
     /* Remove constraints and references to dead objects from the persistent type sets. */
     for (unsigned i = 0; i < num; i++)
-        typeArray[i].sweep(compartment->zone());
+        typeArray[i].sweep(compartment->zone(), oom);
 }
 
 void
@@ -4286,7 +4313,7 @@ TypeZone::~TypeZone()
 }
 
 void
-TypeZone::sweep(FreeOp *fop, bool releaseTypes)
+TypeZone::sweep(FreeOp *fop, bool releaseTypes, bool *oom)
 {
     JS_ASSERT(zone()->isGCSweeping());
 
@@ -4306,10 +4333,12 @@ TypeZone::sweep(FreeOp *fop, bool releaseTypes)
             CompilerOutput &output = (*compilerOutputs)[i];
             if (output.isValid()) {
                 JSScript *script = output.script();
-                if (IsScriptAboutToBeFinalized(&script))
+                if (IsScriptAboutToBeFinalized(&script)) {
+                    jit::GetIonScript(script, output.mode())->recompileInfoRef() = uint32_t(-1);
                     output.invalidate();
-                else
+                } else {
                     output.setSweepIndex(newCompilerOutputCount++);
+                }
             }
         }
     }
@@ -4320,7 +4349,7 @@ TypeZone::sweep(FreeOp *fop, bool releaseTypes)
         for (CellIterUnderGC i(zone(), FINALIZE_SCRIPT); !i.done(); i.next()) {
             JSScript *script = i.get<JSScript>();
             if (script->types) {
-                types::TypeScript::Sweep(fop, script);
+                types::TypeScript::Sweep(fop, script, oom);
 
                 if (releaseTypes) {
                     if (script->hasParallelIonScript()) {
@@ -4359,7 +4388,7 @@ TypeZone::sweep(FreeOp *fop, bool releaseTypes)
              !iter.done(); iter.next())
         {
             TypeObject *object = iter.get<TypeObject>();
-            object->sweep(fop);
+            object->sweep(fop, oom);
         }
 
         for (CompartmentsInZoneIter comp(zone()); !comp.done(); comp.next())
@@ -4372,7 +4401,7 @@ TypeZone::sweep(FreeOp *fop, bool releaseTypes)
             CompilerOutput output = (*compilerOutputs)[i];
             if (output.isValid()) {
                 JS_ASSERT(sweepIndex == output.sweepIndex());
-                output.setSweepIndex(0);
+                output.invalidateSweepIndex();
                 (*compilerOutputs)[sweepIndex++] = output;
             }
         }
@@ -4391,6 +4420,17 @@ TypeZone::sweep(FreeOp *fop, bool releaseTypes)
     {
         gcstats::AutoPhase ap2(rt->gcStats, gcstats::PHASE_FREE_TI_ARENA);
         rt->freeLifoAlloc.transferFrom(&oldAlloc);
+    }
+}
+
+void
+TypeZone::clearAllNewScriptAddendumsOnOOM()
+{
+    for (gc::CellIterUnderGC iter(zone(), gc::FINALIZE_TYPE_OBJECT);
+         !iter.done(); iter.next())
+    {
+        TypeObject *object = iter.get<TypeObject>();
+        object->maybeClearNewScriptAddendumOnOOM();
     }
 }
 

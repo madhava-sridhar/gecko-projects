@@ -2200,7 +2200,7 @@ nsCryptoRunnable::Run()
 
   bool ok =
     JS_EvaluateScript(cx, scope, m_args->m_jsCallback,
-                      strlen(m_args->m_jsCallback), nullptr, 0, nullptr);
+                      strlen(m_args->m_jsCallback), nullptr, 0);
   return ok ? NS_OK : NS_ERROR_FAILURE;
 }
 
@@ -2848,10 +2848,9 @@ CRMFObject::~CRMFObject()
 }
 
 JSObject*
-CRMFObject::WrapObject(JSContext *aCx, JS::Handle<JSObject*> aScope,
-                       bool* aTookOwnership)
+CRMFObject::WrapObject(JSContext *aCx, bool* aTookOwnership)
 {
-  return CRMFObjectBinding::Wrap(aCx, aScope, this, aTookOwnership);
+  return CRMFObjectBinding::Wrap(aCx, this, aTookOwnership);
 }
 
 void

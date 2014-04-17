@@ -60,6 +60,7 @@ namespace jit {
     _(JSOP_OBJECT)             \
     _(JSOP_REGEXP)             \
     _(JSOP_LAMBDA)             \
+    _(JSOP_LAMBDA_ARROW)       \
     _(JSOP_BITOR)              \
     _(JSOP_BITXOR)             \
     _(JSOP_BITAND)             \
@@ -104,7 +105,6 @@ namespace jit {
     _(JSOP_DELELEM)            \
     _(JSOP_IN)                 \
     _(JSOP_GETGNAME)           \
-    _(JSOP_CALLGNAME)          \
     _(JSOP_BINDGNAME)          \
     _(JSOP_SETGNAME)           \
     _(JSOP_SETNAME)            \
@@ -115,23 +115,18 @@ namespace jit {
     _(JSOP_LENGTH)             \
     _(JSOP_GETXPROP)           \
     _(JSOP_GETALIASEDVAR)      \
-    _(JSOP_CALLALIASEDVAR)     \
     _(JSOP_SETALIASEDVAR)      \
     _(JSOP_NAME)               \
-    _(JSOP_CALLNAME)           \
     _(JSOP_BINDNAME)           \
     _(JSOP_DELNAME)            \
     _(JSOP_GETINTRINSIC)       \
-    _(JSOP_CALLINTRINSIC)      \
     _(JSOP_DEFVAR)             \
     _(JSOP_DEFCONST)           \
     _(JSOP_SETCONST)           \
     _(JSOP_DEFFUN)             \
     _(JSOP_GETLOCAL)           \
-    _(JSOP_CALLLOCAL)          \
     _(JSOP_SETLOCAL)           \
     _(JSOP_GETARG)             \
-    _(JSOP_CALLARG)            \
     _(JSOP_SETARG)             \
     _(JSOP_CALL)               \
     _(JSOP_FUNCALL)            \

@@ -189,7 +189,7 @@ pref("privacy.item.syncAccount", true);
 // base url for the wifi geolocation network provider
 pref("geo.provider.use_mls", false);
 pref("geo.cell.scan", true);
-pref("geo.wifi.uri", "https://location.services.mozilla.com/v1/geolocate?key=%MOZ_MOZILLA_API_KEY%");
+pref("geo.wifi.uri", "https://location.services.mozilla.com/v1/geolocate?key=%MOZILLA_API_KEY%");
 
 // enable geo
 pref("geo.enabled", true);
@@ -265,7 +265,7 @@ pref("ui.highlight", "#b2f2ff");
 pref("editor.singleLine.pasteNewlines", 2);
 
 // threshold where a tap becomes a drag, in 1/240" reference pixels
-// The names of the preferences are to be in sync with nsEventStateManager.cpp
+// The names of the preferences are to be in sync with EventStateManager.cpp
 pref("ui.dragThresholdX", 25);
 pref("ui.dragThresholdY", 25);
 
@@ -415,11 +415,12 @@ pref("dom.navigator-property.disable.mozContacts", false);
 pref("dom.global-constructor.disable.mozContact", false);
 
 // Shortnumber matching needed for e.g. Brazil:
-// 01187654321 can be found with 87654321
+// 03187654321 can be found with 87654321
 pref("dom.phonenumber.substringmatching.BR", 8);
 pref("dom.phonenumber.substringmatching.CO", 10);
 pref("dom.phonenumber.substringmatching.VE", 7);
 pref("dom.phonenumber.substringmatching.CL", 8);
+pref("dom.phonenumber.substringmatching.PE", 7);
 
 // WebAlarms
 pref("dom.mozAlarms.enabled", true);
@@ -903,6 +904,7 @@ pref("apz.y_stationary_size_multiplier", "1.8");
 pref("apz.enlarge_displayport_when_clipped", true);
 // Use "sticky" axis locking
 pref("apz.axis_lock_mode", 2);
+pref("apz.subframe.enabled", true);
 
 // This preference allows FirefoxOS apps (and content, I think) to force
 // the use of software (instead of hardware accelerated) 2D canvases by

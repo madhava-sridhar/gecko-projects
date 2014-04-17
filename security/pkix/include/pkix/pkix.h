@@ -34,11 +34,13 @@ namespace mozilla { namespace pkix {
 //
 //    * user-initial-policy-set = { requiredPolicy }.
 //    * initial-explicit-policy = true
-//    * initial-any-policy-inhibit = true
+//    * initial-any-policy-inhibit = false
 //
+// We allow intermediate cerificates to use this extension but since
+// we do not process the inhibit anyPolicy extesion we will fail if this
+// extension is present. TODO(bug 989051)
 // Because we force explicit policy and because we prohibit policy mapping, we
-// do not bother processing the policy mapping, policy constraint, or inhibit
-// anyPolicy extensions.
+// do not bother processing the policy mapping, or policy constraint.
 //
 // ----------------------------------------------------------------------------
 // ERROR RANKING
@@ -51,12 +53,10 @@ namespace mozilla { namespace pkix {
 // The ranking is:
 //
 //    1. Active distrust (SEC_ERROR_UNTRUSTED_CERT).
-//    2. Problems with issuer-independent properties other than
-//       notBefore/notAfter.
-//    3. For CA certificates: Expiration.
-//    4. Unknown issuer (SEC_ERROR_UNKNOWN_ISSUER).
-//    5. For end-entity certificates: Expiration.
-//    6. Revocation.
+//    2. Problems with issuer-independent properties for CA certificates.
+//    3. Unknown issuer (SEC_ERROR_UNKNOWN_ISSUER).
+//    4. Problems with issuer-independent properties for EE certificates.
+//    5. Revocation.
 //
 // In particular, if BuildCertChain returns SEC_ERROR_UNKNOWN_ISSUER then the
 // caller can call CERT_CheckCertValidTimes to determine if the certificate is

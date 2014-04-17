@@ -41,9 +41,9 @@ nsMimeTypeArray::~nsMimeTypeArray()
 }
 
 JSObject*
-nsMimeTypeArray::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aScope)
+nsMimeTypeArray::WrapObject(JSContext* aCx)
 {
-  return MimeTypeArrayBinding::Wrap(aCx, aScope, this);
+  return MimeTypeArrayBinding::Wrap(aCx, this);
 }
 
 void
@@ -173,6 +173,12 @@ nsMimeTypeArray::NamedGetter(const nsAString& aName, bool &aFound)
   return mt;
 }
 
+bool
+nsMimeTypeArray::NameIsEnumerable(const nsAString& aName)
+{
+  return true;
+}
+
 uint32_t
 nsMimeTypeArray::Length()
 {
@@ -182,7 +188,7 @@ nsMimeTypeArray::Length()
 }
 
 void
-nsMimeTypeArray::GetSupportedNames(nsTArray< nsString >& aRetval)
+nsMimeTypeArray::GetSupportedNames(unsigned, nsTArray< nsString >& aRetval)
 {
   EnsurePluginMimeTypes();
 
@@ -251,9 +257,9 @@ nsMimeType::GetParentObject() const
 }
 
 JSObject*
-nsMimeType::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aScope)
+nsMimeType::WrapObject(JSContext* aCx)
 {
-  return MimeTypeBinding::Wrap(aCx, aScope, this);
+  return MimeTypeBinding::Wrap(aCx, this);
 }
 
 void

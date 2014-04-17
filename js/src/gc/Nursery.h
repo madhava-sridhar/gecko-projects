@@ -212,9 +212,13 @@ class Nursery
     void updateDecommittedRegion() {
 #ifndef JS_GC_ZEAL
         if (numActiveChunks_ < NumNurseryChunks) {
+            // Bug 994054: madvise on MacOS is too slow to make this
+            //             optimization worthwhile.
+# ifndef XP_MACOSX
             uintptr_t decommitStart = chunk(numActiveChunks_).start();
             JS_ASSERT(decommitStart == AlignBytes(decommitStart, 1 << 20));
             gc::MarkPagesUnused(runtime(), (void *)decommitStart, heapEnd() - decommitStart);
+# endif
         }
 #endif
     }
@@ -293,9 +297,6 @@ class Nursery
      * In debug and zeal builds, these bytes indicate the state of an unused
      * segment of nursery-allocated memory.
      */
-    static const uint8_t FreshNursery = 0x2a;
-    static const uint8_t SweptNursery = 0x2b;
-    static const uint8_t AllocatedThing = 0x2c;
     void enterZealMode() {
         if (isEnabled())
             numActiveChunks_ = NumNurseryChunks;

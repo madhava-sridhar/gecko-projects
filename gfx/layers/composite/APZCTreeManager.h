@@ -86,7 +86,6 @@ class APZCTreeManager {
 
 public:
   APZCTreeManager();
-  virtual ~APZCTreeManager();
 
   /**
    * Rebuild the APZC tree based on the layer update that just came up. Preserve
@@ -215,6 +214,7 @@ public:
    * Sets allowed touch behavior values for current touch-session for specific apzc (determined by guid).
    * Should be invoked by the widget. Each value of the aValues arrays corresponds to the different
    * touch point that is currently active.
+   * Must be called after receiving the TOUCH_START event that starts the touch-session.
    */
   void SetAllowedTouchBehavior(const ScrollableLayerGuid& aGuid,
                                const nsTArray<TouchBehaviorFlags>& aValues);
@@ -272,7 +272,17 @@ public:
 
   bool FlushRepaintsForOverscrollHandoffChain();
 
+  /**
+   * Determine whether |aApzc|, or any APZC along its overscroll handoff chain,
+   * has room to be panned.
+   * Expects the overscroll handoff chain to already be built.
+   */
+  bool CanBePanned(AsyncPanZoomController* aApzc);
+
 protected:
+  // Protected destructor, to discourage deletion outside of Release():
+  virtual ~APZCTreeManager();
+
   /**
    * Debug-build assertion that can be called to ensure code is running on the
    * compositor thread.
@@ -296,13 +306,13 @@ public:
                           gfx3DMatrix& aTransformToGeckoOut);
 private:
   /* Helpers */
+  AsyncPanZoomController* FindTargetAPZC(AsyncPanZoomController* aApzc, FrameMetrics::ViewID aScrollId);
   AsyncPanZoomController* FindTargetAPZC(AsyncPanZoomController* aApzc, const ScrollableLayerGuid& aGuid);
   AsyncPanZoomController* GetAPZCAtPoint(AsyncPanZoomController* aApzc, const gfxPoint& aHitTestPoint);
   already_AddRefed<AsyncPanZoomController> CommonAncestor(AsyncPanZoomController* aApzc1, AsyncPanZoomController* aApzc2);
   already_AddRefed<AsyncPanZoomController> RootAPZCForLayersId(AsyncPanZoomController* aApzc);
   already_AddRefed<AsyncPanZoomController> GetTouchInputBlockAPZC(const WidgetTouchEvent& aEvent);
   nsEventStatus ProcessTouchEvent(WidgetTouchEvent& touchEvent, ScrollableLayerGuid* aOutTargetGuid);
-  nsEventStatus ProcessMouseEvent(WidgetMouseEvent& mouseEvent, ScrollableLayerGuid* aOutTargetGuid);
   nsEventStatus ProcessEvent(WidgetInputEvent& inputEvent, ScrollableLayerGuid* aOutTargetGuid);
   void UpdateZoomConstraintsRecursively(AsyncPanZoomController* aApzc,
                                         const ZoomConstraints& aConstraints);

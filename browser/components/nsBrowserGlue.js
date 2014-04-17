@@ -22,6 +22,9 @@ XPCOMUtils.defineLazyModuleGetter(this, "AddonManager",
 XPCOMUtils.defineLazyModuleGetter(this, "ContentClick",
                                   "resource:///modules/ContentClick.jsm");
 
+XPCOMUtils.defineLazyModuleGetter(this, "DirectoryLinksProvider",
+                                  "resource://gre/modules/DirectoryLinksProvider.jsm");
+
 XPCOMUtils.defineLazyModuleGetter(this, "NetUtil",
                                   "resource://gre/modules/NetUtil.jsm");
 
@@ -77,6 +80,9 @@ XPCOMUtils.defineLazyModuleGetter(this, "PlacesBackups",
 
 XPCOMUtils.defineLazyModuleGetter(this, "OS",
                                   "resource://gre/modules/osfile.jsm");
+
+ XPCOMUtils.defineLazyModuleGetter(this, "RemotePrompt",
+                                   "resource:///modules/RemotePrompt.jsm");
 
 XPCOMUtils.defineLazyModuleGetter(this, "SessionStore",
                                   "resource:///modules/sessionstore/SessionStore.jsm");
@@ -475,6 +481,8 @@ BrowserGlue.prototype = {
     WebappManager.init();
     PageThumbs.init();
     NewTabUtils.init();
+    DirectoryLinksProvider.init();
+    NewTabUtils.links.addProvider(DirectoryLinksProvider);
     BrowserNewTabPreloader.init();
 #ifdef NIGHTLY_BUILD
     if (Services.prefs.getBoolPref("dom.identity.enabled")) {
@@ -490,8 +498,10 @@ BrowserGlue.prototype = {
     SessionStore.init();
     BrowserUITelemetry.init();
 
-    if (Services.appinfo.browserTabsRemote)
+    if (Services.appinfo.browserTabsRemote) {
       ContentClick.init();
+      RemotePrompt.init();
+    }
 
     Services.obs.notifyObservers(null, "browser-ui-startup-complete", "");
   },

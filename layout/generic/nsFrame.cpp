@@ -34,7 +34,6 @@
 #include "nsLayoutUtils.h"
 
 #include "nsIDOMNode.h"
-#include "nsEventStateManager.h"
 #include "nsISelection.h"
 #include "nsISelectionPrivate.h"
 #include "nsFrameSelection.h"
@@ -79,6 +78,8 @@
 
 #include "mozilla/AsyncEventDispatcher.h"
 #include "mozilla/EventListenerManager.h"
+#include "mozilla/EventStateManager.h"
+#include "mozilla/EventStates.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/LookAndFeel.h"
 #include "mozilla/MouseEvents.h"
@@ -314,6 +315,11 @@ nsIFrame::FindCloserFrameForSelection(
                                          aCurrentBestFrame->mYDistance)) {
     aCurrentBestFrame->mFrame = this;
   }
+}
+
+void
+nsIFrame::ContentStatesChanged(mozilla::EventStates aStates)
+{
 }
 
 void
@@ -4471,6 +4477,17 @@ nsIFrame::SetView(nsView* aView)
 {
   if (aView) {
     aView->SetFrame(this);
+
+#ifdef DEBUG
+    nsIAtom* frameType = GetType();
+    NS_ASSERTION(frameType == nsGkAtoms::scrollFrame ||
+                 frameType == nsGkAtoms::subDocumentFrame ||
+                 frameType == nsGkAtoms::listControlFrame ||
+                 frameType == nsGkAtoms::objectFrame ||
+                 frameType == nsGkAtoms::viewportFrame ||
+                 frameType == nsGkAtoms::menuPopupFrame,
+                 "Only specific frame types can have an nsView");
+#endif
 
     // Set a property on the frame
     Properties().Set(ViewProperty(), aView);

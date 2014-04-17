@@ -9,6 +9,7 @@
 #include "ScopedNSSTypes.h"
 #include "TLSServer.h"
 #include "pkixtestutil.h"
+#include "secder.h"
 #include "secerr.h"
 
 using namespace mozilla;
@@ -99,6 +100,33 @@ GetOCSPResponseForType(OCSPResponseType aORT, CERTCertificate *aCert,
   if (aORT == ORTBadSignature) {
     context.badSignature = true;
   }
+  OCSPResponseExtension extension;
+  if (aORT == ORTCriticalExtension || aORT == ORTNoncriticalExtension) {
+    SECItem oidItem = {
+      siBuffer,
+      nullptr,
+      0
+    };
+    // 1.3.6.1.4.1.13769.666.666.666 is the root of Mozilla's testing OID space
+    static const char* testExtensionOID = "1.3.6.1.4.1.13769.666.666.666.1.500.9.2";
+    if (SEC_StringToOID(aArena, &oidItem, testExtensionOID,
+                        PL_strlen(testExtensionOID)) != SECSuccess) {
+      return nullptr;
+    }
+    DERTemplate oidTemplate[2] = { { DER_OBJECT_ID, 0 }, { 0 } };
+    extension.id.data = nullptr;
+    extension.id.len = 0;
+    if (DER_Encode(aArena, &extension.id, oidTemplate, &oidItem)
+          != SECSuccess) {
+      return nullptr;
+    }
+    extension.critical = (aORT == ORTCriticalExtension);
+    static const uint8_t value[2] = { 0x05, 0x00 };
+    extension.value.data = const_cast<uint8_t*>(value);
+    extension.value.len = PR_ARRAY_SIZE(value);
+    extension.next = nullptr;
+    context.extensions = &extension;
+  }
 
   if (!context.signerCert) {
     context.signerCert = CERT_DupCertificate(context.issuerCert.get());
@@ -111,8 +139,12 @@ GetOCSPResponseForType(OCSPResponseType aORT, CERTCertificate *aCert,
   }
 
   SECItemArray* arr = SECITEM_AllocArray(aArena, nullptr, 1);
-  arr->items[0].data = response ? response->data : nullptr;
-  arr->items[0].len = response ? response->len : 0;
+  if (!arr) {
+    PrintPRError("SECITEM_AllocArray failed");
+    return nullptr;
+  }
+  arr->items[0].data = response->data;
+  arr->items[0].len = response->len;
 
   return arr;
 }

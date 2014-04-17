@@ -473,6 +473,15 @@ class MacroAssemblerX86 : public MacroAssemblerX86Shared
         }
     }
 
+    void testNullSet(Condition cond, const ValueOperand &value, Register dest) {
+        cond = testNull(cond, value);
+        emitSet(cond, dest);
+    }
+    void testUndefinedSet(Condition cond, const ValueOperand &value, Register dest) {
+        cond = testUndefined(cond, value);
+        emitSet(cond, dest);
+    }
+
     void cmpPtr(Register lhs, const ImmWord rhs) {
         cmpl(lhs, Imm32(rhs.value));
     }
@@ -480,6 +489,9 @@ class MacroAssemblerX86 : public MacroAssemblerX86Shared
         cmpPtr(lhs, ImmWord(uintptr_t(imm.value)));
     }
     void cmpPtr(Register lhs, const ImmGCPtr rhs) {
+        cmpl(lhs, rhs);
+    }
+    void cmpPtr(Register lhs, const Imm32 rhs) {
         cmpl(lhs, rhs);
     }
     void cmpPtr(const Operand &lhs, const ImmWord rhs) {
@@ -508,6 +520,13 @@ class MacroAssemblerX86 : public MacroAssemblerX86Shared
     }
     void testPtr(Register lhs, Register rhs) {
         testl(lhs, rhs);
+    }
+
+    template <typename T1, typename T2>
+    void cmpPtrSet(Assembler::Condition cond, T1 lhs, T2 rhs, const Register &dest)
+    {
+        cmpPtr(lhs, rhs);
+        emitSet(cond, dest);
     }
 
     Condition testNegativeZero(const FloatRegister &reg, const Register &scratch);
@@ -560,6 +579,9 @@ class MacroAssemblerX86 : public MacroAssemblerX86Shared
     }
     void subPtr(const Address &addr, const Register &dest) {
         subl(Operand(addr), dest);
+    }
+    void subPtr(const Register &src, const Address &dest) {
+        subl(src, Operand(dest));
     }
 
     void branch32(Condition cond, const AbsoluteAddress &lhs, Imm32 rhs, Label *label) {
@@ -920,6 +942,10 @@ class MacroAssemblerX86 : public MacroAssemblerX86Shared
         testl(operand.payloadReg(), operand.payloadReg());
         return truthy ? NonZero : Zero;
     }
+    void branchTestInt32Truthy(bool truthy, const ValueOperand &operand, Label *label) {
+        Condition cond = testInt32Truthy(truthy, operand);
+        j(cond, label);
+    }
     void branchTestBooleanTruthy(bool truthy, const ValueOperand &operand, Label *label) {
         testl(operand.payloadReg(), operand.payloadReg());
         j(truthy ? NonZero : Zero, label);
@@ -932,7 +958,10 @@ class MacroAssemblerX86 : public MacroAssemblerX86Shared
         testl(lengthAndFlags, Imm32(mask));
         return truthy ? Assembler::NonZero : Assembler::Zero;
     }
-
+    void branchTestStringTruthy(bool truthy, const ValueOperand &value, Label *label) {
+        Condition cond = testStringTruthy(truthy, value);
+        j(cond, label);
+    }
 
     void loadInt32OrDouble(const Operand &operand, const FloatRegister &dest) {
         Label notInt32, end;

@@ -2,8 +2,11 @@
    http://creativecommons.org/publicdomain/zero/1.0/ */
 
 const PREF_NEWTAB_ENABLED = "browser.newtabpage.enabled";
+const PREF_NEWTAB_DIRECTORYSOURCE = "browser.newtabpage.directorySource";
 
 Services.prefs.setBoolPref(PREF_NEWTAB_ENABLED, true);
+// start with no directory links by default
+Services.prefs.setCharPref(PREF_NEWTAB_DIRECTORYSOURCE, "data:application/json,{}");
 
 let tmp = {};
 Cu.import("resource://gre/modules/Promise.jsm", tmp);
@@ -11,7 +14,8 @@ Cu.import("resource://gre/modules/NewTabUtils.jsm", tmp);
 Cc["@mozilla.org/moz/jssubscript-loader;1"]
   .getService(Ci.mozIJSSubScriptLoader)
   .loadSubScript("chrome://browser/content/sanitize.js", tmp);
-let {Promise, NewTabUtils, Sanitizer} = tmp;
+Cu.import("resource://gre/modules/Timer.jsm", tmp);
+let {Promise, NewTabUtils, Sanitizer, clearTimeout} = tmp;
 
 let uri = Services.io.newURI("about:newtab", null, null);
 let principal = Services.scriptSecurityManager.getNoAppCodebasePrincipal(uri);
@@ -26,6 +30,14 @@ registerCleanupFunction(function () {
     gWindow.gBrowser.removeTab(gWindow.gBrowser.tabs[1]);
 
   Services.prefs.clearUserPref(PREF_NEWTAB_ENABLED);
+  Services.prefs.clearUserPref(PREF_NEWTAB_DIRECTORYSOURCE);
+
+  // Stop any update timers to prevent unexpected updates in later tests
+  let timer = NewTabUtils.allPages._scheduleUpdateTimeout;
+  if (timer) {
+    clearTimeout(timer);
+    delete NewTabUtils.allPages._scheduleUpdateTimeout;
+  }
 });
 
 /**
@@ -159,20 +171,34 @@ function clearHistory(aCallback) {
 
 function fillHistory(aLinks, aCallback) {
   let numLinks = aLinks.length;
+  if (!numLinks) {
+    if (aCallback)
+      executeSoon(aCallback);
+    return;
+  }
+
   let transitionLink = Ci.nsINavHistoryService.TRANSITION_LINK;
 
-  for (let link of aLinks.reverse()) {
+  // Important: To avoid test failures due to clock jitter on Windows XP, call
+  // Date.now() once here, not each time through the loop.
+  let now = Date.now() * 1000;
+
+  for (let i = 0; i < aLinks.length; i++) {
+    let link = aLinks[i];
     let place = {
       uri: makeURI(link.url),
       title: link.title,
-      visits: [{visitDate: Date.now() * 1000, transitionType: transitionLink}]
+      // Links are secondarily sorted by visit date descending, so decrease the
+      // visit date as we progress through the array so that links appear in the
+      // grid in the order they're present in the array.
+      visits: [{visitDate: now - i, transitionType: transitionLink}]
     };
 
     PlacesUtils.asyncHistory.updatePlaces(place, {
       handleError: function () ok(false, "couldn't add visit to history"),
       handleResult: function () {},
       handleCompletion: function () {
-        if (--numLinks == 0)
+        if (--numLinks == 0 && aCallback)
           aCallback();
       }
     });
@@ -503,12 +529,18 @@ function createDragEvent(aEventType, aData) {
 
 /**
  * Resumes testing when all pages have been updated.
+ * @param aCallback Called when done. If not specified, TestRunner.next is used.
+ * @param aOnlyIfHidden If true, this resumes testing only when an update that
+ *                      applies to pre-loaded, hidden pages is observed.  If
+ *                      false, this resumes testing when any update is observed.
  */
-function whenPagesUpdated(aCallback) {
+function whenPagesUpdated(aCallback, aOnlyIfHidden=false) {
   let page = {
-    update: function () {
-      NewTabUtils.allPages.unregister(this);
-      executeSoon(aCallback || TestRunner.next);
+    update: function (onlyIfHidden=false) {
+      if (onlyIfHidden == aOnlyIfHidden) {
+        NewTabUtils.allPages.unregister(this);
+        executeSoon(aCallback || TestRunner.next);
+      }
     }
   };
 

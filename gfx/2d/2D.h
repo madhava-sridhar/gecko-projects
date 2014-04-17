@@ -336,6 +336,23 @@ public:
    * DataSourceSurface's data can be accessed directly.
    */
   virtual TemporaryRef<DataSourceSurface> GetDataSurface() = 0;
+
+  /* Tries to get this SourceSurface's native surface.  This will fail if aType
+   * is not the type of this SourceSurface's native surface.
+   */
+  virtual void *GetNativeSurface(NativeSurfaceType aType) {
+    return nullptr;
+  }
+
+  void AddUserData(UserDataKey *key, void *userData, void (*destroy)(void*)) {
+    mUserData.Add(key, userData, destroy);
+  }
+  void *GetUserData(UserDataKey *key) {
+    return mUserData.Get(key);
+  }
+
+protected:
+  UserData mUserData;
 };
 
 class DataSourceSurface : public SourceSurface
@@ -399,7 +416,7 @@ public:
    */
   virtual TemporaryRef<DataSourceSurface> GetDataSurface();
 
-  DebugOnly<bool> mIsMapped;
+  bool mIsMapped;
 };
 
 /* This is an abstract object that accepts path segments. */
@@ -1015,7 +1032,7 @@ public:
    */
   static bool CheckSurfaceSize(const IntSize &sz, int32_t limit = 0);
 
-  static TemporaryRef<DrawTarget> CreateDrawTargetForCairoSurface(cairo_surface_t* aSurface, const IntSize& aSize);
+  static TemporaryRef<DrawTarget> CreateDrawTargetForCairoSurface(cairo_surface_t* aSurface, const IntSize& aSize, SurfaceFormat* aFormat = nullptr);
 
   static TemporaryRef<SourceSurface>
     CreateSourceSurfaceForCairoSurface(cairo_surface_t* aSurface,

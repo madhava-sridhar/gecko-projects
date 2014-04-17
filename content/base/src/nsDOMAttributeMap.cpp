@@ -217,6 +217,12 @@ nsDOMAttributeMap::NamedGetter(const nsAString& aAttrName, bool& aFound)
   return GetAttribute(ni, false);
 }
 
+bool
+nsDOMAttributeMap::NameIsEnumerable(const nsAString& aName)
+{
+  return true;
+}
+
 Attr*
 nsDOMAttributeMap::GetNamedItem(const nsAString& aAttrName)
 {
@@ -553,7 +559,7 @@ nsDOMAttributeMap::SizeOfIncludingThis(MallocSizeOf aMallocSizeOf) const
 }
 
 /* virtual */ JSObject*
-nsDOMAttributeMap::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aScope)
+nsDOMAttributeMap::WrapObject(JSContext* aCx)
 {
-  return MozNamedAttrMapBinding::Wrap(aCx, aScope, this);
+  return MozNamedAttrMapBinding::Wrap(aCx, this);
 }

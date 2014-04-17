@@ -14,7 +14,6 @@
 #include "mozilla/dom/HTMLSelectElement.h"
 #include "nsContentCreatorFunctions.h"
 #include "nsError.h"
-#include "nsEventStates.h"
 #include "nsFormSubmission.h"
 #include "nsGkAtoms.h"
 #include "nsIComboboxControlFrame.h"
@@ -29,6 +28,7 @@
 #include "nsRuleData.h"
 #include "nsServiceManagerUtils.h"
 #include "nsStyleConsts.h"
+#include "jsfriendapi.h"
 
 namespace mozilla {
 namespace dom {
@@ -109,9 +109,9 @@ NS_IMPL_CYCLE_COLLECTING_RELEASE(HTMLOptionsCollection)
 
 
 JSObject*
-HTMLOptionsCollection::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aScope)
+HTMLOptionsCollection::WrapObject(JSContext* aCx)
 {
-  return HTMLOptionsCollectionBinding::Wrap(aCx, aScope, this);
+  return HTMLOptionsCollectionBinding::Wrap(aCx, this);
 }
 
 NS_IMETHODIMP
@@ -281,8 +281,13 @@ HTMLOptionsCollection::NamedItem(const nsAString& aName,
 }
 
 void
-HTMLOptionsCollection::GetSupportedNames(nsTArray<nsString>& aNames)
+HTMLOptionsCollection::GetSupportedNames(unsigned aFlags,
+                                         nsTArray<nsString>& aNames)
 {
+  if (!(aFlags & JSITER_HIDDEN)) {
+    return;
+  }
+
   nsAutoTArray<nsIAtom*, 8> atoms;
   for (uint32_t i = 0; i < mElements.Length(); ++i) {
     HTMLOptionElement* content = mElements.ElementAt(i);

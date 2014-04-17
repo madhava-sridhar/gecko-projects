@@ -16,6 +16,7 @@
 # include "jit/PerfSpewer.h"
 #endif
 #include "jit/VMFunctions.h"
+#include "vm/TraceLogging.h"
 
 #include "jsscriptinlines.h"
 
@@ -336,17 +337,22 @@ BaselineCompiler::emitPrologue()
             masm.bind(&pushLoop);
             for (size_t i = 0; i < LOOP_UNROLL_FACTOR; i++)
                 masm.pushValue(R0);
-            masm.sub32(Imm32(LOOP_UNROLL_FACTOR), R1.scratchReg());
-            masm.j(Assembler::NonZero, &pushLoop);
+            masm.branchSub32(Assembler::NonZero,
+                             Imm32(LOOP_UNROLL_FACTOR), R1.scratchReg(), &pushLoop);
         }
     }
 
     if (needsEarlyStackCheck())
         masm.bind(&earlyStackCheckFailed);
 
-#if JS_TRACE_LOGGING
-    masm.tracelogStart(script.get());
-    masm.tracelogLog(TraceLogging::INFO_ENGINE_BASELINE);
+#ifdef JS_TRACE_LOGGING
+    TraceLogger *logger = TraceLoggerForMainThread(cx->runtime());
+    Register loggerReg = RegisterSet::Volatile().takeGeneral();
+    masm.Push(loggerReg);
+    masm.movePtr(ImmPtr(logger), loggerReg);
+    masm.tracelogStart(loggerReg, TraceLogCreateTextId(logger, script.get()));
+    masm.tracelogStart(loggerReg, TraceLogger::Baseline);
+    masm.Pop(loggerReg);
 #endif
 
     // Record the offset of the prologue, because Ion can bailout before
@@ -381,8 +387,16 @@ BaselineCompiler::emitEpilogue()
 {
     masm.bind(&return_);
 
-#if JS_TRACE_LOGGING
-    masm.tracelogStop();
+#ifdef JS_TRACE_LOGGING
+    TraceLogger *logger = TraceLoggerForMainThread(cx->runtime());
+    Register loggerReg = RegisterSet::Volatile().takeGeneral();
+    masm.Push(loggerReg);
+    masm.movePtr(ImmPtr(logger), loggerReg);
+    masm.tracelogStop(loggerReg, TraceLogger::Baseline);
+    // Stop the script. Using a stop without checking the textId, since we
+    // we didn't save the textId for the script.
+    masm.tracelogStop(loggerReg);
+    masm.Pop(loggerReg);
 #endif
 
     // Pop SPS frame if necessary
@@ -1103,6 +1117,17 @@ BaselineCompiler::emit_JSOP_NULL()
 bool
 BaselineCompiler::emit_JSOP_THIS()
 {
+    if (function() && function()->isArrow()) {
+        // Arrow functions store their (lexical) |this| value in an
+        // extended slot.
+        frame.syncStack(0);
+        Register scratch = R0.scratchReg();
+        masm.loadPtr(frame.addressOfCallee(), scratch);
+        masm.loadValue(Address(scratch, FunctionExtended::offsetOfArrowThisSlot()), R0);
+        frame.push(R0);
+        return true;
+    }
+
     // Keep this value in R0
     frame.pushThis();
 
@@ -1266,6 +1291,33 @@ BaselineCompiler::emit_JSOP_LAMBDA()
     pushArg(ImmGCPtr(fun));
 
     if (!callVM(LambdaInfo))
+        return false;
+
+    // Box and push return value.
+    masm.tagValue(JSVAL_TYPE_OBJECT, ReturnReg, R0);
+    frame.push(R0);
+    return true;
+}
+
+typedef JSObject *(*LambdaArrowFn)(JSContext *, HandleFunction, HandleObject, HandleValue);
+static const VMFunction LambdaArrowInfo = FunctionInfo<LambdaArrowFn>(js::LambdaArrow);
+
+bool
+BaselineCompiler::emit_JSOP_LAMBDA_ARROW()
+{
+    // Keep pushed |this| in R0.
+    frame.popRegsAndSync(1);
+
+    RootedFunction fun(cx, script->getFunction(GET_UINT32_INDEX(pc)));
+
+    prepareVMCall();
+    masm.loadPtr(frame.addressOfScopeChain(), R1.scratchReg());
+
+    pushArg(R0);
+    pushArg(R1.scratchReg());
+    pushArg(ImmGCPtr(fun));
+
+    if (!callVM(LambdaArrowInfo))
         return false;
 
     // Box and push return value.
@@ -1864,12 +1916,6 @@ BaselineCompiler::emit_JSOP_GETGNAME()
 }
 
 bool
-BaselineCompiler::emit_JSOP_CALLGNAME()
-{
-    return emit_JSOP_GETGNAME();
-}
-
-bool
 BaselineCompiler::emit_JSOP_BINDGNAME()
 {
     frame.push(ObjectValue(script->global()));
@@ -2012,12 +2058,6 @@ BaselineCompiler::emit_JSOP_GETALIASEDVAR()
 }
 
 bool
-BaselineCompiler::emit_JSOP_CALLALIASEDVAR()
-{
-    return emit_JSOP_GETALIASEDVAR();
-}
-
-bool
 BaselineCompiler::emit_JSOP_SETALIASEDVAR()
 {
     JSScript *outerScript = ScopeCoordinateFunctionScript(script, pc);
@@ -2092,12 +2132,6 @@ BaselineCompiler::emit_JSOP_NAME()
 }
 
 bool
-BaselineCompiler::emit_JSOP_CALLNAME()
-{
-    return emit_JSOP_NAME();
-}
-
-bool
 BaselineCompiler::emit_JSOP_BINDNAME()
 {
     frame.syncStack(0);
@@ -2147,12 +2181,6 @@ BaselineCompiler::emit_JSOP_GETINTRINSIC()
 
     frame.push(R0);
     return true;
-}
-
-bool
-BaselineCompiler::emit_JSOP_CALLINTRINSIC()
-{
-    return emit_JSOP_GETINTRINSIC();
 }
 
 typedef bool (*DefVarOrConstFn)(JSContext *, HandlePropertyName, unsigned, HandleObject);
@@ -2323,12 +2351,6 @@ BaselineCompiler::emit_JSOP_GETLOCAL()
 }
 
 bool
-BaselineCompiler::emit_JSOP_CALLLOCAL()
-{
-    return emit_JSOP_GETLOCAL();
-}
-
-bool
 BaselineCompiler::emit_JSOP_SETLOCAL()
 {
     // Ensure no other StackValue refers to the old value, for instance i + (i = 3).
@@ -2420,12 +2442,6 @@ BaselineCompiler::emit_JSOP_GETARG()
 {
     uint32_t arg = GET_ARGNO(pc);
     return emitFormalArgAccess(arg, /* get = */ true);
-}
-
-bool
-BaselineCompiler::emit_JSOP_CALLARG()
-{
-    return emit_JSOP_GETARG();
 }
 
 bool

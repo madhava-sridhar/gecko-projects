@@ -15,7 +15,6 @@
 
 #include "jsanalyze.h"
 
-#include "jit/ExecutionModeInlines.h"
 #include "vm/ArrayObject.h"
 #include "vm/BooleanObject.h"
 #include "vm/NumberObject.h"
@@ -24,6 +23,8 @@
 #include "vm/TypedArrayObject.h"
 
 #include "jscntxtinlines.h"
+
+#include "jit/ExecutionMode-inl.h"
 
 namespace js {
 namespace types {
@@ -375,7 +376,7 @@ EnsureTrackPropertyTypes(JSContext *cx, JSObject *obj, jsid id)
             return;
         }
         if (!obj->type()->unknownProperties() && !obj->type()->getProperty(cx, id)) {
-            obj->type()->markUnknown(cx);
+            MOZ_ASSERT(obj->type()->unknownProperties());
             return;
         }
     }
@@ -1078,7 +1079,6 @@ TypeSet::addType(Type type, LifoAlloc *alloc)
 
     if (false) {
     unknownObject:
-        type = Type::AnyObjectType();
         flags |= TYPE_FLAG_ANYOBJECT;
         clearObjects();
     }
@@ -1129,12 +1129,18 @@ HeapTypeSet::newPropertyState(ExclusiveContext *cxArg)
 }
 
 inline void
+HeapTypeSet::setNonDataPropertyIgnoringConstraints()
+{
+    flags |= TYPE_FLAG_NON_DATA_PROPERTY;
+}
+
+inline void
 HeapTypeSet::setNonDataProperty(ExclusiveContext *cx)
 {
     if (flags & TYPE_FLAG_NON_DATA_PROPERTY)
         return;
 
-    flags |= TYPE_FLAG_NON_DATA_PROPERTY;
+    setNonDataPropertyIgnoringConstraints();
     newPropertyState(cx);
 }
 
@@ -1238,6 +1244,12 @@ TypeObject::getProperty(ExclusiveContext *cx, jsid id)
     if (HeapTypeSet *types = maybeGetProperty(id))
         return types;
 
+    Property *base = cx->typeLifoAlloc().new_<Property>(id);
+    if (!base) {
+        markUnknown(cx);
+        return nullptr;
+    }
+
     uint32_t propertyCount = basePropertyCount();
     Property **pprop = HashSetInsert<jsid,Property,Property>
         (cx->typeLifoAlloc(), propertySet, propertyCount, id);
@@ -1249,28 +1261,18 @@ TypeObject::getProperty(ExclusiveContext *cx, jsid id)
     JS_ASSERT(!*pprop);
 
     setBasePropertyCount(propertyCount);
-    if (!addProperty(cx, id, pprop)) {
-        markUnknown(cx);
-        return nullptr;
-    }
+    *pprop = base;
+
+    updateNewPropertyTypes(cx, id, &base->types);
 
     if (propertyCount == OBJECT_FLAG_PROPERTY_COUNT_LIMIT) {
+        // We hit the maximum number of properties the object can have, mark
+        // the object unknown so that new properties will not be added in the
+        // future.
         markUnknown(cx);
-
-        /*
-         * Return an arbitrary property in the object, as all have unknown
-         * type and are treated as non-data properties.
-         */
-        unsigned count = getPropertyCount();
-        for (unsigned i = 0; i < count; i++) {
-            if (Property *prop = getProperty(i))
-                return &prop->types;
-        }
-
-        MOZ_ASSUME_UNREACHABLE("Missing property");
     }
 
-    return &(*pprop)->types;
+    return &base->types;
 }
 
 inline HeapTypeSet *

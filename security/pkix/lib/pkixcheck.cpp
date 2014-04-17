@@ -118,6 +118,14 @@ CheckCertificatePolicies(BackCert& cert, EndEntityOrCA endEntityOrCA,
     return FatalError;
   }
 
+  // Bug 989051. Until we handle inhibitAnyPolicy we will fail close when
+  // inhibitAnyPolicy extension is present and we need to evaluate certificate
+  // policies.
+  if (cert.encodedInhibitAnyPolicy) {
+    PR_SetError(SEC_ERROR_POLICY_VALIDATION_FAILED, 0);
+    return RecoverableError;
+  }
+
   // The root CA certificate may omit the policies that it has been
   // trusted for, so we cannot require the policies to be present in those
   // certificates. Instead, the determination of which roots are trusted for
@@ -141,6 +149,11 @@ CheckCertificatePolicies(BackCert& cert, EndEntityOrCA endEntityOrCA,
   for (const CERTPolicyInfo* const* policyInfos = policies->policyInfos;
        *policyInfos; ++policyInfos) {
     if ((*policyInfos)->oid == requiredPolicy) {
+      return Success;
+    }
+    // Intermediate certs are allowed to have the anyPolicy OID
+    if (endEntityOrCA == MustBeCA &&
+        (*policyInfos)->oid == SEC_OID_X509_ANY_POLICY) {
       return Success;
     }
   }
@@ -175,7 +188,13 @@ DecodeBasicConstraints(const SECItem* encodedBasicConstraints,
   }
 
   bool isCA = false;
-  if (der::OptionalBoolean(input, isCA) != der::Success) {
+  // TODO(bug 989518): cA is by default false. According to DER, default
+  // values must not be explicitly encoded in a SEQUENCE. So, if this
+  // value is present and false, it is an encoding error. However, Go Daddy
+  // has issued many certificates with this improper encoding, so we can't
+  // enforce this yet (hence passing true for allowInvalidExplicitEncoding
+  // to der::OptionalBoolean).
+  if (der::OptionalBoolean(input, true, isCA) != der::Success) {
     return der::Fail(SEC_ERROR_EXTENSION_VALUE_INVALID);
   }
   basicConstraints.isCA = isCA;
@@ -403,18 +422,23 @@ CheckExtendedKeyUsage(EndEntityOrCA endEntityOrCA, const SECItem* encodedEKUs,
 
   // pkixocsp.cpp depends on the following additional checks.
 
-  if (foundOCSPSigning) {
+  if (endEntityOrCA == MustBeEndEntity) {
     // When validating anything other than an delegated OCSP signing cert,
     // reject any cert that also claims to be an OCSP responder, because such
     // a cert does not make sense. For example, if an SSL certificate were to
     // assert id-kp-OCSPSigning then it could sign OCSP responses for itself,
     // if not for this check.
-    if (requiredEKU != SEC_OID_OCSP_RESPONDER) {
+    // That said, we accept CA certificates with id-kp-OCSPSigning because
+    // some CAs in Mozilla's CA program have issued such intermediate
+    // certificates, and because some CAs have reported some Microsoft server
+    // software wrongly requires CA certificates to have id-kp-OCSPSigning.
+    // Allowing this exception does not cause any security issues because we
+    // require delegated OCSP response signing certificates to be end-entity
+    // certificates.
+    if (foundOCSPSigning && requiredEKU != SEC_OID_OCSP_RESPONDER) {
       PR_SetError(SEC_ERROR_INADEQUATE_CERT_TYPE, 0);
       return RecoverableError;
     }
-  } else if (requiredEKU == SEC_OID_OCSP_RESPONDER &&
-             endEntityOrCA == MustBeEndEntity) {
     // http://tools.ietf.org/html/rfc6960#section-4.2.2.2:
     // "OCSP signing delegation SHALL be designated by the inclusion of
     // id-kp-OCSPSigning in an extended key usage certificate extension
@@ -424,8 +448,10 @@ CheckExtendedKeyUsage(EndEntityOrCA endEntityOrCA, const SECItem* encodedEKUs,
     // EKU extension is missing from an end-entity certificate. However, any CA
     // certificate can issue a delegated OCSP response signing certificate, so
     // we can't require the EKU be explicitly included for CA certificates.
-    PR_SetError(SEC_ERROR_INADEQUATE_CERT_TYPE, 0);
-    return RecoverableError;
+    if (!foundOCSPSigning && requiredEKU == SEC_OID_OCSP_RESPONDER) {
+      PR_SetError(SEC_ERROR_INADEQUATE_CERT_TYPE, 0);
+      return RecoverableError;
+    }
   }
 
   return Success;

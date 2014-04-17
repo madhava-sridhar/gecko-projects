@@ -929,6 +929,19 @@ WebGLContext::ValidateTexImageSize(GLenum target, GLint level,
 {
     MOZ_ASSERT(level >= 0, "level should already be validated");
 
+    /* Bug 966630: maxTextureSize >> level runs into "undefined"
+     * behaviour depending on ISA. For example, on Intel shifts
+     * amounts are mod 64 (in 64-bit mode on 64-bit dest) and mod 32
+     * otherwise. This means 16384 >> 0x10000001 == 8192 which isn't
+     * what would be expected. Make the required behaviour explicit by
+     * clamping to a shift of 31 bits if level is greater than that
+     * ammount. This will give 0 that if (!maxAllowedSize) is
+     * expecting.
+     */
+
+    if (level > 31)
+        level = 31;
+
     const GLuint maxTexImageSize = MaxTextureSizeForTarget(target) >> level;
     const bool isCubemapTarget = IsTexImageCubemapTarget(target);
 
@@ -1631,7 +1644,7 @@ WebGLContext::InitAndValidateGL()
     MakeContextCurrent();
 
     // on desktop OpenGL, we always keep vertex attrib 0 array enabled
-    if (!gl->IsGLES2()) {
+    if (!gl->IsGLES()) {
         gl->fEnableVertexAttribArray(0);
     }
 
@@ -1729,7 +1742,7 @@ WebGLContext::InitAndValidateGL()
     // Always 1 for GLES2
     mMaxFramebufferColorAttachments = 1;
 
-    if (!gl->IsGLES2()) {
+    if (!gl->IsGLES()) {
         // gl_PointSize is always available in ES2 GLSL, but has to be
         // specifically enabled on desktop GLSL.
         gl->fEnable(LOCAL_GL_VERTEX_PROGRAM_POINT_SIZE);

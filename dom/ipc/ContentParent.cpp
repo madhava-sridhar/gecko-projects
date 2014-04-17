@@ -15,7 +15,7 @@
 # include <sys/resource.h>
 #endif
 
-#ifdef XP_UNIX
+#ifdef MOZ_WIDGET_GONK
 #include <sys/types.h>
 #include <sys/wait.h>
 #endif
@@ -975,7 +975,7 @@ ContentParent::SetPriorityAndCheckIsAlive(ProcessPriority aPriority)
     // direct child because of Nuwa this will fail with ECHILD, and we
     // need to assume the child is alive in that case rather than
     // assuming it's dead (as is otherwise a reasonable fallback).
-#ifdef XP_UNIX
+#ifdef MOZ_WIDGET_GONK
     siginfo_t info;
     info.si_pid = 0;
     if (waitid(P_PID, Pid(), &info, WNOWAIT | WNOHANG | WEXITED) == 0
@@ -1874,7 +1874,7 @@ ContentParent::RecvGetShowPasswordSetting(bool* showPassword)
 #ifdef MOZ_WIDGET_ANDROID
     NS_ASSERTION(AndroidBridge::Bridge() != nullptr, "AndroidBridge is not available");
 
-    *showPassword = GeckoAppShell::GetShowPasswordSetting();
+    *showPassword = mozilla::widget::android::GeckoAppShell::GetShowPasswordSetting();
 #endif
     return true;
 }
@@ -1891,7 +1891,7 @@ ContentParent::RecvFirstIdle()
 }
 
 bool
-ContentParent::RecvAudioChannelGetState(const AudioChannelType& aType,
+ContentParent::RecvAudioChannelGetState(const AudioChannel& aChannel,
                                         const bool& aElementHidden,
                                         const bool& aElementWasHidden,
                                         AudioChannelState* aState)
@@ -1900,33 +1900,33 @@ ContentParent::RecvAudioChannelGetState(const AudioChannelType& aType,
         AudioChannelService::GetAudioChannelService();
     *aState = AUDIO_CHANNEL_STATE_NORMAL;
     if (service) {
-        *aState = service->GetStateInternal(aType, mChildID,
+        *aState = service->GetStateInternal(aChannel, mChildID,
                                             aElementHidden, aElementWasHidden);
     }
     return true;
 }
 
 bool
-ContentParent::RecvAudioChannelRegisterType(const AudioChannelType& aType,
+ContentParent::RecvAudioChannelRegisterType(const AudioChannel& aChannel,
                                             const bool& aWithVideo)
 {
     nsRefPtr<AudioChannelService> service =
         AudioChannelService::GetAudioChannelService();
     if (service) {
-        service->RegisterType(aType, mChildID, aWithVideo);
+        service->RegisterType(aChannel, mChildID, aWithVideo);
     }
     return true;
 }
 
 bool
-ContentParent::RecvAudioChannelUnregisterType(const AudioChannelType& aType,
+ContentParent::RecvAudioChannelUnregisterType(const AudioChannel& aChannel,
                                               const bool& aElementHidden,
                                               const bool& aWithVideo)
 {
     nsRefPtr<AudioChannelService> service =
         AudioChannelService::GetAudioChannelService();
     if (service) {
-        service->UnregisterType(aType, aElementHidden, mChildID, aWithVideo);
+        service->UnregisterType(aChannel, aElementHidden, mChildID, aWithVideo);
     }
     return true;
 }
@@ -1943,13 +1943,13 @@ ContentParent::RecvAudioChannelChangedNotification()
 }
 
 bool
-ContentParent::RecvAudioChannelChangeDefVolChannel(
-  const AudioChannelType& aType, const bool& aHidden)
+ContentParent::RecvAudioChannelChangeDefVolChannel(const int32_t& aChannel,
+                                                   const bool& aHidden)
 {
     nsRefPtr<AudioChannelService> service =
         AudioChannelService::GetAudioChannelService();
     if (service) {
-       service->SetDefaultVolumeControlChannelInternal(aType,
+       service->SetDefaultVolumeControlChannelInternal(aChannel,
                                                        aHidden, mChildID);
     }
     return true;
@@ -1976,8 +1976,11 @@ ContentParent::RecvNuwaReady()
 {
 #ifdef MOZ_NUWA_PROCESS
     if (!IsNuwaProcess()) {
-        printf_stderr("Terminating child process %d for unauthorized IPC message: "
-                      "NuwaReady", Pid());
+        NS_ERROR(
+            nsPrintfCString(
+                "Terminating child process %d for unauthorized IPC message: NuwaReady",
+                Pid()).get());
+
         KillHard();
         return false;
     }
@@ -1995,8 +1998,11 @@ ContentParent::RecvAddNewProcess(const uint32_t& aPid,
 {
 #ifdef MOZ_NUWA_PROCESS
     if (!IsNuwaProcess()) {
-        printf_stderr("Terminating child process %d for unauthorized IPC message: "
-                      "AddNewProcess(%d)", Pid(), aPid);
+        NS_ERROR(
+            nsPrintfCString(
+                "Terminating child process %d for unauthorized IPC message: "
+                "AddNewProcess(%d)", Pid(), aPid).get());
+
         KillHard();
         return false;
     }
