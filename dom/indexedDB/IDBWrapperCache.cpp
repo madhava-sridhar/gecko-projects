@@ -47,12 +47,12 @@ NS_INTERFACE_MAP_END_INHERITING(DOMEventTargetHelper)
 NS_IMPL_ADDREF_INHERITED(IDBWrapperCache, DOMEventTargetHelper)
 NS_IMPL_RELEASE_INHERITED(IDBWrapperCache, DOMEventTargetHelper)
 
-IDBWrapperCache::IDBWrapperCache(nsDOMEventTargetHelper* aOwner)
-  : nsDOMEventTargetHelper(aOwner), mScriptOwner(nullptr)
+IDBWrapperCache::IDBWrapperCache(DOMEventTargetHelper* aOwner)
+  : DOMEventTargetHelper(aOwner), mScriptOwner(nullptr)
 { }
 
 IDBWrapperCache::IDBWrapperCache(nsPIDOMWindow* aOwner)
-  : nsDOMEventTargetHelper(aOwner), mScriptOwner(nullptr)
+  : DOMEventTargetHelper(aOwner), mScriptOwner(nullptr)
 { }
 
 IDBWrapperCache::~IDBWrapperCache()
@@ -80,7 +80,7 @@ IDBWrapperCache::GetParentObject()
 
   // Do what nsEventTargetSH::PreCreate does.
   nsCOMPtr<nsIScriptGlobalObject> parent;
-  nsDOMEventTargetHelper::GetParentObject(getter_AddRefs(parent));
+  DOMEventTargetHelper::GetParentObject(getter_AddRefs(parent));
 
   return parent ? parent->GetGlobalJSObject() : nullptr;
 }

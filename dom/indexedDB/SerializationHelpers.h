@@ -19,16 +19,16 @@ namespace IPC {
 template <>
 struct ParamTraits<mozilla::dom::quota::PersistenceType> :
   public ContiguousEnumSerializer<
-           mozilla::dom::quota::PersistenceType,
-           mozilla::dom::quota::PERSISTENCE_TYPE_PERSISTENT,
-           mozilla::dom::quota::PERSISTENCE_TYPE_INVALID>
+                               mozilla::dom::quota::PersistenceType,
+                               mozilla::dom::quota::PERSISTENCE_TYPE_PERSISTENT,
+                               mozilla::dom::quota::PERSISTENCE_TYPE_INVALID>
 { };
 
 template <>
 struct ParamTraits<mozilla::dom::quota::StoragePrivilege> :
-  public EnumSerializer<mozilla::dom::quota::StoragePrivilege,
-                        mozilla::dom::quota::Chrome,
-                        mozilla::dom::quota::Invalid>
+  public ContiguousEnumSerializer<mozilla::dom::quota::StoragePrivilege,
+                                  mozilla::dom::quota::Chrome,
+                                  mozilla::dom::quota::Invalid>
 { };
 
 template <>
@@ -54,10 +54,9 @@ struct ParamTraits<mozilla::dom::indexedDB::Key>
 
 template <>
 struct ParamTraits<mozilla::dom::indexedDB::KeyPath::KeyPathType> :
-  public ContiguousEnumSerializer<
-           mozilla::dom::indexedDB::KeyPath::KeyPathType,
-           mozilla::dom::indexedDB::KeyPath::NONEXISTENT,
-           mozilla::dom::indexedDB::KeyPath::ENDGUARD>
+  public ContiguousEnumSerializer<mozilla::dom::indexedDB::KeyPath::KeyPathType,
+                                  mozilla::dom::indexedDB::KeyPath::NONEXISTENT,
+                                  mozilla::dom::indexedDB::KeyPath::ENDGUARD>
 { };
 
 template <>
@@ -86,17 +85,17 @@ struct ParamTraits<mozilla::dom::indexedDB::KeyPath>
 template <>
 struct ParamTraits<mozilla::dom::indexedDB::IDBCursor::Direction> :
   public ContiguousEnumSerializer<
-           mozilla::dom::indexedDB::IDBCursor::Direction,
-           mozilla::dom::indexedDB::IDBCursor::NEXT,
-           mozilla::dom::indexedDB::IDBCursor::DIRECTION_INVALID>
+                          mozilla::dom::indexedDB::IDBCursor::Direction,
+                          mozilla::dom::indexedDB::IDBCursor::NEXT,
+                          mozilla::dom::indexedDB::IDBCursor::DIRECTION_INVALID>
 { };
 
 template <>
 struct ParamTraits<mozilla::dom::indexedDB::IDBTransaction::Mode> :
   public ContiguousEnumSerializer<
-           mozilla::dom::indexedDB::IDBTransaction::Mode,
-           mozilla::dom::indexedDB::IDBTransaction::READ_ONLY,
-           mozilla::dom::indexedDB::IDBTransaction::MODE_INVALID>
+                          mozilla::dom::indexedDB::IDBTransaction::Mode,
+                          mozilla::dom::indexedDB::IDBTransaction::READ_ONLY,
+                          mozilla::dom::indexedDB::IDBTransaction::MODE_INVALID>
 { };
 
 } // namespace IPC

@@ -8,8 +8,8 @@
 #define mozilla_dom_indexeddb_idbwrappercache_h__
 
 #include "js/RootingAPI.h"
+#include "mozilla/DOMEventTargetHelper.h"
 #include "nsCycleCollectionParticipant.h"
-#include "nsDOMEventTargetHelper.h"
 #include "nsWrapperCache.h"
 
 class nsPIDOMWindow;

@@ -243,10 +243,7 @@ private:
 
     auto* wrapperCache = static_cast<IDBWrapperCache*>(mRequest);
 
-    JS::Rooted<JSObject*> global(aCx, wrapperCache->GetParentObject());
-    MOZ_ASSERT(global);
-
-    nsresult rv = nsContentUtils::WrapNative(aCx, global, aUserData, aResult);
+    nsresult rv = nsContentUtils::WrapNative(aCx, aUserData, aResult);
     if (NS_WARN_IF(NS_FAILED(rv))) {
       IDB_REPORT_INTERNAL_ERR();
       return NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;

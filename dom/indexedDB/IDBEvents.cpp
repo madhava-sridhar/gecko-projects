@@ -96,8 +96,7 @@ IDBVersionChangeEvent::Constructor(const GlobalObject& aGlobal,
 NS_IMPL_ISUPPORTS_INHERITED0(IDBVersionChangeEvent, Event)
 
 JSObject*
-IDBVersionChangeEvent::WrapObject(JSContext* aCx,
-                                  JS::Handle<JSObject*> aScope)
+IDBVersionChangeEvent::WrapObject(JSContext* aCx)
 {
-  return IDBVersionChangeEventBinding::Wrap(aCx, aScope, this);
+  return IDBVersionChangeEventBinding::Wrap(aCx, this);
 }

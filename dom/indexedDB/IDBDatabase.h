@@ -216,8 +216,10 @@ public:
   NS_DECL_NSIOFFLINESTORAGE
   NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(IDBDatabase, IDBWrapperCache)
 
-
   // nsIDOMEventTarget
+  virtual void
+  LastRelease() MOZ_OVERRIDE;
+
   virtual nsresult
   PostHandleEvent(EventChainPostVisitor& aVisitor) MOZ_OVERRIDE;
 

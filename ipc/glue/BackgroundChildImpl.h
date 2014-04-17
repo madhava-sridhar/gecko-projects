@@ -60,9 +60,13 @@ protected:
                                     MOZ_OVERRIDE;
 };
 
-class BackgroundChildImpl::ThreadLocal
+class BackgroundChildImpl::ThreadLocal MOZ_FINAL
 {
+  friend class nsAutoPtr<ThreadLocal>;
+
+public:
   mozilla::dom::indexedDB::IDBTransaction* mCurrentTransaction;
+
 #ifdef MOZ_ENABLE_PROFILER_SPS
   uint64_t mNextTransactionSerialNumber;
   uint64_t mNextRequestSerialNumber;
@@ -72,10 +76,8 @@ public:
   ThreadLocal();
 
 private:
-  friend class nsAutoPtr<ThreadLocal>;
-
   // Only destroyed by nsAutoPtr<ThreadLocal>.
-  virtual ~ThreadLocal();
+  ~ThreadLocal();
 };
 
 } // namespace ipc
