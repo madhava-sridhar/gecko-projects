@@ -262,6 +262,21 @@ public:
                            const int16_t& aMode) MOZ_OVERRIDE;
     virtual bool DeallocPFilePickerParent(PFilePickerParent* actor) MOZ_OVERRIDE;
 
+    virtual PIndexedDBPermissionRequestParent*
+    AllocPIndexedDBPermissionRequestParent(const Principal& aPrincipal)
+                                           MOZ_OVERRIDE;
+
+    virtual bool
+    RecvPIndexedDBPermissionRequestConstructor(
+                                      PIndexedDBPermissionRequestParent* aActor,
+                                      const Principal& aPrincipal)
+                                      MOZ_OVERRIDE;
+
+    virtual bool
+    DeallocPIndexedDBPermissionRequestParent(
+                                      PIndexedDBPermissionRequestParent* aActor)
+                                      MOZ_OVERRIDE;
+
     virtual POfflineCacheUpdateParent*
     AllocPOfflineCacheUpdateParent(const URIParams& aManifestURI,
                                    const URIParams& aDocumentURI,

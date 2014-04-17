@@ -16,49 +16,67 @@
 #include "js/Value.h"
 #include "jsapi.h"
 #include "KeyPath.h"
+#include "mozilla/Attributes.h"
+#include "mozilla/AppProcessChecker.h"
 #include "mozilla/AutoRestore.h"
 #include "mozilla/Endian.h"
 #include "mozilla/LazyIdleThread.h"
 #include "mozilla/Maybe.h"
+#include "mozilla/Services.h"
 #include "mozilla/StaticPtr.h"
 #include "mozilla/storage.h"
 #include "mozilla/unused.h"
+#include "mozilla/dom/ContentParent.h"
 #include "mozilla/dom/StructuredCloneTags.h"
-#include "mozilla/dom/indexedDB/IDBTransaction.h"
+#include "mozilla/dom/TabParent.h"
 #include "mozilla/dom/indexedDB/PBackgroundIDBCursorParent.h"
 #include "mozilla/dom/indexedDB/PBackgroundIDBDatabaseParent.h"
+#include "mozilla/dom/indexedDB/PBackgroundIDBFactoryParent.h"
 #include "mozilla/dom/indexedDB/PBackgroundIDBFactoryRequestParent.h"
 #include "mozilla/dom/indexedDB/PBackgroundIDBRequestParent.h"
 #include "mozilla/dom/indexedDB/PBackgroundIDBTransactionParent.h"
 #include "mozilla/dom/indexedDB/PBackgroundIDBVersionChangeTransactionParent.h"
+#include "mozilla/dom/indexedDB/PIndexedDBPermissionRequestParent.h"
 #include "mozilla/dom/quota/StoragePrivilege.h"
 #include "mozilla/dom/quota/AcquireListener.h"
 #include "mozilla/dom/quota/OriginOrPatternString.h"
 #include "mozilla/dom/quota/QuotaManager.h"
 #include "mozilla/ipc/BackgroundParent.h"
-#include "mozilla/ipc/PBackground.h"
 #include "nsCharSeparatedTokenizer.h"
 #include "nsClassHashtable.h"
+#include "nsCOMPtr.h"
 #include "nsDataHashtable.h"
 #include "nsEscape.h"
 #include "nsHashKeys.h"
+#include "nsNetUtil.h"
+#include "nsIAppsService.h"
 #include "nsIEventTarget.h"
 #include "nsIFile.h"
 #include "nsIFileURL.h"
 #include "nsIInputStream.h"
+#include "nsIInterfaceRequestor.h"
 #include "nsInterfaceHashtable.h"
+#include "nsIObserver.h"
+#include "nsIObserverService.h"
 #include "nsIOutputStream.h"
+#include "nsIPrincipal.h"
+#include "nsIScriptSecurityManager.h"
 #include "nsISupports.h"
+#include "nsISupportsImpl.h"
+#include "nsIURI.h"
 #include "nsNetUtil.h"
 #include "nsPrintfCString.h"
+#include "nsString.h"
 #include "nsThreadUtils.h"
 #include "nsXPCOMCID.h"
+#include "PermissionRequestBase.h"
 #include "ProfilerHelpers.h"
 #include "ReportInternalError.h"
 #include "snappy/snappy.h"
 #include "TransactionThreadPool.h"
 
 using namespace mozilla;
+using namespace mozilla::dom;
 using namespace mozilla::dom::indexedDB;
 using namespace mozilla::dom::quota;
 using namespace mozilla::ipc;
@@ -105,6 +123,25 @@ const char kSavepointClause[] = "SAVEPOINT sp;";
 const fallible_t fallible = fallible_t();
 
 const uint32_t kFileCopyBufferSize = 32768;
+
+#define IDB_PREFIX "indexedDB"
+#define CHROME_PREFIX "chrome"
+
+const char kPermissionString[] = IDB_PREFIX;
+
+const char kChromeOrigin[] = CHROME_PREFIX;
+
+const char kPermissionStringChromeBase[] = IDB_PREFIX "-" CHROME_PREFIX "-";
+const char kPermissionStringChromeReadSuffix[] = "-read";
+const char kPermissionStringChromeWriteSuffix[] = "-write";
+
+#undef CHROME_PREFIX
+#undef IDB_PREFIX
+
+enum AppId {
+  kNoAppId = nsIScriptSecurityManager::NO_APP_ID,
+  kUnknownAppId = nsIScriptSecurityManager::UNKNOWN_APP_ID
+};
 
 } // anonymous namespace
 
@@ -1378,7 +1415,6 @@ private:
       return rv;
     }
 
-    static const fallible_t fallible = fallible_t();
     size_t compressedLength = snappy::MaxCompressedLength(uncompressedLength);
     nsAutoArrayPtr<char> compressed(new (fallible) char[compressedLength]);
     if (NS_WARN_IF(!compressed)) {
@@ -2602,6 +2638,63 @@ private:
   NS_DECL_NSIRUNNABLE
 };
 
+class BackgroundFactoryParent MOZ_FINAL
+  : public PBackgroundIDBFactoryParent
+{
+  // Counts the number of "live" BackgroundFactoryParent instances that have not
+  // yet had ActorDestroy called.
+  static uint64_t sFactoryInstanceCount;
+
+#ifdef DEBUG
+  bool mActorDestroyed;
+#endif
+
+public:
+  static already_AddRefed<BackgroundFactoryParent>
+  Create();
+
+  NS_INLINE_DECL_THREADSAFE_REFCOUNTING(BackgroundFactoryParent)
+
+private:
+  // Only constructed in Create().
+  BackgroundFactoryParent();
+
+  // Reference counted.
+  ~BackgroundFactoryParent();
+
+  // IPDL methods are only called by IPDL.
+  virtual void
+  ActorDestroy(ActorDestroyReason aWhy) MOZ_OVERRIDE;
+
+  virtual bool
+  RecvDeleteMe() MOZ_OVERRIDE;
+
+  virtual PBackgroundIDBFactoryRequestParent*
+  AllocPBackgroundIDBFactoryRequestParent(const FactoryRequestParams& aParams)
+                                          MOZ_OVERRIDE;
+
+  virtual bool
+  RecvPBackgroundIDBFactoryRequestConstructor(
+                                     PBackgroundIDBFactoryRequestParent* aActor,
+                                     const FactoryRequestParams& aParams)
+                                     MOZ_OVERRIDE;
+
+  virtual bool
+  DeallocPBackgroundIDBFactoryRequestParent(
+                                     PBackgroundIDBFactoryRequestParent* aActor)
+                                     MOZ_OVERRIDE;
+
+  virtual PBackgroundIDBDatabaseParent*
+  AllocPBackgroundIDBDatabaseParent(
+                                   const DatabaseSpec& aSpec,
+                                   PBackgroundIDBFactoryRequestParent* aRequest)
+                                   MOZ_OVERRIDE;
+
+  virtual bool
+  DeallocPBackgroundIDBDatabaseParent(PBackgroundIDBDatabaseParent* aActor)
+                                      MOZ_OVERRIDE;
+};
+
 class VersionChangeTransaction;
 
 class Database MOZ_FINAL
@@ -2614,7 +2707,10 @@ class Database MOZ_FINAL
   nsRefPtr<FileManager> mFileManager;
   nsTHashtable<nsPtrHashKey<TransactionBase>> mTransactions;
 
-  const nsCString mId;
+  const PrincipalInfo mPrincipalInfo;
+  nsCString mGroup;
+  nsCString mOrigin;
+  nsCString mId;
 
   bool mClosed;
   bool mInvalidated;
@@ -2624,33 +2720,56 @@ class Database MOZ_FINAL
 public:
   // Created by OpenDatabaseOp.
   Database(BackgroundFactoryParent* aFactory,
+           const PrincipalInfo& aPrincipalInfo,
+           const nsACString& aGroup,
+           const nsACString& aOrigin,
            FullDatabaseMetadata* aMetadata,
-           FileManager* mFileManager);
+           FileManager* aFileManager)
+    : mFactory(aFactory)
+    , mMetadata(aMetadata)
+    , mFileManager(aFileManager)
+    , mPrincipalInfo(aPrincipalInfo)
+    , mGroup(aGroup)
+    , mOrigin(aOrigin)
+    , mId(aMetadata->mDatabaseId)
+    , mClosed(false)
+    , mInvalidated(false)
+    , mActorWasAlive(false)
+    , mActorDestroyed(false)
+  {
+    AssertIsOnBackgroundThread();
+    MOZ_ASSERT(aFactory);
+    MOZ_ASSERT(aMetadata);
+    MOZ_ASSERT(aFileManager);
+  }
 
   NS_INLINE_DECL_THREADSAFE_REFCOUNTING(indexedDB::Database)
 
   void
   Invalidate();
 
+  const PrincipalInfo&
+  GetPrincipalInfo() const
+  {
+    return mPrincipalInfo;
+  }
+
   const nsCString&
   Group() const
   {
-    MOZ_ASSERT(mFactory);
-    return mFactory->Group();
+    return mGroup;
   }
 
   const nsCString&
   Origin() const
   {
-    MOZ_ASSERT(mFactory);
-    return mFactory->Origin();
+    return mOrigin;
   }
 
-  StoragePrivilege
-  Privilege() const
+  const nsCString&
+  Id() const
   {
-    MOZ_ASSERT(mFactory);
-    return mFactory->Privilege();
+    return mId;
   }
 
   PersistenceType
@@ -2658,12 +2777,6 @@ public:
   {
     MOZ_ASSERT(mMetadata);
     return mMetadata->mCommonMetadata.persistenceType();
-  }
-
-  const nsCString&
-  Id() const
-  {
-    return mId;
   }
 
   const nsString&
@@ -3390,9 +3503,20 @@ protected:
     // Next step is State_OpenPending.
     State_Initial,
 
-    // Waiting for open allowed on the main thread. The next step is
-    // State_DatabaseWorkOpen.
+    // Waiting for open allowed on the main thread. The next step is either
+    // State_SendingResults if permission is denied,
+    // State_PermissionChallenge if the permission is unknown, or
+    // State_DatabaseWorkOpen if permission is granted.
     State_OpenPending,
+
+    // Sending a permission challenge message to the child. Next step is
+    // State_PermissionRetryReady.
+    State_PermissionChallenge,
+
+    // Retrying permission check after a challenge. Next step is either
+    // State_SendingResults if permission is denied or
+    // State_DatabaseWorkOpen if permission is granted.
+    State_PermissionRetry,
 
     // Waiting to do/doing work on the QuotaManager IO thread. Its next step is
     // either State_BeginVersionChange if the requested version doesn't match
@@ -3438,15 +3562,21 @@ protected:
     State_Completed
   };
 
+  // Must be released on the main thread!
+  nsRefPtr<ContentParent> mContentParent;
+
   nsTArray<Database*> mMaybeBlockedDatabases;
 
+  const PrincipalInfo mPrincipalInfo;
+  const nsString mName;
   nsCString mGroup;
   nsCString mOrigin;
-  nsString mName;
   nsCString mDatabaseId;
   State mState;
-  StoragePrivilege mPrivilege;
-  PersistenceType mPersistenceType;
+  StoragePrivilege mStoragePrivilege;
+  const PersistenceType mPersistenceType;
+  const bool mDeleting;
+  bool mBlockedQuotaManager;
 
 public:
   virtual void
@@ -3456,11 +3586,19 @@ public:
   NoteDatabaseBlocked(Database* aDatabase) = 0;
 
 protected:
-  FactoryOp(const nsACString& aGroup,
-            const nsACString& aOrigin,
-            StoragePrivilege aPrivilege,
+  FactoryOp(already_AddRefed<ContentParent> aContentParent,
+            const PrincipalInfo& aPrincipalInfo,
             const nsAString& aName,
-            PersistenceType aPersistenceType);
+            PersistenceType aPersistenceType,
+            bool aDeleting)
+    : mContentParent(Move(aContentParent))
+    , mPrincipalInfo(aPrincipalInfo)
+    , mName(aName)
+    , mState(State_Initial)
+    , mPersistenceType(aPersistenceType)
+    , mDeleting(aDeleting)
+    , mBlockedQuotaManager(false)
+  { }
 
   virtual
   ~FactoryOp()
@@ -3475,17 +3613,21 @@ protected:
   Open();
 
   nsresult
+  ChallengePermission();
+
+  nsresult
+  RetryCheckPermission();
+
+  nsresult
   SendToIOThread();
+
+  void
+  FinishSendResults();
 
   void
   UnblockQuotaManager();
 
-  NS_IMETHOD
-  Run() MOZ_FINAL;
-
-  virtual void
-  ActorDestroy(ActorDestroyReason aWhy) MOZ_OVERRIDE;
-
+  // Methods that subclasses must implement.
   virtual nsresult
   DoDatabaseWork() = 0;
 
@@ -3497,6 +3639,29 @@ protected:
 
   virtual void
   SendResults() = 0;
+
+  // Common nsIRunnable implementation that subclasses may not override.
+  NS_IMETHOD
+  Run() MOZ_FINAL;
+
+  // IPDL methods.
+  virtual void
+  ActorDestroy(ActorDestroyReason aWhy) MOZ_OVERRIDE;
+
+  virtual bool
+  RecvPermissionRetry() MOZ_OVERRIDE;
+
+private:
+  nsresult
+  CheckPermission(ContentParent* aContentParent,
+                  PermissionRequestBase::PermissionValue* aPermission);
+
+  static bool
+  CheckAtLeastOneAppHasPermission(ContentParent* aContentParent,
+                                  const nsACString& aPermissionString);
+
+  nsresult
+  FinishOpen();
 };
 
 class OpenDatabaseOp MOZ_FINAL
@@ -3523,10 +3688,20 @@ class OpenDatabaseOp MOZ_FINAL
   bool mWasBlocked;
 
 public:
-  OpenDatabaseOp(const nsACString& aGroup,
-                 const nsACString& aOrigin,
-                 StoragePrivilege aPrivilege,
-                 const OpenDatabaseRequestParams& aParams);
+  OpenDatabaseOp(already_AddRefed<ContentParent> aContentParent,
+                 const OpenDatabaseRequestParams& aParams)
+    : FactoryOp(Move(aContentParent),
+                aParams.principalInfo(),
+                aParams.metadata().name(),
+                aParams.metadata().persistenceType(),
+                /* aDeleting */ false)
+    , mOwnedMetadata(new FullDatabaseMetadata())
+    , mMetadata(mOwnedMetadata)
+    , mRequestedVersion(aParams.metadata().version())
+    , mWasBlocked(false)
+  {
+    mMetadata->mCommonMetadata = aParams.metadata();
+  }
 
 private:
   ~OpenDatabaseOp()
@@ -3620,12 +3795,13 @@ class DeleteDatabaseOp MOZ_FINAL
   uint64_t mPreviousVersion;
 
 public:
-  DeleteDatabaseOp(const nsACString& aGroup,
-                   const nsACString& aOrigin,
-                   StoragePrivilege aPrivilege,
+  DeleteDatabaseOp(already_AddRefed<ContentParent> aContentParent,
                    const DeleteDatabaseRequestParams& aParams)
-    : FactoryOp(aGroup, aOrigin, aPrivilege, aParams.metadata().name(),
-                aParams.metadata().persistenceType())
+    : FactoryOp(Move(aContentParent),
+                aParams.principalInfo(),
+                aParams.metadata().name(),
+                aParams.metadata().persistenceType(),
+                /* aDeleting */ true)
     , mPreviousVersion(0)
   { }
 
@@ -4363,6 +4539,31 @@ private:
   SendSuccessResult() MOZ_OVERRIDE;
 };
 
+class PermissionRequestHelper MOZ_FINAL
+  : public PermissionRequestBase
+  , public PIndexedDBPermissionRequestParent
+{
+  bool mActorDestroyed;
+
+public:
+  PermissionRequestHelper(nsPIDOMWindow* aWindow,
+                          nsIPrincipal* aPrincipal)
+    : PermissionRequestBase(aWindow, aPrincipal)
+    , mActorDestroyed(false)
+  { }
+
+protected:
+  ~PermissionRequestHelper()
+  { }
+
+private:
+  virtual void
+  OnPromptComplete(PermissionValue aPermissionValue) MOZ_OVERRIDE;
+
+  virtual void
+  ActorDestroy(ActorDestroyReason aWhy) MOZ_OVERRIDE;
+};
+
 } // anonymous namespace
 
 /*******************************************************************************
@@ -4813,6 +5014,7 @@ UpdateIndexes(TransactionBase* aTransaction,
 
   return NS_OK;
 }
+
 } // anonymous namespace
 
 /*******************************************************************************
@@ -4832,20 +5034,101 @@ StaticRefPtr<nsRunnable> gStartTransactionRunnable;
 } // anonymous namespace
 
 /*******************************************************************************
+ * Exported functions
+ ******************************************************************************/
+
+namespace mozilla {
+namespace dom {
+namespace indexedDB {
+
+PBackgroundIDBFactoryParent*
+AllocPBackgroundIDBFactoryParent()
+{
+  AssertIsOnBackgroundThread();
+
+  nsRefPtr<BackgroundFactoryParent> actor = BackgroundFactoryParent::Create();
+  return actor.forget().take();
+}
+
+bool
+RecvPBackgroundIDBFactoryConstructor(PBackgroundIDBFactoryParent* aActor)
+{
+  AssertIsOnBackgroundThread();
+  MOZ_ASSERT(aActor);
+
+  return true;
+}
+
+bool
+DeallocPBackgroundIDBFactoryParent(PBackgroundIDBFactoryParent* aActor)
+{
+  AssertIsOnBackgroundThread();
+  MOZ_ASSERT(aActor);
+
+  nsRefPtr<BackgroundFactoryParent> actor =
+    dont_AddRef(static_cast<BackgroundFactoryParent*>(aActor));
+  return true;
+}
+
+PIndexedDBPermissionRequestParent*
+AllocPIndexedDBPermissionRequestParent(nsPIDOMWindow* aWindow,
+                                       nsIPrincipal* aPrincipal)
+{
+  MOZ_ASSERT(NS_IsMainThread());
+
+  nsRefPtr<PermissionRequestHelper> actor =
+    new PermissionRequestHelper(aWindow, aPrincipal);
+  return actor.forget().take();
+}
+
+bool
+RecvPIndexedDBPermissionRequestConstructor(
+                                      PIndexedDBPermissionRequestParent* aActor)
+{
+  MOZ_ASSERT(NS_IsMainThread());
+  MOZ_ASSERT(aActor);
+
+  auto* actor = static_cast<PermissionRequestHelper*>(aActor);
+
+  PermissionRequestBase::PermissionValue permission;
+  nsresult rv = actor->PromptIfNeeded(&permission);
+  if (NS_FAILED(rv)) {
+    return false;
+  }
+
+  if (permission != PermissionRequestBase::kPermissionPrompt) {
+    unused <<
+      PIndexedDBPermissionRequestParent::Send__delete__(actor, permission);
+  }
+
+  return true;
+}
+
+bool
+DeallocPIndexedDBPermissionRequestParent(
+                                      PIndexedDBPermissionRequestParent* aActor)
+{
+  MOZ_ASSERT(NS_IsMainThread());
+  MOZ_ASSERT(aActor);
+
+  nsRefPtr<PermissionRequestHelper> actor =
+    dont_AddRef(static_cast<PermissionRequestHelper*>(aActor));
+  return true;
+}
+
+} // namespace indexedDB
+} // namespace dom
+} // namespace mozilla
+
+/*******************************************************************************
  * BackgroundFactoryParent
  ******************************************************************************/
 
 uint64_t BackgroundFactoryParent::sFactoryInstanceCount = 0;
 
-BackgroundFactoryParent::BackgroundFactoryParent(
-                                             const nsCString& aGroup,
-                                             const nsCString& aOrigin,
-                                             const StoragePrivilege& aPrivilege)
-  : mGroup(aGroup)
-  , mOrigin(aOrigin)
-  , mPrivilege(aPrivilege)
+BackgroundFactoryParent::BackgroundFactoryParent()
 #ifdef DEBUG
-  , mActorDestroyed(false)
+  : mActorDestroyed(false)
 #endif
 {
   AssertIsOnBackgroundThread();
@@ -4858,9 +5141,7 @@ BackgroundFactoryParent::~BackgroundFactoryParent()
 
 // static
 already_AddRefed<BackgroundFactoryParent>
-BackgroundFactoryParent::Create(const nsCString& aGroup,
-                                const nsCString& aOrigin,
-                                const StoragePrivilege& aPrivilege)
+BackgroundFactoryParent::Create()
 {
   AssertIsOnBackgroundThread();
 
@@ -4877,8 +5158,7 @@ BackgroundFactoryParent::Create(const nsCString& aGroup,
     gStartTransactionRunnable = new nsRunnable();
   }
 
-  nsRefPtr<BackgroundFactoryParent> actor =
-    new BackgroundFactoryParent(aGroup, aOrigin, aPrivilege);
+  nsRefPtr<BackgroundFactoryParent> actor = new BackgroundFactoryParent();
 
   sFactoryInstanceCount++;
 
@@ -4924,43 +5204,25 @@ BackgroundFactoryParent::AllocPBackgroundIDBFactoryRequestParent(
   AssertIsOnBackgroundThread();
   MOZ_ASSERT(aParams.type() != FactoryRequestParams::T__None);
 
-  nsRefPtr<FactoryOp> actor;
+  // These two are common parameters for both open and delete calls that must be
+  // verified first.
+  const DatabaseMetadata* metadata;
+  const PrincipalInfo* principalInfo;
 
   switch (aParams.type()) {
     case FactoryRequestParams::TOpenDatabaseRequestParams: {
       const OpenDatabaseRequestParams& params =
          aParams.get_OpenDatabaseRequestParams();
-      const DatabaseMetadata& metadata = params.metadata();
-
-      if (NS_WARN_IF(
-            metadata.persistenceType() != PERSISTENCE_TYPE_PERSISTENT &&
-            metadata.persistenceType() != PERSISTENCE_TYPE_TEMPORARY)) {
-        ASSERT_UNLESS_FUZZING();
-        return nullptr;
-      }
-
-      actor = new OpenDatabaseOp(mGroup, mOrigin, mPrivilege, params);
+      metadata = &params.metadata();
+      principalInfo = &params.principalInfo();
       break;
     }
 
     case FactoryRequestParams::TDeleteDatabaseRequestParams: {
       const DeleteDatabaseRequestParams& params =
          aParams.get_DeleteDatabaseRequestParams();
-      const DatabaseMetadata& metadata = params.metadata();
-
-      if (NS_WARN_IF(metadata.version())) {
-        ASSERT_UNLESS_FUZZING();
-        return nullptr;
-      }
-
-      if (NS_WARN_IF(
-            metadata.persistenceType() != PERSISTENCE_TYPE_PERSISTENT &&
-            metadata.persistenceType() != PERSISTENCE_TYPE_TEMPORARY)) {
-        ASSERT_UNLESS_FUZZING();
-        return nullptr;
-      }
-
-      actor = new DeleteDatabaseOp(mGroup, mOrigin, mPrivilege, params);
+      metadata = &params.metadata();
+      principalInfo = &params.principalInfo();
       break;
     }
 
@@ -4969,7 +5231,26 @@ BackgroundFactoryParent::AllocPBackgroundIDBFactoryRequestParent(
       return nullptr;
   }
 
-  MOZ_ASSERT(actor);
+  MOZ_ASSERT(metadata);
+  MOZ_ASSERT(principalInfo);
+
+  if (NS_WARN_IF(metadata->persistenceType() != PERSISTENCE_TYPE_PERSISTENT &&
+                 metadata->persistenceType() != PERSISTENCE_TYPE_TEMPORARY)) {
+    ASSERT_UNLESS_FUZZING();
+    return nullptr;
+  }
+
+  nsRefPtr<ContentParent> contentParent =
+    BackgroundParent::GetContentParent(Manager());
+
+  nsRefPtr<FactoryOp> actor;
+  if (aParams.type() == FactoryRequestParams::TOpenDatabaseRequestParams) {
+    actor = new OpenDatabaseOp(contentParent.forget(),
+                               aParams.get_OpenDatabaseRequestParams());
+  } else {
+    actor = new DeleteDatabaseOp(contentParent.forget(),
+                                 aParams.get_DeleteDatabaseRequestParams());
+  }
 
   // Transfer ownership to IPDL.
   return actor.forget().take();
@@ -5028,24 +5309,6 @@ BackgroundFactoryParent::DeallocPBackgroundIDBDatabaseParent(
 /*******************************************************************************
  * Database
  ******************************************************************************/
-
-Database::Database(BackgroundFactoryParent* aFactory,
-                   FullDatabaseMetadata* aMetadata,
-                   FileManager* aFileManager)
-  : mFactory(aFactory)
-  , mMetadata(aMetadata)
-  , mFileManager(aFileManager)
-  , mId(aMetadata->mDatabaseId)
-  , mClosed(false)
-  , mInvalidated(false)
-  , mActorWasAlive(false)
-  , mActorDestroyed(false)
-{
-  AssertIsOnBackgroundThread();
-  MOZ_ASSERT(aFactory);
-  MOZ_ASSERT(aMetadata);
-  MOZ_ASSERT(aFileManager);
-}
 
 void
 Database::Invalidate()
@@ -5925,14 +6188,15 @@ TransactionBase::VerifyRequestParams(const CursorRequestParams& aParams) const
   switch (aParams.type()) {
     case CursorRequestParams::TContinueParams:
       break;
+
     case CursorRequestParams::TAdvanceParams:
       break;
+
     default:
       ASSERT_UNLESS_FUZZING();
       return false;
   }
 
-  MOZ_CRASH("Implement me!");
   return true;
 }
 
@@ -6308,7 +6572,7 @@ TransactionBase::AllocCursor(const OpenCursorParams& aParams)
     }
 
     default:
-      MOZ_ASSUME_UNREACHABLE("Should never get here!");
+      MOZ_CRASH("Should never get here!");
   }
 
   nsRefPtr<Cursor> actor =
@@ -7272,7 +7536,7 @@ Cursor::RecvContinue(const CursorRequestParams& aParams)
           break;
 
         default:
-          MOZ_ASSUME_UNREACHABLE("Should never get here!");
+          MOZ_CRASH("Should never get here!");
       }
     }
   }
@@ -7354,55 +7618,105 @@ AutoSetProgressHandler::Register(
   return NS_OK;
 }
 
-FactoryOp::FactoryOp(const nsACString& aGroup,
-                     const nsACString& aOrigin,
-                     StoragePrivilege aPrivilege,
-                     const nsAString& aName,
-                     PersistenceType aPersistenceType)
-  : mGroup(aGroup)
-  , mOrigin(aOrigin)
-  , mName(aName)
-  , mState(State_Initial)
-  , mPrivilege(aPrivilege)
-  , mPersistenceType(aPersistenceType)
-{
-  QuotaManager::GetStorageId(aPersistenceType, aOrigin, Client::IDB, aName,
-                             mDatabaseId);
-  MOZ_ASSERT(!mDatabaseId.IsEmpty());
-}
-
-void
-FactoryOp::ActorDestroy(ActorDestroyReason aWhy)
-{
-  AssertIsOnBackgroundThread();
-
-  NoteActorDestroyed();
-}
-
 nsresult
 FactoryOp::Open()
 {
   MOZ_ASSERT(NS_IsMainThread());
   MOZ_ASSERT(mState == State_Initial);
 
+  // Swap this to the stack now to ensure that we release it on this thread.
+  nsRefPtr<ContentParent> contentParent;
+  mContentParent.swap(contentParent);
+
   if (mActorDestroyed) {
     return NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
   }
 
-  QuotaManager* quotaManager = QuotaManager::GetOrCreate();
-  if (NS_WARN_IF(!quotaManager)) {
-    return NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
-  }
-
-  nsresult rv = quotaManager->
-    WaitForOpenAllowed(OriginOrPatternString::FromOrigin(mOrigin),
-                       Nullable<PersistenceType>(mPersistenceType), mDatabaseId,
-                       this);
+  PermissionRequestBase::PermissionValue permission;
+  nsresult rv = CheckPermission(contentParent, &permission);
   if (NS_WARN_IF(NS_FAILED(rv))) {
     return rv;
   }
 
-  mState = State_OpenPending;
+  MOZ_ASSERT(permission == PermissionRequestBase::kPermissionAllowed ||
+             permission == PermissionRequestBase::kPermissionDenied ||
+             permission == PermissionRequestBase::kPermissionPrompt);
+
+  if (permission == PermissionRequestBase::kPermissionDenied) {
+    return NS_ERROR_DOM_INDEXEDDB_NOT_ALLOWED_ERR;
+  }
+
+  QuotaManager::GetStorageId(mPersistenceType, mOrigin, Client::IDB, mName,
+                             mDatabaseId);
+
+  if (permission == PermissionRequestBase::kPermissionPrompt) {
+    mState = State_PermissionChallenge;
+    MOZ_ALWAYS_TRUE(NS_SUCCEEDED(mOwningThread->Dispatch(this,
+                                                         NS_DISPATCH_NORMAL)));
+    return NS_OK;
+  }
+
+  MOZ_ASSERT(permission == PermissionRequestBase::kPermissionAllowed);
+
+  rv = FinishOpen();
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+
+  return NS_OK;
+}
+
+nsresult
+FactoryOp::ChallengePermission()
+{
+  AssertIsOnOwningThread();
+  MOZ_ASSERT(mState == State_PermissionChallenge);
+  MOZ_ASSERT(mPrincipalInfo.type() == PrincipalInfo::TContentPrincipalInfo);
+
+  if (NS_WARN_IF(!SendPermissionChallenge(mPrincipalInfo))) {
+    return NS_ERROR_FAILURE;
+  }
+
+  return NS_OK;
+}
+
+nsresult
+FactoryOp::RetryCheckPermission()
+{
+  MOZ_ASSERT(NS_IsMainThread());
+  MOZ_ASSERT(mState == State_PermissionRetry);
+  MOZ_ASSERT(mPrincipalInfo.type() == PrincipalInfo::TContentPrincipalInfo);
+
+  // Swap this to the stack now to ensure that we release it on this thread.
+  nsRefPtr<ContentParent> contentParent;
+  mContentParent.swap(contentParent);
+
+  if (mActorDestroyed) {
+    return NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
+  }
+
+  PermissionRequestBase::PermissionValue permission;
+  nsresult rv = CheckPermission(contentParent, &permission);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+
+  MOZ_ASSERT(permission == PermissionRequestBase::kPermissionAllowed ||
+             permission == PermissionRequestBase::kPermissionDenied ||
+             permission == PermissionRequestBase::kPermissionPrompt);
+
+  if (permission == PermissionRequestBase::kPermissionDenied ||
+      permission == PermissionRequestBase::kPermissionPrompt) {
+    return NS_ERROR_DOM_INDEXEDDB_NOT_ALLOWED_ERR;
+  }
+
+  MOZ_ASSERT(permission == PermissionRequestBase::kPermissionAllowed);
+
+  rv = FinishOpen();
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+
   return NS_OK;
 }
 
@@ -7436,6 +7750,23 @@ FactoryOp::SendToIOThread()
 }
 
 void
+FactoryOp::FinishSendResults()
+{
+  AssertIsOnOwningThread();
+  MOZ_ASSERT(mState == State_SendingResults);
+
+  if (mBlockedQuotaManager) {
+    // Must set mState before dispatching otherwise we will race with the main
+    // thread.
+    mState = State_UnblockingQuotaManager;
+
+    MOZ_ALWAYS_TRUE(NS_SUCCEEDED(NS_DispatchToMainThread(this)));
+  } else {
+    mState = State_Completed;
+  }
+}
+
+void
 FactoryOp::UnblockQuotaManager()
 {
   MOZ_ASSERT(NS_IsMainThread());
@@ -7453,6 +7784,228 @@ FactoryOp::UnblockQuotaManager()
   mState = State_Completed;
 }
 
+nsresult
+FactoryOp::CheckPermission(ContentParent* aContentParent,
+                           PermissionRequestBase::PermissionValue* aPermission)
+{
+  MOZ_ASSERT(NS_IsMainThread());
+  MOZ_ASSERT(mState == State_Initial || mState == State_PermissionRetry);
+
+  if (mDeleting) {
+    MOZ_CRASH("Handle prompts for deletion");
+  }
+
+  if (mPrincipalInfo.type() == PrincipalInfo::TSystemPrincipalInfo) {
+    if (aContentParent) {
+      // Check to make sure that the child process has access to the database it
+      // is accessing.
+      nsAutoCString permissionString;
+      permissionString.AssignLiteral(kPermissionStringChromeBase);
+      permissionString.Append(NS_ConvertUTF16toUTF8(mName));
+
+      // Deleting a database requires write permissions. If we're opening a
+      // database then we must have read permissions only. Write permissions
+      // will be assessed later if the child attempts modifications.
+      if (mDeleting) {
+        permissionString.AppendLiteral(kPermissionStringChromeWriteSuffix);
+      } else {
+        permissionString.AppendLiteral(kPermissionStringChromeReadSuffix);
+      }
+
+      if (NS_WARN_IF(!CheckAtLeastOneAppHasPermission(aContentParent,
+                                                      permissionString))) {
+        aContentParent->KillHard();
+        IDB_REPORT_INTERNAL_ERR();
+        return NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
+      }
+    }
+
+    if (State_Initial == mState) {
+      QuotaManager::GetInfoForChrome(&mGroup, &mOrigin, &mStoragePrivilege,
+                                     nullptr);
+    }
+
+    *aPermission = PermissionRequestBase::kPermissionAllowed;
+    return NS_OK;
+  }
+
+  MOZ_ASSERT(mPrincipalInfo.type() == PrincipalInfo::TContentPrincipalInfo);
+
+  nsCOMPtr<nsIPrincipal> principal;
+
+  const ContentPrincipalInfo& info =
+    mPrincipalInfo.get_ContentPrincipalInfo();
+
+  nsCOMPtr<nsIURI> uri;
+  nsresult rv = NS_NewURI(getter_AddRefs(uri), info.spec());
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+
+  nsCOMPtr<nsIScriptSecurityManager> secMan =
+    do_GetService(NS_SCRIPTSECURITYMANAGER_CONTRACTID, &rv);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+
+  rv = info.appId() == kUnknownAppId ?
+       secMan->GetSimpleCodebasePrincipal(uri, getter_AddRefs(principal)) :
+       secMan->GetAppCodebasePrincipal(uri, info.appId(),
+                                       info.isInBrowserElement(),
+                                       getter_AddRefs(principal));
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+
+  PermissionRequestBase::PermissionValue permission;
+
+  if (aContentParent) {
+    if (NS_WARN_IF(!AssertAppPrincipal(aContentParent, principal))) {
+      IDB_REPORT_INTERNAL_ERR();
+      return NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
+    }
+
+    uint32_t intPermission =
+      mozilla::CheckPermission(aContentParent, principal, kPermissionString);
+
+    permission =
+      PermissionRequestBase::PermissionValueForIntPermission(intPermission);
+  } else {
+    rv = PermissionRequestBase::GetCurrentPermission(principal, &permission);
+    if (NS_WARN_IF(NS_FAILED(rv))) {
+      return rv;
+    }
+  }
+
+  if (permission != PermissionRequestBase::kPermissionDenied &&
+      State_Initial == mState) {
+    rv = QuotaManager::GetInfoFromPrincipal(principal, &mGroup, &mOrigin,
+                                            &mStoragePrivilege, nullptr);
+    if (NS_WARN_IF(NS_FAILED(rv))) {
+      return rv;
+    }
+  }
+
+  *aPermission = permission;
+  return NS_OK;
+}
+
+// static
+bool
+FactoryOp::CheckAtLeastOneAppHasPermission(ContentParent* aContentParent,
+                                           const nsACString& aPermissionString)
+{
+  MOZ_ASSERT(NS_IsMainThread());
+  MOZ_ASSERT(aContentParent);
+  MOZ_ASSERT(!aPermissionString.IsEmpty());
+
+  const nsTArray<PBrowserParent*>& browsers =
+    aContentParent->ManagedPBrowserParent();
+
+  if (!browsers.IsEmpty()) {
+    nsCOMPtr<nsIAppsService> appsService =
+      do_GetService(APPS_SERVICE_CONTRACTID);
+    if (NS_WARN_IF(!appsService)) {
+      return false;
+    }
+
+    nsCOMPtr<nsIIOService> ioService = do_GetIOService();
+    if (NS_WARN_IF(!ioService)) {
+      return false;
+    }
+
+    nsCOMPtr<nsIScriptSecurityManager> secMan =
+      do_GetService(NS_SCRIPTSECURITYMANAGER_CONTRACTID);
+    if (NS_WARN_IF(!secMan)) {
+      return false;
+    }
+
+    nsCOMPtr<nsIPermissionManager> permMan =
+      mozilla::services::GetPermissionManager();
+    if (NS_WARN_IF(!permMan)) {
+      return false;
+    }
+
+    for (uint32_t index = 0, count = browsers.Length();
+         index < count;
+         index++) {
+      uint32_t appId =
+        static_cast<TabParent*>(browsers[index])->OwnOrContainingAppId();
+      MOZ_ASSERT(kUnknownAppId != appId && kNoAppId != appId);
+
+      nsCOMPtr<mozIApplication> app;
+      nsresult rv = appsService->GetAppByLocalId(appId, getter_AddRefs(app));
+      if (NS_WARN_IF(NS_FAILED(rv))) {
+        return false;
+      }
+
+      nsString origin;
+      rv = app->GetOrigin(origin);
+      if (NS_WARN_IF(NS_FAILED(rv))) {
+        return false;
+      }
+
+      nsCOMPtr<nsIURI> uri;
+      rv = NS_NewURI(getter_AddRefs(uri), origin, nullptr, nullptr, ioService);
+      if (NS_WARN_IF(NS_FAILED(rv))) {
+        return false;
+      }
+
+      nsCOMPtr<nsIPrincipal> principal;
+      rv = secMan->GetAppCodebasePrincipal(uri, appId, false,
+                                           getter_AddRefs(principal));
+      if (NS_WARN_IF(NS_FAILED(rv))) {
+        return false;
+      }
+
+      uint32_t permission;
+      rv = permMan->TestExactPermissionFromPrincipal(
+                                               principal,
+                                               aPermissionString.BeginReading(),
+                                               &permission);
+      if (NS_WARN_IF(NS_FAILED(rv))) {
+        return false;
+      }
+
+      if (permission == nsIPermissionManager::ALLOW_ACTION) {
+        return true;
+      }
+    }
+  }
+
+  return false;
+}
+
+nsresult
+FactoryOp::FinishOpen()
+{
+  MOZ_ASSERT(NS_IsMainThread());
+  MOZ_ASSERT(mState == State_Initial || mState == State_PermissionRetry);
+  MOZ_ASSERT(!mOrigin.IsEmpty());
+  MOZ_ASSERT(!mDatabaseId.IsEmpty());
+  MOZ_ASSERT(!mBlockedQuotaManager);
+
+  QuotaManager* quotaManager = QuotaManager::GetOrCreate();
+  if (NS_WARN_IF(!quotaManager)) {
+    return NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
+  }
+
+  nsresult rv =
+    quotaManager->
+      WaitForOpenAllowed(OriginOrPatternString::FromOrigin(mOrigin),
+                         Nullable<PersistenceType>(mPersistenceType),
+                         mDatabaseId,
+                         this);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+
+  mBlockedQuotaManager = true;
+
+  mState = State_OpenPending;
+  return NS_OK;
+}
+
 NS_IMETHODIMP
 FactoryOp::Run()
 {
@@ -7461,6 +8014,14 @@ FactoryOp::Run()
   switch (mState) {
     case State_Initial:
       rv = Open();
+      break;
+
+    case State_PermissionChallenge:
+      rv = ChallengePermission();
+      break;
+
+    case State_PermissionRetry:
+      rv = RetryCheckPermission();
       break;
 
     case State_OpenPending:
@@ -7477,6 +8038,9 @@ FactoryOp::Run()
 
     case State_SendingResults:
       SendResults();
+      MOZ_ASSERT_IF(mBlockedQuotaManager,
+                    mState == State_UnblockingQuotaManager);
+      MOZ_ASSERT_IF(!mBlockedQuotaManager, mState == State_Completed);
       return NS_OK;
 
     case State_UnblockingQuotaManager:
@@ -7503,21 +8067,27 @@ FactoryOp::Run()
   return NS_OK;
 }
 
-OpenDatabaseOp::OpenDatabaseOp(const nsACString& aGroup,
-                               const nsACString& aOrigin,
-                               StoragePrivilege aPrivilege,
-                               const OpenDatabaseRequestParams& aParams)
-  : FactoryOp(aGroup, aOrigin, aPrivilege, aParams.metadata().name(),
-              aParams.metadata().persistenceType())
-  , mOwnedMetadata(new FullDatabaseMetadata())
-  , mMetadata(mOwnedMetadata)
-  , mRequestedVersion(aParams.metadata().version())
-  , mWasBlocked(false)
+void
+FactoryOp::ActorDestroy(ActorDestroyReason aWhy)
 {
-  mMetadata->mCommonMetadata = aParams.metadata();
+  AssertIsOnBackgroundThread();
 
-  MOZ_ASSERT(!mDatabaseId.IsEmpty());
-  mMetadata->mDatabaseId = mDatabaseId;
+  NoteActorDestroyed();
+}
+
+bool
+FactoryOp::RecvPermissionRetry()
+{
+  AssertIsOnOwningThread();
+  MOZ_ASSERT(!mActorDestroyed);
+  MOZ_ASSERT(mState == State_PermissionChallenge);
+
+  mContentParent = BackgroundParent::GetContentParent(Manager()->Manager());
+
+  mState = State_PermissionRetry;
+  MOZ_ALWAYS_TRUE(NS_SUCCEEDED(NS_DispatchToMainThread(this)));
+
+  return true;
 }
 
 nsresult
@@ -7542,7 +8112,8 @@ OpenDatabaseOp::DoDatabaseWork()
 
   nsresult rv =
     quotaManager->EnsureOriginIsInitialized(mPersistenceType, mGroup,
-                                            mOrigin, mPrivilege != Chrome,
+                                            mOrigin,
+                                            mStoragePrivilege != Chrome,
                                             getter_AddRefs(dbDirectory));
   if (NS_WARN_IF(NS_FAILED(rv))) {
     return rv;
@@ -7649,7 +8220,8 @@ OpenDatabaseOp::DoDatabaseWork()
   nsRefPtr<FileManager> fileManager =
     mgr->GetFileManager(mPersistenceType, mOrigin, mName);
   if (!fileManager) {
-    fileManager = new FileManager(mPersistenceType, mGroup, mOrigin, mPrivilege,
+    fileManager = new FileManager(mPersistenceType, mGroup, mOrigin,
+                                  mStoragePrivilege,
                                   mMetadata->mCommonMetadata.name());
 
     rv = fileManager->Init(fmDirectory, connection);
@@ -8286,11 +8858,7 @@ OpenDatabaseOp::SendResults()
                                                                    response));
   }
 
-  // Must set mState before dispatching otherwise we will race with the main
-  // thread.
-  mState = State_UnblockingQuotaManager;
-
-  MOZ_ALWAYS_TRUE(NS_SUCCEEDED(NS_DispatchToMainThread(this)));
+  FinishSendResults();
 }
 
 nsresult
@@ -8310,6 +8878,9 @@ OpenDatabaseOp::EnsureDatabaseActor()
     return NS_OK;
   }
 
+  MOZ_ASSERT(mMetadata->mDatabaseId.IsEmpty());
+  mMetadata->mDatabaseId = mDatabaseId;
+
   MOZ_ASSERT(mMetadata->mFilePath.IsEmpty());
   mMetadata->mFilePath = mDatabaseFilePath;
 
@@ -8323,7 +8894,8 @@ OpenDatabaseOp::EnsureDatabaseActor()
   auto factory = static_cast<BackgroundFactoryParent*>(Manager());
 
   nsRefPtr<Database> database =
-    new Database(factory, mMetadata, mFileManager);
+    new Database(factory, mPrincipalInfo, mGroup, mOrigin, mMetadata,
+                 mFileManager);
 
   if (info) {
     info->mLiveDatabases.AppendElement(database);
@@ -9003,11 +9575,7 @@ DeleteDatabaseOp::SendResults()
                                                                    response));
   }
 
-  // Must set mState before dispatching otherwise we will race with the main
-  // thread.
-  mState = State_UnblockingQuotaManager;
-
-  MOZ_ALWAYS_TRUE(NS_SUCCEEDED(NS_DispatchToMainThread(this)));
+  FinishSendResults();
 }
 
 nsresult
@@ -9079,7 +9647,7 @@ VersionChangeOp::RunOnIOThread()
   if (exists) {
     int64_t fileSize;
 
-    if (mDeleteDatabaseOp->mPrivilege != Chrome) {
+    if (mDeleteDatabaseOp->mStoragePrivilege != Chrome) {
       rv = dbFile->GetFileSize(&fileSize);
       if (NS_WARN_IF(NS_FAILED(rv))) {
         return rv;
@@ -9091,7 +9659,7 @@ VersionChangeOp::RunOnIOThread()
       return rv;
     }
 
-    if (mDeleteDatabaseOp->mPrivilege != Chrome) {
+    if (mDeleteDatabaseOp->mStoragePrivilege != Chrome) {
       quotaManager->DecreaseUsageForOrigin(mDeleteDatabaseOp->mPersistenceType,
                                            mDeleteDatabaseOp->mGroup,
                                            mDeleteDatabaseOp->mOrigin,
@@ -9152,7 +9720,7 @@ VersionChangeOp::RunOnIOThread()
 
     uint64_t usage = 0;
 
-    if (mDeleteDatabaseOp->mPrivilege != Chrome) {
+    if (mDeleteDatabaseOp->mStoragePrivilege != Chrome) {
       rv = FileManager::GetUsage(fmDirectory, &usage);
       if (NS_WARN_IF(NS_FAILED(rv))) {
         return rv;
@@ -9164,7 +9732,7 @@ VersionChangeOp::RunOnIOThread()
       return rv;
     }
 
-    if (mDeleteDatabaseOp->mPrivilege != Chrome) {
+    if (mDeleteDatabaseOp->mStoragePrivilege != Chrome) {
       quotaManager->DecreaseUsageForOrigin(mDeleteDatabaseOp->mPersistenceType,
                                            mDeleteDatabaseOp->mGroup,
                                            mDeleteDatabaseOp->mOrigin,
@@ -11278,7 +11846,7 @@ IndexRequestOpBase::IndexMetadataForParams(TransactionBase* aTransaction,
     default:
       // This should have already been assured in
       // TransactionBase::AllocRequest().
-      MOZ_ASSUME_UNREACHABLE("Should never get here!");
+      MOZ_CRASH("Should never get here!");
   }
 
   const FullObjectStoreMetadata* objectStoreMetadata =
@@ -11764,7 +12332,7 @@ OpenOp::DoObjectStoreDatabaseWork(TransactionBase* aTransaction)
       break;
 
     default:
-      MOZ_ASSUME_UNREACHABLE("Should never get here!");
+      MOZ_CRASH("Should never get here!");
   }
 
   nsCString firstQuery =
@@ -11861,7 +12429,7 @@ OpenOp::DoObjectStoreDatabaseWork(TransactionBase* aTransaction)
     }
 
     default:
-      MOZ_ASSUME_UNREACHABLE("Should never get here!");
+      MOZ_CRASH("Should never get here!");
   }
 
   mCursor->mContinueQuery =
@@ -11935,7 +12503,7 @@ OpenOp::DoObjectStoreKeyDatabaseWork(TransactionBase* aTransaction)
       break;
 
     default:
-      MOZ_ASSUME_UNREACHABLE("Should never get here!");
+      MOZ_CRASH("Should never get here!");
   }
 
   nsCString firstQuery =
@@ -12024,7 +12592,7 @@ OpenOp::DoObjectStoreKeyDatabaseWork(TransactionBase* aTransaction)
     }
 
     default:
-      MOZ_ASSUME_UNREACHABLE("Should never get here!");
+      MOZ_CRASH("Should never get here!");
   }
 
   mCursor->mContinueQuery =
@@ -12096,7 +12664,7 @@ OpenOp::DoIndexDatabaseWork(TransactionBase* aTransaction)
       break;
 
     default:
-      MOZ_ASSUME_UNREACHABLE("Should never get here!");
+      MOZ_CRASH("Should never get here!");
   }
 
   nsAutoCString queryStart =
@@ -12262,7 +12830,7 @@ OpenOp::DoIndexDatabaseWork(TransactionBase* aTransaction)
     }
 
     default:
-      MOZ_ASSUME_UNREACHABLE("Should never get here!");
+      MOZ_CRASH("Should never get here!");
   }
 
   mResponse = IndexCursorResponse();
@@ -12328,7 +12896,7 @@ OpenOp::DoIndexKeyDatabaseWork(TransactionBase* aTransaction)
       break;
 
     default:
-      MOZ_ASSUME_UNREACHABLE("Should never get here!");
+      MOZ_CRASH("Should never get here!");
   }
 
   nsAutoCString queryStart =
@@ -12479,7 +13047,7 @@ OpenOp::DoIndexKeyDatabaseWork(TransactionBase* aTransaction)
     }
 
     default:
-      MOZ_ASSUME_UNREACHABLE("Should never get here!");
+      MOZ_CRASH("Should never get here!");
   }
 
   mResponse = IndexKeyCursorResponse();
@@ -12749,7 +13317,7 @@ ContinueOp::DoDatabaseWork(TransactionBase* aTransaction)
     }
 
     default:
-      MOZ_ASSUME_UNREACHABLE("Should never get here!");
+      MOZ_CRASH("Should never get here!");
   }
 
   return NS_OK;
@@ -12777,4 +13345,24 @@ ContinueOp::SendSuccessResult()
 
   mResponseSent = true;
   return NS_OK;
+}
+
+void
+PermissionRequestHelper::OnPromptComplete(PermissionValue aPermissionValue)
+{
+  MOZ_ASSERT(NS_IsMainThread());
+
+  if (!mActorDestroyed) {
+    unused <<
+      PIndexedDBPermissionRequestParent::Send__delete__(this, aPermissionValue);
+  }
+}
+
+void
+PermissionRequestHelper::ActorDestroy(ActorDestroyReason aWhy)
+{
+  MOZ_ASSERT(NS_IsMainThread());
+  MOZ_ASSERT(!mActorDestroyed);
+
+  mActorDestroyed = true;
 }

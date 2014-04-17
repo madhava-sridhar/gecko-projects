@@ -15,6 +15,10 @@
 #include "IndexedDatabase.h"
 #include "IndexedDatabaseInlines.h"
 #include "mozilla/BasicEvents.h"
+#include "mozilla/dom/PermissionMessageUtils.h"
+#include "mozilla/dom/TabChild.h"
+#include "mozilla/dom/indexedDB/PIndexedDBPermissionRequestChild.h"
+#include "mozilla/ipc/BackgroundUtils.h"
 #include "nsCOMPtr.h"
 #include "nsContentUtils.h"
 #include "nsIBFCacheEntry.h"
@@ -24,6 +28,7 @@
 #include "nsPIDOMWindow.h"
 #include "nsThreadUtils.h"
 #include "nsTraceRefcnt.h"
+#include "PermissionRequestBase.h"
 #include "ProfilerHelpers.h"
 #include "ReportInternalError.h"
 
@@ -227,7 +232,7 @@ public:
         MOZ_CRASH("Unknown result type!");
     }
 
-    MOZ_ASSUME_UNREACHABLE("Should never get here!");
+    MOZ_CRASH("Should never get here!");
   }
 
 private:
@@ -362,6 +367,60 @@ private:
   }
 };
 
+class PermissionRequestMainProcessHelper MOZ_FINAL
+  : public PermissionRequestBase
+{
+  BackgroundFactoryRequestChild* mActor;
+  nsRefPtr<IDBFactory> mFactory;
+
+public:
+  PermissionRequestMainProcessHelper(BackgroundFactoryRequestChild* aActor,
+                                     IDBFactory* aFactory,
+                                     nsPIDOMWindow* aWindow,
+                                     nsIPrincipal* aPrincipal)
+    : PermissionRequestBase(aWindow, aPrincipal)
+    , mActor(aActor)
+    , mFactory(aFactory)
+  {
+    MOZ_ASSERT(aActor);
+    MOZ_ASSERT(aFactory);
+    aActor->AssertIsOnOwningThread();
+  }
+
+protected:
+  ~PermissionRequestMainProcessHelper()
+  { }
+
+private:
+  virtual void
+  OnPromptComplete(PermissionValue aPermissionValue) MOZ_OVERRIDE;
+};
+
+class PermissionRequestChildProcessActor MOZ_FINAL
+  : public PIndexedDBPermissionRequestChild
+{
+  BackgroundFactoryRequestChild* mActor;
+  nsRefPtr<IDBFactory> mFactory;
+
+public:
+  PermissionRequestChildProcessActor(BackgroundFactoryRequestChild* aActor,
+                                     IDBFactory* aFactory)
+    : mActor(aActor)
+    , mFactory(aFactory)
+  {
+    MOZ_ASSERT(aActor);
+    MOZ_ASSERT(aFactory);
+    aActor->AssertIsOnOwningThread();
+  }
+
+protected:
+  ~PermissionRequestChildProcessActor()
+  { }
+
+  virtual bool
+  Recv__delete__(const uint32_t& aPermission) MOZ_OVERRIDE;
+};
+
 } // anonymous namespace
 
 /*******************************************************************************
@@ -493,8 +552,43 @@ DispatchErrorEvent(IDBRequest* aRequest,
 } // anonymous namespace
 
 /*******************************************************************************
+ * Local class implementations
+ ******************************************************************************/
+
+void
+PermissionRequestMainProcessHelper::OnPromptComplete(
+                                               PermissionValue aPermissionValue)
+{
+  MOZ_ASSERT(mActor);
+  mActor->AssertIsOnOwningThread();
+
+  mActor->SendPermissionRetry();
+
+  mActor = nullptr;
+  mFactory = nullptr;
+}
+
+bool
+PermissionRequestChildProcessActor::Recv__delete__(
+                                              const uint32_t& /* aPermission */)
+{
+  MOZ_ASSERT(mActor);
+  mActor->AssertIsOnOwningThread();
+  MOZ_ASSERT(mFactory);
+
+  nsRefPtr<IDBFactory> factory;
+  mFactory.swap(factory);
+
+  mActor->SendPermissionRetry();
+  mActor = nullptr;
+
+  return true;
+}
+
+/*******************************************************************************
  * BackgroundRequestChildBase
  ******************************************************************************/
+
 BackgroundRequestChildBase::BackgroundRequestChildBase(IDBRequest* aRequest)
   : mRequest(aRequest)
 {
@@ -749,7 +843,58 @@ BackgroundFactoryRequestChild::Recv__delete__(
       MOZ_CRASH("Unknown response type!");
   }
 
-  MOZ_ASSUME_UNREACHABLE("Should never get here!");
+  MOZ_CRASH("Should never get here!");
+}
+
+bool
+BackgroundFactoryRequestChild::RecvPermissionChallenge(
+                                            const PrincipalInfo& aPrincipalInfo)
+{
+  AssertIsOnOwningThread();
+
+  if (!NS_IsMainThread()) {
+    MOZ_CRASH("Implement me for workers!");
+  }
+
+  nsresult rv;
+  nsCOMPtr<nsIPrincipal> principal =
+    mozilla::ipc::PrincipalInfoToPrincipal(aPrincipalInfo, &rv);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return false;
+  }
+
+  if (XRE_GetProcessType() == GeckoProcessType_Default) {
+    nsCOMPtr<nsPIDOMWindow> window = mFactory->GetParentObject();
+    MOZ_ASSERT(window);
+
+    nsRefPtr<PermissionRequestMainProcessHelper> helper =
+      new PermissionRequestMainProcessHelper(this, mFactory, window, principal);
+
+    PermissionRequestBase::PermissionValue permission;
+    if (NS_WARN_IF(NS_FAILED(helper->PromptIfNeeded(&permission)))) {
+      return false;
+    }
+
+    MOZ_ASSERT(permission == PermissionRequestBase::kPermissionAllowed ||
+               permission == PermissionRequestBase::kPermissionDenied ||
+               permission == PermissionRequestBase::kPermissionPrompt);
+
+    if (permission != PermissionRequestBase::kPermissionPrompt) {
+      SendPermissionRetry();
+    }
+    return true;
+  }
+
+  nsRefPtr<TabChild> tabChild = mFactory->GetTabChild();
+  MOZ_ASSERT(tabChild);
+
+  IPC::Principal ipcPrincipal(principal);
+
+  auto* actor = new PermissionRequestChildProcessActor(this, mFactory);
+
+  tabChild->SendPIndexedDBPermissionRequestConstructor(actor, ipcPrincipal);
+
+  return true;
 }
 
 bool

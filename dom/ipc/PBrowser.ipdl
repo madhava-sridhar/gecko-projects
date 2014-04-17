@@ -11,6 +11,7 @@ include protocol PContent;
 include protocol PDocumentRenderer;
 include protocol PContentPermissionRequest;
 include protocol PFilePicker;
+include protocol PIndexedDBPermissionRequest;
 include protocol PRenderFrame;
 include protocol POfflineCacheUpdate;
 include DOMTypes;
@@ -75,6 +76,7 @@ intr protocol PBrowser
     manages PDocumentRenderer;
     manages PContentPermissionRequest;
     manages PFilePicker;
+    manages PIndexedDBPermissionRequest;
     manages PRenderFrame;
     manages POfflineCacheUpdate;
 
@@ -271,6 +273,19 @@ parent:
     PContentPermissionRequest(PermissionRequest[] aRequests, Principal aPrincipal);
 
     PFilePicker(nsString aTitle, int16_t aMode);
+
+    /**
+     * Initiates an asynchronous request for one of the special indexedDB
+     * permissions for the provided principal.
+     *
+     * @param principal
+     *   The principal of the request.
+     *
+     * NOTE: The principal is untrusted in the parent process. Only
+     *       principals that can live in the content process should
+     *       provided.
+     */
+    PIndexedDBPermissionRequest(Principal principal);
 
     /**
      * Create a layout frame (encapsulating a remote layer tree) for

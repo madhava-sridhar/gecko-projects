@@ -33,10 +33,11 @@ protected:
   DeallocPBackgroundTestParent(PBackgroundTestParent* aActor) MOZ_OVERRIDE;
 
   virtual PBackgroundIDBFactoryParent*
-  AllocPBackgroundIDBFactoryParent(const nsCString& aGroup,
-                                   const nsCString& aASCIIOrigin,
-                                   const StoragePrivilege& aPrivilege)
-                                   MOZ_OVERRIDE;
+  AllocPBackgroundIDBFactoryParent() MOZ_OVERRIDE;
+
+  virtual bool
+  RecvPBackgroundIDBFactoryConstructor(PBackgroundIDBFactoryParent* aActor)
+                                       MOZ_OVERRIDE;
 
   virtual bool
   DeallocPBackgroundIDBFactoryParent(PBackgroundIDBFactoryParent* aActor)

@@ -5,11 +5,6 @@
 include protocol PBackgroundIDBFactory;
 include protocol PBackgroundTest;
 
-include "mozilla/dom/indexedDB/SerializationHelpers.h";
-
-using mozilla::dom::quota::StoragePrivilege
-  from "mozilla/dom/quota/StoragePrivilege.h";
-
 namespace mozilla {
 namespace ipc {
 
@@ -22,9 +17,7 @@ parent:
   // Only called at startup during mochitests to check the basic infrastructure.
   PBackgroundTest(nsCString testArg);
 
-  PBackgroundIDBFactory(nsCString group,
-                        nsCString asciiOrigin,
-                        StoragePrivilege privilege);
+  PBackgroundIDBFactory();
 };
 
 } // namespace ipc

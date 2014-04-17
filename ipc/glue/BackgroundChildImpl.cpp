@@ -4,11 +4,9 @@
 
 #include "BackgroundChildImpl.h"
 
-#include "mozilla/dom/indexedDB/ActorsChild.h"
+#include "mozilla/dom/indexedDB/PBackgroundIDBFactoryChild.h"
 #include "mozilla/ipc/PBackgroundTestChild.h"
 #include "nsTraceRefcnt.h"
-
-namespace indexedDB = mozilla::dom::indexedDB;
 
 namespace {
 
@@ -99,10 +97,7 @@ BackgroundChildImpl::DeallocPBackgroundTestChild(PBackgroundTestChild* aActor)
 }
 
 BackgroundChildImpl::PBackgroundIDBFactoryChild*
-BackgroundChildImpl::AllocPBackgroundIDBFactoryChild(
-                                             const nsCString& aGroup,
-                                             const nsCString& aASCIIOrigin,
-                                             const StoragePrivilege& aPrivilege)
+BackgroundChildImpl::AllocPBackgroundIDBFactoryChild()
 {
   MOZ_CRASH("PBackgroundIDBFactoryChild actors should be manually "
             "constructed!");
@@ -114,7 +109,7 @@ BackgroundChildImpl::DeallocPBackgroundIDBFactoryChild(
 {
   MOZ_ASSERT(aActor);
 
-  delete static_cast<indexedDB::BackgroundFactoryChild*>(aActor);
+  delete aActor;
   return true;
 }
 

@@ -5,109 +5,40 @@
 #ifndef mozilla_dom_indexeddb_actorsparent_h__
 #define mozilla_dom_indexeddb_actorsparent_h__
 
-#include "mozilla/Attributes.h"
-#include "mozilla/dom/indexedDB/PBackgroundIDBFactoryParent.h"
-#include "mozilla/dom/quota/StoragePrivilege.h"
-#include "nsISupportsImpl.h"
-#include "nsString.h"
+class nsCString;
+class nsIPrincipal;
+class nsPIDOMWindow;
 
 namespace mozilla {
-namespace ipc {
-
-class BackgroundParentImpl;
-
-} // namespace ipc
-
 namespace dom {
+
+class TabParent;
+
 namespace indexedDB {
 
-class BackgroundFactoryParent MOZ_FINAL
-  : public PBackgroundIDBFactoryParent
-{
-  friend class mozilla::ipc::BackgroundParentImpl;
+class PBackgroundIDBFactoryParent;
+class PIndexedDBPermissionRequestParent;
 
-  typedef mozilla::dom::quota::StoragePrivilege StoragePrivilege;
+PBackgroundIDBFactoryParent*
+AllocPBackgroundIDBFactoryParent();
 
-  // Counts the number of "live" BackgroundFactoryParent instances that have not
-  // yet had ActorDestroy called.
-  static uint64_t sFactoryInstanceCount;
+bool
+RecvPBackgroundIDBFactoryConstructor(PBackgroundIDBFactoryParent* aActor);
 
-  nsCString mGroup;
-  nsCString mOrigin;
-  StoragePrivilege mPrivilege;
+bool
+DeallocPBackgroundIDBFactoryParent(PBackgroundIDBFactoryParent* aActor);
 
-#ifdef DEBUG
-  bool mActorDestroyed;
-#endif
+PIndexedDBPermissionRequestParent*
+AllocPIndexedDBPermissionRequestParent(nsPIDOMWindow* aWindow,
+                                       nsIPrincipal* aPrincipal);
 
-public:
-  const nsCString&
-  Group() const
-  {
-    return mGroup;
-  }
+bool
+RecvPIndexedDBPermissionRequestConstructor(
+                                     PIndexedDBPermissionRequestParent* aActor);
 
-  const nsCString&
-  Origin() const
-  {
-    return mOrigin;
-  }
-
-  StoragePrivilege
-  Privilege() const
-  {
-    return mPrivilege;
-  }
-
-  NS_INLINE_DECL_THREADSAFE_REFCOUNTING(BackgroundFactoryParent)
-
-private:
-  // Only constructed in Create().
-  BackgroundFactoryParent(const nsCString& aGroup,
-                          const nsCString& aOrigin,
-                          const StoragePrivilege& aPrivilege);
-
-  // Reference counted.
-  ~BackgroundFactoryParent();
-
-  // Only created by mozilla::ipc::BackgroundParentImpl.
-  static already_AddRefed<BackgroundFactoryParent>
-  Create(const nsCString& aGroup,
-         const nsCString& aOrigin,
-         const StoragePrivilege& aPrivilege);
-
-  // IPDL methods are only called by IPDL.
-  virtual void
-  ActorDestroy(ActorDestroyReason aWhy) MOZ_OVERRIDE;
-
-  virtual bool
-  RecvDeleteMe() MOZ_OVERRIDE;
-
-  virtual PBackgroundIDBFactoryRequestParent*
-  AllocPBackgroundIDBFactoryRequestParent(const FactoryRequestParams& aParams)
-                                          MOZ_OVERRIDE;
-
-  virtual bool
-  RecvPBackgroundIDBFactoryRequestConstructor(
-                                     PBackgroundIDBFactoryRequestParent* aActor,
-                                     const FactoryRequestParams& aParams)
-                                     MOZ_OVERRIDE;
-
-  virtual bool
-  DeallocPBackgroundIDBFactoryRequestParent(
-                                     PBackgroundIDBFactoryRequestParent* aActor)
-                                     MOZ_OVERRIDE;
-
-  virtual PBackgroundIDBDatabaseParent*
-  AllocPBackgroundIDBDatabaseParent(
-                                   const DatabaseSpec& aSpec,
-                                   PBackgroundIDBFactoryRequestParent* aRequest)
-                                   MOZ_OVERRIDE;
-
-  virtual bool
-  DeallocPBackgroundIDBDatabaseParent(PBackgroundIDBDatabaseParent* aActor)
-                                      MOZ_OVERRIDE;
-};
+bool
+DeallocPIndexedDBPermissionRequestParent(
+                                     PIndexedDBPermissionRequestParent* aActor);
 
 } // namespace indexedDB
 } // namespace dom

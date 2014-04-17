@@ -36,8 +36,9 @@ class IDBFactory;
 class IDBOpenDBRequest;
 class IDBRequest;
 class IDBTransaction;
-
 class Key;
+class PermissionRequestChild;
+class PermissionRequestParent;
 class SerializedStructuredCloneReadInfo;
 
 class BackgroundFactoryChild MOZ_FINAL
@@ -143,6 +144,8 @@ class BackgroundFactoryRequestChild MOZ_FINAL
   friend class IDBFactory;
   friend class BackgroundFactoryChild;
   friend class BackgroundDatabaseChild;
+  friend class PermissionRequestChild;
+  friend class PermissionRequestParent;
 
   nsRefPtr<IDBFactory> mFactory;
   const uint64_t mRequestedVersion;
@@ -176,6 +179,9 @@ private:
   // IPDL methods are only called by IPDL.
   virtual bool
   Recv__delete__(const FactoryRequestResponse& aResponse) MOZ_OVERRIDE;
+
+  virtual bool
+  RecvPermissionChallenge(const PrincipalInfo& aPrincipalInfo) MOZ_OVERRIDE;
 
   virtual bool
   RecvBlocked(const uint64_t& aCurrentVersion) MOZ_OVERRIDE;

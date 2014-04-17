@@ -13,7 +13,6 @@ XPIDL_SOURCES += [
 XPIDL_MODULE = 'dom_indexeddb'
 
 EXPORTS.mozilla.dom.indexedDB += [
-    'ActorsChild.h',
     'ActorsParent.h',
     'Client.h',
     'DatabaseInfo.h',
@@ -41,7 +40,6 @@ SOURCES += [
     'ActorsChild.cpp',
     'ActorsParent.cpp',
     'AsyncConnectionHelper.cpp',
-    'CheckPermissionsHelper.cpp',
     'Client.cpp',
     'DatabaseInfo.cpp',
     'FileInfo.cpp',
@@ -61,6 +59,7 @@ SOURCES += [
     'Key.cpp',
     'KeyPath.cpp',
     'OpenDatabaseHelper.cpp',
+    'PermissionRequestBase.cpp',
     'ReportInternalError.cpp',
     'TransactionThreadPool.cpp',
 ]
@@ -74,6 +73,7 @@ IPDL_SOURCES += [
     'PBackgroundIDBSharedTypes.ipdlh',
     'PBackgroundIDBTransaction.ipdl',
     'PBackgroundIDBVersionChangeTransaction.ipdl',
+    'PIndexedDBPermissionRequest.ipdl',
 ]
 
 # Don't treat warnings as errors for now.

@@ -50,10 +50,7 @@ protected:
   DeallocPBackgroundTestChild(PBackgroundTestChild* aActor) MOZ_OVERRIDE;
 
   virtual PBackgroundIDBFactoryChild*
-  AllocPBackgroundIDBFactoryChild(const nsCString& aGroup,
-                                  const nsCString& aASCIIOrigin,
-                                  const StoragePrivilege& aPrivilege)
-                                  MOZ_OVERRIDE;
+  AllocPBackgroundIDBFactoryChild() MOZ_OVERRIDE;
 
   virtual bool
   DeallocPBackgroundIDBFactoryChild(PBackgroundIDBFactoryChild* aActor)

@@ -296,29 +296,32 @@ public:
                  uint32_t aAppId,
                  bool aInMozBrowser,
                  nsACString* aGroup,
-                 nsACString* aASCIIOrigin,
+                 nsACString* aOrigin,
                  StoragePrivilege* aPrivilege,
                  PersistenceType* aDefaultPersistenceType);
 
   static nsresult
   GetInfoFromPrincipal(nsIPrincipal* aPrincipal,
                        nsACString* aGroup,
-                       nsACString* aASCIIOrigin,
+                       nsACString* aOrigin,
                        StoragePrivilege* aPrivilege,
                        PersistenceType* aDefaultPersistenceType);
 
   static nsresult
   GetInfoFromWindow(nsPIDOMWindow* aWindow,
                     nsACString* aGroup,
-                    nsACString* aASCIIOrigin,
+                    nsACString* aOrigin,
                     StoragePrivilege* aPrivilege,
                     PersistenceType* aDefaultPersistenceType);
 
   static void
   GetInfoForChrome(nsACString* aGroup,
-                   nsACString* aASCIIOrigin,
+                   nsACString* aOrigin,
                    StoragePrivilege* aPrivilege,
                    PersistenceType* aDefaultPersistenceType);
+
+  static void
+  ChromeOrigin(nsACString& aOrigin);
 
   static void
   GetOriginPatternString(uint32_t aAppId, bool aBrowserOnly,

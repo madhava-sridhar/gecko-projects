@@ -7,6 +7,10 @@ include protocol PBackgroundIDBDatabase;
 include protocol PBackgroundIDBFactoryRequest;
 
 include PBackgroundIDBSharedTypes;
+include PBackgroundSharedTypes;
+
+using struct mozilla::void_t
+  from "ipc/IPCMessageUtils.h";
 
 namespace mozilla {
 namespace dom {
@@ -15,11 +19,13 @@ namespace indexedDB {
 struct OpenDatabaseRequestParams
 {
   DatabaseMetadata metadata;
+  PrincipalInfo principalInfo;
 };
 
 struct DeleteDatabaseRequestParams
 {
   DatabaseMetadata metadata;
+  PrincipalInfo principalInfo;
 };
 
 union FactoryRequestParams

@@ -105,8 +105,6 @@ LOCAL_INCLUDES += [
     '/dom/devicestorage',
     '/dom/filesystem',
     '/dom/fmradio/ipc',
-    '/dom/indexedDB',
-    '/dom/indexedDB/ipc',
     '/dom/mobilemessage/src/ipc',
     '/extensions/cookie',
     '/hal/sandbox',

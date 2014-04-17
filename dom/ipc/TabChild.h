@@ -379,6 +379,15 @@ public:
     virtual bool
     DeallocPFilePickerChild(PFilePickerChild* actor) MOZ_OVERRIDE;
 
+    virtual PIndexedDBPermissionRequestChild*
+    AllocPIndexedDBPermissionRequestChild(const Principal& aPrincipal)
+                                          MOZ_OVERRIDE;
+
+    virtual bool
+    DeallocPIndexedDBPermissionRequestChild(
+                                       PIndexedDBPermissionRequestChild* aActor)
+                                       MOZ_OVERRIDE;
+
     virtual POfflineCacheUpdateChild* AllocPOfflineCacheUpdateChild(
             const URIParams& manifestURI,
             const URIParams& documentURI,

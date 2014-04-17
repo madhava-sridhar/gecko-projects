@@ -26,7 +26,6 @@
 #include "AudioChannelService.h"
 #include "CrashReporterParent.h"
 #include "IHistory.h"
-#include "IDBFactory.h"
 #include "mozIApplication.h"
 #include "mozilla/ClearOnShutdown.h"
 #include "mozilla/dom/asmjscache/AsmJSCache.h"

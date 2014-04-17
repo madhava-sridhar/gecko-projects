@@ -15,6 +15,7 @@
 #include "mozilla/EventListenerManager.h"
 #include "mozilla/IntentionalCrash.h"
 #include "mozilla/docshell/OfflineCacheUpdateChild.h"
+#include "mozilla/dom/indexedDB/PIndexedDBPermissionRequestChild.h"
 #include "mozilla/ipc/DocumentRendererChild.h"
 #include "mozilla/ipc/FileDescriptorUtils.h"
 #include "mozilla/layers/ActiveElementManager.h"
@@ -2264,6 +2265,23 @@ TabChild::DeallocPFilePickerChild(PFilePickerChild* actor)
 {
   nsFilePickerProxy* filePicker = static_cast<nsFilePickerProxy*>(actor);
   NS_RELEASE(filePicker);
+  return true;
+}
+
+PIndexedDBPermissionRequestChild*
+TabChild::AllocPIndexedDBPermissionRequestChild(const Principal& aPrincipal)
+{
+  MOZ_CRASH("PIndexedDBPermissionRequestChild actors should always be created "
+            "manually!");
+}
+
+bool
+TabChild::DeallocPIndexedDBPermissionRequestChild(
+                                       PIndexedDBPermissionRequestChild* aActor)
+{
+  MOZ_ASSERT(aActor);
+
+  delete aActor;
   return true;
 }
 

@@ -432,8 +432,7 @@ IndexedDatabaseManager::DefineIndexedDB(JSContext* aCx,
   }
 
   nsRefPtr<IDBFactory> factory;
-  if (NS_FAILED(IDBFactory::Create(aCx, aGlobal, nullptr,
-                                   getter_AddRefs(factory)))) {
+  if (NS_FAILED(IDBFactory::Create(aCx, aGlobal, getter_AddRefs(factory)))) {
     return false;
   }
 

@@ -88,6 +88,7 @@
 
 USING_QUOTA_NAMESPACE
 using namespace mozilla::dom;
+using namespace mozilla::ipc;
 using mozilla::dom::FileService;
 
 static_assert(
@@ -99,6 +100,12 @@ static_assert(
   static_cast<uint32_t>(StorageType::Temporary) ==
   static_cast<uint32_t>(PERSISTENCE_TYPE_TEMPORARY),
   "Enum values should match.");
+
+namespace {
+
+const char kChromeOrigin[] = "chrome";
+
+} // anonymous namespace
 
 BEGIN_QUOTA_NAMESPACE
 
@@ -1986,11 +1993,12 @@ QuotaManager::GetInfoFromURI(nsIURI* aURI,
                              uint32_t aAppId,
                              bool aInMozBrowser,
                              nsACString* aGroup,
-                             nsACString* aASCIIOrigin,
+                             nsACString* aOrigin,
                              StoragePrivilege* aPrivilege,
                              PersistenceType* aDefaultPersistenceType)
 {
-  NS_ASSERTION(aURI, "Null uri!");
+  MOZ_ASSERT(NS_IsMainThread());
+  MOZ_ASSERT(aURI);
 
   nsIScriptSecurityManager* secMan = nsContentUtils::GetSecurityManager();
   NS_ENSURE_TRUE(secMan, NS_ERROR_FAILURE);
@@ -2000,7 +2008,7 @@ QuotaManager::GetInfoFromURI(nsIURI* aURI,
                                                 getter_AddRefs(principal));
   NS_ENSURE_SUCCESS(rv, rv);
 
-  rv = GetInfoFromPrincipal(principal, aGroup, aASCIIOrigin, aPrivilege,
+  rv = GetInfoFromPrincipal(principal, aGroup, aOrigin, aPrivilege,
                             aDefaultPersistenceType);
   NS_ENSURE_SUCCESS(rv, rv);
 
@@ -2011,15 +2019,15 @@ QuotaManager::GetInfoFromURI(nsIURI* aURI,
 nsresult
 QuotaManager::GetInfoFromPrincipal(nsIPrincipal* aPrincipal,
                                    nsACString* aGroup,
-                                   nsACString* aASCIIOrigin,
+                                   nsACString* aOrigin,
                                    StoragePrivilege* aPrivilege,
                                    PersistenceType* aDefaultPersistenceType)
 {
-  NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
-  NS_ASSERTION(aPrincipal, "Don't hand me a null principal!");
+  MOZ_ASSERT(NS_IsMainThread());
+  MOZ_ASSERT(aPrincipal);
 
   if (nsContentUtils::IsSystemPrincipal(aPrincipal)) {
-    GetInfoForChrome(aGroup, aASCIIOrigin, aPrivilege, aDefaultPersistenceType);
+    GetInfoForChrome(aGroup, aOrigin, aPrivilege, aDefaultPersistenceType);
     return NS_OK;
   }
 
@@ -2036,13 +2044,13 @@ QuotaManager::GetInfoFromPrincipal(nsIPrincipal* aPrincipal,
   rv = aPrincipal->GetOrigin(getter_Copies(origin));
   NS_ENSURE_SUCCESS(rv, rv);
 
-  if (origin.EqualsLiteral("chrome")) {
+  if (origin.EqualsLiteral(kChromeOrigin)) {
     NS_WARNING("Non-chrome principal can't use chrome origin!");
     return NS_ERROR_FAILURE;
   }
 
   nsCString jarPrefix;
-  if (aGroup || aASCIIOrigin) {
+  if (aGroup || aOrigin) {
     rv = aPrincipal->GetJarPrefix(jarPrefix);
     NS_ENSURE_SUCCESS(rv, rv);
   }
@@ -2075,8 +2083,8 @@ QuotaManager::GetInfoFromPrincipal(nsIPrincipal* aPrincipal,
     }
   }
 
-  if (aASCIIOrigin) {
-    aASCIIOrigin->Assign(jarPrefix + origin);
+  if (aOrigin) {
+    aOrigin->Assign(jarPrefix + origin);
   }
 
   if (aPrivilege) {
@@ -2094,13 +2102,12 @@ QuotaManager::GetInfoFromPrincipal(nsIPrincipal* aPrincipal,
 nsresult
 QuotaManager::GetInfoFromWindow(nsPIDOMWindow* aWindow,
                                 nsACString* aGroup,
-                                nsACString* aASCIIOrigin,
+                                nsACString* aOrigin,
                                 StoragePrivilege* aPrivilege,
                                 PersistenceType* aDefaultPersistenceType)
 {
-  NS_ASSERTION(NS_IsMainThread(),
-               "We're about to touch a window off the main thread!");
-  NS_ASSERTION(aWindow, "Don't hand me a null window!");
+  MOZ_ASSERT(NS_IsMainThread());
+  MOZ_ASSERT(aWindow);
 
   nsCOMPtr<nsIScriptObjectPrincipal> sop = do_QueryInterface(aWindow);
   NS_ENSURE_TRUE(sop, NS_ERROR_FAILURE);
@@ -2108,8 +2115,8 @@ QuotaManager::GetInfoFromWindow(nsPIDOMWindow* aWindow,
   nsCOMPtr<nsIPrincipal> principal = sop->GetPrincipal();
   NS_ENSURE_TRUE(principal, NS_ERROR_FAILURE);
 
-  nsresult rv = GetInfoFromPrincipal(principal, aGroup, aASCIIOrigin,
-                                     aPrivilege, aDefaultPersistenceType);
+  nsresult rv = GetInfoFromPrincipal(principal, aGroup, aOrigin, aPrivilege,
+                                     aDefaultPersistenceType);
   NS_ENSURE_SUCCESS(rv, rv);
 
   return NS_OK;
@@ -2118,19 +2125,18 @@ QuotaManager::GetInfoFromWindow(nsPIDOMWindow* aWindow,
 // static
 void
 QuotaManager::GetInfoForChrome(nsACString* aGroup,
-                               nsACString* aASCIIOrigin,
+                               nsACString* aOrigin,
                                StoragePrivilege* aPrivilege,
                                PersistenceType* aDefaultPersistenceType)
 {
-  NS_ASSERTION(nsContentUtils::IsCallerChrome(), "Only for chrome!");
-
-  static const char kChromeOrigin[] = "chrome";
+  MOZ_ASSERT(NS_IsMainThread());
+  MOZ_ASSERT(nsContentUtils::IsCallerChrome());
 
   if (aGroup) {
-    aGroup->AssignLiteral(kChromeOrigin);
+    ChromeOrigin(*aGroup);
   }
-  if (aASCIIOrigin) {
-    aASCIIOrigin->AssignLiteral(kChromeOrigin);
+  if (aOrigin) {
+    ChromeOrigin(*aOrigin);
   }
   if (aPrivilege) {
     *aPrivilege = Chrome;
@@ -2138,6 +2144,13 @@ QuotaManager::GetInfoForChrome(nsACString* aGroup,
   if (aDefaultPersistenceType) {
     *aDefaultPersistenceType = PERSISTENCE_TYPE_PERSISTENT;
   }
+}
+
+// static
+void
+QuotaManager::ChromeOrigin(nsACString& aOrigin)
+{
+  aOrigin.AssignLiteral(kChromeOrigin);
 }
 
 NS_IMPL_ISUPPORTS(QuotaManager, nsIQuotaManager, nsIObserver)

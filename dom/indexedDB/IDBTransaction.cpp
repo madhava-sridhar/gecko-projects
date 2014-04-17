@@ -18,7 +18,6 @@
 #include "mozilla/dom/DOMError.h"
 #include "mozilla/dom/DOMStringList.h"
 #include "mozilla/ipc/BackgroundChild.h"
-#include "nsHashKeys.h"
 #include "nsIAppShell.h"
 #include "nsPIDOMWindow.h"
 #include "nsTHashtable.h"

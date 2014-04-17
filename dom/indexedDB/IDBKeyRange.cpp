@@ -11,11 +11,6 @@
 #include "mozilla/dom/BindingUtils.h"
 #include "mozilla/dom/IDBKeyRangeBinding.h"
 #include "mozilla/dom/indexedDB/PBackgroundIDBSharedTypes.h"
-#include "nsContentUtils.h"
-#include "nsDOMClassInfoID.h"
-#include "nsIXPConnect.h"
-#include "nsJSUtils.h"
-#include "nsThreadUtils.h"
 
 using namespace mozilla;
 using namespace mozilla::dom;

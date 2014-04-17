@@ -109,19 +109,25 @@ BackgroundParentImpl::DeallocPBackgroundTestParent(
   return true;
 }
 
-BackgroundParentImpl::PBackgroundIDBFactoryParent*
-BackgroundParentImpl::AllocPBackgroundIDBFactoryParent(
-                                             const nsCString& aGroup,
-                                             const nsCString& aASCIIOrigin,
-                                             const StoragePrivilege& aPrivilege)
+auto
+BackgroundParentImpl::AllocPBackgroundIDBFactoryParent()
+  -> PBackgroundIDBFactoryParent*
 {
   AssertIsInMainProcess();
   AssertIsOnBackgroundThread();
 
-  nsRefPtr<indexedDB::BackgroundFactoryParent> actor =
-    indexedDB::BackgroundFactoryParent::Create(aGroup, aASCIIOrigin,
-                                               aPrivilege);
-  return actor.forget().take();
+  return indexedDB::AllocPBackgroundIDBFactoryParent();
+}
+
+bool
+BackgroundParentImpl::RecvPBackgroundIDBFactoryConstructor(
+                                            PBackgroundIDBFactoryParent* aActor)
+{
+  AssertIsInMainProcess();
+  AssertIsOnBackgroundThread();
+  MOZ_ASSERT(aActor);
+
+  return indexedDB::RecvPBackgroundIDBFactoryConstructor(aActor);
 }
 
 bool
@@ -130,10 +136,9 @@ BackgroundParentImpl::DeallocPBackgroundIDBFactoryParent(
 {
   AssertIsInMainProcess();
   AssertIsOnBackgroundThread();
+  MOZ_ASSERT(aActor);
 
-  nsRefPtr<indexedDB::BackgroundFactoryParent> actor =
-    dont_AddRef(static_cast<indexedDB::BackgroundFactoryParent*>(aActor));
-  return true;
+  return indexedDB::DeallocPBackgroundIDBFactoryParent(aActor);
 }
 
 } // namespace ipc

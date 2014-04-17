@@ -8,10 +8,7 @@
 #define mozilla_dom_indexeddb_idbfactory_h__
 
 #include "mozilla/Attributes.h"
-#include "mozilla/dom/BindingDeclarations.h" // for Optional
 #include "mozilla/dom/StorageTypeBinding.h"
-#include "mozilla/dom/quota/PersistenceType.h"
-#include "mozilla/dom/quota/StoragePrivilege.h"
 #include "nsAutoPtr.h"
 #include "nsCOMPtr.h"
 #include "nsCycleCollectionParticipant.h"
@@ -20,9 +17,6 @@
 #include "nsTArray.h"
 #include "nsWrapperCache.h"
 
-class mozIStorageConnection;
-class nsIFile;
-class nsIFileURL;
 class nsIPrincipal;
 class nsPIDOMWindow;
 struct PRThread;
@@ -34,42 +28,42 @@ class ErrorResult;
 namespace ipc {
 
 class PBackgroundChild;
+class PrincipalInfo;
 
 } // namespace ipc
 
 namespace dom {
 
-class ContentParent;
 class IDBOpenDBOptions;
+class TabChild;
 
 namespace indexedDB {
 
 class BackgroundFactoryChild;
 class FactoryRequestParams;
-class IDBDatabase;
 class IDBOpenDBRequest;
 
 class IDBFactory MOZ_FINAL
   : public nsISupports
   , public nsWrapperCache
 {
-  typedef mozilla::dom::ContentParent ContentParent;
-  typedef mozilla::dom::quota::PersistenceType PersistenceType;
-  typedef mozilla::dom::quota::StoragePrivilege StoragePrivilege;
+  typedef mozilla::dom::StorageType StorageType;
   typedef mozilla::ipc::PBackgroundChild PBackgroundChild;
+  typedef mozilla::ipc::PrincipalInfo PrincipalInfo;
 
   class BackgroundCreateCallback;
   struct PendingRequestInfo;
 
-  nsCString mGroup;
-  nsCString mASCIIOrigin;
-  StoragePrivilege mPrivilege;
-  PersistenceType mDefaultPersistenceType;
+  nsAutoPtr<PrincipalInfo> mPrincipalInfo;
 
   // If this factory lives on a window then mWindow must be non-null. Otherwise
   // mOwningObject must be non-null.
   nsCOMPtr<nsPIDOMWindow> mWindow;
   JS::Heap<JSObject*> mOwningObject;
+
+  // This will only be set if the factory belongs to a window in a child
+  // process.
+  nsRefPtr<TabChild> mTabChild;
 
   nsTArray<nsAutoPtr<PendingRequestInfo>> mPendingRequests;
 
@@ -83,33 +77,16 @@ class IDBFactory MOZ_FINAL
   bool mBackgroundActorFailed;
 
 public:
-  // Called when using IndexedDB from a window in a different process.
-  static nsresult Create(nsPIDOMWindow* aWindow,
-                         const nsACString& aGroup,
-                         const nsACString& aASCIIOrigin,
-                         ContentParent* aContentParent,
-                         IDBFactory** aFactory);
+  // Called when using IndexedDB from a window.
+  static nsresult
+  Create(nsPIDOMWindow* aWindow,
+         IDBFactory** aFactory);
 
-  // Called when using IndexedDB from a window in the current process.
-  static nsresult Create(nsPIDOMWindow* aWindow,
-                         ContentParent* aContentParent,
-                         IDBFactory** aFactory)
-  {
-    return Create(aWindow, EmptyCString(), EmptyCString(), aContentParent,
-                  aFactory);
-  }
-
-  // Called when using IndexedDB from a JS component or a JSM in the current
-  // process.
-  static nsresult Create(JSContext* aCx,
-                         JS::Handle<JSObject*> aOwningObject,
-                         ContentParent* aContentParent,
-                         IDBFactory** aFactory);
-
-  // Called when using IndexedDB from a JS component or a JSM in a different
-  // process or from a C++ component.
-  static nsresult Create(ContentParent* aContentParent,
-                         IDBFactory** aFactory);
+  // Called when using IndexedDB without a window.
+  static nsresult
+  Create(JSContext* aCx,
+         JS::Handle<JSObject*> aOwningObject,
+         IDBFactory** aFactory);
 
   void
   AssertIsOnOwningThread() const
@@ -118,27 +95,6 @@ public:
 #else
   { }
 #endif
-
-  nsresult
-  OpenInternal(const nsAString& aName,
-               int64_t aVersion,
-               PersistenceType aPersistenceType,
-               const nsACString& aGroup,
-               const nsACString& aASCIIOrigin,
-               StoragePrivilege aStoragePrivilege,
-               bool aDeleting,
-               IDBOpenDBRequest** _retval);
-
-  nsresult
-  OpenInternal(const nsAString& aName,
-               int64_t aVersion,
-               PersistenceType aPersistenceType,
-               bool aDeleting,
-               IDBOpenDBRequest** _retval)
-  {
-    return OpenInternal(aName, aVersion, aPersistenceType, mGroup, mASCIIOrigin,
-                        mPrivilege, aDeleting, _retval);
-  }
 
   void
   SetBackgroundActor(BackgroundFactoryChild* aBackgroundActor);
@@ -151,24 +107,22 @@ public:
     mBackgroundActor = nullptr;
   }
 
-  const nsCString&
-  GetASCIIOrigin() const
-  {
-    return mASCIIOrigin;
-  }
-
   nsPIDOMWindow*
   GetParentObject() const
   {
     return mWindow;
   }
 
-  already_AddRefed<IDBOpenDBRequest>
-  Open(const nsAString& aName, uint64_t aVersion, ErrorResult& aRv)
+  TabChild*
+  GetTabChild() const
   {
-    return Open(nullptr, aName, Optional<uint64_t>(aVersion),
-                Optional<mozilla::dom::StorageType>(), false, aRv);
+    return mTabChild;
   }
+
+  already_AddRefed<IDBOpenDBRequest>
+  Open(const nsAString& aName,
+       uint64_t aVersion,
+       ErrorResult& aRv);
 
   already_AddRefed<IDBOpenDBRequest>
   Open(const nsAString& aName,
@@ -216,12 +170,12 @@ private:
   ~IDBFactory();
 
   already_AddRefed<IDBOpenDBRequest>
-  Open(nsIPrincipal* aPrincipal,
-       const nsAString& aName,
-       const Optional<uint64_t>& aVersion,
-       const Optional<mozilla::dom::StorageType>& aStorageType,
-       bool aDelete,
-       ErrorResult& aRv);
+  OpenInternal(nsIPrincipal* aPrincipal,
+               const nsAString& aName,
+               const Optional<uint64_t>& aVersion,
+               const Optional<StorageType>& aStorageType,
+               bool aDeleting,
+               ErrorResult& aRv);
 
   nsresult
   BackgroundActorCreated(PBackgroundChild* aBackgroundActor);

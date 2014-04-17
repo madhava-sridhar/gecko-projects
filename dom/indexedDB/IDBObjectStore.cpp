@@ -27,7 +27,6 @@
 #include "mozilla/dom/DOMStringList.h"
 #include "mozilla/dom/FileHandleBinding.h"
 #include "mozilla/dom/IDBObjectStoreBinding.h"
-#include "mozilla/dom/PBlobParent.h"
 #include "mozilla/dom/StructuredCloneTags.h"
 #include "mozilla/dom/indexedDB/PBackgroundIDBSharedTypes.h"
 #include "mozilla/dom/ipc/Blob.h"

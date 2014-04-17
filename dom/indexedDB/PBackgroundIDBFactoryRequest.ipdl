@@ -5,6 +5,8 @@
 include protocol PBackgroundIDBFactory;
 include protocol PBackgroundIDBDatabase;
 
+include PBackgroundSharedTypes;
+
 namespace mozilla {
 namespace dom {
 namespace indexedDB {
@@ -33,7 +35,12 @@ protocol PBackgroundIDBFactoryRequest
 child:
   __delete__(FactoryRequestResponse response);
 
+  PermissionChallenge(PrincipalInfo principalInfo);
+
   Blocked(uint64_t currentVersion);
+
+parent:
+  PermissionRetry();
 };
 
 } // namespace indexedDB

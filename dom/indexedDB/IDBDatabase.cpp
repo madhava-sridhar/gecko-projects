@@ -19,7 +19,7 @@
 #include "IDBFactory.h"
 #include "mozilla/ErrorResult.h"
 #include "mozilla/EventDispatcher.h"
-#include "mozilla/Mutex.h"
+#include "MainThreadUtils.h"
 #include "mozilla/storage.h"
 #include "mozilla/dom/BindingDeclarations.h"
 #include "mozilla/dom/ContentParent.h"
@@ -32,12 +32,8 @@
 #include "mozilla/dom/quota/QuotaManager.h"
 #include "nsCOMPtr.h"
 #include "nsIDocument.h"
-#include "nsJSUtils.h"
-#include "nsProxyRelease.h"
-#include "nsThreadUtils.h"
 #include "ProfilerHelpers.h"
 #include "ReportInternalError.h"
-#include "TransactionThreadPool.h"
 
 using namespace mozilla;
 using namespace mozilla::dom;

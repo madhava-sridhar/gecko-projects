@@ -18,7 +18,6 @@
 #include "nsTHashtable.h"
 
 class nsIDocument;
-class nsIScriptContext;
 class nsPIDOMWindow;
 
 namespace mozilla {
@@ -28,7 +27,6 @@ class EventChainPostVisitor;
 
 namespace dom {
 
-class ContentParent;
 class DOMStringList;
 class IDBObjectStoreParameters;
 template <typename> class Sequence;
@@ -41,17 +39,13 @@ class Client;
 
 namespace indexedDB {
 
-class AsyncConnectionHelper;
 class BackgroundDatabaseChild;
 class DatabaseSpec;
 class FileManager;
 class IDBFactory;
-class IDBIndex;
 class IDBObjectStore;
 class IDBRequest;
 class IDBTransaction;
-class IndexedDatabaseManager;
-struct ObjectStoreInfoGuts;
 
 class IDBDatabase MOZ_FINAL
   : public IDBWrapperCache
@@ -59,11 +53,6 @@ class IDBDatabase MOZ_FINAL
 {
   typedef mozilla::dom::quota::PersistenceType PersistenceType;
   typedef mozilla::dom::quota::Client QuotaClient;
-
-  friend class AsyncConnectionHelper;
-  friend class IndexedDatabaseManager;
-  friend class IndexedDBDatabaseParent;
-  friend class IndexedDBDatabaseChild;
 
   // The factory must be kept alive when IndexedDB is used in multiple
   // processes. If it dies then the entire actor tree will be destroyed with it
@@ -216,8 +205,8 @@ public:
   }
 
   NS_DECL_ISUPPORTS_INHERITED
-  NS_DECL_NSIOFFLINESTORAGE
   NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(IDBDatabase, IDBWrapperCache)
+  NS_DECL_NSIOFFLINESTORAGE
 
   // nsIDOMEventTarget
   virtual void

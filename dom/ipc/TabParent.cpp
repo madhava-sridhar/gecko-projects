@@ -9,12 +9,12 @@
 #include "TabParent.h"
 
 #include "AppProcessChecker.h"
-#include "IDBFactory.h"
 #include "mozIApplication.h"
 #include "mozilla/BrowserElementParent.h"
 #include "mozilla/docshell/OfflineCacheUpdateParent.h"
 #include "mozilla/dom/ContentParent.h"
 #include "mozilla/dom/PContentPermissionRequestParent.h"
+#include "mozilla/dom/indexedDB/ActorsParent.h"
 #include "mozilla/EventStateManager.h"
 #include "mozilla/Hal.h"
 #include "mozilla/ipc/DocumentRendererParent.h"
@@ -653,6 +653,56 @@ TabParent::DeallocPFilePickerParent(PFilePickerParent* actor)
 {
   delete actor;
   return true;
+}
+
+auto
+TabParent::AllocPIndexedDBPermissionRequestParent(const Principal& aPrincipal)
+  -> PIndexedDBPermissionRequestParent*
+{
+  MOZ_ASSERT(NS_IsMainThread());
+
+  nsCOMPtr<nsIPrincipal> principal = aPrincipal;
+  if (!principal) {
+    return nullptr;
+  }
+
+  nsCOMPtr<nsPIDOMWindow> window;
+  nsCOMPtr<nsIContent> frame = do_QueryInterface(mFrameElement);
+  if (frame) {
+    MOZ_ASSERT(frame->OwnerDoc());
+    window = do_QueryInterface(frame->OwnerDoc()->GetWindow());
+  }
+
+  if (!window) {
+    return nullptr;
+  }
+
+  return
+    mozilla::dom::indexedDB::AllocPIndexedDBPermissionRequestParent(window,
+                                                                    principal);
+}
+
+bool
+TabParent::RecvPIndexedDBPermissionRequestConstructor(
+                                      PIndexedDBPermissionRequestParent* aActor,
+                                      const Principal& aPrincipal)
+{
+  MOZ_ASSERT(NS_IsMainThread());
+  MOZ_ASSERT(aActor);
+
+  return
+    mozilla::dom::indexedDB::RecvPIndexedDBPermissionRequestConstructor(aActor);
+}
+
+bool
+TabParent::DeallocPIndexedDBPermissionRequestParent(
+                                      PIndexedDBPermissionRequestParent* aActor)
+{
+  MOZ_ASSERT(NS_IsMainThread());
+  MOZ_ASSERT(aActor);
+
+  return
+    mozilla::dom::indexedDB::DeallocPIndexedDBPermissionRequestParent(aActor);
 }
 
 void
