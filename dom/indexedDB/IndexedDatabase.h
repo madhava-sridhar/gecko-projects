@@ -81,14 +81,8 @@ struct StructuredCloneWriteInfo
   inline StructuredCloneWriteInfo();
   inline StructuredCloneWriteInfo(StructuredCloneWriteInfo&& aCloneWriteInfo);
 
-  bool operator==(const StructuredCloneWriteInfo& aOther) const
-  {
-    return this->mCloneBuffer.nbytes() == aOther.mCloneBuffer.nbytes() &&
-           this->mCloneBuffer.data() == aOther.mCloneBuffer.data() &&
-           this->mFiles == aOther.mFiles &&
-           this->mTransaction == aOther.mTransaction &&
-           this->mOffsetToKeyProp == aOther.mOffsetToKeyProp;
-  }
+  inline bool
+  operator==(const StructuredCloneWriteInfo& aOther) const;
 
   // In IndexedDatabaseInlines.h
   inline bool

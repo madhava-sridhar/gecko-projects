@@ -355,6 +355,8 @@ ClampResultCode(nsresult aResultCode)
                               "NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR",
                               aResultCode);
       NS_WARNING(message.get());
+#else
+      ;
 #endif
   }
 
@@ -4852,7 +4854,9 @@ BackgroundFactoryParent::ActorDestroy(ActorDestroyReason aWhy)
   AssertIsOnBackgroundThread();
   MOZ_ASSERT(!mActorDestroyed);
 
+#ifdef DEBUG
   mActorDestroyed = true;
+#endif
 
   // Clean up if there are no more instances.
   if (!(--sFactoryInstanceCount)) {

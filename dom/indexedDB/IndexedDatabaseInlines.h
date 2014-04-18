@@ -58,6 +58,18 @@ StructuredCloneWriteInfo::StructuredCloneWriteInfo(
 
 inline
 bool
+StructuredCloneWriteInfo::operator==(
+                                   const StructuredCloneWriteInfo& aOther) const
+{
+  return this->mCloneBuffer.nbytes() == aOther.mCloneBuffer.nbytes() &&
+         this->mCloneBuffer.data() == aOther.mCloneBuffer.data() &&
+         this->mFiles == aOther.mFiles &&
+         this->mTransaction == aOther.mTransaction &&
+         this->mOffsetToKeyProp == aOther.mOffsetToKeyProp;
+}
+
+inline
+bool
 StructuredCloneWriteInfo::SetFromSerialized(
                                const SerializedStructuredCloneWriteInfo& aOther)
 {
