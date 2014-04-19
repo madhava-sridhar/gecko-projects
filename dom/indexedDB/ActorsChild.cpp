@@ -241,8 +241,6 @@ private:
       return NS_OK;
     }
 
-    auto* wrapperCache = static_cast<IDBWrapperCache*>(mRequest);
-
     nsresult rv = nsContentUtils::WrapNative(aCx, aUserData, aResult);
     if (NS_WARN_IF(NS_FAILED(rv))) {
       IDB_REPORT_INTERNAL_ERR();

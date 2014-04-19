@@ -10,6 +10,7 @@
 #include "FileManager.h"
 #include "IDBObjectStore.h"
 #include "IDBTransaction.h"
+#include "IndexedDatabaseInlines.h"
 #include "IndexedDatabaseManager.h"
 #include "js/StructuredClone.h"
 #include "js/Value.h"
@@ -103,7 +104,7 @@ const char kSavepointClause[] = "SAVEPOINT sp;";
 
 const fallible_t fallible = fallible_t();
 
-const uint32_t kFileCopyBufferSize = 32768;
+//const uint32_t kFileCopyBufferSize = 32768;
 
 } // anonymous namespace
 
@@ -221,7 +222,7 @@ class MOZ_STACK_CLASS MetadataNameOrIdMatcher MOZ_FINAL
 {
   typedef MetadataNameOrIdMatcher<MetadataType> SelfType;
 
-  const uint64_t mId;
+  const int64_t mId;
   const nsString mName;
   MetadataType* mMetadata;
   bool mCheckName;
@@ -254,7 +255,7 @@ public:
   }
 
 private:
-  MetadataNameOrIdMatcher(const uint64_t& aId, const nsAString& aName)
+  MetadataNameOrIdMatcher(const int64_t& aId, const nsAString& aName)
     : mId(aId)
     , mName(PromiseFlatString(aName))
     , mMetadata(nullptr)
@@ -264,7 +265,7 @@ private:
     MOZ_ASSERT(aId);
   }
 
-  MetadataNameOrIdMatcher(const uint64_t& aId)
+  MetadataNameOrIdMatcher(const int64_t& aId)
     : mId(aId)
     , mMetadata(nullptr)
     , mCheckName(false)
@@ -3820,19 +3821,15 @@ class DeleteIndexOp MOZ_FINAL
 {
   friend class VersionChangeTransaction;
 
-  const int64_t mObjectStoreId;
   const int64_t mIndexId;
 
 private:
   // Only created by VersionChangeTransaction.
   DeleteIndexOp(VersionChangeTransaction* aTransaction,
-                const int64_t aObjectStoreId,
                 const int64_t aIndexId)
     : VersionChangeTransactionOp(aTransaction)
-    , mObjectStoreId(aObjectStoreId)
     , mIndexId(aIndexId)
   {
-    MOZ_ASSERT(aObjectStoreId);
     MOZ_ASSERT(aIndexId);
   }
 
@@ -4601,6 +4598,7 @@ ReinterpretDoubleAsUInt64(double aDouble)
   return pun.u;
 }
 
+/*
 nsresult
 CopyData(nsIInputStream* aInputStream, nsIOutputStream* aOutputStream)
 {
@@ -4643,6 +4641,7 @@ CopyData(nsIInputStream* aInputStream, nsIOutputStream* aOutputStream)
 
   return NS_OK;
 }
+*/
 
 nsresult
 UpdateIndexes(TransactionBase* aTransaction,
@@ -6546,14 +6545,11 @@ VersionChangeTransaction::CopyDatabaseMetadata()
 
   class MOZ_STACK_CLASS IndexClosure MOZ_FINAL
   {
-    const FullObjectStoreMetadata& mOrig;
     FullObjectStoreMetadata& mNew;
 
   public:
-    IndexClosure(const FullObjectStoreMetadata& aOrig,
-                 FullObjectStoreMetadata& aNew)
-      : mOrig(aOrig)
-      , mNew(aNew)
+    IndexClosure(FullObjectStoreMetadata& aNew)
+      : mNew(aNew)
     { }
 
     static PLDHashOperator
@@ -6581,14 +6577,11 @@ VersionChangeTransaction::CopyDatabaseMetadata()
 
   class MOZ_STACK_CLASS ObjectStoreClosure MOZ_FINAL
   {
-    const FullDatabaseMetadata& mOrig;
     FullDatabaseMetadata& mNew;
 
   public:
-    ObjectStoreClosure(const FullDatabaseMetadata& aOrig,
-                       FullDatabaseMetadata& aNew)
-      : mOrig(aOrig)
-      , mNew(aNew)
+    ObjectStoreClosure(FullDatabaseMetadata& aNew)
+      : mNew(aNew)
     { }
 
     static PLDHashOperator
@@ -6607,7 +6600,7 @@ VersionChangeTransaction::CopyDatabaseMetadata()
       newMetadata->mNextAutoIncrementId = aValue->mNextAutoIncrementId;
       newMetadata->mComittedAutoIncrementId = aValue->mComittedAutoIncrementId;
 
-      IndexClosure idxClosure(*aValue, *newMetadata);
+      IndexClosure idxClosure(*newMetadata);
       aValue->mIndexes.EnumerateRead(IndexClosure::Copy, &idxClosure);
 
       if (NS_WARN_IF(aValue->mIndexes.Count() !=
@@ -6638,7 +6631,7 @@ VersionChangeTransaction::CopyDatabaseMetadata()
   newMetadata->mNextObjectStoreId = origMetadata->mNextObjectStoreId;
   newMetadata->mNextIndexId = origMetadata->mNextIndexId;
 
-  ObjectStoreClosure closure(*origMetadata, *newMetadata);
+  ObjectStoreClosure closure(*newMetadata);
   origMetadata->mObjectStores.EnumerateRead(ObjectStoreClosure::Copy, &closure);
 
   if (NS_WARN_IF(origMetadata->mObjectStores.Count() !=
@@ -7013,7 +7006,7 @@ VersionChangeTransaction::RecvDeleteIndex(const int64_t& aObjectStoreId,
   foundIndexMetadata->mDeleted = true;
 
   nsRefPtr<DeleteIndexOp> op =
-    new DeleteIndexOp(this, aObjectStoreId, aIndexId);
+    new DeleteIndexOp(this, aIndexId);
   op->DispatchToTransactionThreadPool();
 
   return true;
@@ -9387,12 +9380,6 @@ CommitOp::CommitOrRollbackAutoIncrementCounts()
   if (!metadataArray.IsEmpty()) {
     bool committed = NS_SUCCEEDED(mResultCode);
 
-    DatabaseActorInfo* info;
-    MOZ_ALWAYS_TRUE(gLiveDatabaseHashtable->Get(mTransaction->mDatabase->Id(),
-                                                &info));
-
-    FullDatabaseMetadata* dbMetadata = info->mMetadata;
-
     for (uint32_t count = metadataArray.Length(), index = 0;
          index < count;
          index++) {
@@ -10150,7 +10137,7 @@ CreateIndexOp::InitThreadLocals()
   if (kBadThreadLocalIndex == sThreadLocalIndex) {
     PRStatus status =
       PR_NewThreadPrivateIndex(&sThreadLocalIndex, ThreadLocalDestructor);
-    MOZ_ASSERT(status == PR_SUCCESS);
+    MOZ_RELEASE_ASSERT(status == PR_SUCCESS);
     MOZ_ASSERT(kBadThreadLocalIndex != sThreadLocalIndex);
   }
 }

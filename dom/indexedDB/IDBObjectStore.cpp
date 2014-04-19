@@ -103,6 +103,7 @@ GetAddInfoCallback(JSContext* aCx, void* aClosure)
   return NS_OK;
 }
 
+/*
 BlobChild*
 ActorFromRemoteBlob(nsIDOMBlob* aBlob)
 {
@@ -142,6 +143,7 @@ ResolveMysteryBlob(nsIDOMBlob* aBlob, const nsString& aContentType,
   }
   return true;
 }
+*/
 
 bool
 StructuredCloneReadString(JSStructuredCloneReader* aReader,
