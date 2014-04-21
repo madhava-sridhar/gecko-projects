@@ -57,7 +57,6 @@ static_assert(kMajorSchemaVersion <= 0xFFFFFFF,
 static_assert(kMinorSchemaVersion <= 0xF,
               "Minor version needs to fit in 4 bits.");
 
-/*
 inline
 int32_t
 MakeSchemaVersion(uint32_t aMajorSchemaVersion,
@@ -68,7 +67,6 @@ MakeSchemaVersion(uint32_t aMajorSchemaVersion,
 
 const int32_t kSQLiteSchemaVersion = int32_t((kMajorSchemaVersion << 4) +
                                              kMinorSchemaVersion);
-*/
 
 const uint32_t kGoldenRatioU32 = 0x9E3779B9U;
 
@@ -125,7 +123,6 @@ GetDatabaseFilename(const nsAString& aName,
   return NS_OK;
 }
 
-/*
 nsresult
 CreateFileTables(mozIStorageConnection* aDBConn)
 {
@@ -1449,7 +1446,6 @@ UpgradeSchemaFrom13_0To14_0(mozIStorageConnection* aConnection)
 
   return NS_OK;
 }
-*/
 
 class VersionChangeEventsRunnable;
 
@@ -1546,9 +1542,9 @@ public:
                       int64_t aOldVersion,
                       int64_t aNewVersion)
   : mRequestingDatabase(aRequestingDatabase),
-    mRequest(aRequest)
-//    mOldVersion(aOldVersion),
-//    mNewVersion(aNewVersion)
+    mRequest(aRequest),
+    mOldVersion(aOldVersion),
+    mNewVersion(aNewVersion)
   {
     NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
     NS_ASSERTION(aRequestingDatabase, "Null pointer!");
@@ -1638,10 +1634,8 @@ private:
   nsRefPtr<IDBDatabase> mRequestingDatabase;
   nsRefPtr<IDBOpenDBRequest> mRequest;
   nsTArray<nsCOMPtr<nsIOfflineStorage> > mWaitingDatabases;
-/*
   int64_t mOldVersion;
   int64_t mNewVersion;
-*/
 };
 
 } // anonymous namespace

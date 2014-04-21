@@ -104,7 +104,7 @@ const char kSavepointClause[] = "SAVEPOINT sp;";
 
 const fallible_t fallible = fallible_t();
 
-//const uint32_t kFileCopyBufferSize = 32768;
+const uint32_t kFileCopyBufferSize = 32768;
 
 } // anonymous namespace
 
@@ -4598,7 +4598,6 @@ ReinterpretDoubleAsUInt64(double aDouble)
   return pun.u;
 }
 
-/*
 nsresult
 CopyData(nsIInputStream* aInputStream, nsIOutputStream* aOutputStream)
 {
@@ -4641,7 +4640,6 @@ CopyData(nsIInputStream* aInputStream, nsIOutputStream* aOutputStream)
 
   return NS_OK;
 }
-*/
 
 nsresult
 UpdateIndexes(TransactionBase* aTransaction,

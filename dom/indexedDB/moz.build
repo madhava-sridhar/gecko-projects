@@ -76,7 +76,8 @@ IPDL_SOURCES += [
     'PBackgroundIDBVersionChangeTransaction.ipdl',
 ]
 
-FAIL_ON_WARNINGS = True
+# Don't treat warnings as errors for now.
+FAIL_ON_WARNINGS = False
 
 include('/ipc/chromium/chromium-config.mozbuild')
 

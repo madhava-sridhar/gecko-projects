@@ -43,9 +43,11 @@ struct StructuredCloneFile
   nsCOMPtr<nsIInputStream> mInputStream;
 
   // In IndexedDatabaseInlines.h
+  inline
   StructuredCloneFile();
 
   // In IndexedDatabaseInlines.h
+  inline
   ~StructuredCloneFile();
 
   // In IndexedDatabaseInlines.h

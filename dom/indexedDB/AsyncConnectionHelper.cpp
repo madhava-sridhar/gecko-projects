@@ -5,7 +5,6 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "AsyncConnectionHelper.h"
-
 #include "mozilla/dom/quota/QuotaManager.h"
 #include "mozilla/storage.h"
 #include "nsComponentManagerUtils.h"
@@ -18,6 +17,7 @@
 #include "IDBEvents.h"
 #include "IDBObjectStore.h"
 #include "IDBTransaction.h"
+#include "IndexedDatabaseInlines.h"
 #include "IndexedDatabaseManager.h"
 #include "ProfilerHelpers.h"
 #include "ReportInternalError.h"
@@ -31,7 +31,7 @@ namespace {
 
 IDBTransaction* gCurrentTransaction = nullptr;
 
-//const uint32_t kProgressHandlerGranularity = 1000;
+const uint32_t kProgressHandlerGranularity = 1000;
 
 class MOZ_STACK_CLASS TransactionPoolEventTarget : public StackBasedEventTarget
 {
@@ -39,11 +39,11 @@ public:
   NS_DECL_NSIEVENTTARGET
 
   TransactionPoolEventTarget(IDBTransaction* aTransaction)
-//  : mTransaction(aTransaction)
+  : mTransaction(aTransaction)
   { }
 
 private:
-//  IDBTransaction* mTransaction;
+  IDBTransaction* mTransaction;
 };
 
 // This inline is just so that we always clear aBuffers appropriately even if
