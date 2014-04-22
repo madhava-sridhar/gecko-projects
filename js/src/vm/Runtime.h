@@ -370,7 +370,7 @@ class NewObjectCache
         Entry *entry = &entries[*pentry];
 
         /* N.B. Lookups with the same clasp/key but different kinds map to different entries. */
-        return (entry->clasp == clasp && entry->key == key);
+        return entry->clasp == clasp && entry->key == key;
     }
 
     void fill(EntryIndex entry_, const Class *clasp, gc::Cell *key, gc::AllocKind kind, JSObject *obj) {
@@ -582,6 +582,9 @@ class PerThreadData : public PerThreadDataFriendFields
     }
     static unsigned offsetOfAsmJSActivationStackReadOnly() {
         return offsetof(PerThreadData, asmJSActivationStack_);
+    }
+    static unsigned offsetOfActivation() {
+        return offsetof(PerThreadData, activation_);
     }
 
     js::AsmJSActivation *asmJSActivationStackFromAnyThread() const {

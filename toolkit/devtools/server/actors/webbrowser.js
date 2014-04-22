@@ -942,9 +942,15 @@ TabActor.prototype = {
    *         True if the window.console object is native, or false otherwise.
    */
   hasNativeConsoleAPI: function BTA_hasNativeConsoleAPI(aWindow) {
-    // Do not expose WebConsoleActor function directly as it is always
-    // loaded after the BrowserTabActor
-    return WebConsoleActor.prototype.hasNativeConsoleAPI(aWindow);
+    let isNative = false;
+    try {
+      // We are very explicitly examining the "console" property of
+      // the non-Xrayed object here.
+      let console = aWindow.wrappedJSObject.console;
+      isNative = console instanceof aWindow.Console;
+    }
+    catch (ex) { }
+    return isNative;
   }
 };
 
@@ -1113,6 +1119,7 @@ function BrowserAddonActor(aConnection, aAddon) {
   this._addon = aAddon;
   this._contextPool = null;
   this._threadActor = null;
+  this._global = null;
   AddonManager.addAddonListener(this);
 }
 
@@ -1135,6 +1142,10 @@ BrowserAddonActor.prototype = {
     return this._threadActor;
   },
 
+  get global() {
+    return this._global;
+  },
+
   form: function BAA_form() {
     dbg_assert(this.actorID, "addon should have an actorID.");
 
@@ -1142,25 +1153,42 @@ BrowserAddonActor.prototype = {
       actor: this.actorID,
       id: this.id,
       name: this._addon.name,
-      url: this.url
+      url: this.url,
+      debuggable: this._addon.isDebuggable,
     };
   },
 
   disconnect: function BAA_disconnect() {
+    this._addon = null;
+    this._global = null;
     AddonManager.removeAddonListener(this);
   },
 
-  onUninstalled: function BAA_onUninstalled(aAddon) {
-    if (aAddon != this._addon)
+  setOptions: function BAA_setOptions(aOptions) {
+    if ("global" in aOptions) {
+      this._global = aOptions.global;
+    }
+  },
+
+  onDisabled: function BAA_onDisabled(aAddon) {
+    if (aAddon != this._addon) {
       return;
+    }
+
+    this._global = null;
+  },
+
+  onUninstalled: function BAA_onUninstalled(aAddon) {
+    if (aAddon != this._addon) {
+      return;
+    }
 
     if (this.attached) {
       this.onDetach();
       this.conn.send({ from: this.actorID, type: "tabDetached" });
     }
 
-    this._addon = null;
-    AddonManager.removeAddonListener(this);
+    this.disconnect();
   },
 
   onAttach: function BAA_onAttach() {

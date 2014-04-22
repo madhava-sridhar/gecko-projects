@@ -51,7 +51,6 @@
 #include "nsIMemoryInfoDumper.h"
 #include "nsIMutable.h"
 #include "nsIObserverService.h"
-#include "nsIObserver.h"
 #include "nsIScriptSecurityManager.h"
 #include "nsServiceManagerUtils.h"
 #include "nsStyleSheetService.h"
@@ -1266,6 +1265,8 @@ ContentChild::ActorDestroy(ActorDestroyReason why)
 
     mAlertObservers.Clear();
 
+    mIdleObservers.Clear();
+
     nsCOMPtr<nsIConsoleService> svc(do_GetService(NS_CONSOLESERVICE_CONTRACTID));
     if (svc) {
         svc->UnregisterListener(mConsoleListener);
@@ -1644,6 +1645,7 @@ ContentChild::AddIdleObserver(nsIObserver* aObserver, uint32_t aIdleTimeInS)
   // Make sure aObserver isn't released while we wait for the parent
   aObserver->AddRef();
   SendAddIdleObserver(reinterpret_cast<uint64_t>(aObserver), aIdleTimeInS);
+  mIdleObservers.PutEntry(aObserver);
 }
 
 void
@@ -1652,6 +1654,7 @@ ContentChild::RemoveIdleObserver(nsIObserver* aObserver, uint32_t aIdleTimeInS)
   MOZ_ASSERT(aObserver, "null idle observer");
   SendRemoveIdleObserver(reinterpret_cast<uint64_t>(aObserver), aIdleTimeInS);
   aObserver->Release();
+  mIdleObservers.RemoveEntry(aObserver);
 }
 
 bool
@@ -1660,7 +1663,11 @@ ContentChild::RecvNotifyIdleObserver(const uint64_t& aObserver,
                                      const nsString& aTimeStr)
 {
   nsIObserver* observer = reinterpret_cast<nsIObserver*>(aObserver);
-  observer->Observe(nullptr, aTopic.get(), aTimeStr.get());
+  if (mIdleObservers.Contains(observer)) {
+    observer->Observe(nullptr, aTopic.get(), aTimeStr.get());
+  } else {
+    NS_WARNING("Received notification for an idle observer that was removed.");
+  }
   return true;
 }
 

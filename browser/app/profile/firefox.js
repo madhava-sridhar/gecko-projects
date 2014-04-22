@@ -671,6 +671,9 @@ pref("plugin.default.state", 2);
 pref("plugin.default.state", 1);
 #endif
 
+// Plugins bundled in XPIs are enabled by default.
+pref("plugin.defaultXpi.state", 2);
+
 // Flash is enabled by default, and Java is click-to-activate by default on
 // all channels.
 pref("plugin.state.flash", 2);
@@ -1424,6 +1427,8 @@ pref("browser.cache.auto_delete_cache_version", 1);
 // 0 means to randomize (and persist) the experiment value in users' profiles,
 // -1 means no experiment is run and we use the preferred value for frecency (6h)
 pref("browser.cache.frecency_experiment", 0);
+
+pref("browser.translation.detectLanguage", false);
 
 // Telemetry experiments settings.
 pref("experiments.enabled", false);

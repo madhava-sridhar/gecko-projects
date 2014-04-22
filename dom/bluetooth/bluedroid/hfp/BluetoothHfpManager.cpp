@@ -603,40 +603,39 @@ BluetoothHfpManager::ProcessAtChld(bthf_chld_type_t aChld)
   message.AppendInt((int)aChld);
   BT_HF_DISPATCH_MAIN(MainThreadTaskCmd::NOTIFY_DIALER,
                       NS_ConvertUTF8toUTF16(message));
+  SendResponse(BTHF_AT_RESPONSE_OK);
 }
 
 void BluetoothHfpManager::ProcessDialCall(char *aNumber)
 {
   nsAutoCString message(aNumber);
+
+  // There are three cases based on aNumber,
+  // 1) Empty value:    Redial, BLDN
+  // 2) >xxx:           Memory dial, ATD>xxx
+  // 3) xxx:            Normal dial, ATDxxx
+  // We need to respond OK/Error for dial requests for every case listed above,
+  // 1) and 2):         Respond in either RespondToBLDNTask or
+  //                    HandleCallStateChanged()
+  // 3):                Respond here
   if (message.IsEmpty()) {
-    // Redial: BLDN
     mDialingRequestProcessed = false;
     BT_HF_DISPATCH_MAIN(MainThreadTaskCmd::NOTIFY_DIALER,
                         NS_LITERAL_STRING("BLDN"));
-  } else {
+    BT_HF_DISPATCH_MAIN(MainThreadTaskCmd::POST_TASK_RESPOND_TO_BLDN);
+  } else if (message[0] == '>') {
+    mDialingRequestProcessed = false;
     nsAutoCString newMsg("ATD");
-
-    if (message[0] == '>') {
-      // Memory dial: ATD>xxx
-      mDialingRequestProcessed = false;
-      newMsg += message;
-    } else {
-      // Dial number: ATDxxx
-      int end = message.FindChar(';');
-      if (end < 0) {
-        BT_WARNING("Couldn't get the number to dial");
-        SendResponse(BTHF_AT_RESPONSE_OK);
-        return;
-      }
-      newMsg += nsDependentCSubstring(message, 0, end);
-    }
-
+    newMsg += StringHead(message, message.Length() - 1);
     BT_HF_DISPATCH_MAIN(MainThreadTaskCmd::NOTIFY_DIALER,
                         NS_ConvertUTF8toUTF16(newMsg));
-  }
-
-  if (!mDialingRequestProcessed) {
     BT_HF_DISPATCH_MAIN(MainThreadTaskCmd::POST_TASK_RESPOND_TO_BLDN);
+  } else {
+    nsAutoCString newMsg("ATD");
+    newMsg += StringHead(message, message.Length() - 1);
+    BT_HF_DISPATCH_MAIN(MainThreadTaskCmd::NOTIFY_DIALER,
+                        NS_ConvertUTF8toUTF16(newMsg));
+    SendResponse(BTHF_AT_RESPONSE_OK);
   }
 }
 
@@ -699,6 +698,8 @@ BluetoothHfpManager::ProcessAtClcc()
 
     SendCLCC(mCdmaSecondCall, 2);
   }
+
+  SendResponse(BTHF_AT_RESPONSE_OK);
 }
 
 void
@@ -963,6 +964,11 @@ BluetoothHfpManager::SendCLCC(Call& aCall, int aIndex)
                                                BTHF_CALL_STATE_ACTIVE;
   }
 
+  if (callState == BTHF_CALL_STATE_INCOMING &&
+      FindFirstCall(nsITelephonyProvider::CALL_STATE_CONNECTED)) {
+    callState = BTHF_CALL_STATE_WAITING;
+  }
+
   bt_status_t status = sBluetoothHfpInterface->clcc_response(
                           aIndex,
                           aCall.mDirection,
@@ -1066,9 +1072,7 @@ BluetoothHfpManager::ConvertToBthfCallState(int aCallState)
 
   // Refer to AOSP BluetoothPhoneService.convertCallState
   if (aCallState == nsITelephonyProvider::CALL_STATE_INCOMING) {
-    state = (FindFirstCall(nsITelephonyProvider::CALL_STATE_CONNECTED)) ?
-              BTHF_CALL_STATE_WAITING :
-              BTHF_CALL_STATE_INCOMING;
+    state = BTHF_CALL_STATE_INCOMING;
   } else if (aCallState == nsITelephonyProvider::CALL_STATE_DIALING) {
     state = BTHF_CALL_STATE_DIALING;
   } else if (aCallState == nsITelephonyProvider::CALL_STATE_ALERTING) {
@@ -1095,6 +1099,13 @@ BluetoothHfpManager::HandleCallStateChanged(uint32_t aCallIndex,
 {
   if (!IsConnected()) {
     // Normal case. No need to print out warnings.
+    return;
+  }
+
+  // aCallIndex can be UINT32_MAX for the pending outgoing call state update.
+  // aCallIndex will be updated again after real call state changes. See Bug
+  // 990467.
+  if (aCallIndex == UINT32_MAX) {
     return;
   }
 

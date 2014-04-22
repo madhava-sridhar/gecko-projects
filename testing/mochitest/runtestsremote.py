@@ -25,7 +25,9 @@ import droid
 import manifestparser
 import mozinfo
 import mozlog
+import moznetwork
 
+SCRIPT_DIR = os.path.abspath(os.path.realpath(os.path.dirname(__file__)))
 log = mozlog.getLogger('Mochi-Remote')
 
 class RemoteOptions(MochitestOptions):
@@ -130,7 +132,7 @@ class RemoteOptions(MochitestOptions):
 
         if options.remoteWebServer == None:
             if os.name != "nt":
-                options.remoteWebServer = automation.getLanIp()
+                options.remoteWebServer = moznetwork.get_ip()
             else:
                 log.error("you must specify a --remote-webserver=<ip address>")
                 return None
@@ -627,7 +629,7 @@ def main():
             log.info("Running tests %d-%d/%d", start+1, end, len(tests))
 
         dm.removeFile(os.path.join(deviceRoot, "fennec_ids.txt"))
-        fennec_ids = os.path.abspath("fennec_ids.txt")
+        fennec_ids = os.path.abspath(os.path.join(SCRIPT_DIR, "fennec_ids.txt"))
         if not os.path.exists(fennec_ids) and options.robocopIds:
             fennec_ids = options.robocopIds
         dm.pushFile(fennec_ids, os.path.join(deviceRoot, "fennec_ids.txt"))
