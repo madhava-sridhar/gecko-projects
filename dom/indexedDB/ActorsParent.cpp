@@ -10332,8 +10332,18 @@ CreateIndexOp::DoDatabaseWork(TransactionBase* aTransaction)
 const JSClass CreateIndexOp::ThreadLocalJSRuntime::kGlobalClass = {
   "IndexedDBTransactionThreadGlobal",
   JSCLASS_GLOBAL_FLAGS,
-  JS_PropertyStub, JS_DeletePropertyStub, JS_PropertyStub, JS_StrictPropertyStub,
-  JS_EnumerateStub, JS_ResolveStub, JS_ConvertStub
+  /* addProperty*/ JS_PropertyStub,
+  /* delProperty */ JS_DeletePropertyStub,
+  /* getProperty */ JS_PropertyStub,
+  /* setProperty */ JS_StrictPropertyStub,
+  /* enumerate */ JS_EnumerateStub,
+  /* resolve */ JS_ResolveStub,
+  /* convert */ JS_ConvertStub,
+  /* finalize */ nullptr,
+  /* call */ nullptr,
+  /* hasInstance */ nullptr,
+  /* construct */ nullptr,
+  /* trace */ JS_GlobalObjectTraceHook
 };
 
 // static
