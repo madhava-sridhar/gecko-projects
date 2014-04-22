@@ -64,7 +64,7 @@
 #include "mozilla/layers/ShadowLayers.h"
 
 #include "mozilla/dom/Element.h"
-#include "mozilla/dom/file/FileHandle.h"
+#include "mozilla/dom/FileHandle.h"
 #include "mozilla/dom/FileHandleBinding.h"
 #include "mozilla/dom/TabChild.h"
 #include "mozilla/dom/IDBFactoryBinding.h"
@@ -3176,7 +3176,7 @@ nsDOMWindowUtils::GetFileId(JS::Handle<JS::Value> aFile, JSContext* aCx,
   if (!JSVAL_IS_PRIMITIVE(aFile)) {
     JSObject* obj = JSVAL_TO_OBJECT(aFile);
 
-    file::FileHandle* fileHandle;
+    FileHandle* fileHandle;
     if (NS_SUCCEEDED(UNWRAP_OBJECT(FileHandle, obj, fileHandle))) {
       *aResult = fileHandle->GetFileId();
       return NS_OK;
