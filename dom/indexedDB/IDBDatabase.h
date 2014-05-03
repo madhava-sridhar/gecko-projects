@@ -13,7 +13,6 @@
 #include "mozilla/dom/quota/PersistenceType.h"
 #include "nsAutoPtr.h"
 #include "nsHashKeys.h"
-#include "nsIFileStorage.h"
 #include "nsIOfflineStorage.h"
 #include "nsString.h"
 #include "nsTHashtable.h"
@@ -98,9 +97,6 @@ public:
   static IDBDatabase*
   FromStorage(nsIOfflineStorage* aStorage);
 
-  static IDBDatabase*
-  FromStorage(nsIFileStorage* aStorage);
-
   void
   AssertIsOnOwningThread() const
 #ifdef DEBUG
@@ -125,6 +121,15 @@ public:
 
   already_AddRefed<nsIDocument>
   GetOwnerDocument() const;
+
+  // Whether or not the database has been invalidated. If it has then no further
+  // transactions for this database will be allowed to run. This function may be
+  // called on any thread.
+  bool
+  IsInvalidated() const
+  {
+    return mInvalidated;
+  }
 
   void
   CloseInternal();
@@ -212,7 +217,6 @@ public:
   }
 
   NS_DECL_ISUPPORTS_INHERITED
-  NS_DECL_NSIFILESTORAGE
   NS_DECL_NSIOFFLINESTORAGE
   NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(IDBDatabase, IDBWrapperCache)
 

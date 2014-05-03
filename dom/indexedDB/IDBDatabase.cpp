@@ -176,14 +176,6 @@ IDBDatabase::FromStorage(nsIOfflineStorage* aStorage)
          static_cast<IDBDatabase*>(aStorage) : nullptr;
 }
 
-// static
-IDBDatabase*
-IDBDatabase::FromStorage(nsIFileStorage* aStorage)
-{
-  nsCOMPtr<nsIOfflineStorage> storage = do_QueryInterface(aStorage);
-  return storage ? FromStorage(storage) : nullptr;
-}
-
 #ifdef DEBUG
 
 void
@@ -693,7 +685,6 @@ NS_IMPL_ADDREF_INHERITED(IDBDatabase, IDBWrapperCache)
 NS_IMPL_RELEASE_INHERITED(IDBDatabase, IDBWrapperCache)
 
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION_INHERITED(IDBDatabase)
-  NS_INTERFACE_MAP_ENTRY(nsIFileStorage)
   NS_INTERFACE_MAP_ENTRY(nsIOfflineStorage)
 NS_INTERFACE_MAP_END_INHERITING(IDBWrapperCache)
 
@@ -753,31 +744,6 @@ NS_IMETHODIMP_(const nsACString&)
 IDBDatabase::Id()
 {
   MOZ_CRASH("Remove me!");
-}
-
-NS_IMETHODIMP_(bool)
-IDBDatabase::IsInvalidated()
-{
-  return mInvalidated;
-}
-
-NS_IMETHODIMP_(bool)
-IDBDatabase::IsShuttingDown()
-{
-  return QuotaManager::IsShuttingDown();
-}
-
-NS_IMETHODIMP_(void)
-IDBDatabase::SetThreadLocals()
-{
-  NS_ASSERTION(GetOwner(), "Should have owner!");
-  QuotaManager::SetCurrentWindow(GetOwner());
-}
-
-NS_IMETHODIMP_(void)
-IDBDatabase::UnsetThreadLocals()
-{
-  QuotaManager::SetCurrentWindow(nullptr);
 }
 
 NS_IMETHODIMP_(mozilla::dom::quota::Client*)
@@ -885,7 +851,7 @@ CreateFileHelper::GetSuccessResult(JSContext* aCx,
                                    JS::MutableHandle<JS::Value> aVal)
 {
   nsRefPtr<IDBFileHandle> fileHandle =
-    IDBFileHandle::Create(mDatabase, mName, mType, mFileInfo.forget());
+    IDBFileHandle::Create(mName, mType, mDatabase, mFileInfo.forget());
   IDB_ENSURE_TRUE(fileHandle, NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
 
   return WrapNative(aCx, NS_ISUPPORTS_CAST(EventTarget*, fileHandle), aVal);
