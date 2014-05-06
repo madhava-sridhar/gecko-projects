@@ -14,6 +14,7 @@
 #include "mozilla/Atomics.h"            // for PrimitiveIntrinsics
 #include "mozilla/ipc/SharedMemory.h"   // for SharedMemory, etc
 #include "mozilla/layers/LayersSurfaces.h"  // for SurfaceDescriptor, etc
+#include "mozilla/layers/SharedBufferManagerChild.h"
 #include "ShadowLayerUtils.h"
 #include "mozilla/mozalloc.h"           // for operator delete[], etc
 #include "nsAutoPtr.h"                  // for nsRefPtr, getter_AddRefs, etc
@@ -30,7 +31,7 @@ using namespace mozilla::ipc;
 namespace mozilla {
 namespace layers {
 
-NS_IMPL_ISUPPORTS1(GfxMemoryImageReporter, nsIMemoryReporter)
+NS_IMPL_ISUPPORTS(GfxMemoryImageReporter, nsIMemoryReporter)
 
 mozilla::Atomic<size_t> GfxMemoryImageReporter::sAmount(0);
 
@@ -306,6 +307,21 @@ ISurfaceAllocator::ShrinkShmemSectionHeap()
       break;
     }
   }
+}
+
+bool
+ISurfaceAllocator::AllocGrallocBuffer(const gfx::IntSize& aSize,
+                                      uint32_t aFormat,
+                                      uint32_t aUsage,
+                                      MaybeMagicGrallocBufferHandle* aHandle)
+{
+  return SharedBufferManagerChild::GetSingleton()->AllocGrallocBuffer(aSize, aFormat, aUsage, aHandle);
+}
+
+void
+ISurfaceAllocator::DeallocGrallocBuffer(MaybeMagicGrallocBufferHandle* aHandle)
+{
+  SharedBufferManagerChild::GetSingleton()->DeallocGrallocBuffer(*aHandle);
 }
 
 } // namespace

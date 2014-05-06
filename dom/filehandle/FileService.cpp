@@ -305,7 +305,7 @@ FileService::HasLockedFilesForStorage(nsIOfflineStorage* aStorage)
   return storageInfo->HasRunningLockedFiles(aStorage);
 }
 
-NS_IMPL_ISUPPORTS1(FileService, nsIObserver)
+NS_IMPL_ISUPPORTS(FileService, nsIObserver)
 
 NS_IMETHODIMP
 FileService::Observe(nsISupports* aSubject, const char*  aTopic,

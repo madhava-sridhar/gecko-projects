@@ -222,7 +222,7 @@ class MarionetteTestResult(unittest._TextTestResult, TestResultCollection):
             lastline = None
             fail_present = None
             for line in err:
-                if not line.startswith('\t'):
+                if not line.startswith('\t') and line != '':
                     lastline = line
                 if 'TEST-UNEXPECTED-FAIL' in line:
                     fail_present = True
@@ -231,7 +231,7 @@ class MarionetteTestResult(unittest._TextTestResult, TestResultCollection):
                     self.stream.writeln("%s" % line)
                 else:
                     self.stream.writeln("TEST-UNEXPECTED-FAIL | %s | %s" %
-                                        (self.getInfo(error), line))
+                                        (self.getInfo(error), error.reason))
 
     def stopTest(self, *args, **kwargs):
         unittest._TextTestResult.stopTest(self, *args, **kwargs)
@@ -251,7 +251,7 @@ class MarionetteTextTestRunner(unittest.TextTestRunner):
         self.b2g_pid = None
         del kwargs['marionette']
 
-        if self.capabilities['device'] != 'desktop' and self.capabilities['b2g']:
+        if self.capabilities["device"] != "desktop" and self.capabilities["browserName"] == "B2G":
             def b2g_pre_run():
                 dm_type = os.environ.get('DM_TRANS', 'adb')
                 if dm_type == 'adb':
@@ -623,7 +623,7 @@ class BaseMarionetteTestRunner(object):
         # for XML output
         self.testvars['xml_output'] = self.xml_output
         self.results = []
- 
+
     @property
     def capabilities(self):
         if self._capabilities:

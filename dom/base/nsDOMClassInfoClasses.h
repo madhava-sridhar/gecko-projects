@@ -15,7 +15,6 @@ DOMCI_CLASS(CSSCharsetRule)
 DOMCI_CLASS(CSSImportRule)
 DOMCI_CLASS(CSSMediaRule)
 DOMCI_CLASS(CSSNameSpaceRule)
-DOMCI_CLASS(CSSRuleList)
 DOMCI_CLASS(CSSStyleSheet)
 
 // XUL classes
@@ -93,7 +92,6 @@ DOMCI_CLASS(CSSPageRule)
 DOMCI_CLASS(CSSFontFeatureValuesRule)
 
 DOMCI_CLASS(UserDataHandler)
-DOMCI_CLASS(XPathNamespace)
 DOMCI_CLASS(XULControlElement)
 DOMCI_CLASS(XULLabeledControlElement)
 DOMCI_CLASS(XULButtonElement)

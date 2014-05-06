@@ -11,6 +11,7 @@
 #include "nsIInterfaceRequestorUtils.h"
 #include "AudioChannelManager.h"
 #include "mozilla/dom/AudioChannelManagerBinding.h"
+#include "mozilla/Services.h"
 
 using namespace mozilla::hal;
 
@@ -18,8 +19,8 @@ namespace mozilla {
 namespace dom {
 namespace system {
 
-NS_IMPL_QUERY_INTERFACE_INHERITED1(AudioChannelManager, DOMEventTargetHelper,
-                                   nsIDOMEventListener)
+NS_IMPL_QUERY_INTERFACE_INHERITED(AudioChannelManager, DOMEventTargetHelper,
+                                  nsIDOMEventListener)
 NS_IMPL_ADDREF_INHERITED(AudioChannelManager, DOMEventTargetHelper)
 NS_IMPL_RELEASE_INHERITED(AudioChannelManager, DOMEventTargetHelper)
 
@@ -85,7 +86,7 @@ AudioChannelManager::SetVolumeControlChannel(const nsAString& aChannel)
   // Only normal channel doesn't need permission.
   if (newChannel != AudioChannel::Normal) {
     nsCOMPtr<nsIPermissionManager> permissionManager =
-      do_GetService(NS_PERMISSIONMANAGER_CONTRACTID);
+      services::GetPermissionManager();
     if (!permissionManager) {
       return false;
     }

@@ -2041,8 +2041,7 @@ MacroAssemblerARMCompat::movePtr(const AsmJSImmPtr &imm, const Register &dest)
     else
         rs = L_LDR;
 
-    AsmJSAbsoluteLink link(nextOffset().getOffset(), imm.kind());
-    enoughMemory_ &= asmJSAbsoluteLinks_.append(link);
+    enoughMemory_ &= append(AsmJSAbsoluteLink(nextOffset().getOffset(), imm.kind()));
     ma_movPatchable(Imm32(-1), dest, Always, rs);
 }
 void
@@ -3504,8 +3503,9 @@ MacroAssemblerARMCompat::storeTypeTag(ImmTag tag, Register base, Register index,
 }
 
 void
-MacroAssemblerARMCompat::linkExitFrame() {
-    uint8_t *dest = (uint8_t*)GetIonContext()->runtime->addressOfIonTop();
+MacroAssemblerARMCompat::linkExitFrame()
+{
+    uint8_t *dest = (uint8_t*)GetIonContext()->runtime->addressOfJitTop();
     movePtr(ImmPtr(dest), ScratchRegister);
     ma_str(StackPointer, Operand(ScratchRegister, 0));
 }
@@ -3513,7 +3513,7 @@ MacroAssemblerARMCompat::linkExitFrame() {
 void
 MacroAssemblerARMCompat::linkParallelExitFrame(const Register &pt)
 {
-    ma_str(StackPointer, Operand(pt, offsetof(PerThreadData, ionTop)));
+    ma_str(StackPointer, Operand(pt, offsetof(PerThreadData, jitTop)));
 }
 
 // ARM says that all reads of pc will return 8 higher than the
@@ -3567,6 +3567,19 @@ MacroAssemblerARM::ma_call(ImmPtr dest)
 
     ma_movPatchable(dest, CallReg, Always, rs);
     as_blx(CallReg);
+}
+
+void
+MacroAssemblerARM::ma_callAndStoreRet(const Register r, uint32_t stackArgBytes)
+{
+    // Note: this function stores the return address to sp[0]. The caller must
+    // anticipate this by pushing additional space on the stack. The ABI does
+    // not provide space for a return address so this function may only be
+    // called if no argument are passed.
+    JS_ASSERT(stackArgBytes == 0);
+    AutoForbidPools afp(this);
+    as_dtr(IsStore, 32, Offset, pc, DTRAddr(sp, DtrOffImm(0)));
+    as_blx(r);
 }
 
 void
@@ -4334,3 +4347,37 @@ MacroAssemblerARMCompat::jumpWithPatch(RepatchLabel *label, Condition cond)
     return ret;
 }
 
+#ifdef JSGC_GENERATIONAL
+
+void
+MacroAssemblerARMCompat::branchPtrInNurseryRange(Condition cond, Register ptr, Register temp,
+                                                 Label *label)
+{
+    JS_ASSERT(cond == Assembler::Equal || cond == Assembler::NotEqual);
+    JS_ASSERT(ptr != temp);
+    JS_ASSERT(ptr != secondScratchReg_);
+
+    const Nursery &nursery = GetIonContext()->runtime->gcNursery();
+    uintptr_t startChunk = nursery.start() >> Nursery::ChunkShift;
+
+    ma_mov(Imm32(startChunk), secondScratchReg_);
+    as_rsb(secondScratchReg_, secondScratchReg_, lsr(ptr, Nursery::ChunkShift));
+    branch32(cond == Assembler::Equal ? Assembler::Below : Assembler::AboveOrEqual,
+              secondScratchReg_, Imm32(Nursery::NumNurseryChunks), label);
+}
+
+void
+MacroAssemblerARMCompat::branchValueIsNurseryObject(Condition cond, ValueOperand value,
+                                                    Register temp, Label *label)
+{
+    JS_ASSERT(cond == Assembler::Equal || cond == Assembler::NotEqual);
+
+    Label done;
+
+    branchTestObject(Assembler::NotEqual, value, cond == Assembler::Equal ? &done : label);
+    branchPtrInNurseryRange(cond, value.payloadReg(), temp, label);
+
+    bind(&done);
+}
+
+#endif

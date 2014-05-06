@@ -1,4 +1,5 @@
-/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+/* vim: set ts=8 sts=4 et sw=4 tw=99: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -543,7 +544,7 @@ Parent(JSContext *cx, unsigned argc, jsval *vp)
     }
 
     Value v = args[0];
-    if (JSVAL_IS_PRIMITIVE(v)) {
+    if (v.isPrimitive()) {
         JS_ReportError(cx, "Only objects have parents!");
         return false;
     }
@@ -825,10 +826,10 @@ env_enumerate(JSContext *cx, HandleObject obj)
 }
 
 static bool
-env_resolve(JSContext *cx, HandleObject obj, HandleId id, unsigned flags,
+env_resolve(JSContext *cx, HandleObject obj, HandleId id,
             JS::MutableHandleObject objp)
 {
-    JSString *idstr, *valstr;
+    JSString *idstr;
 
     RootedValue idval(cx);
     if (!JS_IdToValue(cx, id, &idval))
@@ -842,11 +843,10 @@ env_resolve(JSContext *cx, HandleObject obj, HandleId id, unsigned flags,
         return false;
     const char *value = getenv(name.ptr());
     if (value) {
-        valstr = JS_NewStringCopyZ(cx, value);
+        RootedString valstr(cx, JS_NewStringCopyZ(cx, value));
         if (!valstr)
             return false;
-        if (!JS_DefinePropertyById(cx, obj, id, STRING_TO_JSVAL(valstr),
-                                   nullptr, nullptr, JSPROP_ENUMERATE)) {
+        if (!JS_DefinePropertyById(cx, obj, id, valstr, JSPROP_ENUMERATE)) {
             return false;
         }
         objp.set(obj);
@@ -1093,11 +1093,9 @@ ProcessArgs(JSContext *cx, JS::Handle<JSObject*> obj, char **argv, int argc, XPC
         return 1;
 
     for (size_t j = 0, length = argc - i; j < length; j++) {
-        JSString *str = JS_NewStringCopyZ(cx, argv[i++]);
-        if (!str)
-            return 1;
-        if (!JS_DefineElement(cx, argsObj, j, STRING_TO_JSVAL(str),
-                              nullptr, nullptr, JSPROP_ENUMERATE)) {
+        RootedString str(cx, JS_NewStringCopyZ(cx, argv[i++]));
+        if (!str ||
+            !JS_DefineElement(cx, argsObj, j, str, JSPROP_ENUMERATE)) {
             return 1;
         }
     }
@@ -1206,7 +1204,7 @@ public:
     TestGlobal(){}
 };
 
-NS_IMPL_ISUPPORTS2(TestGlobal, nsIXPCTestNoisy, nsIXPCScriptable)
+NS_IMPL_ISUPPORTS(TestGlobal, nsIXPCTestNoisy, nsIXPCScriptable)
 
 // The nsIXPCScriptable map declaration that will generate stubs for us...
 #define XPC_MAP_CLASSNAME           TestGlobal
@@ -1239,7 +1237,7 @@ public:
 };
 
 /* Implementation file */
-NS_IMPL_ISUPPORTS1(nsXPCFunctionThisTranslator, nsIXPCFunctionThisTranslator)
+NS_IMPL_ISUPPORTS(nsXPCFunctionThisTranslator, nsIXPCFunctionThisTranslator)
 
 nsXPCFunctionThisTranslator::nsXPCFunctionThisTranslator()
 {
@@ -1550,6 +1548,11 @@ XRE_XPCShellMain(int argc, char **argv, char **envp)
                 return 1;
             }
 
+            // Even if we're building in a configuration where source is
+            // discarded, there's no reason to do that on XPCShell, and doing so
+            // might break various automation scripts.
+            JS::CompartmentOptionsRef(glob).setDiscardSource(false);
+
             backstagePass->SetGlobalObject(glob);
 
             JSAutoCompartment ac(cx, glob);
@@ -1566,7 +1569,7 @@ XRE_XPCShellMain(int argc, char **argv, char **envp)
             }
 
             JS::Rooted<JSObject*> envobj(cx);
-            envobj = JS_DefineObject(cx, glob, "environment", &env_class, nullptr, 0);
+            envobj = JS_DefineObject(cx, glob, "environment", &env_class);
             if (!envobj) {
                 JS_EndRequest(cx);
                 return 1;
@@ -1662,9 +1665,9 @@ XPCShellDirProvider::Release()
     return 1;
 }
 
-NS_IMPL_QUERY_INTERFACE2(XPCShellDirProvider,
-                         nsIDirectoryServiceProvider,
-                         nsIDirectoryServiceProvider2)
+NS_IMPL_QUERY_INTERFACE(XPCShellDirProvider,
+                        nsIDirectoryServiceProvider,
+                        nsIDirectoryServiceProvider2)
 
 NS_IMETHODIMP
 XPCShellDirProvider::GetFile(const char *prop, bool *persistent,

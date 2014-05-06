@@ -11,6 +11,7 @@ Cu.import("resource://gre/modules/osfile.jsm");
 Cu.import("resource://services-sync/healthreport.jsm", this);
 Cu.import("resource://testing-common/services/healthreport/utils.jsm", this);
 Cu.import("resource://gre/modules/services/healthreport/providers.jsm");
+Cu.import("resource://testing-common/AddonManagerTesting.jsm");
 
 const PREF_EXPERIMENTS_ENABLED  = "experiments.enabled";
 const PREF_LOGGING_LEVEL        = "experiments.logging.level";
@@ -155,10 +156,16 @@ function loadAddonManager() {
   startupManager();
 }
 
-function getExperimentAddons() {
+function getExperimentAddons(previous=false) {
   let deferred = Promise.defer();
 
-  AddonManager.getAddonsByTypes(["experiment"], deferred.resolve);
+  AddonManager.getAddonsByTypes(["experiment"], (addons) => {
+    if (previous) {
+      deferred.resolve(addons);
+    } else {
+      deferred.resolve([a for (a of addons) if (!a.appDisabled)]);
+    }
+  });
 
   return deferred.promise;
 }

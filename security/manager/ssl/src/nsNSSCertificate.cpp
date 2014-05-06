@@ -67,14 +67,14 @@ NSSCleanupAutoPtrClass_WithParam(PLArenaPool, PORT_FreeArena, FalseParam, false)
 // in the list to mean not yet initialized.
 #define CERT_TYPE_NOT_YET_INITIALIZED (1 << 30)
 
-NS_IMPL_ISUPPORTS7(nsNSSCertificate,
-                   nsIX509Cert,
-                   nsIX509Cert2,
-                   nsIX509Cert3,
-                   nsIIdentityInfo,
-                   nsISMimeCert,
-                   nsISerializable,
-                   nsIClassInfo)
+NS_IMPL_ISUPPORTS(nsNSSCertificate,
+                  nsIX509Cert,
+                  nsIX509Cert2,
+                  nsIX509Cert3,
+                  nsIIdentityInfo,
+                  nsISMimeCert,
+                  nsISerializable,
+                  nsIClassInfo)
 
 /*static*/ nsNSSCertificate*
 nsNSSCertificate::Create(CERTCertificate* cert, SECOidTag* evOidPolicy)
@@ -829,10 +829,12 @@ nsNSSCertificate::GetChain(nsIArray** _rvChain)
 
   // We want to test all usages, but we start with server because most of the
   // time Firefox users care about server certs.
-  certVerifier->VerifyCert(mCert.get(), nullptr,
+  certVerifier->VerifyCert(mCert.get(),
                            certificateUsageSSLServer, PR_Now(),
                            nullptr, /*XXX fixme*/
+                           nullptr, /* hostname */
                            CertVerifier::FLAG_LOCAL_ONLY,
+                           nullptr, /* stapledOCSPResponse */
                            &nssChain);
   // This is the whitelist of all non-SSLServer usages that are supported by
   // verifycert.
@@ -851,10 +853,12 @@ nsNSSCertificate::GetChain(nsIArray** _rvChain)
     PR_LOG(gPIPNSSLog, PR_LOG_DEBUG,
            ("pipnss: PKIX attempting chain(%d) for '%s'\n",
             usage, mCert->nickname));
-    certVerifier->VerifyCert(mCert.get(), nullptr,
+    certVerifier->VerifyCert(mCert.get(),
                              usage, PR_Now(),
                              nullptr, /*XXX fixme*/
+                             nullptr, /*hostname*/
                              CertVerifier::FLAG_LOCAL_ONLY,
+                             nullptr, /* stapledOCSPResponse */
                              &nssChain);
   }
 
@@ -1467,10 +1471,11 @@ nsNSSCertificate::hasValidEVOidTag(SECOidTag& resultOidTag, bool& validEV)
 
   uint32_t flags = mozilla::psm::CertVerifier::FLAG_LOCAL_ONLY |
     mozilla::psm::CertVerifier::FLAG_MUST_BE_EV;
-  SECStatus rv = certVerifier->VerifyCert(mCert.get(), nullptr,
+  SECStatus rv = certVerifier->VerifyCert(mCert.get(),
     certificateUsageSSLServer, PR_Now(),
     nullptr /* XXX pinarg */,
-    flags, nullptr, &resultOidTag);
+    nullptr /* hostname */,
+    flags, nullptr /* stapledOCSPResponse */ , nullptr, &resultOidTag);
 
   if (rv != SECSuccess) {
     resultOidTag = SEC_OID_UNKNOWN;
@@ -1566,7 +1571,7 @@ nsNSSCertificate::GetValidEVPolicyOid(nsACString& outDottedOid)
   return NS_OK;
 }
 
-NS_IMPL_ISUPPORTS1(nsNSSCertList, nsIX509CertList)
+NS_IMPL_ISUPPORTS(nsNSSCertList, nsIX509CertList)
 
 nsNSSCertList::nsNSSCertList(mozilla::pkix::ScopedCERTCertList& certList,
                              const nsNSSShutDownPreventionLock& proofOfLock)
@@ -1706,7 +1711,7 @@ nsNSSCertList::GetEnumerator(nsISimpleEnumerator** _retval)
   return NS_OK;
 }
 
-NS_IMPL_ISUPPORTS1(nsNSSCertListEnumerator, nsISimpleEnumerator)
+NS_IMPL_ISUPPORTS(nsNSSCertListEnumerator, nsISimpleEnumerator)
 
 nsNSSCertListEnumerator::nsNSSCertListEnumerator(
   CERTCertList* certList, const nsNSSShutDownPreventionLock& proofOfLock)

@@ -89,17 +89,17 @@ HTMLOptionsCollection::GetOptionIndex(Element* aOption,
 }
 
 
-NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE_1(HTMLOptionsCollection, mElements)
+NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE(HTMLOptionsCollection, mElements)
 
 // nsISupports
 
 // QueryInterface implementation for HTMLOptionsCollection
 NS_INTERFACE_TABLE_HEAD(HTMLOptionsCollection)
   NS_WRAPPERCACHE_INTERFACE_MAP_ENTRY
-  NS_INTERFACE_TABLE3(HTMLOptionsCollection,
-                      nsIHTMLCollection,
-                      nsIDOMHTMLOptionsCollection,
-                      nsIDOMHTMLCollection)
+  NS_INTERFACE_TABLE(HTMLOptionsCollection,
+                     nsIHTMLCollection,
+                     nsIDOMHTMLOptionsCollection,
+                     nsIDOMHTMLCollection)
   NS_INTERFACE_TABLE_TO_MAP_SEGUE_CYCLE_COLLECTION(HTMLOptionsCollection)
 NS_INTERFACE_MAP_END
 

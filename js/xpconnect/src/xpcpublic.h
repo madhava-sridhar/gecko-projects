@@ -1,7 +1,6 @@
-/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*-
- * vim: set ts=8 sw=4 et tw=78:
- *
- * This Source Code Form is subject to the terms of the Mozilla Public
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+/* vim: set ts=8 sts=4 et sw=4 tw=99: */
+/* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
@@ -415,6 +414,13 @@ nsIGlobalObject *
 GetNativeForGlobal(JSObject *global);
 
 /**
+ * Returns the nsISupports native behind a given reflector (either DOM or
+ * XPCWN).
+ */
+nsISupports *
+UnwrapReflectorToISupports(JSObject *reflector);
+
+/**
  * In some cases a native object does not really belong to any compartment (XBL,
  * document created from by XHR of a worker, etc.). But when for some reason we
  * have to wrap these natives (because of an event for example) instead of just
@@ -477,6 +483,11 @@ RecordAdoptedNode(JSCompartment *c);
 
 void
 RecordDonatedNode(JSCompartment *c);
+
+// This function may be used off-main-thread, in which case it is benignly
+// racey.
+bool
+ShouldDiscardSystemSource();
 
 } // namespace xpc
 

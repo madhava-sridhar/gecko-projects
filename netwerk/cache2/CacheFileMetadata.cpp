@@ -11,6 +11,7 @@
 #include "CacheFileChunk.h"
 #include "CacheFileUtils.h"
 #include "nsILoadContextInfo.h"
+#include "nsICacheEntry.h" // for nsICacheEntryMetaDataVisitor
 #include "../cache/nsCacheUtils.h"
 #include "nsIFile.h"
 #include "mozilla/Telemetry.h"
@@ -26,7 +27,7 @@ namespace net {
 
 #define kCacheEntryVersion 1
 
-NS_IMPL_ISUPPORTS1(CacheFileMetadata, CacheFileIOListener)
+NS_IMPL_ISUPPORTS(CacheFileMetadata, CacheFileIOListener)
 
 CacheFileMetadata::CacheFileMetadata(CacheFileHandle *aHandle, const nsACString &aKey)
   : CacheMemoryConsumer(NORMAL)
@@ -199,7 +200,7 @@ CacheFileMetadata::ReadMetadata(CacheFileMetadataListener *aListener)
        "offset=%lld, filesize=%lld [this=%p]", offset, size, this));
 
   mListener = aListener;
-  rv = CacheFileIOManager::Read(mHandle, offset, mBuf, mBufSize, this);
+  rv = CacheFileIOManager::Read(mHandle, offset, mBuf, mBufSize, true, this);
   if (NS_FAILED(rv)) {
     LOG(("CacheFileMetadata::ReadMetadata() - CacheFileIOManager::Read() failed"
          " synchronously, creating empty metadata. [this=%p, rv=0x%08x]",
@@ -304,7 +305,10 @@ CacheFileMetadata::SyncReadMetadata(nsIFile *aFile)
 
   int64_t fileSize;
   rv = aFile->GetFileSize(&fileSize);
-  NS_ENSURE_SUCCESS(rv, rv);
+  if (NS_FAILED(rv)) {
+    // Don't bloat the console
+    return rv;
+  }
 
   PRFileDesc *fd;
   rv = aFile->OpenNSPRFileDesc(PR_RDONLY, 0600, &fd);
@@ -429,6 +433,28 @@ CacheFileMetadata::SetElement(const char *aKey, const char *aValue)
   // Update value
   memcpy(pos, aValue, valueSize);
   mElementsSize = newSize;
+
+  return NS_OK;
+}
+
+nsresult
+CacheFileMetadata::Visit(nsICacheEntryMetaDataVisitor *aVisitor)
+{
+  const char *data = mBuf;
+  const char *limit = mBuf + mElementsSize;
+
+  while (data < limit) {
+    // Point to the value part
+    const char *value = data + strlen(data) + 1;
+    MOZ_ASSERT(value < limit, "Metadata elements corrupted");
+
+    aVisitor->OnMetaDataElement(data, value);
+
+    // Skip value part
+    data = value + strlen(value) + 1;
+  }
+
+  MOZ_ASSERT(data == limit, "Metadata elements corrupted");
 
   return NS_OK;
 }
@@ -629,7 +655,7 @@ CacheFileMetadata::OnDataRead(CacheFileHandle *aHandle, char *aBuf,
     LOG(("CacheFileMetadata::OnDataRead() - We need to read %d more bytes to "
          "have full metadata. [this=%p]", missing, this));
 
-    rv = CacheFileIOManager::Read(mHandle, realOffset, mBuf, missing, this);
+    rv = CacheFileIOManager::Read(mHandle, realOffset, mBuf, missing, true, this);
     if (NS_FAILED(rv)) {
       LOG(("CacheFileMetadata::OnDataRead() - CacheFileIOManager::Read() "
            "failed synchronously, creating empty metadata. [this=%p, "

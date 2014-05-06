@@ -134,7 +134,7 @@ extern nsresult nsStringInputStreamConstructor(nsISupports *, REFNSIID, void **)
 #endif
 
 #include "ogg/ogg.h"
-#ifdef MOZ_VPX
+#if defined(MOZ_VPX) && !defined(MOZ_VPX_NO_MEM_REPORTING)
 #include "vpx_mem/vpx_mem.h"
 #endif
 #ifdef MOZ_WEBM
@@ -375,7 +375,7 @@ private:
     }
 };
 
-NS_IMPL_ISUPPORTS1(ICUReporter, nsIMemoryReporter)
+NS_IMPL_ISUPPORTS(ICUReporter, nsIMemoryReporter)
 
 /* static */ template<> Atomic<size_t> CountingAllocatorBase<ICUReporter>::sAmount(0);
 
@@ -395,7 +395,7 @@ private:
     }
 };
 
-NS_IMPL_ISUPPORTS1(OggReporter, nsIMemoryReporter)
+NS_IMPL_ISUPPORTS(OggReporter, nsIMemoryReporter)
 
 /* static */ template<> Atomic<size_t> CountingAllocatorBase<OggReporter>::sAmount(0);
 
@@ -416,7 +416,7 @@ private:
     }
 };
 
-NS_IMPL_ISUPPORTS1(VPXReporter, nsIMemoryReporter)
+NS_IMPL_ISUPPORTS(VPXReporter, nsIMemoryReporter)
 
 /* static */ template<> Atomic<size_t> CountingAllocatorBase<VPXReporter>::sAmount(0);
 #endif /* MOZ_VPX */
@@ -438,7 +438,7 @@ private:
     }
 };
 
-NS_IMPL_ISUPPORTS1(NesteggReporter, nsIMemoryReporter)
+NS_IMPL_ISUPPORTS(NesteggReporter, nsIMemoryReporter)
 
 /* static */ template<> Atomic<size_t> CountingAllocatorBase<NesteggReporter>::sAmount(0);
 #endif /* MOZ_WEBM */
@@ -460,6 +460,17 @@ NS_InitXPCOM2(nsIServiceManager* *result,
     // Initialize the available memory tracker before other threads have had a
     // chance to start up, because the initialization is not thread-safe.
     mozilla::AvailableMemoryTracker::Init();
+
+#ifdef XP_UNIX
+    // Discover the current value of the umask, and save it where
+    // nsSystemInfo::Init can retrieve it when necessary.  There is no way
+    // to read the umask without changing it, and the setting is process-
+    // global, so this must be done while we are still single-threaded; the
+    // nsSystemInfo object is typically created much later, when some piece
+    // of chrome JS wants it.  The system call is specified as unable to fail.
+    nsSystemInfo::gUserUmask = ::umask(0777);
+    ::umask(nsSystemInfo::gUserUmask);
+#endif
 
     NS_LogInit();
 
@@ -602,7 +613,7 @@ NS_InitXPCOM2(nsIServiceManager* *result,
                           OggReporter::CountingRealloc,
                           OggReporter::CountingFree);
 
-#ifdef MOZ_VPX
+#if defined(MOZ_VPX) && !defined(MOZ_VPX_NO_MEM_REPORTING)
     // And for VPX.
     vpx_mem_set_functions(VPXReporter::CountingMalloc,
                           VPXReporter::CountingCalloc,

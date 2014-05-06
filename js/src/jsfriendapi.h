@@ -383,13 +383,13 @@ proxy_Slice(JSContext *cx, JS::HandleObject proxy, uint32_t begin, uint32_t end,
 /*
  * A class of objects that return source code on demand.
  *
- * When code is compiled with CompileOptions::LAZY_SOURCE, SpiderMonkey
- * doesn't retain the source code (and doesn't do lazy bytecode
- * generation). If we ever need the source code, say, in response to a call
- * to Function.prototype.toSource or Debugger.Source.prototype.text, then
- * we call the 'load' member function of the instance of this class that
- * has hopefully been registered with the runtime, passing the code's URL,
- * and hope that it will be able to find the source.
+ * When code is compiled with setSourceIsLazy(true), SpiderMonkey doesn't
+ * retain the source code (and doesn't do lazy bytecode generation). If we ever
+ * need the source code, say, in response to a call to Function.prototype.
+ * toSource or Debugger.Source.prototype.text, then we call the 'load' member
+ * function of the instance of this class that has hopefully been registered
+ * with the runtime, passing the code's URL, and hope that it will be able to
+ * find the source.
  */
 class SourceHook {
   public:
@@ -404,7 +404,7 @@ class SourceHook {
 };
 
 /*
- * Have |rt| use |hook| to retrieve LAZY_SOURCE source code. See the
+ * Have |rt| use |hook| to retrieve lazily-retrieved source code. See the
  * comments for SourceHook. The runtime takes ownership of the hook, and
  * will delete it when the runtime itself is deleted, or when a new hook is
  * set.
@@ -1444,13 +1444,25 @@ JS_GetArrayBufferViewData(JSObject *obj);
  * object that would return true for JS_IsArrayBufferViewObject().
  */
 extern JS_FRIEND_API(JSObject *)
-JS_GetArrayBufferViewBuffer(JSContext *cx, JSObject *obj);
+JS_GetArrayBufferViewBuffer(JSContext *cx, JS::HandleObject obj);
+
+typedef enum {
+    ChangeData,
+    KeepData
+} NeuterDataDisposition;
 
 /*
  * Set an ArrayBuffer's length to 0 and neuter all of its views.
+ *
+ * The |changeData| argument is a hint to inform internal behavior with respect
+ * to the internal pointer to the ArrayBuffer's data after being neutered.
+ * There is no guarantee it will be respected.  But if it is respected, the
+ * ArrayBuffer's internal data pointer will, or will not, have changed
+ * accordingly.
  */
 extern JS_FRIEND_API(bool)
-JS_NeuterArrayBuffer(JSContext *cx, JS::HandleObject obj);
+JS_NeuterArrayBuffer(JSContext *cx, JS::HandleObject obj,
+                     NeuterDataDisposition changeData);
 
 /*
  * Check whether obj supports JS_GetDataView* APIs.
@@ -2054,7 +2066,8 @@ DefaultValue(JSContext *cx, JS::HandleObject obj, JSType hint, JS::MutableHandle
  */
 extern JS_FRIEND_API(bool)
 CheckDefineProperty(JSContext *cx, JS::HandleObject obj, JS::HandleId id, JS::HandleValue value,
-                    JSPropertyOp getter, JSStrictPropertyOp setter, unsigned attrs);
+                    unsigned attrs,
+                    JSPropertyOp getter = nullptr, JSStrictPropertyOp setter = nullptr);
 
 } /* namespace js */
 

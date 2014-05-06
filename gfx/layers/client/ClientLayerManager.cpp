@@ -12,8 +12,8 @@
 #include "mozilla/dom/ScreenOrientation.h"  // for ScreenOrientation
 #include "mozilla/dom/TabChild.h"       // for TabChild
 #include "mozilla/hal_sandbox/PHal.h"   // for ScreenConfiguration
-#include "mozilla/layers/CompositableClient.h"  // for CompositableChild, etc
-#include "mozilla/layers/ContentClient.h"  // for ContentClientRemote
+#include "mozilla/layers/CompositableClient.h"
+#include "mozilla/layers/ContentClient.h"
 #include "mozilla/layers/ISurfaceAllocator.h"
 #include "mozilla/layers/LayersMessages.h"  // for EditReply, etc
 #include "mozilla/layers/LayersSurfaces.h"  // for SurfaceDescriptor
@@ -53,6 +53,14 @@ ClientLayerManager::ClientLayerManager(nsIWidget* aWidget)
 
 ClientLayerManager::~ClientLayerManager()
 {
+  ClearCachedResources();
+  // Stop receiveing AsyncParentMessage at Forwarder.
+  // After the call, the message is directly handled by LayerTransactionChild. 
+  // Basically this function should be called in ShadowLayerForwarder's
+  // destructor. But when the destructor is triggered by 
+  // CompositorChild::Destroy(), the destructor can not handle it correctly.
+  // See Bug 1000525.
+  mForwarder->StopReceiveAsyncParentMessge();
   mRoot = nullptr;
 
   MOZ_COUNT_DTOR(ClientLayerManager);
@@ -266,9 +274,7 @@ ClientLayerManager::GetRemoteRenderer()
 void
 ClientLayerManager::Composite()
 {
-  if (LayerTransactionChild* manager = mForwarder->GetShadowManager()) {
-    manager->SendForceComposite();
-  }
+  mForwarder->Composite();
 }
 
 void
@@ -379,10 +385,10 @@ ClientLayerManager::ForwardTransaction(bool aScheduleComposite)
 
         const OpContentBufferSwap& obs = reply.get_OpContentBufferSwap();
 
-        CompositableChild* compositableChild =
-          static_cast<CompositableChild*>(obs.compositableChild());
+        CompositableClient* compositable =
+          CompositableClient::FromIPDLActor(obs.compositableChild());
         ContentClientRemote* contentClient =
-          static_cast<ContentClientRemote*>(compositableChild->GetCompositableClient());
+          static_cast<ContentClientRemote*>(compositable);
         MOZ_ASSERT(contentClient);
 
         contentClient->SwapBuffers(obs.frontUpdatedRegion());
@@ -394,12 +400,10 @@ ClientLayerManager::ForwardTransaction(bool aScheduleComposite)
 
         const OpTextureSwap& ots = reply.get_OpTextureSwap();
 
-        CompositableChild* compositableChild =
-          static_cast<CompositableChild*>(ots.compositableChild());
-        MOZ_ASSERT(compositableChild);
-
-        compositableChild->GetCompositableClient()
-          ->SetDescriptorFromReply(ots.textureId(), ots.image());
+        CompositableClient* compositable =
+          CompositableClient::FromIPDLActor(ots.compositableChild());
+        MOZ_ASSERT(compositable);
+        compositable->SetDescriptorFromReply(ots.textureId(), ots.image());
         break;
       }
       case EditReply::TReturnReleaseFence: {
@@ -430,6 +434,7 @@ ClientLayerManager::ForwardTransaction(bool aScheduleComposite)
   }
 
   mForwarder->RemoveTexturesIfNecessary();
+  mForwarder->SendPendingAsyncMessge();
   mPhase = PHASE_NONE;
 
   // this may result in Layers being deleted, which results in
@@ -500,9 +505,7 @@ void
 ClientLayerManager::ClearCachedResources(Layer* aSubtree)
 {
   MOZ_ASSERT(!HasShadowManager() || !aSubtree);
-  if (LayerTransactionChild* manager = mForwarder->GetShadowManager()) {
-    manager->SendClearCachedResources();
-  }
+  mForwarder->ClearCachedResources();
   if (aSubtree) {
     ClearLayer(aSubtree);
   } else if (mRoot) {

@@ -928,7 +928,7 @@ public:
   }
 };
 
-NS_IMPL_ISUPPORTS1(CompressDataBlobsFunction, mozIStorageFunction)
+NS_IMPL_ISUPPORTS(CompressDataBlobsFunction, mozIStorageFunction)
 
 nsresult
 UpgradeSchemaFrom8To9_0(mozIStorageConnection* aConnection)
@@ -1186,7 +1186,7 @@ public:
   }
 };
 
-NS_IMPL_ISUPPORTS1(EncodeKeysFunction, mozIStorageFunction)
+NS_IMPL_ISUPPORTS(EncodeKeysFunction, mozIStorageFunction)
 
 nsresult
 UpgradeSchemaFrom11_0To12_0(mozIStorageConnection* aConnection)
@@ -1640,7 +1640,7 @@ private:
 
 } // anonymous namespace
 
-NS_IMPL_ISUPPORTS1(OpenDatabaseHelper, nsIRunnable)
+NS_IMPL_ISUPPORTS(OpenDatabaseHelper, nsIRunnable)
 
 nsresult
 OpenDatabaseHelper::Init()

@@ -81,9 +81,6 @@ XPCOMUtils.defineLazyServiceGetter(this, "gSystemMessenger",
 XPCOMUtils.defineLazyServiceGetter(this, "gSystemWorkerManager",
                                    "@mozilla.org/telephony/system-worker-manager;1",
                                    "nsISystemWorkerManager");
-XPCOMUtils.defineLazyServiceGetter(this, "gSettingsService",
-                                   "@mozilla.org/settingsService;1",
-                                   "nsISettingsService");
 XPCOMUtils.defineLazyServiceGetter(this, "UUIDGenerator",
                                     "@mozilla.org/uuid-generator;1",
                                     "nsIUUIDGenerator");
@@ -310,6 +307,24 @@ XPCOMUtils.defineLazyGetter(this, "gMessageManager", function () {
               (event === (NFC.NFC_PEER_EVENT_READY | NFC.NFC_PEER_EVENT_LOST)));
     },
 
+    checkP2PRegistration: function checkP2PRegistration(msg) {
+      // Check if the session and application id yeild a valid registered
+      // target.  It should have registered for NFC_PEER_EVENT_READY
+      let isValid = !!this.nfc.sessionTokenMap[this.nfc._currentSessionId] &&
+                    this.isRegisteredP2PTarget(msg.json.appId,
+                                               NFC.NFC_PEER_EVENT_READY);
+      // Remember the current AppId if registered.
+      this.currentPeerAppId = (isValid) ? msg.json.appId : null;
+      let status = (isValid) ? NFC.GECKO_NFC_ERROR_SUCCESS :
+                               NFC.GECKO_NFC_ERROR_GENERIC_FAILURE;
+
+      // Notify the content process immediately of the status
+      msg.target.sendAsyncMessage(msg.name + "Response", {
+        status: status,
+        requestId: msg.json.requestId
+      });
+    },
+
     /**
      * nsIMessageListener interface methods.
      */
@@ -363,19 +378,7 @@ XPCOMUtils.defineLazyGetter(this, "gMessageManager", function () {
           this.unregisterPeerTarget(msg);
           return null;
         case "NFC:CheckP2PRegistration":
-          // Check if the application id is a valid registered target.
-          // (It should have registered for NFC_PEER_EVENT_READY).
-          let isRegistered = this.isRegisteredP2PTarget(msg.json.appId,
-                                                        NFC.NFC_PEER_EVENT_READY);
-          // Remember the current AppId if registered.
-          this.currentPeerAppId = (isRegistered) ? msg.json.appId : null;
-          let status = (isRegistered) ? NFC.GECKO_NFC_ERROR_SUCCESS :
-                                        NFC.GECKO_NFC_ERROR_GENERIC_FAILURE;
-          // Notify the content process immediately of the status
-          msg.target.sendAsyncMessage(msg.name + "Response", {
-            status: status,
-            requestId: msg.json.requestId
-          });
+          this.checkP2PRegistration(msg);
           return null;
         case "NFC:NotifyUserAcceptedP2P":
           // Notify the 'NFC_PEER_EVENT_READY' since user has acknowledged
@@ -415,11 +418,8 @@ function Nfc() {
   this.worker.onerror = this.onerror.bind(this);
   this.worker.onmessage = this.onmessage.bind(this);
 
-  Services.obs.addObserver(this, NFC.TOPIC_MOZSETTINGS_CHANGED, false);
-
   gMessageManager.init(this);
-  let lock = gSettingsService.createLock();
-  lock.get(NFC.SETTING_NFC_ENABLED, this);
+
   // Maps sessionId (that are generated from nfcd) with a unique guid : 'SessionToken'
   this.sessionTokenMap = {};
   this.targetsByRequestId = {};
@@ -434,12 +434,11 @@ Nfc.prototype = {
                                     classDescription: "Nfc",
                                     interfaces: [Ci.nsIWorkerHolder]}),
 
-  QueryInterface: XPCOMUtils.generateQI([Ci.nsIWorkerHolder,
-                                         Ci.nsIObserver,
-                                         Ci.nsISettingsServiceCallback]),
+  QueryInterface: XPCOMUtils.generateQI([Ci.nsIWorkerHolder]),
 
   _currentSessionId: null,
-  _enabled: false,
+
+  powerLevel: NFC.NFC_POWER_LEVEL_UNKNOWN,
 
   onerror: function onerror(event) {
     debug("Got an error: " + event.filename + ":" +
@@ -526,6 +525,10 @@ Nfc.prototype = {
         }
         delete this.targetsByRequestId[message.requestId];
 
+        if (message.status == NFC.GECKO_NFC_ERROR_SUCCESS) {
+          this.powerLevel = message.powerLevel;
+        }
+
         target.sendAsyncMessage("NFC:ConfigResponse", message);
         break;
       case "ConnectResponse": // Fall through.
@@ -575,8 +578,8 @@ Nfc.prototype = {
       return null;
     }
 
-    if (!this._enabled) {
-      debug("NFC is not enabled.");
+    if (this.powerLevel != NFC.NFC_POWER_LEVEL_ENABLED) {
+      debug("NFC is not enabled. current powerLevel:" + this.powerLevel);
       this.sendNfcErrorResponse(message);
       return null;
     }
@@ -628,35 +631,6 @@ Nfc.prototype = {
     }
 
     return null;
-  },
-
-  /**
-   * nsISettingsServiceCallback
-   */
-
-  handle: function handle(aName, aResult) {
-    switch(aName) {
-      case NFC.SETTING_NFC_ENABLED:
-        debug("'nfc.enabled' is now " + aResult);
-        this._enabled = aResult;
-        break;
-    }
-  },
-
-  /**
-   * nsIObserver
-   */
-
-  observe: function observe(subject, topic, data) {
-    switch (topic) {
-      case NFC.TOPIC_MOZSETTINGS_CHANGED:
-        let setting = JSON.parse(data);
-        if (setting) {
-          let setting = JSON.parse(data);
-          this.handle(setting.key, setting.value);
-        }
-        break;
-    }
   },
 
   setConfig: function setConfig(prop) {

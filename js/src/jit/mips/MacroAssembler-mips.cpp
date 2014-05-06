@@ -2834,7 +2834,7 @@ MacroAssemblerMIPSCompat::storeTypeTag(ImmTag tag, Register base, Register index
 void
 MacroAssemblerMIPSCompat::linkExitFrame()
 {
-    uint8_t *dest = (uint8_t*)GetIonContext()->runtime->addressOfIonTop();
+    uint8_t *dest = (uint8_t*)GetIonContext()->runtime->addressOfJitTop();
     movePtr(ImmPtr(dest), ScratchRegister);
     ma_sw(StackPointer, Address(ScratchRegister, 0));
 }
@@ -2842,7 +2842,7 @@ MacroAssemblerMIPSCompat::linkExitFrame()
 void
 MacroAssemblerMIPSCompat::linkParallelExitFrame(const Register &pt)
 {
-    ma_sw(StackPointer, Address(pt, offsetof(PerThreadData, ionTop)));
+    ma_sw(StackPointer, Address(pt, offsetof(PerThreadData, jitTop)));
 }
 
 // This macrosintruction calls the ion code and pushes the return address to
@@ -3038,6 +3038,14 @@ void MacroAssemblerMIPSCompat::checkStackAlignment()
     as_break(MAX_BREAK_CODE);
     bind(&aligned);
 #endif
+}
+
+void
+MacroAssemblerMIPSCompat::alignPointerUp(Register src, Register dest, uint32_t alignment)
+{
+    MOZ_ASSERT(alignment > 1);
+    ma_addu(dest, src, Imm32(alignment - 1));
+    ma_and(dest, dest, Imm32(~(alignment - 1)));
 }
 
 void
@@ -3244,4 +3252,22 @@ MacroAssemblerMIPSCompat::toggledCall(JitCode *target, bool enabled)
     }
     MOZ_ASSERT(nextOffset().getOffset() - offset.offset() == ToggledCallSize());
     return offset;
+}
+
+void
+MacroAssemblerMIPSCompat::branchPtrInNurseryRange(Register ptr, Register temp, Label *label)
+{
+    JS_ASSERT(temp != InvalidReg);
+    const Nursery &nursery = GetIonContext()->runtime->gcNursery();
+
+    // ptr and temp may be the same register, in which case we mustn't trash it
+    // before we use its contents.
+    if (ptr == temp) {
+        addPtr(ImmWord(-ptrdiff_t(nursery.start())), ptr);
+        branchPtr(Assembler::Below, ptr, Imm32(Nursery::NurserySize), label);
+    } else {
+        movePtr(ImmWord(-ptrdiff_t(nursery.start())), temp);
+        addPtr(ptr, temp);
+        branchPtr(Assembler::Below, temp, Imm32(Nursery::NurserySize), label);
+    }
 }

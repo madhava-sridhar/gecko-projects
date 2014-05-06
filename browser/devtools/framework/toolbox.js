@@ -527,7 +527,9 @@ Toolbox.prototype = {
    * Add buttons to the UI as specified in the devtools.toolbox.toolbarSpec pref
    */
   _buildButtons: function() {
-    this._buildPickerButton();
+    if (!this.target.isAddon) {
+      this._buildPickerButton();
+    }
 
     if (!this.target.isLocalTab) {
       return;
@@ -573,7 +575,8 @@ Toolbox.prototype = {
       "command-button-responsive",
       "command-button-paintflashing",
       "command-button-tilt",
-      "command-button-scratchpad"
+      "command-button-scratchpad",
+      "command-button-eyedropper"
     ].map(id => {
       let button = this.doc.getElementById(id);
       // Some buttons may not exist inside of Browser Toolbox

@@ -54,10 +54,10 @@ static const char* kNetworkConnStateChangedTopic = "network-connection-state-cha
 // While most methods of GonkGPSGeolocationProvider should only be
 // called from main thread, we deliberately put the Init and ShutdownGPS
 // methods off main thread to avoid blocking.
-NS_IMPL_ISUPPORTS3(GonkGPSGeolocationProvider,
-                   nsIGeolocationProvider,
-                   nsIObserver,
-                   nsISettingsServiceCallback)
+NS_IMPL_ISUPPORTS(GonkGPSGeolocationProvider,
+                  nsIGeolocationProvider,
+                  nsIObserver,
+                  nsISettingsServiceCallback)
 
 /* static */ GonkGPSGeolocationProvider* GonkGPSGeolocationProvider::sSingleton = nullptr;
 GpsCallbacks GonkGPSGeolocationProvider::mCallbacks = {
@@ -655,8 +655,8 @@ GonkGPSGeolocationProvider::SetupAGPS()
 #endif // MOZ_B2G_RIL
 
 
-NS_IMPL_ISUPPORTS1(GonkGPSGeolocationProvider::NetworkLocationUpdate,
-                   nsIGeolocationUpdate)
+NS_IMPL_ISUPPORTS(GonkGPSGeolocationProvider::NetworkLocationUpdate,
+                  nsIGeolocationUpdate)
 
 NS_IMETHODIMP
 GonkGPSGeolocationProvider::NetworkLocationUpdate::Update(nsIDOMGeoPosition *position)
@@ -825,10 +825,8 @@ GonkGPSGeolocationProvider::Handle(const nsAString& aName,
   } else
 #endif // MOZ_B2G_RIL
   if (aName.EqualsLiteral(SETTING_DEBUG_ENABLED)) {
-    if (!aResult.isBoolean()) {
-      return NS_ERROR_FAILURE;
-    }
-    gGPSDebugging = aResult.toBoolean();
+    gGPSDebugging = aResult.isBoolean() ? aResult.toBoolean() : false;
+    return NS_OK;
   }
   return NS_OK;
 }

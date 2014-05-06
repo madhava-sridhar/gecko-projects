@@ -12,7 +12,9 @@
 let { Ci, Cc, CC, Cu, Cr } = require("chrome");
 let Debugger = require("Debugger");
 let Services = require("Services");
-let DevToolsUtils = require("devtools/toolkit/DevToolsUtils.js");
+let { ActorPool } = require("devtools/server/actors/common");
+let { DebuggerTransport, LocalDebuggerTransport, ChildDebuggerTransport } = require("devtools/server/transport");
+let DevToolsUtils = require("devtools/toolkit/DevToolsUtils");
 let { dumpn, dbg_assert } = DevToolsUtils;
 let Services = require("Services");
 let EventEmitter = require("devtools/toolkit/event-emitter");
@@ -30,6 +32,7 @@ this.Cu = Cu;
 this.Cr = Cr;
 this.Debugger = Debugger;
 this.Services = Services;
+this.ActorPool = ActorPool;
 this.DevToolsUtils = DevToolsUtils;
 this.dumpn = dumpn;
 this.dbg_assert = dbg_assert;
@@ -45,9 +48,10 @@ const DBG_STRINGS_URI = "chrome://global/locale/devtools/debugger.properties";
 const nsFile = CC("@mozilla.org/file/local;1", "nsIFile", "initWithPath");
 Cu.import("resource://gre/modules/reflect.jsm");
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
+Cu.import("resource://gre/modules/NetUtil.jsm");
 dumpn.wantLogging = Services.prefs.getBoolPref("devtools.debugger.log");
 
-Cu.import("resource://gre/modules/commonjs/sdk/core/promise.js");
+Cu.import("resource://gre/modules/devtools/deprecated-sync-thenables.js");
 
 function loadSubScript(aURL)
 {
@@ -66,11 +70,10 @@ function loadSubScript(aURL)
 }
 
 let events = require("sdk/event/core");
-let {defer, resolve, reject, promised, all} = require("sdk/core/promise");
+let {defer, resolve, reject, all} = require("devtools/toolkit/deprecated-sync-thenables");
 this.defer = defer;
 this.resolve = resolve;
 this.reject = reject;
-this.promised = promised;
 this.all = all;
 
 Cu.import("resource://gre/modules/devtools/SourceMap.jsm");
@@ -81,8 +84,6 @@ XPCOMUtils.defineLazyModuleGetter(this, "console",
 XPCOMUtils.defineLazyGetter(this, "NetworkMonitorManager", () => {
   return require("devtools/toolkit/webconsole/network-monitor").NetworkMonitorManager;
 });
-
-loadSubScript.call(this, "resource://gre/modules/devtools/server/transport.js");
 
 // XPCOM constructors
 const ServerSocket = CC("@mozilla.org/network/server-socket;1",
@@ -218,7 +219,6 @@ var DebuggerServer = {
 
     this.xpcInspector = Cc["@mozilla.org/jsinspector;1"].getService(Ci.nsIJSInspector);
     this.initTransport(aAllowConnectionCallback);
-    this.addActors("resource://gre/modules/devtools/server/actors/root.js");
 
     this._initialized = true;
   },
@@ -345,7 +345,8 @@ var DebuggerServer = {
 
     if (!restrictPrivileges) {
       this.addTabActors();
-      this.addGlobalActor(this.ChromeDebuggerActor, "chromeDebugger");
+      let { ChromeDebuggerActor } = require("devtools/server/actors/script");
+      this.addGlobalActor(ChromeDebuggerActor, "chromeDebugger");
       this.registerModule("devtools/server/actors/preference");
     }
 
@@ -376,7 +377,7 @@ var DebuggerServer = {
    * Install tab actors.
    */
   addTabActors: function() {
-    this.addActors("resource://gre/modules/devtools/server/actors/script.js");
+    this.registerModule("devtools/server/actors/script");
     this.registerModule("devtools/server/actors/webconsole");
     this.registerModule("devtools/server/actors/inspector");
     this.registerModule("devtools/server/actors/call-watcher");
@@ -823,97 +824,9 @@ if (this.exports) {
 // Needed on B2G (See header note)
 this.DebuggerServer = DebuggerServer;
 
-/**
- * Construct an ActorPool.
- *
- * ActorPools are actorID -> actor mapping and storage.  These are
- * used to accumulate and quickly dispose of groups of actors that
- * share a lifetime.
- */
-function ActorPool(aConnection)
-{
-  this.conn = aConnection;
-  this._cleanups = {};
-  this._actors = {};
-}
-
+// Export ActorPool for requirers of main.js
 if (this.exports) {
   exports.ActorPool = ActorPool;
-}
-// Needed on B2G (See header note)
-this.ActorPool = ActorPool;
-
-ActorPool.prototype = {
-  /**
-   * Add an actor to the actor pool.  If the actor doesn't have an ID,
-   * allocate one from the connection.
-   *
-   * @param aActor object
-   *        The actor implementation.  If the object has a
-   *        'disconnect' property, it will be called when the actor
-   *        pool is cleaned up.
-   */
-  addActor: function AP_addActor(aActor) {
-    aActor.conn = this.conn;
-    if (!aActor.actorID) {
-      let prefix = aActor.actorPrefix;
-      if (typeof aActor == "function") {
-        // typeName is a convention used with protocol.js-based actors
-        prefix = aActor.prototype.actorPrefix || aActor.prototype.typeName;
-      }
-      aActor.actorID = this.conn.allocID(prefix || undefined);
-    }
-
-    if (aActor.registeredPool) {
-      aActor.registeredPool.removeActor(aActor);
-    }
-    aActor.registeredPool = this;
-
-    this._actors[aActor.actorID] = aActor;
-    if (aActor.disconnect) {
-      this._cleanups[aActor.actorID] = aActor;
-    }
-  },
-
-  get: function AP_get(aActorID) {
-    return this._actors[aActorID];
-  },
-
-  has: function AP_has(aActorID) {
-    return aActorID in this._actors;
-  },
-
-  /**
-   * Returns true if the pool is empty.
-   */
-  isEmpty: function AP_isEmpty() {
-    return Object.keys(this._actors).length == 0;
-  },
-
-  /**
-   * Remove an actor from the actor pool.
-   */
-  removeActor: function AP_remove(aActor) {
-    delete this._actors[aActor.actorID];
-    delete this._cleanups[aActor.actorID];
-  },
-
-  /**
-   * Match the api expected by the protocol library.
-   */
-  unmanage: function(aActor) {
-    return this.removeActor(aActor);
-  },
-
-  /**
-   * Run all actor cleanups.
-   */
-  cleanup: function AP_cleanup() {
-    for each (let actor in this._cleanups) {
-      actor.disconnect();
-    }
-    this._cleanups = {};
-  }
 }
 
 /**

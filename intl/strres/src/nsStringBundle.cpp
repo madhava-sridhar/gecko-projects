@@ -172,7 +172,7 @@ nsStringBundle::FormatStringFromName(const char16_t *aName,
 }
 
 
-NS_IMPL_ISUPPORTS1(nsStringBundle, nsIStringBundle)
+NS_IMPL_ISUPPORTS(nsStringBundle, nsIStringBundle)
 
 /* void GetStringFromID (in long aID, out wstring aResult); */
 NS_IMETHODIMP
@@ -350,7 +350,7 @@ nsStringBundle::FormatString(const char16_t *aFormatStr,
   return *aResult ? NS_OK : NS_ERROR_OUT_OF_MEMORY;
 }
 
-NS_IMPL_ISUPPORTS1(nsExtensibleStringBundle, nsIStringBundle)
+NS_IMPL_ISUPPORTS(nsExtensibleStringBundle, nsIStringBundle)
 
 nsExtensibleStringBundle::nsExtensibleStringBundle()
 {
@@ -472,23 +472,33 @@ nsresult nsExtensibleStringBundle::GetSimpleEnumeration(nsISimpleEnumerator ** a
 
 #define MAX_CACHED_BUNDLES 16
 
-struct bundleCacheEntry_t : public LinkedListElement<bundleCacheEntry_t> {
-  nsAutoPtr<nsCStringKey> mHashKey;
+struct bundleCacheEntry_t MOZ_FINAL : public LinkedListElement<bundleCacheEntry_t> {
+  nsCString mHashKey;
   nsCOMPtr<nsIStringBundle> mBundle;
+
+  bundleCacheEntry_t()
+  {
+    MOZ_COUNT_CTOR(bundleCacheEntry_t);
+  }
+
+  ~bundleCacheEntry_t()
+  {
+    MOZ_COUNT_DTOR(bundleCacheEntry_t);
+  }
 };
 
 
 nsStringBundleService::nsStringBundleService() :
-  mBundleMap(MAX_CACHED_BUNDLES, true)
+  mBundleMap(MAX_CACHED_BUNDLES)
 {
   mErrorService = do_GetService(kErrorServiceCID);
   NS_ASSERTION(mErrorService, "Couldn't get error service");
 }
 
-NS_IMPL_ISUPPORTS3(nsStringBundleService,
-                   nsIStringBundleService,
-                   nsIObserver,
-                   nsISupportsWeakReference)
+NS_IMPL_ISUPPORTS(nsStringBundleService,
+                  nsIStringBundleService,
+                  nsIObserver,
+                  nsISupportsWeakReference)
 
 nsStringBundleService::~nsStringBundleService()
 {
@@ -538,7 +548,7 @@ void
 nsStringBundleService::flushBundleCache()
 {
   // release all bundles in the cache
-  mBundleMap.Reset();
+  mBundleMap.Clear();
 
   while (!mBundleCache.isEmpty()) {
     delete mBundleCache.popFirst();
@@ -556,10 +566,8 @@ nsresult
 nsStringBundleService::getStringBundle(const char *aURLSpec,
                                        nsIStringBundle **aResult)
 {
-  nsCStringKey completeKey(aURLSpec);
-
-  bundleCacheEntry_t* cacheEntry =
-    (bundleCacheEntry_t*)mBundleMap.Get(&completeKey);
+  nsDependentCString key(aURLSpec);
+  bundleCacheEntry_t* cacheEntry = mBundleMap.Get(key);
 
   if (cacheEntry) {
     // cache hit!
@@ -571,7 +579,7 @@ nsStringBundleService::getStringBundle(const char *aURLSpec,
 
     // hasn't been cached, so insert it into the hash table
     nsRefPtr<nsStringBundle> bundle = new nsStringBundle(aURLSpec, mOverrideStrings);
-    cacheEntry = insertIntoCache(bundle.forget(), &completeKey);
+    cacheEntry = insertIntoCache(bundle.forget(), key);
   }
 
   // at this point the cacheEntry should exist in the hashtable,
@@ -588,7 +596,7 @@ nsStringBundleService::getStringBundle(const char *aURLSpec,
 
 bundleCacheEntry_t *
 nsStringBundleService::insertIntoCache(already_AddRefed<nsIStringBundle> aBundle,
-                                       nsCStringKey* aHashKey)
+                                       nsCString &aHashKey)
 {
   bundleCacheEntry_t *cacheEntry;
 
@@ -601,7 +609,7 @@ nsStringBundleService::insertIntoCache(already_AddRefed<nsIStringBundle> aBundle
     cacheEntry = mBundleCache.getLast();
 
     // remove it from the hash table and linked list
-    NS_ASSERTION(mBundleMap.Exists(cacheEntry->mHashKey),
+    NS_ASSERTION(mBundleMap.Contains(cacheEntry->mHashKey),
                  "Element will not be removed!");
     mBundleMap.Remove(cacheEntry->mHashKey);
     cacheEntry->remove();
@@ -609,7 +617,7 @@ nsStringBundleService::insertIntoCache(already_AddRefed<nsIStringBundle> aBundle
 
   // at this point we have a new cacheEntry that doesn't exist
   // in the hashtable, so set up the cacheEntry
-  cacheEntry->mHashKey = (nsCStringKey*)aHashKey->Clone();
+  cacheEntry->mHashKey = aHashKey;
   cacheEntry->mBundle = aBundle;
 
   // insert the entry into the cache and map, make it the MRU

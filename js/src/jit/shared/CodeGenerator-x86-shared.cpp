@@ -39,9 +39,31 @@ CodeGeneratorX86Shared::CodeGeneratorX86Shared(MIRGenerator *gen, LIRGraph *grap
 bool
 CodeGeneratorX86Shared::generatePrologue()
 {
+    JS_ASSERT(!gen->compilingAsmJS());
+
     // Note that this automatically sets MacroAssembler::framePushed().
     masm.reserveStack(frameSize());
 
+    return true;
+}
+
+bool
+CodeGeneratorX86Shared::generateAsmJSPrologue(Label *stackOverflowLabel)
+{
+    JS_ASSERT(gen->compilingAsmJS());
+
+    // The asm.js over-recursed handler wants to be able to assume that SP
+    // points to the return address, so perform the check before pushing
+    // frameDepth.
+    if (!omitOverRecursedCheck()) {
+        masm.branchPtr(Assembler::AboveOrEqual,
+                       AsmJSAbsoluteAddress(AsmJSImm_StackLimit),
+                       StackPointer,
+                       stackOverflowLabel);
+    }
+
+    // Note that this automatically sets MacroAssembler::framePushed().
+    masm.reserveStack(frameSize());
     return true;
 }
 
@@ -928,6 +950,7 @@ CodeGeneratorX86Shared::visitDivOrModConstantI(LDivOrModConstantI *ins) {
     // This emits the division answer into edx or the modulus answer into eax.
     JS_ASSERT(output == eax || output == edx);
     JS_ASSERT(lhs != eax && lhs != edx);
+    bool isDiv = (output == edx);
 
     // The absolute value of the denominator isn't a power of 2 (see LDivPowTwoI
     // and LModPowTwoI).
@@ -942,12 +965,11 @@ CodeGeneratorX86Shared::visitDivOrModConstantI(LDivOrModConstantI *ins) {
     // is non-negative or (rmc.multiplier * n) + (2^32 * n) otherwise. This is the
     // desired division result if n is non-negative, and is one less than the result
     // otherwise.
-    masm.movl(lhs, eax);
-    masm.movl(Imm32(rmc.multiplier), edx);
-    masm.imull(edx);
+    masm.movl(Imm32(rmc.multiplier), eax);
+    masm.imull(lhs);
     if (rmc.multiplier < 0)
         masm.addl(lhs, edx);
-    masm.sarl(Imm32(rmc.shift_amount), edx);
+    masm.sarl(Imm32(rmc.shiftAmount), edx);
 
     // We'll subtract -1 instead of adding 1, because (n < 0 ? -1 : 0) can be
     // computed with just a sign-extending shift of 31 bits.
@@ -957,17 +979,17 @@ CodeGeneratorX86Shared::visitDivOrModConstantI(LDivOrModConstantI *ins) {
         masm.subl(eax, edx);
     }
 
-    // After this, edx contains the correct division result.
+    // After this, edx contains the correct truncated division result.
     if (d < 0)
         masm.negl(edx);
 
-    if (output == eax) {
+    if (!isDiv) {
         masm.imull(Imm32(-d), edx, eax);
         masm.addl(lhs, eax);
     }
 
     if (!ins->mir()->isTruncated()) {
-        if (output == edx) {
+        if (isDiv) {
             // This is a division op. Multiply the obtained value by d to check if
             // the correct answer is an integer. This cannot overflow, since |d| > 1.
             masm.imull(Imm32(d), edx, eax);
@@ -1558,10 +1580,12 @@ CodeGeneratorX86Shared::visitFloor(LFloor *lir)
     FloatRegister scratch = ScratchFloatReg;
     Register output = ToRegister(lir->output());
 
+    Label bailout;
+
     if (AssemblerX86Shared::HasSSE41()) {
         // Bail on negative-zero.
-        Assembler::Condition bailCond = masm.testNegativeZero(input, output);
-        if (!bailoutIf(bailCond, lir->snapshot()))
+        masm.branchNegativeZero(input, output, &bailout);
+        if (!bailoutFrom(&bailout, lir->snapshot()))
             return false;
 
         // Round toward -Infinity.
@@ -1579,8 +1603,8 @@ CodeGeneratorX86Shared::visitFloor(LFloor *lir)
         masm.branchDouble(Assembler::DoubleLessThan, input, scratch, &negative);
 
         // Bail on negative-zero.
-        Assembler::Condition bailCond = masm.testNegativeZero(input, output);
-        if (!bailoutIf(bailCond, lir->snapshot()))
+        masm.branchNegativeZero(input, output, &bailout);
+        if (!bailoutFrom(&bailout, lir->snapshot()))
             return false;
 
         // Input is non-negative, so truncation correctly rounds.
@@ -1625,10 +1649,12 @@ CodeGeneratorX86Shared::visitFloorF(LFloorF *lir)
     FloatRegister scratch = ScratchFloatReg;
     Register output = ToRegister(lir->output());
 
+    Label bailout;
+
     if (AssemblerX86Shared::HasSSE41()) {
         // Bail on negative-zero.
-        Assembler::Condition bailCond = masm.testNegativeZeroFloat32(input, output);
-        if (!bailoutIf(bailCond, lir->snapshot()))
+        masm.branchNegativeZeroFloat32(input, output, &bailout);
+        if (!bailoutFrom(&bailout, lir->snapshot()))
             return false;
 
         // Round toward -Infinity.
@@ -1646,8 +1672,8 @@ CodeGeneratorX86Shared::visitFloorF(LFloorF *lir)
         masm.branchFloat(Assembler::DoubleLessThan, input, scratch, &negative);
 
         // Bail on negative-zero.
-        Assembler::Condition bailCond = masm.testNegativeZeroFloat32(input, output);
-        if (!bailoutIf(bailCond, lir->snapshot()))
+        masm.branchNegativeZeroFloat32(input, output, &bailout);
+        if (!bailoutFrom(&bailout, lir->snapshot()))
             return false;
 
         // Input is non-negative, so truncation correctly rounds.
@@ -1693,7 +1719,7 @@ CodeGeneratorX86Shared::visitRound(LRound *lir)
     FloatRegister scratch = ScratchFloatReg;
     Register output = ToRegister(lir->output());
 
-    Label negative, end;
+    Label negative, end, bailout;
 
     // Load 0.5 in the temp register.
     masm.loadConstantDouble(0.5, temp);
@@ -1703,8 +1729,8 @@ CodeGeneratorX86Shared::visitRound(LRound *lir)
     masm.branchDouble(Assembler::DoubleLessThan, input, scratch, &negative);
 
     // Bail on negative-zero.
-    Assembler::Condition bailCond = masm.testNegativeZero(input, output);
-    if (!bailoutIf(bailCond, lir->snapshot()))
+    masm.branchNegativeZero(input, output, &bailout);
+    if (!bailoutFrom(&bailout, lir->snapshot()))
         return false;
 
     // Input is non-negative. Add 0.5 and truncate, rounding down. Note that we
@@ -1781,7 +1807,7 @@ CodeGeneratorX86Shared::visitRoundF(LRoundF *lir)
     FloatRegister scratch = ScratchFloatReg;
     Register output = ToRegister(lir->output());
 
-    Label negative, end;
+    Label negative, end, bailout;
 
     // Load 0.5 in the temp register.
     masm.loadConstantFloat32(0.5f, temp);
@@ -1791,8 +1817,8 @@ CodeGeneratorX86Shared::visitRoundF(LRoundF *lir)
     masm.branchFloat(Assembler::DoubleLessThan, input, scratch, &negative);
 
     // Bail on negative-zero.
-    Assembler::Condition bailCond = masm.testNegativeZeroFloat32(input, output);
-    if (!bailoutIf(bailCond, lir->snapshot()))
+    masm.branchNegativeZeroFloat32(input, output, &bailout);
+    if (!bailoutFrom(&bailout, lir->snapshot()))
         return false;
 
     // Input is non-negative. Add 0.5 and truncate, rounding down. Note that we

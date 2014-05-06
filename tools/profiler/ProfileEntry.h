@@ -10,8 +10,10 @@
 #include <ostream>
 #include "GeckoProfiler.h"
 #include "platform.h"
+#include "JSStreamWriter.h"
 #include "ProfilerBacktrace.h"
 #include "mozilla/Mutex.h"
+#include "gtest/MozGtestFriend.h"
 
 class ThreadProfile;
 
@@ -45,6 +47,11 @@ public:
   char getTagName() const { return mTagName; }
 
 private:
+  FRIEND_TEST(ThreadProfile, InsertOneTag);
+  FRIEND_TEST(ThreadProfile, InsertOneTagWithTinyBuffer);
+  FRIEND_TEST(ThreadProfile, InsertTagsNoWrap);
+  FRIEND_TEST(ThreadProfile, InsertTagsWrap);
+  FRIEND_TEST(ThreadProfile, MemoryMeasure);
   friend class ThreadProfile;
   union {
     const char* mTagData;
@@ -82,7 +89,7 @@ public:
   JSObject *ToJSObject(JSContext *aCx);
   PseudoStack* GetPseudoStack();
   mozilla::Mutex* GetMutex();
-  template <typename Builder> void BuildJSObject(Builder& b, typename Builder::ObjectHandle profile);
+  void StreamJSObject(JSStreamWriter& b);
   void BeginUnwind();
   virtual void EndUnwind();
   virtual SyncProfile* AsSyncProfile() { return nullptr; }
@@ -99,6 +106,11 @@ public:
   void* GetStackTop() const { return mStackTop; }
   void DuplicateLastSample();
 private:
+  FRIEND_TEST(ThreadProfile, InsertOneTag);
+  FRIEND_TEST(ThreadProfile, InsertOneTagWithTinyBuffer);
+  FRIEND_TEST(ThreadProfile, InsertTagsNoWrap);
+  FRIEND_TEST(ThreadProfile, InsertTagsWrap);
+  FRIEND_TEST(ThreadProfile, MemoryMeasure);
   // Circular buffer 'Keep One Slot Open' implementation
   // for simplicity
   ProfileEntry*  mEntries;

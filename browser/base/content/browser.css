@@ -122,36 +122,25 @@ tabbrowser {
   visibility: hidden;
 }
 
-.tab-background,
 .tab-close-button,
-.tab-label {
+.tab-background {
   /* Explicitly set the visibility to override the value (collapsed)
    * we inherit from #TabsToolbar[collapsed] upon opening a browser window. */
   visibility: visible;
 }
 
+.tab-close-button[fadein],
 .tab-background[fadein] {
   /* This transition is only wanted for opening tabs. */
   transition: visibility 0ms 25ms;
 }
 
+.tab-close-button:not([fadein]),
 .tab-background:not([fadein]) {
   visibility: hidden;
 }
 
-.tab-close-button[fadein],
-.tab-label[fadein] {
-  /* This transition is only wanted for opening tabs. */
-  transition: opacity 70ms 230ms,
-              visibility 0ms 230ms;
-}
-
-.tab-close-button:not([fadein]),
-.tab-label:not([fadein]) {
-  visibility: collapse;
-  opacity: .6;
-}
-
+.tab-label:not([fadein]),
 .tab-throbber:not([fadein]),
 .tab-icon-image:not([fadein]) {
   display: none;
@@ -299,6 +288,11 @@ toolbarpaletteitem > #personal-bookmarks > #bookmarks-toolbar-placeholder,
 #personal-bookmarks[cui-areatype="menu-panel"] > #bookmarks-toolbar-placeholder,
 #personal-bookmarks[cui-areatype="toolbar"][overflowedItem=true] > #bookmarks-toolbar-placeholder {
   display: -moz-box;
+}
+
+toolbar:not(#TabsToolbar) > #wrapper-personal-bookmarks,
+toolbar:not(#TabsToolbar) > #personal-bookmarks {
+  -moz-box-flex: 1;
 }
 
 #zoom-controls[cui-areatype="toolbar"]:not([overflowedItem=true]) > #zoom-reset-button > .toolbarbutton-text {
@@ -498,10 +492,6 @@ menupopup[emptyplacesresult="true"] > .hide-if-empty-places-result {
 
 menuitem.spell-suggestion {
   font-weight: bold;
-}
-
-#sidebar-header > .tabs-closebutton {
-  -moz-user-focus: normal;
 }
 
 /* apply Fitts' law to the notification bar's close button */

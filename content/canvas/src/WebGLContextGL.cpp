@@ -53,7 +53,6 @@ using namespace mozilla::gl;
 using namespace mozilla::gfx;
 
 static bool BaseTypeAndSizeFromUniformType(GLenum uType, GLenum *baseType, GLint *unitSize);
-static GLenum InternalFormatForFormatAndType(GLenum format, GLenum type, bool isGLES2);
 
 const WebGLRectangleObject*
 WebGLContext::CurValidFBRectObject() const
@@ -453,12 +452,13 @@ WebGLContext::CopyTexImage2D(GLenum target,
 
     // copyTexImage2D only generates textures with type = UNSIGNED_BYTE
     const WebGLTexImageFunc func = WebGLTexImageFunc::CopyTexImage;
-    GLenum type = LOCAL_GL_UNSIGNED_BYTE;
+    const GLenum format = internalformat; // WebGL/ES Format
+    const GLenum type = LOCAL_GL_UNSIGNED_BYTE; // WebGL/ES Format
 
-    if (!ValidateTexImage(2, target, level, internalformat,
+    if (!ValidateTexImage(2, target, level, format,
                           0, 0, 0,
                           width, height, 0,
-                          border, internalformat, type,
+                          border, format, type,
                           func))
     {
         return;
@@ -477,9 +477,9 @@ WebGLContext::CopyTexImage2D(GLenum target,
       ClearBackbufferIfNeeded();
     }
 
-    bool texFormatRequiresAlpha = internalformat == LOCAL_GL_RGBA ||
-                                  internalformat == LOCAL_GL_ALPHA ||
-                                  internalformat == LOCAL_GL_LUMINANCE_ALPHA;
+    bool texFormatRequiresAlpha = format == LOCAL_GL_RGBA ||
+                                  format == LOCAL_GL_ALPHA ||
+                                  format == LOCAL_GL_LUMINANCE_ALPHA;
     bool fboFormatHasAlpha = mBoundFramebuffer ? mBoundFramebuffer->ColorAttachment(0).HasAlpha()
                                                : bool(gl->GetPixelFormat().alpha > 0);
     if (texFormatRequiresAlpha && !fboFormatHasAlpha)
@@ -494,14 +494,14 @@ WebGLContext::CopyTexImage2D(GLenum target,
 
         sizeMayChange = width != imageInfo.Width() ||
                         height != imageInfo.Height() ||
-                        internalformat != imageInfo.InternalFormat() ||
-                        type != imageInfo.Type();
+                        format != imageInfo.WebGLFormat() ||
+                        type != imageInfo.WebGLType();
     }
 
     if (sizeMayChange)
         GetAndFlushUnderlyingGLErrors();
 
-    CopyTexSubImage2D_base(target, level, internalformat, 0, 0, x, y, width, height, false);
+    CopyTexSubImage2D_base(target, level, format, 0, 0, x, y, width, height, false);
 
     if (sizeMayChange) {
         GLenum error = GetAndFlushUnderlyingGLErrors();
@@ -511,7 +511,7 @@ WebGLContext::CopyTexImage2D(GLenum target,
         }
     }
 
-    tex->SetImageInfo(target, level, width, height, internalformat, type,
+    tex->SetImageInfo(target, level, width, height, format, type,
                       WebGLImageDataStatus::InitializedImageData);
 }
 
@@ -571,12 +571,9 @@ WebGLContext::CopyTexSubImage2D(GLenum target,
     if (yoffset + height > texHeight || yoffset + height < 0)
       return ErrorInvalidValue("copyTexSubImage2D: yoffset+height is too large");
 
-    GLenum internalFormat = imageInfo.InternalFormat();
-    if (IsGLDepthFormat(internalFormat) ||
-        IsGLDepthStencilFormat(internalFormat))
-    {
+    GLenum webGLFormat = imageInfo.WebGLFormat();
+    if (IsGLDepthFormat(webGLFormat) || IsGLDepthStencilFormat(webGLFormat))
         return ErrorInvalidOperation("copyTexSubImage2D: a base internal format of DEPTH_COMPONENT or DEPTH_STENCIL isn't supported");
-    }
 
     if (mBoundFramebuffer) {
         if (!mBoundFramebuffer->CheckAndInitializeAttachments())
@@ -591,9 +588,7 @@ WebGLContext::CopyTexSubImage2D(GLenum target,
         ClearBackbufferIfNeeded();
     }
 
-    bool texFormatRequiresAlpha = (internalFormat == LOCAL_GL_RGBA ||
-                                   internalFormat == LOCAL_GL_ALPHA ||
-                                   internalFormat == LOCAL_GL_LUMINANCE_ALPHA);
+    bool texFormatRequiresAlpha = FormatHasAlpha(webGLFormat);
     bool fboFormatHasAlpha = mBoundFramebuffer ? mBoundFramebuffer->ColorAttachment(0).HasAlpha()
                                                : bool(gl->GetPixelFormat().alpha > 0);
 
@@ -605,7 +600,7 @@ WebGLContext::CopyTexSubImage2D(GLenum target,
         tex->DoDeferredImageInitialization(target, level);
     }
 
-    return CopyTexSubImage2D_base(target, level, internalFormat, xoffset, yoffset, x, y, width, height, true);
+    return CopyTexSubImage2D_base(target, level, webGLFormat, xoffset, yoffset, x, y, width, height, true);
 }
 
 
@@ -900,12 +895,12 @@ WebGLContext::GenerateMipmap(GLenum target)
     if (!tex->IsFirstImagePowerOfTwo())
         return ErrorInvalidOperation("generateMipmap: Level zero of texture does not have power-of-two width and height.");
 
-    GLenum internalFormat = tex->ImageInfoAt(imageTarget, 0).InternalFormat();
-    if (IsTextureFormatCompressed(internalFormat))
+    GLenum webGLFormat = tex->ImageInfoAt(imageTarget, 0).WebGLFormat();
+    if (IsTextureFormatCompressed(webGLFormat))
         return ErrorInvalidOperation("generateMipmap: Texture data at level zero is compressed.");
 
-    if (IsExtensionEnabled(WEBGL_depth_texture) &&
-        (IsGLDepthFormat(internalFormat) || IsGLDepthStencilFormat(internalFormat)))
+    if (IsExtensionEnabled(WebGLExtensionID::WEBGL_depth_texture) &&
+        (IsGLDepthFormat(webGLFormat) || IsGLDepthStencilFormat(webGLFormat)))
     {
         return ErrorInvalidOperation("generateMipmap: "
                                      "A texture that has a base internal format of "
@@ -1088,7 +1083,7 @@ WebGLContext::GetFramebufferAttachmentParameter(JSContext* cx,
         attachment != LOCAL_GL_STENCIL_ATTACHMENT &&
         attachment != LOCAL_GL_DEPTH_STENCIL_ATTACHMENT)
     {
-        if (IsExtensionEnabled(WEBGL_draw_buffers))
+        if (IsExtensionEnabled(WebGLExtensionID::WEBGL_draw_buffers))
         {
             if (attachment < LOCAL_GL_COLOR_ATTACHMENT0 ||
                 attachment >= GLenum(LOCAL_GL_COLOR_ATTACHMENT0 + mGLMaxColorAttachments))
@@ -1113,7 +1108,7 @@ WebGLContext::GetFramebufferAttachmentParameter(JSContext* cx,
     if (fba.Renderbuffer()) {
         switch (pname) {
             case LOCAL_GL_FRAMEBUFFER_ATTACHMENT_COLOR_ENCODING_EXT:
-                if (IsExtensionEnabled(EXT_sRGB)) {
+                if (IsExtensionEnabled(WebGLExtensionID::EXT_sRGB)) {
                     const GLenum internalFormat = fba.Renderbuffer()->InternalFormat();
                     return (internalFormat == LOCAL_GL_SRGB_EXT ||
                             internalFormat == LOCAL_GL_SRGB_ALPHA_EXT ||
@@ -1130,8 +1125,8 @@ WebGLContext::GetFramebufferAttachmentParameter(JSContext* cx,
                 return WebGLObjectAsJSValue(cx, fba.Renderbuffer(), rv);
 
             case LOCAL_GL_FRAMEBUFFER_ATTACHMENT_COMPONENT_TYPE: {
-                if (!IsExtensionEnabled(EXT_color_buffer_half_float) &&
-                    !IsExtensionEnabled(WEBGL_color_buffer_float))
+                if (!IsExtensionEnabled(WebGLExtensionID::EXT_color_buffer_half_float) &&
+                    !IsExtensionEnabled(WebGLExtensionID::WEBGL_color_buffer_float))
                 {
                     break;
                 }
@@ -1176,12 +1171,12 @@ WebGLContext::GetFramebufferAttachmentParameter(JSContext* cx,
     } else if (fba.Texture()) {
         switch (pname) {
              case LOCAL_GL_FRAMEBUFFER_ATTACHMENT_COLOR_ENCODING_EXT:
-                if (IsExtensionEnabled(EXT_sRGB)) {
-                    const GLenum internalFormat =
-                        fba.Texture()->ImageInfoBase().InternalFormat();
-                    return (internalFormat == LOCAL_GL_SRGB_EXT ||
-                            internalFormat == LOCAL_GL_SRGB_ALPHA_EXT) ?
-                        JS::NumberValue(uint32_t(LOCAL_GL_SRGB_EXT)) :
+                if (IsExtensionEnabled(WebGLExtensionID::EXT_sRGB)) {
+                    const GLenum webGLFormat =
+                        fba.Texture()->ImageInfoBase().WebGLFormat();
+                    return (webGLFormat == LOCAL_GL_SRGB ||
+                            webGLFormat == LOCAL_GL_SRGB_ALPHA) ?
+                        JS::NumberValue(uint32_t(LOCAL_GL_SRGB)) :
                         JS::NumberValue(uint32_t(LOCAL_GL_LINEAR));
                 }
                 break;
@@ -1203,8 +1198,8 @@ WebGLContext::GetFramebufferAttachmentParameter(JSContext* cx,
             }
 
             case LOCAL_GL_FRAMEBUFFER_ATTACHMENT_COMPONENT_TYPE: {
-                if (!IsExtensionEnabled(EXT_color_buffer_half_float) &&
-                    !IsExtensionEnabled(WEBGL_color_buffer_float))
+                if (!IsExtensionEnabled(WebGLExtensionID::EXT_color_buffer_half_float) &&
+                    !IsExtensionEnabled(WebGLExtensionID::WEBGL_color_buffer_float))
                 {
                     break;
                 }
@@ -1220,7 +1215,7 @@ WebGLContext::GetFramebufferAttachmentParameter(JSContext* cx,
 
                 uint32_t ret = LOCAL_GL_NONE;
                 GLenum type = fba.Texture()->ImageInfoAt(fba.TexImageTarget(),
-                                                         fba.TexImageLevel()).Type();
+                                                         fba.TexImageLevel()).WebGLType();
                 switch (type) {
                 case LOCAL_GL_UNSIGNED_BYTE:
                 case LOCAL_GL_UNSIGNED_SHORT_4_4_4_4:
@@ -1535,7 +1530,7 @@ void WebGLContext::TexParameter_base(GLenum target, GLenum pname,
             }
             break;
         case LOCAL_GL_TEXTURE_MAX_ANISOTROPY_EXT:
-            if (IsExtensionEnabled(EXT_texture_filter_anisotropic)) {
+            if (IsExtensionEnabled(WebGLExtensionID::EXT_texture_filter_anisotropic)) {
                 if (floatParamPtr && floatParam < 1.f)
                     paramValueInvalid = true;
                 else if (intParamPtr && intParam < 1)
@@ -1598,7 +1593,7 @@ WebGLContext::GetTexParameter(GLenum target, GLenum pname)
             return JS::NumberValue(uint32_t(i));
         }
         case LOCAL_GL_TEXTURE_MAX_ANISOTROPY_EXT:
-            if (IsExtensionEnabled(EXT_texture_filter_anisotropic)) {
+            if (IsExtensionEnabled(WebGLExtensionID::EXT_texture_filter_anisotropic)) {
                 GLfloat f = 0.f;
                 gl->fGetTexParameterfv(target, pname, &f);
                 return JS::DoubleValue(f);
@@ -1795,7 +1790,7 @@ WebGLContext::Hint(GLenum target, GLenum mode)
             isValid = true;
             break;
         case LOCAL_GL_FRAGMENT_SHADER_DERIVATIVE_HINT:
-            if (IsExtensionEnabled(OES_standard_derivatives))
+            if (IsExtensionEnabled(WebGLExtensionID::OES_standard_derivatives))
                 isValid = true;
             break;
     }
@@ -2118,8 +2113,8 @@ WebGLContext::ReadPixels(GLint x, GLint y, GLsizei width,
             requiredDataType = js::ArrayBufferView::TYPE_UINT16;
             break;
         case LOCAL_GL_FLOAT:
-            if (IsExtensionEnabled(WEBGL_color_buffer_float) ||
-                IsExtensionEnabled(EXT_color_buffer_half_float))
+            if (IsExtensionEnabled(WebGLExtensionID::WEBGL_color_buffer_float) ||
+                IsExtensionEnabled(WebGLExtensionID::EXT_color_buffer_half_float))
             {
                 isReadTypeValid = true;
                 isReadTypeFloat = true;
@@ -2378,16 +2373,16 @@ WebGLContext::RenderbufferStorage(GLenum target, GLenum internalformat, GLsizei 
         break;
     case LOCAL_GL_RGB16F:
     case LOCAL_GL_RGBA16F: {
-        bool hasExtensions = IsExtensionEnabled(OES_texture_half_float) &&
-                             IsExtensionEnabled(EXT_color_buffer_half_float);
+        bool hasExtensions = IsExtensionEnabled(WebGLExtensionID::OES_texture_half_float) &&
+                             IsExtensionEnabled(WebGLExtensionID::EXT_color_buffer_half_float);
         if (!hasExtensions)
             return ErrorInvalidEnumInfo("renderbufferStorage: internalformat", target);
         break;
     }
     case LOCAL_GL_RGB32F:
     case LOCAL_GL_RGBA32F: {
-        bool hasExtensions = IsExtensionEnabled(OES_texture_float) &&
-                             IsExtensionEnabled(WEBGL_color_buffer_float);
+        bool hasExtensions = IsExtensionEnabled(WebGLExtensionID::OES_texture_float) &&
+                             IsExtensionEnabled(WebGLExtensionID::WEBGL_color_buffer_float);
         if (!hasExtensions)
             return ErrorInvalidEnumInfo("renderbufferStorage: internalformat", target);
         break;
@@ -2985,13 +2980,13 @@ WebGLContext::CompileShader(WebGLShader *shader)
         resources.MaxFragmentUniformVectors = mGLMaxFragmentUniformVectors;
         resources.MaxDrawBuffers = mGLMaxDrawBuffers;
 
-        if (IsExtensionEnabled(EXT_frag_depth))
+        if (IsExtensionEnabled(WebGLExtensionID::EXT_frag_depth))
             resources.EXT_frag_depth = 1;
 
-        if (IsExtensionEnabled(OES_standard_derivatives))
+        if (IsExtensionEnabled(WebGLExtensionID::OES_standard_derivatives))
             resources.OES_standard_derivatives = 1;
 
-        if (IsExtensionEnabled(WEBGL_draw_buffers))
+        if (IsExtensionEnabled(WebGLExtensionID::WEBGL_draw_buffers))
             resources.EXT_draw_buffers = 1;
 
         // Tell ANGLE to allow highp in frag shaders. (unless disabled)
@@ -3523,6 +3518,7 @@ GLenum WebGLContext::CheckedTexImage2D(GLenum target,
                                        GLenum type,
                                        const GLvoid *data)
 {
+    MOZ_ASSERT(internalFormat == format);
     WebGLTexture *tex = activeBoundTextureForTarget(target);
     MOZ_ASSERT(tex != nullptr, "no texture bound");
 
@@ -3532,28 +3528,28 @@ GLenum WebGLContext::CheckedTexImage2D(GLenum target,
         const WebGLTexture::ImageInfo& imageInfo = tex->ImageInfoAt(target, level);
         sizeMayChange = width != imageInfo.Width() ||
                         height != imageInfo.Height() ||
-                        format != imageInfo.InternalFormat() ||
-                        type != imageInfo.Type();
+                        format != imageInfo.WebGLFormat() ||
+                        type != imageInfo.WebGLType();
     }
 
-    // convert type for half float if not on GLES2
-    GLenum realType = type;
-    if (realType == LOCAL_GL_HALF_FLOAT_OES && !gl->IsGLES()) {
-        realType = LOCAL_GL_HALF_FLOAT;
-    }
+    // Convert to format and type required by OpenGL 'driver'.
+    GLenum driverType = DriverTypeFromType(gl, type);
+    GLenum driverInternalFormat = LOCAL_GL_NONE;
+    GLenum driverFormat = LOCAL_GL_NONE;
+    DriverFormatsFromFormatAndType(gl, format, type, &driverInternalFormat, &driverFormat);
 
     if (sizeMayChange) {
         GetAndFlushUnderlyingGLErrors();
-
-        gl->fTexImage2D(target, level, internalFormat, width, height, border, format, realType, data);
-
-        GLenum error = GetAndFlushUnderlyingGLErrors();
-        return error;
     }
 
-    gl->fTexImage2D(target, level, internalFormat, width, height, border, format, realType, data);
+    gl->fTexImage2D(target, level, driverInternalFormat, width, height, border, driverFormat, driverType, data);
 
-    return LOCAL_GL_NO_ERROR;
+    GLenum error = LOCAL_GL_NO_ERROR;
+    if (sizeMayChange) {
+        error = GetAndFlushUnderlyingGLErrors();
+    }
+
+    return error;
 }
 
 void
@@ -3561,7 +3557,7 @@ WebGLContext::TexImage2D_base(GLenum target, GLint level, GLenum internalformat,
                               GLsizei width, GLsizei height, GLsizei srcStrideOrZero,
                               GLint border,
                               GLenum format, GLenum type,
-                              void *data, uint32_t byteLength,
+                              void* data, uint32_t byteLength,
                               int jsArrayType, // a TypedArray format enum, or -1 if not relevant
                               WebGLTexelFormat srcFormat, bool srcPremultiplied)
 {
@@ -3598,7 +3594,6 @@ WebGLContext::TexImage2D_base(GLenum target, GLint level, GLenum internalformat,
         GetImageSize(height, width, srcTexelSize, mPixelStoreUnpackAlignment);
 
     CheckedUint32 checked_plainRowSize = CheckedUint32(width) * srcTexelSize;
-
     CheckedUint32 checked_alignedRowSize =
         RoundedToNextMultipleOf(checked_plainRowSize.value(), mPixelStoreUnpackAlignment);
 
@@ -3618,38 +3613,16 @@ WebGLContext::TexImage2D_base(GLenum target, GLint level, GLenum internalformat,
 
     MakeContextCurrent();
 
-    // Handle ES2 and GL differences in floating point internal formats.  Note that
-    // format == internalformat, as checked above and as required by ES.
-    internalformat = InternalFormatForFormatAndType(format, type, gl->IsGLES());
-
-    // Handle ES2 and GL differences when supporting sRGB internal formats. GL ES
-    // requires that format == internalformat, but GL will fail in this case.
-    // GL requires:
-    //      format  ->  internalformat
-    //      GL_RGB      GL_SRGB_EXT
-    //      GL_RGBA     GL_SRGB_ALPHA_EXT
-    if (!gl->IsGLES()) {
-        switch (internalformat) {
-            case LOCAL_GL_SRGB_EXT:
-                format = LOCAL_GL_RGB;
-                break;
-            case LOCAL_GL_SRGB_ALPHA_EXT:
-                format = LOCAL_GL_RGBA;
-                break;
-        }
-    }
-
-    GLenum error = LOCAL_GL_NO_ERROR;
-
-    WebGLImageDataStatus imageInfoStatusIfSuccess = WebGLImageDataStatus::NoImageData;
+    nsAutoArrayPtr<uint8_t> convertedData;
+    void* pixels = nullptr;
+    WebGLImageDataStatus imageInfoStatusIfSuccess = WebGLImageDataStatus::UninitializedImageData;
 
     if (byteLength) {
-        size_t srcStride = srcStrideOrZero ? srcStrideOrZero : checked_alignedRowSize.value();
-
+        size_t   srcStride = srcStrideOrZero ? srcStrideOrZero : checked_alignedRowSize.value();
         uint32_t dstTexelSize = GetBitsPerTexel(format, type) / 8;
-        size_t dstPlainRowSize = dstTexelSize * width;
-        size_t unpackAlignment = mPixelStoreUnpackAlignment;
-        size_t dstStride = ((dstPlainRowSize + unpackAlignment-1) / unpackAlignment) * unpackAlignment;
+        size_t   dstPlainRowSize = dstTexelSize * width;
+        size_t   unpackAlignment = mPixelStoreUnpackAlignment;
+        size_t   dstStride = ((dstPlainRowSize + unpackAlignment-1) / unpackAlignment) * unpackAlignment;
 
         if (actualSrcFormat == dstFormat &&
             srcPremultiplied == mPixelStorePremultiplyAlpha &&
@@ -3657,26 +3630,23 @@ WebGLContext::TexImage2D_base(GLenum target, GLint level, GLenum internalformat,
             !mPixelStoreFlipY)
         {
             // no conversion, no flipping, so we avoid copying anything and just pass the source pointer
-            error = CheckedTexImage2D(target, level, internalformat,
-                                      width, height, border, format, type, data);
+            pixels = data;
         }
         else
         {
             size_t convertedDataSize = height * dstStride;
-            nsAutoArrayPtr<uint8_t> convertedData(new uint8_t[convertedDataSize]);
+            convertedData = new uint8_t[convertedDataSize];
             ConvertImage(width, height, srcStride, dstStride,
                         static_cast<uint8_t*>(data), convertedData,
                         actualSrcFormat, srcPremultiplied,
                         dstFormat, mPixelStorePremultiplyAlpha, dstTexelSize);
-            error = CheckedTexImage2D(target, level, internalformat,
-                                      width, height, border, format, type, convertedData);
+            pixels = reinterpret_cast<void*>(convertedData.get());
         }
         imageInfoStatusIfSuccess = WebGLImageDataStatus::InitializedImageData;
-    } else {
-        error = CheckedTexImage2D(target, level, internalformat,
-                                  width, height, border, format, type, nullptr);
-        imageInfoStatusIfSuccess = WebGLImageDataStatus::UninitializedImageData;
     }
+
+    GLenum error = CheckedTexImage2D(target, level, internalformat, width,
+                                     height, border, format, type, pixels);
 
     if (error) {
         GenerateWarning("texImage2D generated error %s", ErrorName(error));
@@ -3688,7 +3658,7 @@ WebGLContext::TexImage2D_base(GLenum target, GLint level, GLenum internalformat,
     // have NoImageData at this point.
     MOZ_ASSERT(imageInfoStatusIfSuccess != WebGLImageDataStatus::NoImageData);
 
-    tex->SetImageInfo(target, level, width, height, internalformat, type, imageInfoStatusIfSuccess);
+    tex->SetImageInfo(target, level, width, height, format, type, imageInfoStatusIfSuccess);
 }
 
 void
@@ -3733,7 +3703,7 @@ WebGLContext::TexSubImage2D_base(GLenum target, GLint level,
                                  GLint xoffset, GLint yoffset,
                                  GLsizei width, GLsizei height, GLsizei srcStrideOrZero,
                                  GLenum format, GLenum type,
-                                 void *pixels, uint32_t byteLength,
+                                 void* data, uint32_t byteLength,
                                  int jsArrayType,
                                  WebGLTexelFormat srcFormat, bool srcPremultiplied)
 {
@@ -3782,42 +3752,37 @@ WebGLContext::TexSubImage2D_base(GLenum target, GLint level,
 
     MakeContextCurrent();
 
-    size_t srcStride = srcStrideOrZero ? srcStrideOrZero : checked_alignedRowSize.value();
-
+    size_t   srcStride = srcStrideOrZero ? srcStrideOrZero : checked_alignedRowSize.value();
     uint32_t dstTexelSize = GetBitsPerTexel(format, type) / 8;
-    size_t dstPlainRowSize = dstTexelSize * width;
+    size_t   dstPlainRowSize = dstTexelSize * width;
     // There are checks above to ensure that this won't overflow.
-    size_t dstStride = RoundedToNextMultipleOf(dstPlainRowSize, mPixelStoreUnpackAlignment).value();
+    size_t   dstStride = RoundedToNextMultipleOf(dstPlainRowSize, mPixelStoreUnpackAlignment).value();
 
-    // convert type for half float if not on GLES2
-    GLenum realType = type;
-    if (realType == LOCAL_GL_HALF_FLOAT_OES) {
-        if (gl->IsSupported(gl::GLFeature::texture_half_float)) {
-            realType = LOCAL_GL_HALF_FLOAT;
-        } else {
-            MOZ_ASSERT(gl->IsExtensionSupported(gl::GLContext::OES_texture_half_float));
-        }
-    }
+    void* pixels = data;
+    nsAutoArrayPtr<uint8_t> convertedData;
 
-    if (actualSrcFormat == dstFormat &&
-        srcPremultiplied == mPixelStorePremultiplyAlpha &&
-        srcStride == dstStride &&
-        !mPixelStoreFlipY)
-    {
-        // no conversion, no flipping, so we avoid copying anything and just pass the source pointer
-        gl->fTexSubImage2D(target, level, xoffset, yoffset, width, height, format, realType, pixels);
-    }
-    else
-    {
+    // no conversion, no flipping, so we avoid copying anything and just pass the source pointer
+    bool noConversion = (actualSrcFormat == dstFormat &&
+                         srcPremultiplied == mPixelStorePremultiplyAlpha &&
+                         srcStride == dstStride &&
+                         !mPixelStoreFlipY);
+
+    if (!noConversion) {
         size_t convertedDataSize = height * dstStride;
-        nsAutoArrayPtr<uint8_t> convertedData(new uint8_t[convertedDataSize]);
+        convertedData = new uint8_t[convertedDataSize];
         ConvertImage(width, height, srcStride, dstStride,
-                    static_cast<const uint8_t*>(pixels), convertedData,
+                    static_cast<const uint8_t*>(data), convertedData,
                     actualSrcFormat, srcPremultiplied,
                     dstFormat, mPixelStorePremultiplyAlpha, dstTexelSize);
-
-        gl->fTexSubImage2D(target, level, xoffset, yoffset, width, height, format, realType, convertedData);
+        pixels = reinterpret_cast<void*>(convertedData.get());
     }
+
+    GLenum driverType = DriverTypeFromType(gl, type);
+    GLenum driverInternalFormat = LOCAL_GL_NONE;
+    GLenum driverFormat = LOCAL_GL_NONE;
+    DriverFormatsFromFormatAndType(gl, format, type, &driverInternalFormat, &driverFormat);
+
+    gl->fTexSubImage2D(target, level, xoffset, yoffset, width, height, driverFormat, driverType, pixels);
 }
 
 void
@@ -4018,12 +3983,16 @@ WebGLTexelFormat mozilla::GetWebGLTexelFormat(GLenum internalformat, GLenum type
             case LOCAL_GL_RGBA32F:
                 return WebGLTexelFormat::RGBA32F;
             case LOCAL_GL_RGB:
+            case LOCAL_GL_RGB32F:
                 return WebGLTexelFormat::RGB32F;
             case LOCAL_GL_ALPHA:
+            case LOCAL_GL_ALPHA32F_ARB:
                 return WebGLTexelFormat::A32F;
             case LOCAL_GL_LUMINANCE:
+            case LOCAL_GL_LUMINANCE32F_ARB:
                 return WebGLTexelFormat::R32F;
             case LOCAL_GL_LUMINANCE_ALPHA:
+            case LOCAL_GL_LUMINANCE_ALPHA32F_ARB:
                 return WebGLTexelFormat::RA32F;
         }
 
@@ -4032,14 +4001,19 @@ WebGLTexelFormat mozilla::GetWebGLTexelFormat(GLenum internalformat, GLenum type
         // OES_texture_half_float
         switch (internalformat) {
             case LOCAL_GL_RGBA:
+            case LOCAL_GL_RGBA16F:
                 return WebGLTexelFormat::RGBA16F;
             case LOCAL_GL_RGB:
+            case LOCAL_GL_RGB16F:
                 return WebGLTexelFormat::RGB16F;
             case LOCAL_GL_ALPHA:
+            case LOCAL_GL_ALPHA16F_ARB:
                 return WebGLTexelFormat::A16F;
             case LOCAL_GL_LUMINANCE:
+            case LOCAL_GL_LUMINANCE16F_ARB:
                 return WebGLTexelFormat::R16F;
             case LOCAL_GL_LUMINANCE_ALPHA:
+            case LOCAL_GL_LUMINANCE_ALPHA16F_ARB:
                 return WebGLTexelFormat::RA16F;
             default:
                 MOZ_ASSERT(false, "Coding mistake?! Should never reach this point.");
@@ -4060,72 +4034,6 @@ WebGLTexelFormat mozilla::GetWebGLTexelFormat(GLenum internalformat, GLenum type
     }
 
     MOZ_CRASH("Invalid WebGL texture format/type?");
-}
-
-GLenum
-InternalFormatForFormatAndType(GLenum format, GLenum type, bool isGLES2)
-{
-    // ES2 requires that format == internalformat; floating-point is
-    // indicated purely by the type that's loaded.  For desktop GL, we
-    // have to specify a floating point internal format.
-    if (isGLES2)
-        return format;
-
-    if (format == LOCAL_GL_DEPTH_COMPONENT) {
-        if (type == LOCAL_GL_UNSIGNED_SHORT)
-            return LOCAL_GL_DEPTH_COMPONENT16;
-        else if (type == LOCAL_GL_UNSIGNED_INT)
-            return LOCAL_GL_DEPTH_COMPONENT32;
-    }
-
-    if (format == LOCAL_GL_DEPTH_STENCIL) {
-        if (type == LOCAL_GL_UNSIGNED_INT_24_8_EXT)
-            return LOCAL_GL_DEPTH24_STENCIL8;
-    }
-
-    switch (type) {
-    case LOCAL_GL_UNSIGNED_BYTE:
-    case LOCAL_GL_UNSIGNED_SHORT_4_4_4_4:
-    case LOCAL_GL_UNSIGNED_SHORT_5_5_5_1:
-    case LOCAL_GL_UNSIGNED_SHORT_5_6_5:
-        return format;
-
-    case LOCAL_GL_FLOAT:
-        switch (format) {
-        case LOCAL_GL_RGBA:
-            return LOCAL_GL_RGBA32F_ARB;
-        case LOCAL_GL_RGB:
-            return LOCAL_GL_RGB32F_ARB;
-        case LOCAL_GL_ALPHA:
-            return LOCAL_GL_ALPHA32F_ARB;
-        case LOCAL_GL_LUMINANCE:
-            return LOCAL_GL_LUMINANCE32F_ARB;
-        case LOCAL_GL_LUMINANCE_ALPHA:
-            return LOCAL_GL_LUMINANCE_ALPHA32F_ARB;
-        }
-        break;
-
-    case LOCAL_GL_HALF_FLOAT_OES:
-        switch (format) {
-        case LOCAL_GL_RGBA:
-            return LOCAL_GL_RGBA16F;
-        case LOCAL_GL_RGB:
-            return LOCAL_GL_RGB16F;
-        case LOCAL_GL_ALPHA:
-            return LOCAL_GL_ALPHA16F_ARB;
-        case LOCAL_GL_LUMINANCE:
-            return LOCAL_GL_LUMINANCE16F_ARB;
-        case LOCAL_GL_LUMINANCE_ALPHA:
-            return LOCAL_GL_LUMINANCE_ALPHA16F_ARB;
-        }
-        break;
-
-    default:
-        break;
-    }
-
-    NS_ASSERTION(false, "Coding mistake -- bad format/type passed?");
-    return 0;
 }
 
 void

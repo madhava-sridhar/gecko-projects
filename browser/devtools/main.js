@@ -105,7 +105,7 @@ Tools.webConsole = {
   },
 
   isTargetSupported: function(target) {
-    return !target.isAddon;
+    return true;
   },
   build: function(iframeWindow, toolbox) {
     let panel = new WebConsolePanel(iframeWindow, toolbox);
@@ -128,6 +128,7 @@ Tools.inspector = {
   commands: [
     "devtools/resize-commands",
     "devtools/inspector/inspector-commands",
+    "devtools/eyedropper/commands.js"
   ],
 
   preventClosingOnKey: true,
@@ -313,7 +314,7 @@ Tools.scratchpad = {
   commands: "devtools/scratchpad/scratchpad-commands",
 
   isTargetSupported: function(target) {
-    return !target.isAddon && target.isRemote;
+    return target.isRemote;
   },
 
   build: function(iframeWindow, toolbox) {

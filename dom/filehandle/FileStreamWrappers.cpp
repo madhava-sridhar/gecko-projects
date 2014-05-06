@@ -119,9 +119,9 @@ FileInputStreamWrapper::FileInputStreamWrapper(nsISupports* aFileStream,
   NS_ASSERTION(mInputStream, "This should always succeed!");
 }
 
-NS_IMPL_ISUPPORTS_INHERITED1(FileInputStreamWrapper,
-                             FileStreamWrapper,
-                             nsIInputStream)
+NS_IMPL_ISUPPORTS_INHERITED(FileInputStreamWrapper,
+                            FileStreamWrapper,
+                            nsIInputStream)
 
 NS_IMETHODIMP
 FileInputStreamWrapper::Close()
@@ -238,9 +238,9 @@ FileOutputStreamWrapper::FileOutputStreamWrapper(nsISupports* aFileStream,
   NS_ASSERTION(mOutputStream, "This should always succeed!");
 }
 
-NS_IMPL_ISUPPORTS_INHERITED1(FileOutputStreamWrapper,
-                             FileStreamWrapper,
-                             nsIOutputStream)
+NS_IMPL_ISUPPORTS_INHERITED(FileOutputStreamWrapper,
+                            FileStreamWrapper,
+                            nsIOutputStream)
 
 NS_IMETHODIMP
 FileOutputStreamWrapper::Close()
@@ -352,7 +352,7 @@ FileOutputStreamWrapper::IsNonBlocking(bool* _retval)
   return NS_OK;
 }
 
-NS_IMPL_ISUPPORTS1(ProgressRunnable, nsIRunnable)
+NS_IMPL_ISUPPORTS(ProgressRunnable, nsIRunnable)
 
 NS_IMETHODIMP
 ProgressRunnable::Run()
@@ -365,7 +365,7 @@ ProgressRunnable::Run()
   return NS_OK;
 }
 
-NS_IMPL_ISUPPORTS1(CloseRunnable, nsIRunnable)
+NS_IMPL_ISUPPORTS(CloseRunnable, nsIRunnable)
 
 NS_IMETHODIMP
 CloseRunnable::Run()
@@ -378,7 +378,7 @@ CloseRunnable::Run()
   return NS_OK;
 }
 
-NS_IMPL_ISUPPORTS1(DestroyRunnable, nsIRunnable)
+NS_IMPL_ISUPPORTS(DestroyRunnable, nsIRunnable)
 
 NS_IMETHODIMP
 DestroyRunnable::Run()

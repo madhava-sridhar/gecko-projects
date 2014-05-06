@@ -89,14 +89,14 @@ TableRowsCollection::WrapObject(JSContext* aCx)
   return HTMLCollectionBinding::Wrap(aCx, this);
 }
 
-NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE_1(TableRowsCollection, mOrphanRows)
+NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE(TableRowsCollection, mOrphanRows)
 NS_IMPL_CYCLE_COLLECTING_ADDREF(TableRowsCollection)
 NS_IMPL_CYCLE_COLLECTING_RELEASE(TableRowsCollection)
 
 NS_INTERFACE_TABLE_HEAD(TableRowsCollection)
   NS_WRAPPERCACHE_INTERFACE_MAP_ENTRY
-  NS_INTERFACE_TABLE2(TableRowsCollection, nsIHTMLCollection,
-                      nsIDOMHTMLCollection)
+  NS_INTERFACE_TABLE(TableRowsCollection, nsIHTMLCollection,
+                     nsIDOMHTMLCollection)
   NS_INTERFACE_TABLE_TO_MAP_SEGUE_CYCLE_COLLECTION(TableRowsCollection)
 NS_INTERFACE_MAP_END
 
@@ -328,7 +328,7 @@ NS_IMPL_RELEASE_INHERITED(HTMLTableElement, Element)
 
 // QueryInterface implementation for HTMLTableElement
 NS_INTERFACE_TABLE_HEAD_CYCLE_COLLECTION_INHERITED(HTMLTableElement)
-  NS_INTERFACE_TABLE_INHERITED1(HTMLTableElement, nsIDOMHTMLTableElement)
+  NS_INTERFACE_TABLE_INHERITED(HTMLTableElement, nsIDOMHTMLTableElement)
 NS_INTERFACE_TABLE_TAIL_INHERITING(nsGenericHTMLElement)
 
 
@@ -548,17 +548,12 @@ HTMLTableElement::InsertRow(int32_t aIndex, ErrorResult& aError)
     }
   } else {
     // the row count was 0, so 
-    // find the first row group and insert there as first child
+    // find the last row group and insert there as first child
     nsCOMPtr<nsIContent> rowGroup;
-    for (nsIContent* child = nsINode::GetFirstChild();
+    for (nsIContent* child = nsINode::GetLastChild();
          child;
-         child = child->GetNextSibling()) {
-      nsINodeInfo *childInfo = child->NodeInfo();
-      nsIAtom *localName = childInfo->NameAtom();
-      if (childInfo->NamespaceID() == kNameSpaceID_XHTML &&
-          (localName == nsGkAtoms::thead ||
-           localName == nsGkAtoms::tbody ||
-           localName == nsGkAtoms::tfoot)) {
+         child = child->GetPreviousSibling()) {
+      if (child->IsHTML(nsGkAtoms::tbody)) {
         rowGroup = child;
         break;
       }

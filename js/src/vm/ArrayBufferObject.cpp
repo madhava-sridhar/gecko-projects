@@ -343,10 +343,8 @@ ArrayBufferObject::neuter(JSContext *cx, Handle<ArrayBufferObject*> buffer, void
         MarkObjectStateChange(cx, view);
     }
 
-    if (buffer->isMappedArrayBuffer())
-        buffer->changeContents(cx, nullptr);
-    else if (newData != buffer->dataPointer())
-        buffer->changeContents(cx, newData);
+    if (newData != buffer->dataPointer())
+        buffer->setNewOwnedData(cx->runtime()->defaultFreeOp(), newData);
 
     buffer->setByteLength(0);
     buffer->setViewList(nullptr);
@@ -371,11 +369,25 @@ ArrayBufferObject::neuter(JSContext *cx, Handle<ArrayBufferObject*> buffer, void
 }
 
 void
-ArrayBufferObject::changeContents(JSContext *cx, void *newData)
+ArrayBufferObject::setNewOwnedData(FreeOp* fop, void *newData)
 {
     JS_ASSERT(!isAsmJSArrayBuffer());
     JS_ASSERT(!isSharedArrayBuffer());
-    JS_ASSERT_IF(isMappedArrayBuffer(), !newData);
+
+    if (ownsData()) {
+        JS_ASSERT(newData != dataPointer());
+        releaseData(fop);
+    }
+
+    setDataPointer(static_cast<uint8_t *>(newData), OwnsData);
+}
+
+void
+ArrayBufferObject::changeContents(JSContext *cx, void *newData)
+{
+    // Change buffer contents.
+    uint8_t* oldDataPointer = dataPointer();
+    setNewOwnedData(cx->runtime()->defaultFreeOp(), newData);
 
     // Update all views.
     ArrayBufferViewObject *viewListHead = viewList();
@@ -386,18 +398,14 @@ ArrayBufferObject::changeContents(JSContext *cx, void *newData)
         uint8_t *viewDataPointer = view->dataPointer();
         if (viewDataPointer) {
             JS_ASSERT(newData);
-            viewDataPointer += static_cast<uint8_t *>(newData) - dataPointer();
+            ptrdiff_t offset = viewDataPointer - oldDataPointer;
+            viewDataPointer = static_cast<uint8_t *>(newData) + offset;
             view->setPrivate(viewDataPointer);
         }
 
         // Notify compiled jit code that the base pointer has moved.
         MarkObjectStateChange(cx, view);
     }
-
-    if (ownsData())
-        releaseData(cx->runtime()->defaultFreeOp());
-
-    setDataPointer(static_cast<uint8_t *>(newData), OwnsData);
 }
 
 #if defined(JS_CPU_X64)
@@ -525,9 +533,9 @@ ArrayBufferObject::canNeuterAsmJSArrayBuffer(JSContext *cx, ArrayBufferObject &b
 }
 
 void *
-ArrayBufferObject::createMappedArrayBuffer(int fd, size_t offset, size_t length)
+ArrayBufferObject::createMappedContents(int fd, size_t offset, size_t length)
 {
-    return AllocateMappedContent(fd, offset, length, ARRAY_BUFFER_ALIGNMENT);
+    return SystemPageAllocator::AllocateMappedContent(fd, offset, length, ARRAY_BUFFER_ALIGNMENT);
 }
 
 void
@@ -536,7 +544,7 @@ ArrayBufferObject::releaseMappedArray()
     if(!isMappedArrayBuffer() || isNeutered())
         return;
 
-    DeallocateMappedContent(dataPointer(), byteLength());
+    SystemPageAllocator::DeallocateMappedContent(dataPointer(), byteLength());
 }
 
 void
@@ -643,11 +651,9 @@ ArrayBufferObject::create(JSContext *cx, uint32_t nbytes, void *data /* = nullpt
     gc::AllocKind allocKind = GetGCObjectKind(nslots);
 
     Rooted<ArrayBufferObject*> obj(cx, NewBuiltinClassInstance<ArrayBufferObject>(cx, allocKind, newKind));
-    if (!obj) {
-        if (data)
-            js_free(data);
+    if (!obj)
         return nullptr;
-    }
+
     JS_ASSERT(obj->getClass() == &class_);
 
     JS_ASSERT(!gc::IsInsideNursery(cx->runtime(), obj));
@@ -738,14 +744,9 @@ ArrayBufferObject::stealContents(JSContext *cx, Handle<ArrayBufferObject*> buffe
     }
 
     void *oldData = buffer->dataPointer();
-    void *newData;
-    if (buffer->isMappedArrayBuffer())
-        newData = oldData;
-    else {
-        newData = AllocateArrayBufferContents(cx, buffer->byteLength());
-        if (!newData)
-            return nullptr;
-    }
+    void *newData = AllocateArrayBufferContents(cx, buffer->byteLength());
+    if (!newData)
+        return nullptr;
 
     if (buffer->hasStealableContents()) {
         buffer->setOwnsData(DoesntOwnData);
@@ -1013,7 +1014,8 @@ JS_GetStableArrayBufferData(JSContext *cx, HandleObject objArg)
 }
 
 JS_FRIEND_API(bool)
-JS_NeuterArrayBuffer(JSContext *cx, HandleObject obj)
+JS_NeuterArrayBuffer(JSContext *cx, HandleObject obj,
+                     NeuterDataDisposition changeData)
 {
     if (!obj->is<ArrayBufferObject>()) {
         JS_ReportError(cx, "ArrayBuffer object required");
@@ -1027,7 +1029,16 @@ JS_NeuterArrayBuffer(JSContext *cx, HandleObject obj)
         return false;
     }
 
-    ArrayBufferObject::neuter(cx, buffer, buffer->dataPointer());
+    void *newData;
+    if (changeData == ChangeData && buffer->hasStealableContents()) {
+        newData = AllocateArrayBufferContents(cx, buffer->byteLength());
+        if (!newData)
+            return false;
+    } else {
+        newData = buffer->dataPointer();
+    }
+
+    ArrayBufferObject::neuter(cx, buffer, newData);
     return true;
 }
 
@@ -1090,13 +1101,13 @@ JS_NewMappedArrayBufferWithContents(JSContext *cx, size_t nbytes, void *contents
 JS_PUBLIC_API(void *)
 JS_CreateMappedArrayBufferContents(int fd, size_t offset, size_t length)
 {
-    return ArrayBufferObject::createMappedArrayBuffer(fd, offset, length);
+    return ArrayBufferObject::createMappedContents(fd, offset, length);
 }
 
 JS_PUBLIC_API(void)
 JS_ReleaseMappedArrayBufferContents(void *contents, size_t length)
 {
-    DeallocateMappedContent(contents, length);
+    SystemPageAllocator::DeallocateMappedContent(contents, length);
 }
 
 JS_FRIEND_API(bool)
@@ -1122,9 +1133,9 @@ JS_GetArrayBufferViewData(JSObject *obj)
 }
 
 JS_FRIEND_API(JSObject *)
-JS_GetArrayBufferViewBuffer(JSContext *cx, JSObject *obj)
+JS_GetArrayBufferViewBuffer(JSContext *cx, HandleObject objArg)
 {
-    obj = CheckedUnwrap(obj);
+    JSObject *obj = CheckedUnwrap(objArg);
     if (!obj)
         return nullptr;
     Rooted<ArrayBufferViewObject *> viewObject(cx, &obj->as<ArrayBufferViewObject>());
@@ -1173,4 +1184,3 @@ JS_GetObjectAsArrayBuffer(JSObject *obj, uint32_t *length, uint8_t **data)
 
     return obj;
 }
-

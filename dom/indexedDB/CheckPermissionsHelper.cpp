@@ -65,8 +65,7 @@ GetIndexedDBPermissions(nsIDOMWindow* aWindow)
     return PERMISSION_DENIED;
   }
 
-  nsCOMPtr<nsIPermissionManager> permissionManager =
-    do_GetService(NS_PERMISSIONMANAGER_CONTRACTID);
+  nsCOMPtr<nsIPermissionManager> permissionManager = GetPermissionManager();
   NS_ENSURE_TRUE(permissionManager, PERMISSION_DENIED);
 
   uint32_t permission;
@@ -98,9 +97,10 @@ CheckPermissionsHelper::CheckPermissionsHelper(OpenDatabaseHelper* aHelper,
 CheckPermissionsHelper::~CheckPermissionsHelper()
 { }
 
-NS_IMPL_ISUPPORTS3(CheckPermissionsHelper, nsIRunnable,
-                   nsIInterfaceRequestor,
-                   nsIObserver)
+NS_IMPL_ISUPPORTS(CheckPermissionsHelper,
+                  nsIRunnable,
+                  nsIInterfaceRequestor,
+                  nsIObserver)
 
 NS_IMETHODIMP
 CheckPermissionsHelper::Run()
@@ -127,8 +127,7 @@ CheckPermissionsHelper::Run()
       nsIPrincipal* windowPrincipal = sop->GetPrincipal();
       NS_ASSERTION(windowPrincipal, "Null principal!");
 
-      nsCOMPtr<nsIPermissionManager> permissionManager =
-        do_GetService(NS_PERMISSIONMANAGER_CONTRACTID);
+      nsCOMPtr<nsIPermissionManager> permissionManager = GetPermissionManager();
       NS_ENSURE_STATE(permissionManager);
 
       rv = permissionManager->AddFromPrincipal(windowPrincipal,

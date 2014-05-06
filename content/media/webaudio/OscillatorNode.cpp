@@ -14,8 +14,8 @@
 namespace mozilla {
 namespace dom {
 
-NS_IMPL_CYCLE_COLLECTION_INHERITED_3(OscillatorNode, AudioNode,
-                                     mPeriodicWave, mFrequency, mDetune)
+NS_IMPL_CYCLE_COLLECTION_INHERITED(OscillatorNode, AudioNode,
+                                   mPeriodicWave, mFrequency, mDetune)
 
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION_INHERITED(OscillatorNode)
 NS_INTERFACE_MAP_END_INHERITING(AudioNode)
@@ -542,7 +542,7 @@ OscillatorNode::SizeOfExcludingThis(MallocSizeOf aMallocSizeOf) const
   size_t amount = AudioNode::SizeOfExcludingThis(aMallocSizeOf);
 
   // For now only report if we know for sure that it's not shared.
-  amount += mPeriodicWave->SizeOfExcludingThisIfNotShared(aMallocSizeOf);
+  amount += mPeriodicWave->SizeOfIncludingThisIfNotShared(aMallocSizeOf);
   amount += mFrequency->SizeOfIncludingThis(aMallocSizeOf);
   amount += mDetune->SizeOfIncludingThis(aMallocSizeOf);
   return amount;

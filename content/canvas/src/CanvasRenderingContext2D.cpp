@@ -158,7 +158,7 @@ public:
   }
 };
 
-NS_IMPL_ISUPPORTS1(Canvas2dPixelsReporter, nsIMemoryReporter)
+NS_IMPL_ISUPPORTS(Canvas2dPixelsReporter, nsIMemoryReporter)
 
 class CanvasRadialGradient : public CanvasGradient
 {
@@ -166,7 +166,7 @@ public:
   CanvasRadialGradient(CanvasRenderingContext2D* aContext,
                        const Point &aBeginOrigin, Float aBeginRadius,
                        const Point &aEndOrigin, Float aEndRadius)
-    : CanvasGradient(aContext, RADIAL)
+    : CanvasGradient(aContext, Type::RADIAL)
     , mCenter1(aBeginOrigin)
     , mCenter2(aEndOrigin)
     , mRadius1(aBeginRadius)
@@ -185,7 +185,7 @@ class CanvasLinearGradient : public CanvasGradient
 public:
   CanvasLinearGradient(CanvasRenderingContext2D* aContext,
                        const Point &aBegin, const Point &aEnd)
-    : CanvasGradient(aContext, LINEAR)
+    : CanvasGradient(aContext, Type::LINEAR)
     , mBegin(aBegin)
     , mEnd(aEnd)
   {
@@ -231,7 +231,7 @@ public:
     if (state.StyleIsColor(aStyle)) {
       mPattern = new (mColorPattern.addr()) ColorPattern(Color::FromABGR(state.colorStyles[aStyle]));
     } else if (state.gradientStyles[aStyle] &&
-               state.gradientStyles[aStyle]->GetType() == CanvasGradient::LINEAR) {
+               state.gradientStyles[aStyle]->GetType() == CanvasGradient::Type::LINEAR) {
       CanvasLinearGradient *gradient =
         static_cast<CanvasLinearGradient*>(state.gradientStyles[aStyle].get());
 
@@ -239,7 +239,7 @@ public:
         LinearGradientPattern(gradient->mBegin, gradient->mEnd,
                               gradient->GetGradientStopsForTarget(aRT));
     } else if (state.gradientStyles[aStyle] &&
-               state.gradientStyles[aStyle]->GetType() == CanvasGradient::RADIAL) {
+               state.gradientStyles[aStyle]->GetType() == CanvasGradient::Type::RADIAL) {
       CanvasRadialGradient *gradient =
         static_cast<CanvasRadialGradient*>(state.gradientStyles[aStyle].get());
 
@@ -255,7 +255,7 @@ public:
       }
 
       ExtendMode mode;
-      if (state.patternStyles[aStyle]->mRepeat == CanvasPattern::NOREPEAT) {
+      if (state.patternStyles[aStyle]->mRepeat == CanvasPattern::RepeatMode::NOREPEAT) {
         mode = ExtendMode::CLAMP;
       } else {
         mode = ExtendMode::REPEAT;
@@ -415,12 +415,12 @@ CanvasGradient::AddColorStop(float offset, const nsAString& colorstr, ErrorResul
 NS_IMPL_CYCLE_COLLECTION_ROOT_NATIVE(CanvasGradient, AddRef)
 NS_IMPL_CYCLE_COLLECTION_UNROOT_NATIVE(CanvasGradient, Release)
 
-NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE_1(CanvasGradient, mContext)
+NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE(CanvasGradient, mContext)
 
 NS_IMPL_CYCLE_COLLECTION_ROOT_NATIVE(CanvasPattern, AddRef)
 NS_IMPL_CYCLE_COLLECTION_UNROOT_NATIVE(CanvasPattern, Release)
 
-NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE_1(CanvasPattern, mContext)
+NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE(CanvasPattern, mContext)
 
 class CanvasRenderingContext2DUserData : public LayerUserData {
 public:
@@ -478,10 +478,10 @@ NS_IMPL_CYCLE_COLLECTION_CLASS(CanvasRenderingContext2D)
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(CanvasRenderingContext2D)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mCanvasElement)
   for (uint32_t i = 0; i < tmp->mStyleStack.Length(); i++) {
-    ImplCycleCollectionUnlink(tmp->mStyleStack[i].patternStyles[STYLE_STROKE]);
-    ImplCycleCollectionUnlink(tmp->mStyleStack[i].patternStyles[STYLE_FILL]);
-    ImplCycleCollectionUnlink(tmp->mStyleStack[i].gradientStyles[STYLE_STROKE]);
-    ImplCycleCollectionUnlink(tmp->mStyleStack[i].gradientStyles[STYLE_FILL]);
+    ImplCycleCollectionUnlink(tmp->mStyleStack[i].patternStyles[Style::STROKE]);
+    ImplCycleCollectionUnlink(tmp->mStyleStack[i].patternStyles[Style::FILL]);
+    ImplCycleCollectionUnlink(tmp->mStyleStack[i].gradientStyles[Style::STROKE]);
+    ImplCycleCollectionUnlink(tmp->mStyleStack[i].gradientStyles[Style::FILL]);
   }
   NS_IMPL_CYCLE_COLLECTION_UNLINK_PRESERVED_WRAPPER
 NS_IMPL_CYCLE_COLLECTION_UNLINK_END
@@ -489,10 +489,10 @@ NS_IMPL_CYCLE_COLLECTION_UNLINK_END
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(CanvasRenderingContext2D)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mCanvasElement)
   for (uint32_t i = 0; i < tmp->mStyleStack.Length(); i++) {
-    ImplCycleCollectionTraverse(cb, tmp->mStyleStack[i].patternStyles[STYLE_STROKE], "Stroke CanvasPattern");
-    ImplCycleCollectionTraverse(cb, tmp->mStyleStack[i].patternStyles[STYLE_FILL], "Fill CanvasPattern");
-    ImplCycleCollectionTraverse(cb, tmp->mStyleStack[i].gradientStyles[STYLE_STROKE], "Stroke CanvasGradient");
-    ImplCycleCollectionTraverse(cb, tmp->mStyleStack[i].gradientStyles[STYLE_FILL], "Fill CanvasGradient");
+    ImplCycleCollectionTraverse(cb, tmp->mStyleStack[i].patternStyles[Style::STROKE], "Stroke CanvasPattern");
+    ImplCycleCollectionTraverse(cb, tmp->mStyleStack[i].patternStyles[Style::FILL], "Fill CanvasPattern");
+    ImplCycleCollectionTraverse(cb, tmp->mStyleStack[i].gradientStyles[Style::STROKE], "Stroke CanvasGradient");
+    ImplCycleCollectionTraverse(cb, tmp->mStyleStack[i].gradientStyles[Style::FILL], "Fill CanvasGradient");
   }
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE_SCRIPT_OBJECTS
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
@@ -825,7 +825,7 @@ CanvasRenderingContext2D::RemoveDemotableContext(CanvasRenderingContext2D* conte
 }
 
 bool
-CheckSizeForSkiaGL(IntSize size) {
+CanvasRenderingContext2D::CheckSizeForSkiaGL(IntSize size) {
   MOZ_ASSERT(NS_IsMainThread());
 
   int minsize = Preferences::GetInt("gfx.canvas.min-size-for-skia-gl", 128);
@@ -852,6 +852,11 @@ CheckSizeForSkiaGL(IntSize size) {
   // Cache the number of pixels on the primary screen
   static int32_t gScreenPixels = -1;
   if (gScreenPixels < 0) {
+    // Default to historical mobile screen size of 980x480.  In addition,
+    // allow skia use up to this size even if the screen is smaller.  A lot
+    // content expects this size to work well.
+    gScreenPixels = 980 * 480;
+
     nsCOMPtr<nsIScreenManager> screenManager =
       do_GetService("@mozilla.org/gfx/screenmanager;1");
     if (screenManager) {
@@ -861,13 +866,33 @@ CheckSizeForSkiaGL(IntSize size) {
         int32_t x, y, width, height;
         primaryScreen->GetRect(&x, &y, &width, &height);
 
-        gScreenPixels = width * height;
+        gScreenPixels = std::max(gScreenPixels, width * height);
       }
     }
   }
 
+  // On high DPI devices the screen pixels may be scaled up.  Make
+  // sure to apply that scaling here as well if we are hooked up
+  // to a widget.
+  static double gDefaultScale = 0.0;
+  if (gDefaultScale < 1.0) {
+    nsIPresShell* ps = GetPresShell();
+    if (ps) {
+      nsIFrame* frame = ps->GetRootFrame();
+      if (frame) {
+        nsIWidget* widget = frame->GetNearestWidget();
+        if (widget) {
+          gDefaultScale = widget->GetDefaultScale().scale;
+        }
+      }
+    }
+  }
+
+  double scale = gDefaultScale > 0 ? gDefaultScale : 1.0;
+  int32_t threshold = ceil(scale * scale * gScreenPixels);
+
   // screen size acts as max threshold
-  return gScreenPixels < 0 || (size.width * size.height) <= gScreenPixels;
+  return threshold < 0 || (size.width * size.height) <= threshold;
 }
 
 void
@@ -1002,8 +1027,8 @@ CanvasRenderingContext2D::ClearTarget()
   ContextState *state = mStyleStack.AppendElement();
   state->globalAlpha = 1.0;
 
-  state->colorStyles[STYLE_FILL] = NS_RGB(0,0,0);
-  state->colorStyles[STYLE_STROKE] = NS_RGB(0,0,0);
+  state->colorStyles[Style::FILL] = NS_RGB(0,0,0);
+  state->colorStyles[Style::STROKE] = NS_RGB(0,0,0);
   state->shadowColor = NS_RGBA(0,0,0,0);
 }
 
@@ -1335,7 +1360,7 @@ CanvasRenderingContext2D::GetMozCurrentTransformInverse(JSContext* cx,
   Matrix ctm = mTarget->GetTransform();
 
   if (!ctm.Invert()) {
-    double NaN = JSVAL_TO_DOUBLE(JS_GetNaNValue(cx));
+    double NaN = JS_GetNaNValue(cx).toDouble();
     ctm = Matrix(NaN, NaN, NaN, NaN, NaN, NaN);
   }
 
@@ -1427,16 +1452,16 @@ CanvasRenderingContext2D::CreatePattern(const HTMLImageOrCanvasOrVideoElement& e
                                         ErrorResult& error)
 {
   CanvasPattern::RepeatMode repeatMode =
-    CanvasPattern::NOREPEAT;
+    CanvasPattern::RepeatMode::NOREPEAT;
 
   if (repeat.IsEmpty() || repeat.EqualsLiteral("repeat")) {
-    repeatMode = CanvasPattern::REPEAT;
+    repeatMode = CanvasPattern::RepeatMode::REPEAT;
   } else if (repeat.EqualsLiteral("repeat-x")) {
-    repeatMode = CanvasPattern::REPEATX;
+    repeatMode = CanvasPattern::RepeatMode::REPEATX;
   } else if (repeat.EqualsLiteral("repeat-y")) {
-    repeatMode = CanvasPattern::REPEATY;
+    repeatMode = CanvasPattern::RepeatMode::REPEATY;
   } else if (repeat.EqualsLiteral("no-repeat")) {
-    repeatMode = CanvasPattern::NOREPEAT;
+    repeatMode = CanvasPattern::RepeatMode::NOREPEAT;
   } else {
     error.Throw(NS_ERROR_DOM_SYNTAX_ERR);
     return nullptr;
@@ -1465,7 +1490,13 @@ CanvasRenderingContext2D::CreatePattern(const HTMLImageOrCanvasOrVideoElement& e
       return pat.forget();
     }
   } else if (element.IsHTMLImageElement()) {
-    htmlElement = &element.GetAsHTMLImageElement();
+    HTMLImageElement* img = &element.GetAsHTMLImageElement();
+    if (img->IntrinsicState().HasState(NS_EVENT_STATE_BROKEN)) {
+      error.Throw(NS_ERROR_DOM_INVALID_STATE_ERR);
+      return nullptr;
+    }
+
+    htmlElement = img;
   } else {
     htmlElement = &element.GetAsHTMLVideoElement();
   }
@@ -1527,15 +1558,15 @@ CanvasRenderingContext2D::FillRect(double x, double y, double w,
 {
   const ContextState &state = CurrentState();
 
-  if (state.patternStyles[STYLE_FILL]) {
+  if (state.patternStyles[Style::FILL]) {
     CanvasPattern::RepeatMode repeat =
-      state.patternStyles[STYLE_FILL]->mRepeat;
+      state.patternStyles[Style::FILL]->mRepeat;
     // In the FillRect case repeat modes are easy to deal with.
-    bool limitx = repeat == CanvasPattern::NOREPEAT || repeat == CanvasPattern::REPEATY;
-    bool limity = repeat == CanvasPattern::NOREPEAT || repeat == CanvasPattern::REPEATX;
+    bool limitx = repeat == CanvasPattern::RepeatMode::NOREPEAT || repeat == CanvasPattern::RepeatMode::REPEATY;
+    bool limity = repeat == CanvasPattern::RepeatMode::NOREPEAT || repeat == CanvasPattern::RepeatMode::REPEATX;
 
     IntSize patternSize =
-      state.patternStyles[STYLE_FILL]->mSurface->GetSize();
+      state.patternStyles[Style::FILL]->mSurface->GetSize();
 
     // We always need to execute painting for non-over operators, even if
     // we end up with w/h = 0.
@@ -1583,7 +1614,7 @@ CanvasRenderingContext2D::FillRect(double x, double y, double w,
 
   AdjustedTarget(this, bounds.IsEmpty() ? nullptr : &bounds)->
     FillRect(mgfx::Rect(x, y, w, h),
-             CanvasGeneralPattern().ForStyle(this, STYLE_FILL, mTarget),
+             CanvasGeneralPattern().ForStyle(this, Style::FILL, mTarget),
              DrawOptions(state.globalAlpha, UsedOperation()));
 
   RedrawUser(gfxRect(x, y, w, h));
@@ -1619,7 +1650,7 @@ CanvasRenderingContext2D::StrokeRect(double x, double y, double w,
     }
     AdjustedTarget(this, bounds.IsEmpty() ? nullptr : &bounds)->
       StrokeLine(Point(x, y), Point(x + w, y),
-                  CanvasGeneralPattern().ForStyle(this, STYLE_STROKE, mTarget),
+                  CanvasGeneralPattern().ForStyle(this, Style::STROKE, mTarget),
                   StrokeOptions(state.lineWidth, state.lineJoin,
                                 cap, state.miterLimit,
                                 state.dash.Length(),
@@ -1636,7 +1667,7 @@ CanvasRenderingContext2D::StrokeRect(double x, double y, double w,
     }
     AdjustedTarget(this, bounds.IsEmpty() ? nullptr : &bounds)->
       StrokeLine(Point(x, y), Point(x, y + h),
-                  CanvasGeneralPattern().ForStyle(this, STYLE_STROKE, mTarget),
+                  CanvasGeneralPattern().ForStyle(this, Style::STROKE, mTarget),
                   StrokeOptions(state.lineWidth, state.lineJoin,
                                 cap, state.miterLimit,
                                 state.dash.Length(),
@@ -1648,7 +1679,7 @@ CanvasRenderingContext2D::StrokeRect(double x, double y, double w,
 
   AdjustedTarget(this, bounds.IsEmpty() ? nullptr : &bounds)->
     StrokeRect(mgfx::Rect(x, y, w, h),
-                CanvasGeneralPattern().ForStyle(this, STYLE_STROKE, mTarget),
+                CanvasGeneralPattern().ForStyle(this, Style::STROKE, mTarget),
                 StrokeOptions(state.lineWidth, state.lineJoin,
                               state.lineCap, state.miterLimit,
                               state.dash.Length(),
@@ -1688,7 +1719,7 @@ CanvasRenderingContext2D::Fill(const CanvasWindingRule& winding)
   }
 
   AdjustedTarget(this, bounds.IsEmpty() ? nullptr : &bounds)->
-    Fill(mPath, CanvasGeneralPattern().ForStyle(this, STYLE_FILL, mTarget),
+    Fill(mPath, CanvasGeneralPattern().ForStyle(this, Style::FILL, mTarget),
          DrawOptions(CurrentState().globalAlpha, UsedOperation()));
 
   Redraw();
@@ -1711,7 +1742,7 @@ void CanvasRenderingContext2D::Fill(const CanvasPath& path, const CanvasWindingR
   }
 
   AdjustedTarget(this, bounds.IsEmpty() ? nullptr : &bounds)->
-    Fill(gfxpath, CanvasGeneralPattern().ForStyle(this, STYLE_FILL, mTarget),
+    Fill(gfxpath, CanvasGeneralPattern().ForStyle(this, Style::FILL, mTarget),
          DrawOptions(CurrentState().globalAlpha, UsedOperation()));
 
   Redraw();
@@ -1740,7 +1771,7 @@ CanvasRenderingContext2D::Stroke()
   }
 
   AdjustedTarget(this, bounds.IsEmpty() ? nullptr : &bounds)->
-    Stroke(mPath, CanvasGeneralPattern().ForStyle(this, STYLE_STROKE, mTarget),
+    Stroke(mPath, CanvasGeneralPattern().ForStyle(this, Style::STROKE, mTarget),
            strokeOptions, DrawOptions(state.globalAlpha, UsedOperation()));
 
   Redraw();
@@ -1771,7 +1802,7 @@ CanvasRenderingContext2D::Stroke(const CanvasPath& path)
   }
 
   AdjustedTarget(this, bounds.IsEmpty() ? nullptr : &bounds)->
-    Stroke(gfxpath, CanvasGeneralPattern().ForStyle(this, STYLE_STROKE, mTarget),
+    Stroke(gfxpath, CanvasGeneralPattern().ForStyle(this, Style::STROKE, mTarget),
            strokeOptions, DrawOptions(state.globalAlpha, UsedOperation()));
 
   Redraw();
@@ -1803,7 +1834,7 @@ void CanvasRenderingContext2D::DrawFocusIfNeeded(mozilla::dom::Element& aElement
 
     // color and style of the rings is the same as for image maps
     // set the background focus color
-    CurrentState().SetColorStyle(STYLE_STROKE, NS_RGBA(255, 255, 255, 255));
+    CurrentState().SetColorStyle(Style::STROKE, NS_RGBA(255, 255, 255, 255));
     // draw the focus ring
     Stroke();
 
@@ -1813,7 +1844,7 @@ void CanvasRenderingContext2D::DrawFocusIfNeeded(mozilla::dom::Element& aElement
     dash.AppendElement(1);
 
     // set the foreground focus color
-    CurrentState().SetColorStyle(STYLE_STROKE, NS_RGBA(0,0,0, 255));
+    CurrentState().SetColorStyle(Style::STROKE, NS_RGBA(0,0,0, 255));
     // draw the focus ring
     Stroke();
 
@@ -1837,7 +1868,10 @@ bool CanvasRenderingContext2D::DrawCustomFocusRing(mozilla::dom::Element& aEleme
     nsCOMPtr<nsIDOMElement> focusedElement;
     fm->GetFocusedElement(getter_AddRefs(focusedElement));
     if (SameCOMIdentity(aElement.AsDOMNode(), focusedElement)) {
-      return true;
+      nsPIDOMWindow *window = aElement.OwnerDoc()->GetWindow();
+      if (window) {
+        return window->ShouldShowFocusRing();
+      }
     }
   }
 
@@ -2291,15 +2325,15 @@ void
 CanvasRenderingContext2D::SetTextAlign(const nsAString& ta)
 {
   if (ta.EqualsLiteral("start"))
-    CurrentState().textAlign = TEXT_ALIGN_START;
+    CurrentState().textAlign = TextAlign::START;
   else if (ta.EqualsLiteral("end"))
-    CurrentState().textAlign = TEXT_ALIGN_END;
+    CurrentState().textAlign = TextAlign::END;
   else if (ta.EqualsLiteral("left"))
-    CurrentState().textAlign = TEXT_ALIGN_LEFT;
+    CurrentState().textAlign = TextAlign::LEFT;
   else if (ta.EqualsLiteral("right"))
-    CurrentState().textAlign = TEXT_ALIGN_RIGHT;
+    CurrentState().textAlign = TextAlign::RIGHT;
   else if (ta.EqualsLiteral("center"))
-    CurrentState().textAlign = TEXT_ALIGN_CENTER;
+    CurrentState().textAlign = TextAlign::CENTER;
 }
 
 void
@@ -2307,19 +2341,19 @@ CanvasRenderingContext2D::GetTextAlign(nsAString& ta)
 {
   switch (CurrentState().textAlign)
   {
-  case TEXT_ALIGN_START:
+  case TextAlign::START:
     ta.AssignLiteral("start");
     break;
-  case TEXT_ALIGN_END:
+  case TextAlign::END:
     ta.AssignLiteral("end");
     break;
-  case TEXT_ALIGN_LEFT:
+  case TextAlign::LEFT:
     ta.AssignLiteral("left");
     break;
-  case TEXT_ALIGN_RIGHT:
+  case TextAlign::RIGHT:
     ta.AssignLiteral("right");
     break;
-  case TEXT_ALIGN_CENTER:
+  case TextAlign::CENTER:
     ta.AssignLiteral("center");
     break;
   }
@@ -2329,17 +2363,17 @@ void
 CanvasRenderingContext2D::SetTextBaseline(const nsAString& tb)
 {
   if (tb.EqualsLiteral("top"))
-    CurrentState().textBaseline = TEXT_BASELINE_TOP;
+    CurrentState().textBaseline = TextBaseline::TOP;
   else if (tb.EqualsLiteral("hanging"))
-    CurrentState().textBaseline = TEXT_BASELINE_HANGING;
+    CurrentState().textBaseline = TextBaseline::HANGING;
   else if (tb.EqualsLiteral("middle"))
-    CurrentState().textBaseline = TEXT_BASELINE_MIDDLE;
+    CurrentState().textBaseline = TextBaseline::MIDDLE;
   else if (tb.EqualsLiteral("alphabetic"))
-    CurrentState().textBaseline = TEXT_BASELINE_ALPHABETIC;
+    CurrentState().textBaseline = TextBaseline::ALPHABETIC;
   else if (tb.EqualsLiteral("ideographic"))
-    CurrentState().textBaseline = TEXT_BASELINE_IDEOGRAPHIC;
+    CurrentState().textBaseline = TextBaseline::IDEOGRAPHIC;
   else if (tb.EqualsLiteral("bottom"))
-    CurrentState().textBaseline = TEXT_BASELINE_BOTTOM;
+    CurrentState().textBaseline = TextBaseline::BOTTOM;
 }
 
 void
@@ -2347,22 +2381,22 @@ CanvasRenderingContext2D::GetTextBaseline(nsAString& tb)
 {
   switch (CurrentState().textBaseline)
   {
-  case TEXT_BASELINE_TOP:
+  case TextBaseline::TOP:
     tb.AssignLiteral("top");
     break;
-  case TEXT_BASELINE_HANGING:
+  case TextBaseline::HANGING:
     tb.AssignLiteral("hanging");
     break;
-  case TEXT_BASELINE_MIDDLE:
+  case TextBaseline::MIDDLE:
     tb.AssignLiteral("middle");
     break;
-  case TEXT_BASELINE_ALPHABETIC:
+  case TextBaseline::ALPHABETIC:
     tb.AssignLiteral("alphabetic");
     break;
-  case TEXT_BASELINE_IDEOGRAPHIC:
+  case TextBaseline::IDEOGRAPHIC:
     tb.AssignLiteral("ideographic");
     break;
-  case TEXT_BASELINE_BOTTOM:
+  case TextBaseline::BOTTOM:
     tb.AssignLiteral("bottom");
     break;
   }
@@ -2387,7 +2421,7 @@ CanvasRenderingContext2D::FillText(const nsAString& text, double x,
                                    const Optional<double>& maxWidth,
                                    ErrorResult& error)
 {
-  error = DrawOrMeasureText(text, x, y, maxWidth, TEXT_DRAW_OPERATION_FILL, nullptr);
+  error = DrawOrMeasureText(text, x, y, maxWidth, TextDrawOperation::FILL, nullptr);
 }
 
 void
@@ -2396,7 +2430,7 @@ CanvasRenderingContext2D::StrokeText(const nsAString& text, double x,
                                      const Optional<double>& maxWidth,
                                      ErrorResult& error)
 {
-  error = DrawOrMeasureText(text, x, y, maxWidth, TEXT_DRAW_OPERATION_STROKE, nullptr);
+  error = DrawOrMeasureText(text, x, y, maxWidth, TextDrawOperation::STROKE, nullptr);
 }
 
 TextMetrics*
@@ -2405,7 +2439,7 @@ CanvasRenderingContext2D::MeasureText(const nsAString& rawText,
 {
   float width;
   Optional<double> maxWidth;
-  error = DrawOrMeasureText(rawText, 0, 0, maxWidth, TEXT_DRAW_OPERATION_MEASURE, &width);
+  error = DrawOrMeasureText(rawText, 0, 0, maxWidth, TextDrawOperation::MEASURE, &width);
   if (error.Failed()) {
     return nullptr;
   }
@@ -2639,14 +2673,14 @@ struct MOZ_STACK_CLASS CanvasBidiProcessor : public nsBidiPresUtils::BidiProcess
       Rect bounds = mCtx->mTarget->GetTransform().
         TransformBounds(Rect(mBoundingBox.x, mBoundingBox.y,
                              mBoundingBox.width, mBoundingBox.height));
-      if (mOp == CanvasRenderingContext2D::TEXT_DRAW_OPERATION_FILL) {
+      if (mOp == CanvasRenderingContext2D::TextDrawOperation::FILL) {
         AdjustedTarget(mCtx, &bounds)->
           FillGlyphs(scaledFont, buffer,
                      CanvasGeneralPattern().
-                       ForStyle(mCtx, CanvasRenderingContext2D::STYLE_FILL, mCtx->mTarget),
+                       ForStyle(mCtx, CanvasRenderingContext2D::Style::FILL, mCtx->mTarget),
                      DrawOptions(mState->globalAlpha, mCtx->UsedOperation()),
                      renderingOptions);
-      } else if (mOp == CanvasRenderingContext2D::TEXT_DRAW_OPERATION_STROKE) {
+      } else if (mOp == CanvasRenderingContext2D::TextDrawOperation::STROKE) {
         // stroke glyphs one at a time to avoid poor CoreGraphics performance
         // when stroking a path with a very large number of points
         buffer.mGlyphs = &glyphBuf.front();
@@ -2660,7 +2694,7 @@ struct MOZ_STACK_CLASS CanvasBidiProcessor : public nsBidiPresUtils::BidiProcess
                                        state.dashOffset);
         CanvasGeneralPattern cgp;
         const Pattern& patForStyle
-          (cgp.ForStyle(mCtx, CanvasRenderingContext2D::STYLE_STROKE, mCtx->mTarget));
+          (cgp.ForStyle(mCtx, CanvasRenderingContext2D::Style::STROKE, mCtx->mTarget));
         const DrawOptions drawOpts(state.globalAlpha, mCtx->UsedOperation());
 
         for (unsigned i = glyphBuf.size(); i > 0; --i) {
@@ -2819,18 +2853,18 @@ CanvasRenderingContext2D::DrawOrMeasureText(const nsAString& aRawText,
   }
 
   // if only measuring, don't need to do any more work
-  if (aOp==TEXT_DRAW_OPERATION_MEASURE) {
+  if (aOp==TextDrawOperation::MEASURE) {
     return NS_OK;
   }
 
   // offset pt.x based on text align
   gfxFloat anchorX;
 
-  if (state.textAlign == TEXT_ALIGN_CENTER) {
+  if (state.textAlign == TextAlign::CENTER) {
     anchorX = .5;
-  } else if (state.textAlign == TEXT_ALIGN_LEFT ||
-            (!isRTL && state.textAlign == TEXT_ALIGN_START) ||
-            (isRTL && state.textAlign == TEXT_ALIGN_END)) {
+  } else if (state.textAlign == TextAlign::LEFT ||
+            (!isRTL && state.textAlign == TextAlign::START) ||
+            (isRTL && state.textAlign == TextAlign::END)) {
     anchorX = 0;
   } else {
     anchorX = 1;
@@ -2847,20 +2881,20 @@ CanvasRenderingContext2D::DrawOrMeasureText(const nsAString& aRawText,
 
   switch (state.textBaseline)
   {
-  case TEXT_BASELINE_HANGING:
+  case TextBaseline::HANGING:
       // fall through; best we can do with the information available
-  case TEXT_BASELINE_TOP:
+  case TextBaseline::TOP:
     anchorY = fontMetrics.emAscent;
     break;
-  case TEXT_BASELINE_MIDDLE:
+  case TextBaseline::MIDDLE:
     anchorY = (fontMetrics.emAscent - fontMetrics.emDescent) * .5f;
     break;
-  case TEXT_BASELINE_IDEOGRAPHIC:
+  case TextBaseline::IDEOGRAPHIC:
     // fall through; best we can do with the information available
-  case TEXT_BASELINE_ALPHABETIC:
+  case TextBaseline::ALPHABETIC:
     anchorY = 0;
     break;
-  case TEXT_BASELINE_BOTTOM:
+  case TextBaseline::BOTTOM:
     anchorY = -fontMetrics.emDescent;
     break;
   default:
@@ -2914,7 +2948,7 @@ CanvasRenderingContext2D::DrawOrMeasureText(const nsAString& aRawText,
 
   mTarget->SetTransform(oldTransform);
 
-  if (aOp == CanvasRenderingContext2D::TEXT_DRAW_OPERATION_FILL &&
+  if (aOp == CanvasRenderingContext2D::TextDrawOperation::FILL &&
       !doDrawShadow) {
     RedrawUser(boundingBox);
     return NS_OK;

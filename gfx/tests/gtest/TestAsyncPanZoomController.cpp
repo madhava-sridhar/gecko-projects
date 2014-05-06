@@ -34,6 +34,7 @@ class AsyncPanZoomControllerTester : public ::testing::Test {
 protected:
   virtual void SetUp() {
     gfxPrefs::GetSingleton();
+    AsyncPanZoomController::SetThreadAssertionsEnabled(false);
   }
   virtual void TearDown() {
     gfxPrefs::DestroySingleton();
@@ -44,6 +45,7 @@ class APZCTreeManagerTester : public ::testing::Test {
 protected:
   virtual void SetUp() {
     gfxPrefs::GetSingleton();
+    AsyncPanZoomController::SetThreadAssertionsEnabled(false);
   }
   virtual void TearDown() {
     gfxPrefs::DestroySingleton();
@@ -140,9 +142,6 @@ public:
 };
 
 class TestAPZCTreeManager : public APZCTreeManager {
-protected:
-  void AssertOnCompositorThread() MOZ_OVERRIDE { /* no-op */ }
-
 public:
   // Expose this so test code can call it directly.
   void BuildOverscrollHandoffChain(AsyncPanZoomController* aApzc) {
@@ -415,7 +414,7 @@ TEST_F(AsyncPanZoomControllerTester, PinchWithTouchActionNone) {
 
   nsTArray<uint32_t> values;
   values.AppendElement(mozilla::layers::AllowedTouchBehavior::VERTICAL_PAN);
-  values.AppendElement(mozilla::layers::AllowedTouchBehavior::ZOOM);
+  values.AppendElement(mozilla::layers::AllowedTouchBehavior::PINCH_ZOOM);
   apzc->SetTouchActionEnabled(true);
 
   apzc->SetAllowedTouchBehavior(values);
@@ -906,7 +905,7 @@ TEST_F(AsyncPanZoomControllerTester, LongPress) {
 TEST_F(AsyncPanZoomControllerTester, LongPressWithTouchAction) {
   DoLongPressTest(true, mozilla::layers::AllowedTouchBehavior::HORIZONTAL_PAN
                       | mozilla::layers::AllowedTouchBehavior::VERTICAL_PAN
-                      | mozilla::layers::AllowedTouchBehavior::ZOOM);
+                      | mozilla::layers::AllowedTouchBehavior::PINCH_ZOOM);
 }
 
 TEST_F(AsyncPanZoomControllerTester, LongPressPreventDefault) {
@@ -916,7 +915,7 @@ TEST_F(AsyncPanZoomControllerTester, LongPressPreventDefault) {
 TEST_F(AsyncPanZoomControllerTester, LongPressPreventDefaultWithTouchAction) {
   DoLongPressPreventDefaultTest(true, mozilla::layers::AllowedTouchBehavior::HORIZONTAL_PAN
                                     | mozilla::layers::AllowedTouchBehavior::VERTICAL_PAN
-                                    | mozilla::layers::AllowedTouchBehavior::ZOOM);
+                                    | mozilla::layers::AllowedTouchBehavior::PINCH_ZOOM);
 }
 
 // Layer tree for HitTesting1

@@ -10,6 +10,7 @@ if (Cc === undefined) {
 }
 
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
+Cu.import("resource://gre/modules/Task.jsm");
 
 XPCOMUtils.defineLazyModuleGetter(this, "Services",
   "resource://gre/modules/Services.jsm");
@@ -23,11 +24,15 @@ XPCOMUtils.defineLazyModuleGetter(this, "CustomizationTabPreloader",
 const SIMPLETEST_OVERRIDES =
   ["ok", "is", "isnot", "ise", "todo", "todo_is", "todo_isnot", "info", "expectAssertions"];
 
-window.addEventListener("load", testOnLoad, false);
+window.addEventListener("load", function testOnLoad() {
+  window.removeEventListener("load", testOnLoad);
+  window.addEventListener("MozAfterPaint", function testOnMozAfterPaint() {
+    window.removeEventListener("MozAfterPaint", testOnMozAfterPaint);
+    setTimeout(testInit, 0);
+  });
+});
 
-function testOnLoad() {
-  window.removeEventListener("load", testOnLoad, false);
-
+function testInit() {
   gConfig = readConfig();
   if (gConfig.testRoot == "browser" ||
       gConfig.testRoot == "metro" ||
@@ -88,7 +93,7 @@ function Tester(aTests, aDumper, aCallback) {
   this._scriptLoader.loadSubScript("chrome://mochikit/content/chrome-harness.js", simpleTestScope);
   this.SimpleTest = simpleTestScope.SimpleTest;
   this.MemoryStats = simpleTestScope.MemoryStats;
-  this.Task = Components.utils.import("resource://gre/modules/Task.jsm", null).Task;
+  this.Task = Task;
   this.Promise = Components.utils.import("resource://gre/modules/Promise.jsm", null).Promise;
   this.Assert = Components.utils.import("resource://testing-common/Assert.jsm", null).Assert;
 
@@ -142,15 +147,6 @@ Tester.prototype = {
   },
 
   start: function Tester_start() {
-    // Check whether this window is ready to run tests.
-    if (window.BrowserChromeTest) {
-      BrowserChromeTest.runWhenReady(this.actuallyStart.bind(this));
-      return;
-    }
-    this.actuallyStart();
-  },
-
-  actuallyStart: function Tester_actuallyStart() {
     //if testOnLoad was not called, then gConfig is not defined
     if (!gConfig)
       gConfig = readConfig();
@@ -314,7 +310,7 @@ Tester.prototype = {
     }
   },
 
-  nextTest: function Tester_nextTest() {
+  nextTest: Task.async(function*() {
     if (this.currentTest) {
       // Run cleanup functions for the current test before moving on to the
       // next one.
@@ -322,7 +318,7 @@ Tester.prototype = {
       while (testScope.__cleanupFunctions.length > 0) {
         let func = testScope.__cleanupFunctions.shift();
         try {
-          func.apply(testScope);
+          yield func.apply(testScope);
         }
         catch (ex) {
           this.currentTest.addResult(new testResult(false, "Cleanup function threw an exception", ex, false));
@@ -531,7 +527,7 @@ Tester.prototype = {
       this.currentTestIndex++;
       this.execTest();
     }).bind(this));
-  },
+  }),
 
   execTest: function Tester_execTest() {
     this.dumper.dump("TEST-START | " + this.currentTest.path + "\n");

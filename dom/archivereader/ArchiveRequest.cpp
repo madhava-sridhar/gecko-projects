@@ -195,8 +195,7 @@ ArchiveRequest::GetFilenamesResult(JSContext* aCx,
     NS_ENSURE_TRUE(str, NS_ERROR_OUT_OF_MEMORY);
 
     if (NS_FAILED(rv) ||
-        !JS_DefineElement(aCx, array, i, JS::StringValue(str), nullptr, nullptr,
-                          JSPROP_ENUMERATE)) {
+        !JS_DefineElement(aCx, array, i, str, JSPROP_ENUMERATE)) {
       return NS_ERROR_FAILURE;
     }
   }
@@ -247,8 +246,7 @@ ArchiveRequest::GetFilesResult(JSContext* aCx,
     nsresult rv = nsContentUtils::WrapNative(aCx, file, &NS_GET_IID(nsIDOMFile),
                                              &value);
     if (NS_FAILED(rv) ||
-        !JS_DefineElement(aCx, array, i, value, nullptr, nullptr,
-                          JSPROP_ENUMERATE)) {
+        !JS_DefineElement(aCx, array, i, value, JSPROP_ENUMERATE)) {
       return NS_ERROR_FAILURE;
     }
   }
@@ -269,8 +267,8 @@ ArchiveRequest::Create(nsPIDOMWindow* aOwner,
   return request.forget();
 }
 
-NS_IMPL_CYCLE_COLLECTION_INHERITED_1(ArchiveRequest, DOMRequest,
-                                     mArchiveReader)
+NS_IMPL_CYCLE_COLLECTION_INHERITED(ArchiveRequest, DOMRequest,
+                                   mArchiveReader)
 
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION_INHERITED(ArchiveRequest)
 NS_INTERFACE_MAP_END_INHERITING(DOMRequest)

@@ -12,7 +12,7 @@
 using namespace mozilla;
 using namespace mozilla::dom;
 
-NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE_1(DOMRectReadOnly, mParent)
+NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE(DOMRectReadOnly, mParent)
 NS_IMPL_CYCLE_COLLECTING_ADDREF(DOMRectReadOnly)
 NS_IMPL_CYCLE_COLLECTING_RELEASE(DOMRectReadOnly)
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(DOMRectReadOnly)
@@ -29,7 +29,7 @@ DOMRectReadOnly::WrapObject(JSContext* aCx)
 
 // -----------------------------------------------------------------------------
 
-NS_IMPL_ISUPPORTS_INHERITED1(DOMRect, DOMRectReadOnly, nsIDOMClientRect)
+NS_IMPL_ISUPPORTS_INHERITED(DOMRect, DOMRectReadOnly, nsIDOMClientRect)
 
 #define FORWARD_GETTER(_name)                                                   \
   NS_IMETHODIMP                                                                 \
@@ -72,11 +72,11 @@ DOMRect::Constructor(const GlobalObject& aGlobal, double aX, double aY,
 
 // -----------------------------------------------------------------------------
 
-NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE_2(DOMRectList, mParent, mArray)
+NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE(DOMRectList, mParent, mArray)
 
 NS_INTERFACE_TABLE_HEAD(DOMRectList)
   NS_WRAPPERCACHE_INTERFACE_MAP_ENTRY
-  NS_INTERFACE_TABLE1(DOMRectList, nsIDOMClientRectList)
+  NS_INTERFACE_TABLE(DOMRectList, nsIDOMClientRectList)
   NS_INTERFACE_TABLE_TO_MAP_SEGUE_CYCLE_COLLECTION(DOMRectList)
 NS_INTERFACE_MAP_END
 

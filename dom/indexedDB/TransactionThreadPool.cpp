@@ -902,7 +902,7 @@ FinishTransactionRunnable::Run()
 
 #ifdef MOZ_ENABLE_PROFILER_SPS
 
-NS_IMPL_ISUPPORTS1(TransactionThreadPoolListener, nsIThreadPoolListener)
+NS_IMPL_ISUPPORTS(TransactionThreadPoolListener, nsIThreadPoolListener)
 
 NS_IMETHODIMP
 TransactionThreadPoolListener::OnThreadCreated()

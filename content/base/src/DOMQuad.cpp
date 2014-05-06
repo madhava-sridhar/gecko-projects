@@ -14,8 +14,8 @@ using namespace mozilla;
 using namespace mozilla::dom;
 using namespace mozilla::gfx;
 
-NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE_6(DOMQuad, mParent, mBounds, mPoints[0],
-                                        mPoints[1], mPoints[2], mPoints[3])
+NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE(DOMQuad, mParent, mBounds, mPoints[0],
+                                      mPoints[1], mPoints[2], mPoints[3])
 
 NS_IMPL_CYCLE_COLLECTION_ROOT_NATIVE(DOMQuad, AddRef)
 NS_IMPL_CYCLE_COLLECTION_UNROOT_NATIVE(DOMQuad, Release)
@@ -141,7 +141,7 @@ protected:
   nsRefPtr<DOMQuad> mQuad;
 };
 
-NS_IMPL_CYCLE_COLLECTION_INHERITED_1(DOMQuad::QuadBounds, DOMRectReadOnly, mQuad)
+NS_IMPL_CYCLE_COLLECTION_INHERITED(DOMQuad::QuadBounds, DOMRectReadOnly, mQuad)
 
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION_INHERITED(DOMQuad::QuadBounds)
 NS_INTERFACE_MAP_END_INHERITING(DOMRectReadOnly)

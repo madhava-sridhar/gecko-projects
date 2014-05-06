@@ -7247,14 +7247,14 @@ Cursor::RecvContinue(const CursorRequestParams& aParams)
  * Local class implementations
  ******************************************************************************/
 
-NS_IMPL_ISUPPORTS1(CompressDataBlobsFunction, mozIStorageFunction)
-NS_IMPL_ISUPPORTS1(EncodeKeysFunction, mozIStorageFunction)
+NS_IMPL_ISUPPORTS(CompressDataBlobsFunction, mozIStorageFunction)
+NS_IMPL_ISUPPORTS(EncodeKeysFunction, mozIStorageFunction)
 
 uint64_t DatabaseOperationBase::sNextSerialNumber = 0;
 
-NS_IMPL_ISUPPORTS_INHERITED1(DatabaseOperationBase,
-                             nsRunnable,
-                             mozIStorageProgressHandler)
+NS_IMPL_ISUPPORTS_INHERITED(DatabaseOperationBase,
+                            nsRunnable,
+                            mozIStorageProgressHandler)
 
 NS_IMETHODIMP
 DatabaseOperationBase::OnProgress(mozIStorageConnection* aConnection,
@@ -9488,7 +9488,7 @@ CommitOp::TransactionFinishedAfterUnblock()
 #endif
 }
 
-NS_IMPL_ISUPPORTS1(TransactionBase::UpdateRefcountFunction, mozIStorageFunction)
+NS_IMPL_ISUPPORTS(TransactionBase::UpdateRefcountFunction, mozIStorageFunction)
 
 NS_IMETHODIMP
 TransactionBase::

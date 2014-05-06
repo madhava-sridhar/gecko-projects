@@ -32,8 +32,9 @@ enum AllowedTouchBehavior {
   NONE =               0,
   VERTICAL_PAN =       1 << 0,
   HORIZONTAL_PAN =     1 << 1,
-  ZOOM =               1 << 2,
-  UNKNOWN =            1 << 3
+  PINCH_ZOOM =         1 << 2,
+  DOUBLE_TAP_ZOOM =    1 << 3,
+  UNKNOWN =            1 << 4
 };
 
 class Layer;
@@ -282,12 +283,6 @@ public:
 protected:
   // Protected destructor, to discourage deletion outside of Release():
   virtual ~APZCTreeManager();
-
-  /**
-   * Debug-build assertion that can be called to ensure code is running on the
-   * compositor thread.
-   */
-  virtual void AssertOnCompositorThread();
 
   /*
    * Build the chain of APZCs that will handle overscroll for a pan starting at |aInitialTarget|.

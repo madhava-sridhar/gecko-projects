@@ -443,13 +443,13 @@ TileClient::ValidateBackBufferFromFront(const nsIntRegion& aDirtyRegion,
         return;
       }
 
-      if (!mFrontBuffer->Lock(OPEN_READ)) {
+      if (!mFrontBuffer->Lock(OpenMode::OPEN_READ)) {
         NS_WARNING("Failed to lock the tile's front buffer");
         return;
       }
       TextureClientAutoUnlock autoFront(mFrontBuffer);
 
-      if (!mBackBuffer->Lock(OPEN_WRITE)) {
+      if (!mBackBuffer->Lock(OpenMode::OPEN_WRITE)) {
         NS_WARNING("Failed to lock the tile's back buffer");
         return;
       }
@@ -485,7 +485,14 @@ TileClient::DiscardBackBuffer()
 {
   if (mBackBuffer) {
     MOZ_ASSERT(mBackLock);
-    mManager->GetTexturePool(mBackBuffer->GetFormat())->ReturnTextureClient(mBackBuffer);
+    if (!mBackBuffer->ImplementsLocking() && mBackLock->GetReadCount() > 1) {
+      // Our current back-buffer is still locked by the compositor. This can occur
+      // when the client is producing faster than the compositor can consume. In
+      // this case we just want to drop it and not return it to the pool.
+      mManager->GetTexturePool(mBackBuffer->GetFormat())->ReportClientLost();
+    } else {
+      mManager->GetTexturePool(mBackBuffer->GetFormat())->ReturnTextureClient(mBackBuffer);
+    }
     mBackLock->ReadUnlock();
     mBackBuffer = nullptr;
     mBackLock = nullptr;
@@ -658,6 +665,10 @@ ClientTiledLayerBuffer::PaintThebes(const nsIntRegion& aNewValidRegion,
                        ceilf(bounds.height * mResolution)),
           gfx::ImageFormatToSurfaceFormat(format));
 
+      if (!mSinglePaintDrawTarget) {
+        return;
+      }
+
       ctxt = new gfxContext(mSinglePaintDrawTarget);
 
       mSinglePaintBufferOffset = nsIntPoint(bounds.x, bounds.y);
@@ -742,7 +753,7 @@ ClientTiledLayerBuffer::ValidateTile(TileClient aTile,
                         mManager->GetTexturePool(gfxPlatform::GetPlatform()->Optimal2DFormatForContent(GetContentType())),
                         &createdTextureClient, !usingSinglePaintBuffer);
 
-  if (!backBuffer->Lock(OPEN_READ_WRITE)) {
+  if (!backBuffer->Lock(OpenMode::OPEN_READ_WRITE)) {
     NS_WARNING("Failed to lock tile TextureClient for updating.");
     aTile.DiscardFrontBuffer();
     return aTile;

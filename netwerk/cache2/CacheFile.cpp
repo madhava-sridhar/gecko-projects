@@ -8,7 +8,6 @@
 #include "CacheFileChunk.h"
 #include "CacheFileInputStream.h"
 #include "CacheFileOutputStream.h"
-#include "CacheIndex.h"
 #include "nsThreadUtils.h"
 #include "mozilla/DebugOnly.h"
 #include <algorithm>
@@ -20,6 +19,7 @@
 // unused chunks only when:
 //  - CacheFile is memory-only
 //  - CacheFile is still waiting for the handle
+//  - the chunk is preloaded
 
 //#define CACHE_CHUNKS
 
@@ -159,7 +159,7 @@ private:
   nsCOMPtr<CacheFileListener>  mListener;
 };
 
-NS_IMPL_ISUPPORTS1(DoomFileHelper, CacheFileIOListener)
+NS_IMPL_ISUPPORTS(DoomFileHelper, CacheFileIOListener)
 
 
 NS_IMPL_ADDREF(CacheFile)
@@ -181,6 +181,7 @@ CacheFile::CacheFile()
   , mDataAccessed(false)
   , mDataIsDirty(false)
   , mWritingMetadata(false)
+  , mPreloadWithoutInputStreams(true)
   , mStatus(NS_OK)
   , mDataSize(-1)
   , mOutput(nullptr)
@@ -235,33 +236,8 @@ CacheFile::Init(const nsACString &aKey,
       mMetadata = new CacheFileMetadata(mOpenAsMemoryOnly, mKey);
       mReady = true;
       mDataSize = mMetadata->Offset();
-    }
-    else {
+    } else {
       flags = CacheFileIOManager::CREATE;
-
-      // Have a look into index and change to CREATE_NEW when we are sure
-      // that the entry does not exist.
-      CacheIndex::EntryStatus status;
-      rv = CacheIndex::HasEntry(mKey, &status);
-      if (status == CacheIndex::DOES_NOT_EXIST) {
-        LOG(("CacheFile::Init() - Forcing CREATE_NEW flag since we don't have"
-             " this entry according to index"));
-        flags = CacheFileIOManager::CREATE_NEW;
-
-        // make sure we can use this entry immediately
-        mMetadata = new CacheFileMetadata(mOpenAsMemoryOnly, mKey);
-        mReady = true;
-        mDataSize = mMetadata->Offset();
-
-        // Notify callback now and don't store it in mListener, no further
-        // operation can change the result.
-        nsRefPtr<NotifyCacheFileListenerEvent> ev;
-        ev = new NotifyCacheFileListenerEvent(aCallback, NS_OK, true);
-        rv = NS_DispatchToCurrentThread(ev);
-        NS_ENSURE_SUCCESS(rv, rv);
-
-        aCallback = nullptr;
-      }
     }
 
     if (aPriority)
@@ -269,7 +245,7 @@ CacheFile::Init(const nsACString &aKey,
 
     mOpeningFile = true;
     mListener = aCallback;
-    rv = CacheFileIOManager::OpenFile(mKey, flags, this);
+    rv = CacheFileIOManager::OpenFile(mKey, flags, true, this);
     if (NS_FAILED(rv)) {
       mListener = nullptr;
       mOpeningFile = false;
@@ -316,10 +292,13 @@ CacheFile::OnChunkRead(nsresult aResult, CacheFileChunk *aChunk)
 
   uint32_t index = aChunk->Index();
 
-  LOG(("CacheFile::OnChunkRead() [this=%p, rv=0x%08x, chunk=%p, idx=%d]",
+  LOG(("CacheFile::OnChunkRead() [this=%p, rv=0x%08x, chunk=%p, idx=%u]",
        this, aResult, aChunk, index));
 
-  // TODO handle ERROR state
+  if (NS_FAILED(aResult)) {
+    SetError(aResult);
+    CacheFileIOManager::DoomFile(mHandle, nullptr);
+  }
 
   if (HaveChunkListeners(index)) {
     rv = NotifyChunkListeners(index, aResult, aChunk);
@@ -336,19 +315,16 @@ CacheFile::OnChunkWritten(nsresult aResult, CacheFileChunk *aChunk)
 
   nsresult rv;
 
-  LOG(("CacheFile::OnChunkWritten() [this=%p, rv=0x%08x, chunk=%p, idx=%d]",
+  LOG(("CacheFile::OnChunkWritten() [this=%p, rv=0x%08x, chunk=%p, idx=%u]",
        this, aResult, aChunk, aChunk->Index()));
 
   MOZ_ASSERT(!mMemoryOnly);
   MOZ_ASSERT(!mOpeningFile);
-
-  // TODO handle ERROR state
+  MOZ_ASSERT(mHandle);
 
   if (NS_FAILED(aResult)) {
-    // TODO ??? doom entry
-    // TODO mark this chunk as memory only, since it wasn't written to disk and
-    // therefore cannot be released from memory
-    // LOG
+    SetError(aResult);
+    CacheFileIOManager::DoomFile(mHandle, nullptr);
   }
 
   if (NS_SUCCEEDED(aResult) && !aChunk->IsDirty()) {
@@ -359,7 +335,7 @@ CacheFile::OnChunkWritten(nsresult aResult, CacheFileChunk *aChunk)
   // notify listeners if there is any
   if (HaveChunkListeners(aChunk->Index())) {
     // don't release the chunk since there are some listeners queued
-    rv = NotifyChunkListeners(aChunk->Index(), NS_OK, aChunk);
+    rv = NotifyChunkListeners(aChunk->Index(), aResult, aChunk);
     if (NS_SUCCEEDED(rv)) {
       MOZ_ASSERT(aChunk->mRefCnt != 2);
       return NS_OK;
@@ -373,23 +349,18 @@ CacheFile::OnChunkWritten(nsresult aResult, CacheFileChunk *aChunk)
     return NS_OK;
   }
 
-#ifdef CACHE_CHUNKS
-  LOG(("CacheFile::OnChunkWritten() - Caching unused chunk [this=%p, chunk=%p]",
-       this, aChunk));
-#else
-  LOG(("CacheFile::OnChunkWritten() - Releasing unused chunk [this=%p, "
-       "chunk=%p]", this, aChunk));
-#endif
+  bool keepChunk = false;
+  if (NS_SUCCEEDED(aResult)) {
+    keepChunk = ShouldKeepChunk(aChunk->Index());
+    LOG(("CacheFile::OnChunkWritten() - %s unused chunk [this=%p, chunk=%p]",
+         keepChunk ? "Caching" : "Releasing", this, aChunk));
+  } else {
+    LOG(("CacheFile::OnChunkWritten() - Releasing failed chunk [this=%p, "
+         "chunk=%p]", this, aChunk));
+  }
 
-  aChunk->mRemovingChunk = true;
-  ReleaseOutsideLock(static_cast<CacheFileChunkListener *>(
-                       aChunk->mFile.forget().take()));
+  RemoveChunkInternal(aChunk, keepChunk);
 
-#ifdef CACHE_CHUNKS
-  mCachedChunks.Put(aChunk->Index(), aChunk);
-#endif
-
-  mChunks.Remove(aChunk->Index());
   WriteMetadataIfNeededLocked();
 
   return NS_OK;
@@ -577,6 +548,9 @@ CacheFile::OnMetadataRead(nsresult aResult)
     if (mDataSize == 0 && mMetadata->ElementsSize() == 0) {
       isNew = true;
       mMetadata->MarkDirty();
+    } else {
+      CacheFileAutoLock lock(this);
+      PreloadChunks(0);
     }
 
     InitIndexEntry();
@@ -667,6 +641,11 @@ CacheFile::OpenInputStream(nsIInputStream **_retval)
 
     return NS_ERROR_NOT_AVAILABLE;
   }
+
+  // Once we open input stream we no longer allow preloading of chunks without
+  // input stream, i.e. we will no longer keep first few chunks preloaded when
+  // the last input stream is closed.
+  mPreloadWithoutInputStreams = false;
 
   CacheFileInputStream *input = new CacheFileInputStream(this);
 
@@ -799,12 +778,7 @@ CacheFile::ThrowMemoryCachedData()
     return NS_ERROR_ABORT;
   }
 
-#ifdef CACHE_CHUNKS
   mCachedChunks.Clear();
-#else
-  // If we don't cache all chunks, mCachedChunks must be empty.
-  MOZ_ASSERT(mCachedChunks.Count() == 0);
-#endif
 
   return NS_OK;
 }
@@ -834,6 +808,17 @@ CacheFile::SetElement(const char *aKey, const char *aValue)
 
   PostWriteTimer();
   return mMetadata->SetElement(aKey, aValue);
+}
+
+nsresult
+CacheFile::VisitMetaData(nsICacheEntryMetaDataVisitor *aVisitor)
+{
+  CacheFileAutoLock lock(this);
+  MOZ_ASSERT(mMetadata);
+  MOZ_ASSERT(mReady);
+  NS_ENSURE_TRUE(mMetadata, NS_ERROR_UNEXPECTED);
+
+  return mMetadata->Visit(aVisitor);
 }
 
 nsresult
@@ -972,26 +957,32 @@ CacheFile::ReleaseOutsideLock(nsISupports *aObject)
 }
 
 nsresult
-CacheFile::GetChunk(uint32_t aIndex, bool aWriter,
+CacheFile::GetChunk(uint32_t aIndex, ECallerType aCaller,
                     CacheFileChunkListener *aCallback, CacheFileChunk **_retval)
 {
   CacheFileAutoLock lock(this);
-  return GetChunkLocked(aIndex, aWriter, aCallback, _retval);
+  return GetChunkLocked(aIndex, aCaller, aCallback, _retval);
 }
 
 nsresult
-CacheFile::GetChunkLocked(uint32_t aIndex, bool aWriter,
+CacheFile::GetChunkLocked(uint32_t aIndex, ECallerType aCaller,
                           CacheFileChunkListener *aCallback,
                           CacheFileChunk **_retval)
 {
   AssertOwnsLock();
 
-  LOG(("CacheFile::GetChunkLocked() [this=%p, idx=%d, writer=%d, listener=%p]",
-       this, aIndex, aWriter, aCallback));
+  LOG(("CacheFile::GetChunkLocked() [this=%p, idx=%u, caller=%d, listener=%p]",
+       this, aIndex, aCaller, aCallback));
 
   MOZ_ASSERT(mReady);
   MOZ_ASSERT(mHandle || mMemoryOnly || mOpeningFile);
-  MOZ_ASSERT((aWriter && !aCallback) || (!aWriter && aCallback));
+  MOZ_ASSERT((aCaller == READER && aCallback) ||
+             (aCaller == WRITER && !aCallback) ||
+             (aCaller == PRELOADER && !aCallback));
+
+  // Preload chunks from disk when this is disk backed entry and the listener
+  // is reader.
+  bool preload = !mMemoryOnly && (aCaller == READER);
 
   nsresult rv;
 
@@ -1000,25 +991,39 @@ CacheFile::GetChunkLocked(uint32_t aIndex, bool aWriter,
     LOG(("CacheFile::GetChunkLocked() - Found chunk %p in mChunks [this=%p]",
          chunk.get(), this));
 
-    if (chunk->IsReady() || aWriter) {
-      chunk.swap(*_retval);
+    // Preloader calls this method to preload only non-loaded chunks.
+    MOZ_ASSERT(aCaller != PRELOADER, "Unexpected!");
+
+    // We might get failed chunk between releasing the lock in
+    // CacheFileChunk::OnDataWritten/Read and CacheFile::OnChunkWritten/Read
+    rv = chunk->GetStatus();
+    if (NS_FAILED(rv)) {
+      SetError(rv);
+      LOG(("CacheFile::GetChunkLocked() - Found failed chunk in mChunks "
+           "[this=%p]", this));
+      return rv;
     }
-    else {
+
+    if (chunk->IsReady() || aCaller == WRITER) {
+      chunk.swap(*_retval);
+    } else {
       rv = QueueChunkListener(aIndex, aCallback);
       NS_ENSURE_SUCCESS(rv, rv);
+    }
+
+    if (preload) {
+      PreloadChunks(aIndex + 1);
     }
 
     return NS_OK;
   }
 
   if (mCachedChunks.Get(aIndex, getter_AddRefs(chunk))) {
-#ifndef CACHE_CHUNKS
-    // We don't cache all chunks, so we must not have handle and we must be
-    // either waiting for the handle, or this is memory-only entry.
-    MOZ_ASSERT(!mHandle && (mMemoryOnly || mOpeningFile));
-#endif
     LOG(("CacheFile::GetChunkLocked() - Reusing cached chunk %p [this=%p]",
          chunk.get(), this));
+
+    // Preloader calls this method to preload only non-loaded chunks.
+    MOZ_ASSERT(aCaller != PRELOADER, "Unexpected!");
 
     mChunks.Put(aIndex, chunk);
     mCachedChunks.Remove(aIndex);
@@ -1028,6 +1033,11 @@ CacheFile::GetChunkLocked(uint32_t aIndex, bool aWriter,
     MOZ_ASSERT(chunk->IsReady());
 
     chunk.swap(*_retval);
+
+    if (preload) {
+      PreloadChunks(aIndex + 1);
+    }
+
     return NS_OK;
   }
 
@@ -1056,26 +1066,25 @@ CacheFile::GetChunkLocked(uint32_t aIndex, bool aWriter,
     rv = chunk->Read(mHandle, std::min(static_cast<uint32_t>(mDataSize - off),
                      static_cast<uint32_t>(kChunkSize)),
                      mMetadata->GetHash(aIndex), this);
-    if (NS_FAILED(rv)) {
-      chunk->mRemovingChunk = true;
-      ReleaseOutsideLock(static_cast<CacheFileChunkListener *>(
-                           chunk->mFile.forget().take()));
-      mChunks.Remove(aIndex);
-      NS_ENSURE_SUCCESS(rv, rv);
+    if (NS_WARN_IF(NS_FAILED(rv))) {
+      RemoveChunkInternal(chunk, false);
+      return rv;
     }
 
-    if (aWriter) {
+    if (aCaller == WRITER) {
       chunk.swap(*_retval);
-    }
-    else {
+    } else if (aCaller != PRELOADER) {
       rv = QueueChunkListener(aIndex, aCallback);
       NS_ENSURE_SUCCESS(rv, rv);
     }
 
+    if (preload) {
+      PreloadChunks(aIndex + 1);
+    }
+
     return NS_OK;
-  }
-  else if (off == mDataSize) {
-    if (aWriter) {
+  } else if (off == mDataSize) {
+    if (aCaller == WRITER) {
       // this listener is going to write to the chunk
       chunk = new CacheFileChunk(this, aIndex);
       mChunks.Put(aIndex, chunk);
@@ -1094,9 +1103,8 @@ CacheFile::GetChunkLocked(uint32_t aIndex, bool aWriter,
       chunk.swap(*_retval);
       return NS_OK;
     }
-  }
-  else {
-    if (aWriter) {
+  } else {
+    if (aCaller == WRITER) {
       // this chunk was requested by writer, but we need to fill the gap first
 
       // Fill with zero the last chunk if it is incomplete
@@ -1116,8 +1124,7 @@ CacheFile::GetChunkLocked(uint32_t aIndex, bool aWriter,
           rv = PadChunkWithZeroes(i);
           NS_ENSURE_SUCCESS(rv, rv);
         }
-      }
-      else {
+      } else {
         // We don't need to create CacheFileChunk for other empty chunks unless
         // there is some input stream waiting for this chunk.
 
@@ -1134,8 +1141,7 @@ CacheFile::GetChunkLocked(uint32_t aIndex, bool aWriter,
           if (HaveChunkListeners(i)) {
             rv = PadChunkWithZeroes(i);
             NS_ENSURE_SUCCESS(rv, rv);
-          }
-          else {
+          } else {
             mMetadata->SetHash(i, kEmptyChunkHash);
             mDataSize = (i + 1) * kChunkSize;
           }
@@ -1143,7 +1149,7 @@ CacheFile::GetChunkLocked(uint32_t aIndex, bool aWriter,
       }
 
       MOZ_ASSERT(mDataSize == off);
-      rv = GetChunkLocked(aIndex, true, nullptr, getter_AddRefs(chunk));
+      rv = GetChunkLocked(aIndex, WRITER, nullptr, getter_AddRefs(chunk));
       NS_ENSURE_SUCCESS(rv, rv);
 
       chunk.swap(*_retval);
@@ -1151,16 +1157,104 @@ CacheFile::GetChunkLocked(uint32_t aIndex, bool aWriter,
     }
   }
 
+  // We can be here only if the caller is reader since writer always create a
+  // new chunk above and preloader calls this method to preload only chunks that
+  // are not loaded but that do exist.
+  MOZ_ASSERT(aCaller == READER, "Unexpected!");
+
   if (mOutput) {
     // the chunk doesn't exist but mOutput may create it
     rv = QueueChunkListener(aIndex, aCallback);
     NS_ENSURE_SUCCESS(rv, rv);
-  }
-  else {
+  } else {
     return NS_ERROR_NOT_AVAILABLE;
   }
 
   return NS_OK;
+}
+
+void
+CacheFile::PreloadChunks(uint32_t aIndex)
+{
+  AssertOwnsLock();
+
+  uint32_t limit = aIndex + CacheObserver::PreloadChunkCount();
+
+  for (uint32_t i = aIndex; i < limit; ++i) {
+    int64_t off = i * kChunkSize;
+
+    if (off >= mDataSize) {
+      // This chunk is beyond EOF.
+      return;
+    }
+
+    if (mChunks.GetWeak(i) || mCachedChunks.GetWeak(i)) {
+      // This chunk is already in memory or is being read right now.
+      continue;
+    }
+
+    LOG(("CacheFile::PreloadChunks() - Preloading chunk [this=%p, idx=%u]",
+         this, i));
+
+    nsRefPtr<CacheFileChunk> chunk;
+    GetChunkLocked(i, PRELOADER, nullptr, getter_AddRefs(chunk));
+    // We've checked that we don't have this chunk, so no chunk must be
+    // returned.
+    MOZ_ASSERT(!chunk);
+  }
+}
+
+bool
+CacheFile::ShouldKeepChunk(uint32_t aIndex)
+{
+  AssertOwnsLock();
+
+#ifdef CACHE_CHUNKS
+  // We cache all chunks.
+  return true;
+#else
+  // Cache chunk when this is memory only entry or we don't have a handle yet.
+  if (mMemoryOnly || mOpeningFile) {
+    return true;
+  }
+
+  uint32_t preloadChunkCount = CacheObserver::PreloadChunkCount();
+
+  if (preloadChunkCount == 0) {
+    // Preloading of chunks is disabled
+    return false;
+  }
+
+  if (mPreloadWithoutInputStreams && aIndex < preloadChunkCount) {
+    // We don't have any input stream yet, but it is likely that some will be
+    // opened soon. Keep first preloadChunkCount chunks in memory.
+    return true;
+  }
+
+  // Check whether this chunk should be considered as preloaded chunk for any
+  // existing input stream.
+
+  // maxPos is the position of the last byte in the given chunk
+  int64_t maxPos = static_cast<int64_t>(aIndex + 1) * kChunkSize - 1;
+
+  // minPos is the position of the first byte in a chunk that precedes the given
+  // chunk by PreloadChunkCount chunks
+  int64_t minPos;
+  if (preloadChunkCount >= aIndex) {
+    minPos = 0;
+  } else {
+    minPos = static_cast<int64_t>(aIndex - preloadChunkCount) * kChunkSize;
+  }
+
+  for (uint32_t i = 0; i < mInputs.Length(); ++i) {
+    int64_t inputPos = mInputs[i]->GetPosition();
+    if (inputPos >= minPos && inputPos <= maxPos) {
+      return true;
+    }
+  }
+
+  return false;
+#endif
 }
 
 nsresult
@@ -1174,7 +1268,7 @@ CacheFile::RemoveChunk(CacheFileChunk *aChunk)
   {
     CacheFileAutoLock lock(this);
 
-    LOG(("CacheFile::RemoveChunk() [this=%p, chunk=%p, idx=%d]",
+    LOG(("CacheFile::RemoveChunk() [this=%p, chunk=%p, idx=%u]",
          this, aChunk, aChunk->Index()));
 
     MOZ_ASSERT(mReady);
@@ -1204,6 +1298,15 @@ CacheFile::RemoveChunk(CacheFileChunk *aChunk)
     }
 #endif
 
+    if (NS_FAILED(mStatus)) {
+      // Don't write any chunk to disk since this entry will be doomed
+      LOG(("CacheFile::RemoveChunk() - Releasing chunk because of status "
+           "[this=%p, chunk=%p, mStatus=0x%08x]", this, chunk.get(), mStatus));
+
+      RemoveChunkInternal(chunk, false);
+      return mStatus;
+    }
+
     if (chunk->IsDirty() && !mMemoryOnly && !mOpeningFile) {
       LOG(("CacheFile::RemoveChunk() - Writing dirty chunk to the disk "
            "[this=%p]", this));
@@ -1212,10 +1315,15 @@ CacheFile::RemoveChunk(CacheFileChunk *aChunk)
 
       rv = chunk->Write(mHandle, this);
       if (NS_FAILED(rv)) {
-        // TODO ??? doom entry
-        // TODO mark this chunk as memory only, since it wasn't written to disk
-        // and therefore cannot be released from memory
-        // LOG
+        LOG(("CacheFile::RemoveChunk() - CacheFileChunk::Write() failed "
+             "synchronously. Removing it. [this=%p, chunk=%p, rv=0x%08x]",
+             this, chunk.get(), rv));
+
+        RemoveChunkInternal(chunk, false);
+
+        SetError(rv);
+        CacheFileIOManager::DoomFile(mHandle, nullptr);
+        return rv;
       }
       else {
         // Chunk will be removed in OnChunkWritten if it is still unused
@@ -1227,37 +1335,31 @@ CacheFile::RemoveChunk(CacheFileChunk *aChunk)
       }
     }
 
-#ifdef CACHE_CHUNKS
-    LOG(("CacheFile::RemoveChunk() - Caching unused chunk [this=%p, chunk=%p]",
-         this, chunk.get()));
-#else
-    if (mMemoryOnly || mOpeningFile) {
-      LOG(("CacheFile::RemoveChunk() - Caching unused chunk [this=%p, chunk=%p,"
-           " reason=%s]", this, chunk.get(),
-           mMemoryOnly ? "memory-only" : "opening-file"));
-    } else {
-      LOG(("CacheFile::RemoveChunk() - Releasing unused chunk [this=%p, "
-           "chunk=%p]", this, chunk.get()));
-    }
-#endif
+    bool keepChunk = ShouldKeepChunk(aChunk->Index());
+    LOG(("CacheFile::RemoveChunk() - %s unused chunk [this=%p, chunk=%p]",
+         keepChunk ? "Caching" : "Releasing", this, chunk.get()));
 
-    chunk->mRemovingChunk = true;
-    ReleaseOutsideLock(static_cast<CacheFileChunkListener *>(
-                         chunk->mFile.forget().take()));
-#ifndef CACHE_CHUNKS
-    // Cache the chunk only when we have a reason to do so
-    if (mMemoryOnly || mOpeningFile)
-#endif
-    {
-      mCachedChunks.Put(chunk->Index(), chunk);
-    }
+    RemoveChunkInternal(chunk, keepChunk);
 
-    mChunks.Remove(chunk->Index());
     if (!mMemoryOnly)
       WriteMetadataIfNeededLocked();
   }
 
   return NS_OK;
+}
+
+void
+CacheFile::RemoveChunkInternal(CacheFileChunk *aChunk, bool aCacheChunk)
+{
+  aChunk->mRemovingChunk = true;
+  ReleaseOutsideLock(static_cast<CacheFileChunkListener *>(
+                       aChunk->mFile.forget().take()));
+
+  if (aCacheChunk) {
+    mCachedChunks.Put(aChunk->Index(), aChunk);
+  }
+
+  mChunks.Remove(aChunk->Index());
 }
 
 nsresult
@@ -1275,6 +1377,10 @@ CacheFile::RemoveInput(CacheFileInputStream *aInput)
 
   if (!mMemoryOnly)
     WriteMetadataIfNeededLocked();
+
+  // If the input didn't read all data, there might be left some preloaded
+  // chunks that won't be used anymore.
+  mCachedChunks.Enumerate(&CacheFile::CleanUpPreloadedChunks, this);
 
   return NS_OK;
 }
@@ -1314,7 +1420,7 @@ CacheFile::NotifyChunkListener(CacheFileChunkListener *aCallback,
                                CacheFileChunk *aChunk)
 {
   LOG(("CacheFile::NotifyChunkListener() [this=%p, listener=%p, target=%p, "
-       "rv=0x%08x, idx=%d, chunk=%p]", this, aCallback, aTarget, aResult,
+       "rv=0x%08x, idx=%u, chunk=%p]", this, aCallback, aTarget, aResult,
        aChunkIdx, aChunk));
 
   nsresult rv;
@@ -1333,7 +1439,7 @@ nsresult
 CacheFile::QueueChunkListener(uint32_t aIndex,
                               CacheFileChunkListener *aCallback)
 {
-  LOG(("CacheFile::QueueChunkListener() [this=%p, idx=%d, listener=%p]",
+  LOG(("CacheFile::QueueChunkListener() [this=%p, idx=%u, listener=%p]",
        this, aIndex, aCallback));
 
   AssertOwnsLock();
@@ -1358,7 +1464,7 @@ nsresult
 CacheFile::NotifyChunkListeners(uint32_t aIndex, nsresult aResult,
                                 CacheFileChunk *aChunk)
 {
-  LOG(("CacheFile::NotifyChunkListeners() [this=%p, idx=%d, rv=0x%08x, "
+  LOG(("CacheFile::NotifyChunkListeners() [this=%p, idx=%u, rv=0x%08x, "
        "chunk=%p]", this, aIndex, aResult, aChunk));
 
   AssertOwnsLock();
@@ -1422,8 +1528,6 @@ CacheFile::DataSize(int64_t* aSize)
 bool
 CacheFile::IsDoomed()
 {
-  CacheFileAutoLock lock(this);
-
   if (!mHandle)
     return false;
 
@@ -1501,11 +1605,10 @@ CacheFile::WriteMetadataIfNeededLocked(bool aFireAndForget)
     mWritingMetadata = true;
     mDataIsDirty = false;
   } else {
-    LOG(("CacheFile::WriteMetadataIfNeededLocked() - Writing synchronously failed "
-         "[this=%p]", this));
+    LOG(("CacheFile::WriteMetadataIfNeededLocked() - Writing synchronously "
+         "failed [this=%p]", this));
     // TODO: close streams with error
-    if (NS_SUCCEEDED(mStatus))
-      mStatus = rv;
+    SetError(rv);
   }
 }
 
@@ -1524,7 +1627,7 @@ CacheFile::WriteAllCachedChunks(const uint32_t& aIdx,
 {
   CacheFile *file = static_cast<CacheFile*>(aClosure);
 
-  LOG(("CacheFile::WriteAllCachedChunks() [this=%p, idx=%d, chunk=%p]",
+  LOG(("CacheFile::WriteAllCachedChunks() [this=%p, idx=%u, chunk=%p]",
        file, aIdx, aChunk.get()));
 
   file->mChunks.Put(aIdx, aChunk);
@@ -1547,7 +1650,7 @@ CacheFile::FailListenersIfNonExistentChunk(
 {
   CacheFile *file = static_cast<CacheFile*>(aClosure);
 
-  LOG(("CacheFile::FailListenersIfNonExistentChunk() [this=%p, idx=%d]",
+  LOG(("CacheFile::FailListenersIfNonExistentChunk() [this=%p, idx=%u]",
        file, aIdx));
 
   nsRefPtr<CacheFileChunk> chunk;
@@ -1577,7 +1680,7 @@ CacheFile::FailUpdateListeners(
   CacheFile *file = static_cast<CacheFile*>(aClosure);
 #endif
 
-  LOG(("CacheFile::FailUpdateListeners() [this=%p, idx=%d]",
+  LOG(("CacheFile::FailUpdateListeners() [this=%p, idx=%u]",
        file, aIdx));
 
   if (aChunk->IsReady()) {
@@ -1585,6 +1688,25 @@ CacheFile::FailUpdateListeners(
   }
 
   return PL_DHASH_NEXT;
+}
+
+PLDHashOperator
+CacheFile::CleanUpPreloadedChunks(const uint32_t& aIdx,
+                                  nsRefPtr<CacheFileChunk>& aChunk,
+                                  void* aClosure)
+{
+  CacheFile *file = static_cast<CacheFile*>(aClosure);
+
+  LOG(("CacheFile::CleanUpPreloadedChunks() [this=%p, idx=%u, chunk=%p]", file,
+       aIdx, aChunk.get()));
+
+  if (file->ShouldKeepChunk(aIdx)) {
+    LOG(("CacheFile::CleanUpPreloadedChunks() - Keeping chunk"));
+    return PL_DHASH_NEXT;
+  }
+
+  LOG(("CacheFile::CleanUpPreloadedChunks() - Removing chunk"));
+  return PL_DHASH_REMOVE;
 }
 
 nsresult
@@ -1598,7 +1720,7 @@ CacheFile::PadChunkWithZeroes(uint32_t aChunkIdx)
 
   nsresult rv;
   nsRefPtr<CacheFileChunk> chunk;
-  rv = GetChunkLocked(aChunkIdx, true, nullptr, getter_AddRefs(chunk));
+  rv = GetChunkLocked(aChunkIdx, WRITER, nullptr, getter_AddRefs(chunk));
   NS_ENSURE_SUCCESS(rv, rv);
 
   LOG(("CacheFile::PadChunkWithZeroes() - Zeroing hole in chunk %d, range %d-%d"
@@ -1613,6 +1735,14 @@ CacheFile::PadChunkWithZeroes(uint32_t aChunkIdx)
   ReleaseOutsideLock(chunk.forget().take());
 
   return NS_OK;
+}
+
+void
+CacheFile::SetError(nsresult aStatus)
+{
+  if (NS_SUCCEEDED(mStatus)) {
+    mStatus = aStatus;
+  }
 }
 
 nsresult

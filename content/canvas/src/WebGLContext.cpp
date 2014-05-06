@@ -57,6 +57,7 @@
 #include "mozilla/dom/BindingUtils.h"
 #include "mozilla/dom/ImageData.h"
 #include "mozilla/ProcessPriorityManager.h"
+#include "mozilla/EnumeratedArrayCycleCollection.h"
 
 #include "Layers.h"
 
@@ -262,10 +263,10 @@ WebGLContext::DestroyResourcesAndContext()
 
     // disable all extensions except "WEBGL_lose_context". see bug #927969
     // spec: http://www.khronos.org/registry/webgl/specs/latest/1.0/#5.15.2
-    for (size_t i = 0; i < size_t(WebGLExtensionID_max); ++i) {
+    for (size_t i = 0; i < size_t(WebGLExtensionID::Max); ++i) {
         WebGLExtensionID extension = WebGLExtensionID(i);
 
-        if (!IsExtensionEnabled(extension) || (extension == WEBGL_lose_context))
+        if (!IsExtensionEnabled(extension) || (extension == WebGLExtensionID::WEBGL_lose_context))
             continue;
 
         mExtensions[extension]->MarkLost();
@@ -955,7 +956,7 @@ WebGLContext::MozGetUnderlyingParamString(uint32_t pname, nsAString& retval)
 void
 WebGLContext::ClearScreen()
 {
-    bool colorAttachmentsMask[WebGLContext::sMaxColorAttachments] = {false};
+    bool colorAttachmentsMask[WebGLContext::kMaxColorAttachments] = {false};
 
     MakeContextCurrent();
     ScopedBindFramebuffer autoFB(gl, 0);
@@ -985,16 +986,16 @@ static bool IsShadowCorrect(float shadow, float actual) {
 #endif
 
 void
-WebGLContext::ForceClearFramebufferWithDefaultValues(GLbitfield mask, const bool colorAttachmentsMask[sMaxColorAttachments])
+WebGLContext::ForceClearFramebufferWithDefaultValues(GLbitfield mask, const bool colorAttachmentsMask[kMaxColorAttachments])
 {
     MakeContextCurrent();
 
     bool initializeColorBuffer = 0 != (mask & LOCAL_GL_COLOR_BUFFER_BIT);
     bool initializeDepthBuffer = 0 != (mask & LOCAL_GL_DEPTH_BUFFER_BIT);
     bool initializeStencilBuffer = 0 != (mask & LOCAL_GL_STENCIL_BUFFER_BIT);
-    bool drawBuffersIsEnabled = IsExtensionEnabled(WEBGL_draw_buffers);
+    bool drawBuffersIsEnabled = IsExtensionEnabled(WebGLExtensionID::WEBGL_draw_buffers);
 
-    GLenum currentDrawBuffers[WebGLContext::sMaxColorAttachments];
+    GLenum currentDrawBuffers[WebGLContext::kMaxColorAttachments];
 
     // Fun GL fact: No need to worry about the viewport here, glViewport is just
     // setting up a coordinates transformation, it doesn't affect glClear at all.
@@ -1067,7 +1068,7 @@ WebGLContext::ForceClearFramebufferWithDefaultValues(GLbitfield mask, const bool
 
         if (drawBuffersIsEnabled) {
 
-            GLenum drawBuffersCommand[WebGLContext::sMaxColorAttachments] = { LOCAL_GL_NONE };
+            GLenum drawBuffersCommand[WebGLContext::kMaxColorAttachments] = { LOCAL_GL_NONE };
 
             for(int32_t i = 0; i < mGLMaxDrawBuffers; i++) {
                 GLint temp;
@@ -1395,7 +1396,7 @@ WebGLContext::GetSurfaceSnapshot(bool* aPremultAlpha)
 NS_IMPL_CYCLE_COLLECTING_ADDREF(WebGLContext)
 NS_IMPL_CYCLE_COLLECTING_RELEASE(WebGLContext)
 
-NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE_13(WebGLContext,
+NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE(WebGLContext,
   mCanvasElement,
   mExtensions,
   mBound2DTextures,

@@ -37,11 +37,11 @@ using namespace mozilla::dom;
 namespace mozilla {
 namespace image {
 
-NS_IMPL_ISUPPORTS4(SVGDocumentWrapper,
-                   nsIStreamListener,
-                   nsIRequestObserver,
-                   nsIObserver,
-                   nsISupportsWeakReference)
+NS_IMPL_ISUPPORTS(SVGDocumentWrapper,
+                  nsIStreamListener,
+                  nsIRequestObserver,
+                  nsIObserver,
+                  nsISupportsWeakReference)
 
 SVGDocumentWrapper::SVGDocumentWrapper()
   : mIgnoreInvalidation(false),
@@ -215,6 +215,19 @@ SVGDocumentWrapper::SetCurrentTime(float aTime)
   SVGSVGElement* svgElem = GetRootSVGElem();
   if (svgElem && svgElem->GetCurrentTime() != aTime) {
     svgElem->SetCurrentTime(aTime);
+  }
+}
+
+void
+SVGDocumentWrapper::TickRefreshDriver()
+{
+  nsCOMPtr<nsIPresShell> presShell;
+  mViewer->GetPresShell(getter_AddRefs(presShell));
+  if (presShell) {
+    nsPresContext* presContext = presShell->GetPresContext();
+    if (presContext) {
+      presContext->RefreshDriver()->DoTick();
+    }
   }
 }
 

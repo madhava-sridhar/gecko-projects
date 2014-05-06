@@ -9,6 +9,8 @@
 #include "gfx2DGlue.h"                  // for ToIntSize
 #include "mozilla/gfx/2D.h"             // for DataSourceSurface, Factory
 #include "mozilla/ipc/Shmem.h"          // for Shmem
+#include "mozilla/layers/AsyncTransactionTracker.h" // for AsyncTransactionTracker
+#include "mozilla/layers/CompositableTransactionParent.h" // for CompositableParentManager
 #include "mozilla/layers/Compositor.h"  // for Compositor
 #include "mozilla/layers/ISurfaceAllocator.h"  // for ISurfaceAllocator
 #include "mozilla/layers/ImageDataSerializer.h"
@@ -36,6 +38,36 @@ struct nsIntPoint;
 namespace mozilla {
 namespace layers {
 
+#if defined(MOZ_WIDGET_GONK) && ANDROID_VERSION >= 17
+// FenceDeliveryTracker puts off releasing a Fence until a transaction complete.
+class FenceDeliveryTracker : public AsyncTransactionTracker {
+public:
+  FenceDeliveryTracker(const android::sp<android::Fence>& aFence)
+    : mFence(aFence)
+  {
+    MOZ_COUNT_CTOR(FenceDeliveryTracker);
+  }
+
+  ~FenceDeliveryTracker()
+  {
+    MOZ_COUNT_DTOR(FenceDeliveryTracker);
+  }
+
+  virtual void Complete() MOZ_OVERRIDE
+  {
+    mFence = nullptr;
+  }
+
+  virtual void Cancel() MOZ_OVERRIDE
+  {
+    mFence = nullptr;
+  }
+
+private:
+  android::sp<android::Fence> mFence;
+};
+#endif
+
 /**
  * TextureParent is the host-side IPDL glue between TextureClient and TextureHost.
  * It is an IPDL actor just like LayerParent, CompositableParent, etc.
@@ -43,7 +75,7 @@ namespace layers {
 class TextureParent : public PTextureParent
 {
 public:
-  TextureParent(ISurfaceAllocator* aAllocator);
+  TextureParent(CompositableParentManager* aManager);
 
   ~TextureParent();
 
@@ -61,24 +93,24 @@ public:
 
   void ActorDestroy(ActorDestroyReason why) MOZ_OVERRIDE;
 
-  ISurfaceAllocator* mAllocator;
+  CompositableParentManager* mCompositableManager;
   RefPtr<TextureHost> mWaitForClientRecycle;
   RefPtr<TextureHost> mTextureHost;
 };
 
 // static
 PTextureParent*
-TextureHost::CreateIPDLActor(ISurfaceAllocator* aAllocator,
+TextureHost::CreateIPDLActor(CompositableParentManager* aManager,
                              const SurfaceDescriptor& aSharedData,
                              TextureFlags aFlags)
 {
   if (aSharedData.type() == SurfaceDescriptor::TSurfaceDescriptorMemory &&
-      !aAllocator->IsSameProcess())
+      !aManager->IsSameProcess())
   {
     NS_ERROR("A client process is trying to peek at our address space using a MemoryTexture!");
     return nullptr;
   }
-  TextureParent* actor = new TextureParent(aAllocator);
+  TextureParent* actor = new TextureParent(aManager);
   if (!actor->Init(aSharedData, aFlags)) {
     delete actor;
     return nullptr;
@@ -233,7 +265,7 @@ TextureHost::~TextureHost()
 
 void TextureHost::Finalize()
 {
-  if (!(GetFlags() & TEXTURE_DEALLOCATE_CLIENT)) {
+  if (!(GetFlags() & TextureFlags::DEALLOCATE_CLIENT)) {
     DeallocateSharedData();
     DeallocateDeviceData();
   }
@@ -292,7 +324,7 @@ BufferTextureHost::Updated(const nsIntRegion* aRegion)
   } else {
     mPartialUpdate = false;
   }
-  if (GetFlags() & TEXTURE_IMMEDIATE_UPLOAD) {
+  if (GetFlags() & TextureFlags::IMMEDIATE_UPLOAD) {
     DebugOnly<bool> result = MaybeUpload(mPartialUpdate ? &mMaybeUpdatedRegion : nullptr);
     NS_WARN_IF_FALSE(result, "Failed to upload a texture");
   }
@@ -355,7 +387,7 @@ BufferTextureHost::GetFormat() const
   // instead (see BufferTextureHost::Upload)
   if (mFormat == gfx::SurfaceFormat::YUV &&
     mCompositor &&
-    !mCompositor->SupportsEffect(EFFECT_YCBCR)) {
+    !mCompositor->SupportsEffect(EffectTypes::YCBCR)) {
     return gfx::SurfaceFormat::R8G8B8X8;
   }
   return mFormat;
@@ -397,7 +429,7 @@ BufferTextureHost::Upload(nsIntRegion *aRegion)
     YCbCrImageDataDeserializer yuvDeserializer(GetBuffer(), GetBufferSize());
     MOZ_ASSERT(yuvDeserializer.IsValid());
 
-    if (!mCompositor->SupportsEffect(EFFECT_YCBCR)) {
+    if (!mCompositor->SupportsEffect(EffectTypes::YCBCR)) {
       RefPtr<gfx::DataSourceSurface> surf = yuvDeserializer.ToDataSourceSurface();
       if (!mFirstSource) {
         mFirstSource = mCompositor->CreateDataTextureSource(mFlags);
@@ -411,9 +443,9 @@ BufferTextureHost::Upload(nsIntRegion *aRegion)
     RefPtr<DataTextureSource> srcV;
     if (!mFirstSource) {
       // We don't support BigImages for YCbCr compositing.
-      srcY = mCompositor->CreateDataTextureSource(mFlags|TEXTURE_DISALLOW_BIGIMAGE);
-      srcU = mCompositor->CreateDataTextureSource(mFlags|TEXTURE_DISALLOW_BIGIMAGE);
-      srcV = mCompositor->CreateDataTextureSource(mFlags|TEXTURE_DISALLOW_BIGIMAGE);
+      srcY = mCompositor->CreateDataTextureSource(mFlags|TextureFlags::DISALLOW_BIGIMAGE);
+      srcU = mCompositor->CreateDataTextureSource(mFlags|TextureFlags::DISALLOW_BIGIMAGE);
+      srcV = mCompositor->CreateDataTextureSource(mFlags|TextureFlags::DISALLOW_BIGIMAGE);
       mFirstSource = srcY;
       srcY->SetNextSibling(srcU);
       srcU->SetNextSibling(srcV);
@@ -569,7 +601,7 @@ MemoryTextureHost::MemoryTextureHost(uint8_t* aBuffer,
 MemoryTextureHost::~MemoryTextureHost()
 {
   DeallocateDeviceData();
-  NS_ASSERTION(!mBuffer || (mFlags & TEXTURE_DEALLOCATE_CLIENT),
+  NS_ASSERTION(!mBuffer || (mFlags & TextureFlags::DEALLOCATE_CLIENT),
                "Leaking our buffer");
   MOZ_COUNT_DTOR(MemoryTextureHost);
 }
@@ -604,8 +636,8 @@ size_t MemoryTextureHost::GetBufferSize()
   return std::numeric_limits<size_t>::max();
 }
 
-TextureParent::TextureParent(ISurfaceAllocator* aAllocator)
-: mAllocator(aAllocator)
+TextureParent::TextureParent(CompositableParentManager* aCompositableManager)
+: mCompositableManager(aCompositableManager)
 {
   MOZ_COUNT_CTOR(TextureParent);
 }
@@ -628,23 +660,25 @@ TextureParent::CompositorRecycle()
 {
   mTextureHost->ClearRecycleCallback();
 
-  MaybeFenceHandle handle = null_t();
 #if defined(MOZ_WIDGET_GONK) && ANDROID_VERSION >= 17
   if (mTextureHost) {
     TextureHostOGL* hostOGL = mTextureHost->AsHostOGL();
     android::sp<android::Fence> fence = hostOGL->GetAndResetReleaseFence();
     if (fence.get() && fence->isValid()) {
-      handle = FenceHandle(fence);
       // HWC might not provide Fence.
       // In this case, HWC implicitly handles buffer's fence.
+
+      FenceHandle handle = FenceHandle(fence);
+      RefPtr<FenceDeliveryTracker> tracker = new FenceDeliveryTracker(fence);
+      mCompositableManager->SendFenceHandle(tracker, this, handle);
     }
   }
 #endif
-  mozilla::unused << SendCompositorRecycle(handle);
 
-  // Don't forget to prepare for the next reycle
-  // if TextureClient request it.
-  if (mTextureHost->GetFlags() & TEXTURE_RECYCLE) {
+  if (mTextureHost->GetFlags() & TextureFlags::RECYCLE) {
+    mozilla::unused << SendCompositorRecycle();
+    // Don't forget to prepare for the next reycle
+    // if TextureClient request it.
     mWaitForClientRecycle = mTextureHost;
   }
 }
@@ -667,11 +701,11 @@ TextureParent::Init(const SurfaceDescriptor& aSharedData,
                     const TextureFlags& aFlags)
 {
   mTextureHost = TextureHost::Create(aSharedData,
-                                     mAllocator,
+                                     mCompositableManager,
                                      aFlags);
   if (mTextureHost) {
     mTextureHost->mActor = this;
-    if (aFlags & TEXTURE_RECYCLE) {
+    if (aFlags & TextureFlags::RECYCLE) {
       mWaitForClientRecycle = mTextureHost;
       RECYCLE_LOG("Setup recycling for tile %p\n", this);
     }
@@ -711,11 +745,11 @@ TextureParent::ActorDestroy(ActorDestroyReason why)
     NS_RUNTIMEABORT("FailedConstructor isn't possible in PTexture");
   }
 
-  if (mTextureHost->GetFlags() & TEXTURE_RECYCLE) {
+  if (mTextureHost->GetFlags() & TextureFlags::RECYCLE) {
     RECYCLE_LOG("clear recycling for tile %p\n", this);
     mTextureHost->ClearRecycleCallback();
   }
-  if (mTextureHost->GetFlags() & TEXTURE_DEALLOCATE_CLIENT) {
+  if (mTextureHost->GetFlags() & TextureFlags::DEALLOCATE_CLIENT) {
     mTextureHost->ForgetSharedData();
   }
 

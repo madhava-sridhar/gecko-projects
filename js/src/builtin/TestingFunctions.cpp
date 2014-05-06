@@ -23,6 +23,7 @@
 #include "vm/GlobalObject.h"
 #include "vm/Interpreter.h"
 #include "vm/ProxyObject.h"
+#include "vm/SavedStacks.h"
 #include "vm/TraceLogging.h"
 
 #include "jscntxtinlines.h"
@@ -87,6 +88,14 @@ GetBuildConfiguration(JSContext *cx, unsigned argc, jsval *vp)
     value = BooleanValue(false);
 #endif
     if (!JS_SetProperty(cx, info, "x64", value))
+        return false;
+
+#ifdef JS_ARM_SIMULATOR
+    value = BooleanValue(true);
+#else
+    value = BooleanValue(false);
+#endif
+    if (!JS_SetProperty(cx, info, "arm-simulator", value))
         return false;
 
 #ifdef MOZ_ASAN
@@ -229,7 +238,7 @@ GC(JSContext *cx, unsigned argc, jsval *vp)
     }
 
 #ifndef JS_MORE_DETERMINISTIC
-    size_t preBytes = cx->runtime()->gcBytes;
+    size_t preBytes = cx->runtime()->gc.bytes;
 #endif
 
     if (compartment)
@@ -241,7 +250,7 @@ GC(JSContext *cx, unsigned argc, jsval *vp)
     char buf[256] = { '\0' };
 #ifndef JS_MORE_DETERMINISTIC
     JS_snprintf(buf, sizeof(buf), "before %lu, after %lu\n",
-                (unsigned long)preBytes, (unsigned long)cx->runtime()->gcBytes);
+                (unsigned long)preBytes, (unsigned long)cx->runtime()->gc.bytes);
 #endif
     JSString *str = JS_NewStringCopyZ(cx, buf);
     if (!str)
@@ -256,7 +265,7 @@ MinorGC(JSContext *cx, unsigned argc, jsval *vp)
     CallArgs args = CallArgsFromVp(argc, vp);
 #ifdef JSGC_GENERATIONAL
     if (args.get(0) == BooleanValue(true))
-        cx->runtime()->gcStoreBuffer.setAboutToOverflow();
+        cx->runtime()->gc.storeBuffer.setAboutToOverflow();
 
     MinorGC(cx, gcreason::API);
 #endif
@@ -436,7 +445,7 @@ GCPreserveCode(JSContext *cx, unsigned argc, jsval *vp)
         return false;
     }
 
-    cx->runtime()->alwaysPreserveCode = true;
+    cx->runtime()->gc.alwaysPreserveCode = true;
 
     args.rval().setUndefined();
     return true;
@@ -504,7 +513,7 @@ SelectForGC(JSContext *cx, unsigned argc, Value *vp)
     JSRuntime *rt = cx->runtime();
     for (unsigned i = 0; i < args.length(); i++) {
         if (args[i].isObject()) {
-            if (!rt->gcSelectedForMarking.append(&args[i].toObject()))
+            if (!rt->gc.selectedForMarking.append(&args[i].toObject()))
                 return false;
         }
     }
@@ -555,7 +564,7 @@ GCState(JSContext *cx, unsigned argc, jsval *vp)
     }
 
     const char *state;
-    gc::State globalState = cx->runtime()->gcIncrementalState;
+    gc::State globalState = cx->runtime()->gc.incrementalState;
     if (globalState == gc::NO_INCREMENTAL)
         state = "none";
     else if (globalState == gc::MARK)
@@ -842,6 +851,39 @@ CountHeap(JSContext *cx, unsigned argc, jsval *vp)
     return true;
 }
 
+static bool
+GetSavedFrameCount(JSContext *cx, unsigned argc, jsval *vp)
+{
+    CallArgs args = CallArgsFromVp(argc, vp);
+    args.rval().setNumber(cx->compartment()->savedStacks().count());
+    return true;
+}
+
+static bool
+SaveStack(JSContext *cx, unsigned argc, jsval *vp)
+{
+    CallArgs args = CallArgsFromVp(argc, vp);
+    Rooted<SavedFrame*> frame(cx);
+    if (!cx->compartment()->savedStacks().saveCurrentStack(cx, &frame))
+        return false;
+    args.rval().setObject(*frame.get());
+    return true;
+}
+
+static bool
+EnableTrackAllocations(JSContext *cx, unsigned argc, jsval *vp)
+{
+    SetObjectMetadataCallback(cx, SavedStacksMetadataCallback);
+    return true;
+}
+
+static bool
+DisableTrackAllocations(JSContext *cx, unsigned argc, jsval *vp)
+{
+    SetObjectMetadataCallback(cx, nullptr);
+    return true;
+}
+
 #if defined(DEBUG) || defined(JS_OOM_BREAKPOINT)
 static bool
 OOMAfterAllocations(JSContext *cx, unsigned argc, jsval *vp)
@@ -974,24 +1016,51 @@ Terminate(JSContext *cx, unsigned arg, jsval *vp)
     return false;
 }
 
+#define SPS_PROFILING_STACK_MAX_SIZE 1000
+static ProfileEntry SPS_PROFILING_STACK[SPS_PROFILING_STACK_MAX_SIZE];
+static uint32_t SPS_PROFILING_STACK_SIZE = 0;
+
 static bool
-EnableSPSProfilingAssertions(JSContext *cx, unsigned argc, jsval *vp)
+EnableSPSProfiling(JSContext *cx, unsigned argc, jsval *vp)
 {
     CallArgs args = CallArgsFromVp(argc, vp);
-    if (!args.get(0).isBoolean()) {
-        RootedObject arg(cx, &args.callee());
-        ReportUsageError(cx, arg, "Must have one boolean argument");
-        return false;
-    }
-
-    static ProfileEntry stack[1000];
-    static uint32_t stack_size = 0;
 
     // Disable before re-enabling; see the assertion in |SPSProfiler::setProfilingStack|.
     if (cx->runtime()->spsProfiler.installed())
         cx->runtime()->spsProfiler.enable(false);
-    SetRuntimeProfilingStack(cx->runtime(), stack, &stack_size, 1000);
-    cx->runtime()->spsProfiler.enableSlowAssertions(args[0].toBoolean());
+
+    SetRuntimeProfilingStack(cx->runtime(), SPS_PROFILING_STACK, &SPS_PROFILING_STACK_SIZE,
+                             SPS_PROFILING_STACK_MAX_SIZE);
+    cx->runtime()->spsProfiler.enableSlowAssertions(false);
+    cx->runtime()->spsProfiler.enable(true);
+
+    args.rval().setUndefined();
+    return true;
+}
+
+static bool
+EnableSPSProfilingWithSlowAssertions(JSContext *cx, unsigned argc, jsval *vp)
+{
+    CallArgs args = CallArgsFromVp(argc, vp);
+
+    if (cx->runtime()->spsProfiler.enabled()) {
+        // If profiling already enabled with slow assertions disabled,
+        // this is a no-op.
+        if (cx->runtime()->spsProfiler.slowAssertionsEnabled())
+            return true;
+
+        // Slow assertions are off.  Disable profiling before re-enabling
+        // with slow assertions on.
+        cx->runtime()->spsProfiler.enable(false);
+    }
+
+    // Disable before re-enabling; see the assertion in |SPSProfiler::setProfilingStack|.
+    if (cx->runtime()->spsProfiler.installed())
+        cx->runtime()->spsProfiler.enable(false);
+
+    SetRuntimeProfilingStack(cx->runtime(), SPS_PROFILING_STACK, &SPS_PROFILING_STACK_SIZE,
+                             SPS_PROFILING_STACK_MAX_SIZE);
+    cx->runtime()->spsProfiler.enableSlowAssertions(true);
     cx->runtime()->spsProfiler.enable(true);
 
     args.rval().setUndefined();
@@ -1072,10 +1141,14 @@ ShellObjectMetadataCallback(JSContext *cx, JSObject **pmetadata)
     }
 
     int stackIndex = 0;
+    RootedId id(cx);
+    RootedValue callee(cx);
     for (NonBuiltinScriptFrameIter iter(cx); !iter.done(); ++iter) {
         if (iter.isFunctionFrame() && iter.compartment() == cx->compartment()) {
-            if (!JS_DefinePropertyById(cx, stack, INT_TO_JSID(stackIndex), ObjectValue(*iter.callee()),
-                                       JS_PropertyStub, JS_StrictPropertyStub, 0))
+            id = INT_TO_JSID(stackIndex);
+            RootedObject callee(cx, iter.callee());
+            if (!JS_DefinePropertyById(cx, stack, id, callee, 0,
+                                       JS_PropertyStub, JS_StrictPropertyStub))
             {
                 return false;
             }
@@ -1455,8 +1528,13 @@ Neuter(JSContext *cx, unsigned argc, jsval *vp)
 {
     CallArgs args = CallArgsFromVp(argc, vp);
 
+    if (args.length() != 2) {
+        JS_ReportError(cx, "wrong number of arguments to neuter()");
+        return false;
+    }
+
     RootedObject obj(cx);
-    if (!JS_ValueToObject(cx, args.get(0), &obj))
+    if (!JS_ValueToObject(cx, args[0], &obj))
         return false;
 
     if (!obj) {
@@ -1464,7 +1542,23 @@ Neuter(JSContext *cx, unsigned argc, jsval *vp)
         return false;
     }
 
-    if (!JS_NeuterArrayBuffer(cx, obj))
+    NeuterDataDisposition changeData;
+    RootedString str(cx, JS::ToString(cx, args[1]));
+    if (!str)
+        return false;
+    JSAutoByteString dataDisposition(cx, str);
+    if (!dataDisposition)
+        return false;
+    if (strcmp(dataDisposition.ptr(), "same-data") == 0) {
+        changeData = KeepData;
+    } else if (strcmp(dataDisposition.ptr(), "change-data") == 0) {
+        changeData = ChangeData;
+    } else {
+        JS_ReportError(cx, "unknown parameter 2 to neuter()");
+        return false;
+    }
+
+    if (!JS_NeuterArrayBuffer(cx, obj, changeData))
         return false;
 
     args.rval().setUndefined();
@@ -1541,6 +1635,25 @@ static const JSFunctionSpecWithHelp TestingFunctions[] = {
 "  to count only things of that kind. If kind is the string 'specific',\n"
 "  then you can provide an extra argument with some specific traceable\n"
 "  thing to count.\n"),
+
+    JS_FN_HELP("getSavedFrameCount", GetSavedFrameCount, 0, 0,
+"getSavedFrameCount()",
+"  Return the number of SavedFrame instances stored in this compartment's\n"
+"  SavedStacks cache."),
+
+    JS_FN_HELP("saveStack", SaveStack, 0, 0,
+"saveStack()",
+"  Capture a stack.\n"),
+
+    JS_FN_HELP("enableTrackAllocations", EnableTrackAllocations, 0, 0,
+"enableTrackAllocations()",
+"  Start capturing the JS stack at every allocation. Note that this sets an "
+"  object metadata callback that will override any other object metadata "
+"  callback that may be set."),
+
+    JS_FN_HELP("disableTrackAllocations", DisableTrackAllocations, 0, 0,
+"disableTrackAllocations()",
+"  Stop capturing the JS stack at every allocation."),
 
 #if defined(DEBUG) || defined(JS_OOM_BREAKPOINT)
     JS_FN_HELP("oomAfterAllocations", OOMAfterAllocations, 1, 0,
@@ -1645,14 +1758,17 @@ static const JSFunctionSpecWithHelp TestingFunctions[] = {
 "  Terminate JavaScript execution, as if we had run out of\n"
 "  memory or been terminated by the slow script dialog."),
 
-    JS_FN_HELP("enableSPSProfilingAssertions", EnableSPSProfilingAssertions, 1, 0,
-"enableSPSProfilingAssertions(slow)",
-"  Enables SPS instrumentation and corresponding assertions. If 'slow' is\n"
-"  true, then even slower assertions are enabled for all generated JIT code.\n"
-"  When 'slow' is false, then instrumentation is enabled, but the slow\n"
-"  assertions are disabled."),
+    JS_FN_HELP("enableSPSProfiling", EnableSPSProfiling, 0, 0,
+"enableSPSProfiling()",
+"  Enables SPS instrumentation and corresponding assertions, with slow\n"
+"  assertions disabled.\n"),
 
-    JS_FN_HELP("disableSPSProfiling", DisableSPSProfiling, 1, 0,
+    JS_FN_HELP("enableSPSProfilingWithSlowAssertions", EnableSPSProfilingWithSlowAssertions, 0, 0,
+"enableSPSProfilingWithSlowAssertions()",
+"  Enables SPS instrumentation and corresponding assertions, with slow\n"
+"  assertions enabled.\n"),
+
+    JS_FN_HELP("disableSPSProfiling", DisableSPSProfiling, 0, 0,
 "disableSPSProfiling()",
 "  Disables SPS instrumentation"),
 
@@ -1740,8 +1856,11 @@ static const JSFunctionSpecWithHelp TestingFunctions[] = {
 "  Deserialize data generated by serialize."),
 
     JS_FN_HELP("neuter", Neuter, 1, 0,
-"neuter(buffer)",
-"  Neuter the given ArrayBuffer object as if it had been transferred to a WebWorker."),
+"neuter(buffer, \"change-data\"|\"same-data\")",
+"  Neuter the given ArrayBuffer object as if it had been transferred to a\n"
+"  WebWorker. \"change-data\" will update the internal data pointer.\n"
+"  \"same-data\" will leave it set to its original value, to mimic eg\n"
+"  asm.js ArrayBuffer neutering."),
 
     JS_FN_HELP("workerThreadCount", WorkerThreadCount, 0, 0,
 "workerThreadCount()",
@@ -1754,7 +1873,7 @@ static const JSFunctionSpecWithHelp TestingFunctions[] = {
 "  TLOPTIONS=disableMainThread"),
 
     JS_FN_HELP("stopTraceLogger", DisableTraceLogger, 0, 0,
-"startTraceLogger()",
+"stopTraceLogger()",
 "  Stop logging the mainThread."),
     JS_FS_HELP_END
 };

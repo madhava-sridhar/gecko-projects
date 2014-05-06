@@ -20,7 +20,6 @@
 #include "nsIIPCSerializableInputStream.h"
 #include "nsIMemoryReporter.h"
 #include "nsIMIMEService.h"
-#include "nsIPlatformCharset.h"
 #include "nsISeekableStream.h"
 #include "nsIUnicharInputStream.h"
 #include "nsIUnicodeDecoder.h"
@@ -711,7 +710,7 @@ public:
   }
 };
 
-NS_IMPL_ISUPPORTS1(nsDOMMemoryFileDataOwnerMemoryReporter, nsIMemoryReporter)
+NS_IMPL_ISUPPORTS(nsDOMMemoryFileDataOwnerMemoryReporter, nsIMemoryReporter)
 
 /* static */ void
 nsDOMMemoryFile::DataOwner::EnsureMemoryReporterRegistered()

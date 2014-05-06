@@ -111,6 +111,8 @@ struct Cell
     inline JSRuntime *runtimeFromAnyThread() const;
     inline JS::shadow::Runtime *shadowRuntimeFromAnyThread() const;
 
+    inline StoreBuffer *storeBuffer() const;
+
 #ifdef DEBUG
     inline bool isAligned() const;
     inline bool isTenured() const;
@@ -606,8 +608,18 @@ ArenaHeader::getThingSize() const
  */
 struct ChunkTrailer
 {
+    /* The index the chunk in the nursery, or LocationTenuredHeap. */
+    uint32_t        location;
+    uint32_t        padding;
+
+    /* The store buffer for writes to things in this chunk or nullptr. */
+    StoreBuffer     *storeBuffer;
+
     JSRuntime       *runtime;
 };
+
+static_assert(sizeof(ChunkTrailer) == 2 * sizeof(uintptr_t) + sizeof(uint64_t),
+              "ChunkTrailer size is incorrect.");
 
 /* The chunk header (located at the end of the chunk to preserve arena alignment). */
 struct ChunkInfo
@@ -623,7 +635,7 @@ struct ChunkInfo
      * Calculating sizes and offsets is simpler if sizeof(ChunkInfo) is
      * architecture-independent.
      */
-    char            padding[16];
+    char            padding[20];
 #endif
 
     /*
@@ -812,15 +824,7 @@ struct Chunk
 
     static Chunk *allocate(JSRuntime *rt);
 
-    void decommitAllArenas(JSRuntime *rt) {
-        decommittedArenas.clear(true);
-        MarkPagesUnused(rt, &arenas[0], ArenasPerChunk * ArenaSize);
-
-        info.freeArenasHead = nullptr;
-        info.lastDecommittedArenaOffset = 0;
-        info.numArenasFree = ArenasPerChunk;
-        info.numArenasFreeCommitted = 0;
-    }
+    void decommitAllArenas(JSRuntime *rt);
 
     /* Must be called with the GC lock taken. */
     static inline void release(JSRuntime *rt, Chunk *chunk);
@@ -864,9 +868,13 @@ static_assert(sizeof(Chunk) == ChunkSize,
 static_assert(js::gc::ChunkMarkBitmapOffset == offsetof(Chunk, bitmap),
               "The hardcoded API bitmap offset must match the actual offset.");
 static_assert(js::gc::ChunkRuntimeOffset == offsetof(Chunk, info) +
-                                               offsetof(ChunkInfo, trailer) +
-                                               offsetof(ChunkTrailer, runtime),
+                                            offsetof(ChunkInfo, trailer) +
+                                            offsetof(ChunkTrailer, runtime),
               "The hardcoded API runtime offset must match the actual offset.");
+static_assert(js::gc::ChunkLocationOffset == offsetof(Chunk, info) +
+                                             offsetof(ChunkInfo, trailer) +
+                                             offsetof(ChunkTrailer, location),
+              "The hardcoded API location offset must match the actual offset.");
 
 inline uintptr_t
 ArenaHeader::address() const
@@ -972,7 +980,7 @@ AssertValidColor(const void *thing, uint32_t color)
 {
 #ifdef DEBUG
     ArenaHeader *aheader = reinterpret_cast<const Cell *>(thing)->arenaHeader();
-    JS_ASSERT_IF(color, color < aheader->getThingSize() / CellSize);
+    JS_ASSERT(color < aheader->getThingSize() / CellSize);
 #endif
 }
 
@@ -1015,6 +1023,7 @@ bool
 Cell::isMarked(uint32_t color /* = BLACK */) const
 {
     JS_ASSERT(isTenured());
+    JS_ASSERT(arenaHeader()->allocated());
     AssertValidColor(this, color);
     return chunk()->bitmap.isMarked(this, color);
 }
@@ -1093,6 +1102,12 @@ Cell::chunk() const
     JS_ASSERT(addr % CellSize == 0);
     addr &= ~(ChunkSize - 1);
     return reinterpret_cast<Chunk *>(addr);
+}
+
+inline StoreBuffer *
+Cell::storeBuffer() const
+{
+    return chunk()->info.trailer.storeBuffer;
 }
 
 inline bool

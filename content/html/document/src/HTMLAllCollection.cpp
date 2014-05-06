@@ -24,7 +24,7 @@ public:
   static bool DocumentAllGetProperty(JSContext *cx, JS::Handle<JSObject*> obj, JS::Handle<jsid> id,
                                      JS::MutableHandle<JS::Value> vp);
   static bool DocumentAllNewResolve(JSContext *cx, JS::Handle<JSObject*> obj, JS::Handle<jsid> id,
-                                    unsigned flags, JS::MutableHandle<JSObject*> objp);
+                                    JS::MutableHandle<JSObject*> objp);
   static void ReleaseDocument(JSFreeOp *fop, JSObject *obj);
   static bool CallToGetPropMapper(JSContext *cx, unsigned argc, JS::Value *vp);
 };
@@ -291,7 +291,7 @@ nsHTMLDocumentSH::DocumentAllGetProperty(JSContext *cx, JS::Handle<JSObject*> ob
 
 bool
 nsHTMLDocumentSH::DocumentAllNewResolve(JSContext *cx, JS::Handle<JSObject*> obj,
-                                        JS::Handle<jsid> id, unsigned flags,
+                                        JS::Handle<jsid> id,
                                         JS::MutableHandle<JSObject*> objp)
 {
   JS::Rooted<JS::Value> v(cx);
@@ -322,7 +322,7 @@ nsHTMLDocumentSH::DocumentAllNewResolve(JSContext *cx, JS::Handle<JSObject*> obj
   bool ok = true;
 
   if (v.get() != JSVAL_VOID) {
-    ok = ::JS_DefinePropertyById(cx, obj, id, v, nullptr, nullptr, 0);
+    ok = ::JS_DefinePropertyById(cx, obj, id, v, 0);
     objp.set(obj);
   }
 

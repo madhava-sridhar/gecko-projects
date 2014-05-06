@@ -16,7 +16,7 @@
 namespace mozilla {
 namespace dom {
 
-NS_IMPL_ISUPPORTS2(AsyncHelper, nsIRunnable, nsIRequest)
+NS_IMPL_ISUPPORTS(AsyncHelper, nsIRunnable, nsIRequest)
 
 nsresult
 AsyncHelper::AsyncWork(nsIRequestObserver* aObserver, nsISupports* aCtxt)

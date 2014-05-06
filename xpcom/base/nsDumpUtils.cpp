@@ -13,7 +13,7 @@
 #include "nsIObserverService.h"
 #include "mozilla/ClearOnShutdown.h"
 
-#if defined(XP_LINUX) || defined(__FreeBSD__) // {
+#if defined(XP_LINUX) || defined(__FreeBSD__) || defined(XP_MACOSX) // {
 #include "mozilla/Preferences.h"
 #include <fcntl.h>
 #include <unistd.h>
@@ -48,6 +48,9 @@ using namespace mozilla;
 // specific signal occurs.
 static Atomic<int> sDumpPipeWriteFd(-1);
 
+const char* const FifoWatcher::kPrefName =
+  "memory_info_dumper.watch_fifo.enabled";
+
 static void
 DumpSignalHandler(int aSignum)
 {
@@ -60,7 +63,7 @@ DumpSignalHandler(int aSignum)
   }
 }
 
-NS_IMPL_ISUPPORTS1(FdWatcher, nsIObserver);
+NS_IMPL_ISUPPORTS(FdWatcher, nsIObserver);
 
 void FdWatcher::Init()
 {
@@ -70,8 +73,8 @@ void FdWatcher::Init()
   os->AddObserver(this, "xpcom-shutdown", /* ownsWeak = */ false);
 
   XRE_GetIOMessageLoop()->PostTask(
-      FROM_HERE,
-      NewRunnableMethod(this, &FdWatcher::StartWatching));
+    FROM_HERE,
+    NewRunnableMethod(this, &FdWatcher::StartWatching));
 }
 
 // Implementations may call this function multiple times if they ensure that
@@ -259,7 +262,7 @@ FifoWatcher::MaybeCreate()
     return false;
   }
 
-  if (!Preferences::GetBool("memory_info_dumper.watch_fifo.enabled", false)) {
+  if (!Preferences::GetBool(kPrefName, false)) {
     LOG("Fifo watcher disabled via pref.");
     return false;
   }
@@ -334,9 +337,9 @@ int FifoWatcher::OpenFd()
   }
 
 #ifdef ANDROID
-    // Android runs with a umask, so we need to chmod our fifo to make it
-    // world-writable.
-    chmod(path.get(), 0666);
+  // Android runs with a umask, so we need to chmod our fifo to make it
+  // world-writable.
+  chmod(path.get(), 0666);
 #endif
 
   int fd;
@@ -475,15 +478,15 @@ nsDumpUtils::OpenTempFile(const nsACString& aFilename, nsIFile** aFile,
     return rv;
 
 #ifdef ANDROID
-    // Make this file world-read/writable; the permissions passed to the
-    // CreateUnique call above are not sufficient on Android, which runs with a
-    // umask.
-    nsAutoCString path;
-    rv = file->GetNativePath(path);
-    if (NS_WARN_IF(NS_FAILED(rv)))
-      return rv;
+  // Make this file world-read/writable; the permissions passed to the
+  // CreateUnique call above are not sufficient on Android, which runs with a
+  // umask.
+  nsAutoCString path;
+  rv = file->GetNativePath(path);
+  if (NS_WARN_IF(NS_FAILED(rv)))
+    return rv;
 
-    while (chmod(path.get(), 0666) == -1 && errno == EINTR) {}
+  while (chmod(path.get(), 0666) == -1 && errno == EINTR) {}
 #endif
 
   return NS_OK;

@@ -306,9 +306,9 @@ nsSocketInputStream::OnSocketReady(nsresult condition)
         callback->OnInputStreamReady(this);
 }
 
-NS_IMPL_QUERY_INTERFACE2(nsSocketInputStream,
-                         nsIInputStream,
-                         nsIAsyncInputStream)
+NS_IMPL_QUERY_INTERFACE(nsSocketInputStream,
+                        nsIInputStream,
+                        nsIAsyncInputStream)
 
 NS_IMETHODIMP_(MozExternalRefCountType)
 nsSocketInputStream::AddRef()
@@ -569,9 +569,9 @@ nsSocketOutputStream::OnSocketReady(nsresult condition)
         callback->OnOutputStreamReady(this);
 }
 
-NS_IMPL_QUERY_INTERFACE2(nsSocketOutputStream,
-                         nsIOutputStream,
-                         nsIAsyncOutputStream)
+NS_IMPL_QUERY_INTERFACE(nsSocketOutputStream,
+                        nsIOutputStream,
+                        nsIAsyncOutputStream)
 
 NS_IMETHODIMP_(MozExternalRefCountType)
 nsSocketOutputStream::AddRef()
@@ -1924,15 +1924,15 @@ nsSocketTransport::IsLocal(bool *aIsLocal)
 //-----------------------------------------------------------------------------
 // xpcom api
 
-NS_IMPL_ISUPPORTS4(nsSocketTransport,
-                   nsISocketTransport,
-                   nsITransport,
-                   nsIDNSListener,
-                   nsIClassInfo)
-NS_IMPL_CI_INTERFACE_GETTER3(nsSocketTransport,
-                             nsISocketTransport,
-                             nsITransport,
-                             nsIDNSListener)
+NS_IMPL_ISUPPORTS(nsSocketTransport,
+                  nsISocketTransport,
+                  nsITransport,
+                  nsIDNSListener,
+                  nsIClassInfo)
+NS_IMPL_CI_INTERFACE_GETTER(nsSocketTransport,
+                            nsISocketTransport,
+                            nsITransport,
+                            nsIDNSListener)
 
 NS_IMETHODIMP
 nsSocketTransport::OpenInputStream(uint32_t flags,
@@ -2433,11 +2433,11 @@ nsSocketTransport::OnKeepaliveEnabledPrefChange(bool aEnabled)
 nsresult
 nsSocketTransport::SetKeepaliveEnabledInternal(bool aEnable)
 {
-    MOZ_ASSERT(mKeepaliveIdleTimeS > 0 ||
+    MOZ_ASSERT(mKeepaliveIdleTimeS > 0 &&
                mKeepaliveIdleTimeS <= kMaxTCPKeepIdle);
-    MOZ_ASSERT(mKeepaliveRetryIntervalS > 0 ||
+    MOZ_ASSERT(mKeepaliveRetryIntervalS > 0 &&
                mKeepaliveRetryIntervalS <= kMaxTCPKeepIntvl);
-    MOZ_ASSERT(mKeepaliveProbeCount > 0 ||
+    MOZ_ASSERT(mKeepaliveProbeCount > 0 &&
                mKeepaliveProbeCount <= kMaxTCPKeepCount);
 
     PRFileDescAutoLock fd(this);

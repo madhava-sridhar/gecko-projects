@@ -91,8 +91,8 @@ using namespace mozilla::a11y;
 ////////////////////////////////////////////////////////////////////////////////
 // Accessible: nsISupports and cycle collection
 
-NS_IMPL_CYCLE_COLLECTION_3(Accessible,
-                           mContent, mParent, mChildren)
+NS_IMPL_CYCLE_COLLECTION(Accessible,
+                         mContent, mParent, mChildren)
 
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(Accessible)
   NS_INTERFACE_MAP_ENTRY(nsIAccessible)
@@ -2453,6 +2453,8 @@ Accessible::Shutdown()
 
   mContent = nullptr;
   mDoc = nullptr;
+  if (SelectionMgr()->AccessibleWithCaret(nullptr) == this)
+    SelectionMgr()->ResetCaretOffset();
 }
 
 // Accessible protected

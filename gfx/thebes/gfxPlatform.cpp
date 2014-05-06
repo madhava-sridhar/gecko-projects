@@ -7,9 +7,11 @@
 #define FORCE_PR_LOG /* Allow logging in the release build */
 #endif
 
+#include "mozilla/layers/AsyncTransactionTracker.h" // for AsyncTransactionTracker
 #include "mozilla/layers/CompositorChild.h"
 #include "mozilla/layers/CompositorParent.h"
 #include "mozilla/layers/ImageBridgeChild.h"
+#include "mozilla/layers/SharedBufferManagerChild.h"
 #include "mozilla/layers/ISurfaceAllocator.h"     // for GfxMemoryImageReporter
 
 #include "prlog.h"
@@ -137,7 +139,7 @@ public:
     NS_DECL_NSIOBSERVER
 };
 
-NS_IMPL_ISUPPORTS2(SRGBOverrideObserver, nsIObserver, nsISupportsWeakReference)
+NS_IMPL_ISUPPORTS(SRGBOverrideObserver, nsIObserver, nsISupportsWeakReference)
 
 #define GFX_DOWNLOADABLE_FONTS_ENABLED "gfx.downloadable_fonts.enabled"
 
@@ -182,7 +184,7 @@ public:
     NS_DECL_NSIOBSERVER
 };
 
-NS_IMPL_ISUPPORTS1(FontPrefsObserver, nsIObserver)
+NS_IMPL_ISUPPORTS(FontPrefsObserver, nsIObserver)
 
 NS_IMETHODIMP
 FontPrefsObserver::Observe(nsISupports *aSubject,
@@ -206,7 +208,7 @@ public:
     NS_DECL_NSIOBSERVER
 };
 
-NS_IMPL_ISUPPORTS1(MemoryPressureObserver, nsIObserver)
+NS_IMPL_ISUPPORTS(MemoryPressureObserver, nsIObserver)
 
 NS_IMETHODIMP
 MemoryPressureObserver::Observe(nsISupports *aSubject,
@@ -334,6 +336,8 @@ gfxPlatform::Init()
 
     gGfxPlatformPrefsLock = new Mutex("gfxPlatform::gGfxPlatformPrefsLock");
 
+    AsyncTransactionTracker::Initialize();
+
     /* Initialize the GfxInfo service.
      * Note: we can't call functions on GfxInfo that depend
      * on gPlatform until after it has been initialized
@@ -375,6 +379,9 @@ gfxPlatform::Init()
         if (gfxPrefs::AsyncVideoEnabled()) {
             ImageBridgeChild::StartUp();
         }
+#ifdef MOZ_WIDGET_GONK
+        SharedBufferManagerChild::StartUp();
+#endif
     }
 
     nsresult rv;
@@ -496,8 +503,12 @@ gfxPlatform::Shutdown()
     // This will block this thread untill the ImageBridge protocol is completely
     // deleted.
     ImageBridgeChild::ShutDown();
-
+#ifdef MOZ_WIDGET_GONK
+    SharedBufferManagerChild::ShutDown();
+#endif
     CompositorParent::ShutDown();
+
+    AsyncTransactionTracker::Finalize();
 
     delete gGfxPlatformPrefsLock;
 
@@ -754,76 +765,26 @@ gfxPlatform::GetSourceSurfaceForSurface(DrawTarget *aTarget, gfxASurface *aSurfa
   if (!srcBuffer) {
     nsRefPtr<gfxImageSurface> imgSurface = aSurface->GetAsImageSurface();
 
-    RefPtr<DataSourceSurface> copy;
-    if (!imgSurface) {
-      copy = CopySurface(aSurface);
+    RefPtr<DataSourceSurface> dataSurf;
 
-      if (!copy) {
-        return nullptr;
-      }
-
-      DataSourceSurface::MappedSurface map;
-      DebugOnly<bool> result = copy->Map(DataSourceSurface::WRITE, &map);
-      MOZ_ASSERT(result, "Should always succeed mapping raw data surfaces!");
-
-      imgSurface = new gfxImageSurface(map.mData, aSurface->GetSize(), map.mStride,
-                                       SurfaceFormatToImageFormat(copy->GetFormat()));
+    if (imgSurface) {
+      dataSurf = GetWrappedDataSourceSurface(aSurface);
+    } else {
+      dataSurf = CopySurface(aSurface);
     }
 
-    gfxImageFormat cairoFormat = imgSurface->Format();
-    switch(cairoFormat) {
-      case gfxImageFormat::ARGB32:
-        format = SurfaceFormat::B8G8R8A8;
-        break;
-      case gfxImageFormat::RGB24:
-        format = SurfaceFormat::B8G8R8X8;
-        break;
-      case gfxImageFormat::A8:
-        format = SurfaceFormat::A8;
-        break;
-      case gfxImageFormat::RGB16_565:
-        format = SurfaceFormat::R5G6B5;
-        break;
-      default:
-        NS_RUNTIMEABORT("Invalid surface format!");
-    }
-
-    IntSize size = IntSize(imgSurface->GetSize().width, imgSurface->GetSize().height);
-    srcBuffer = aTarget->CreateSourceSurfaceFromData(imgSurface->Data(),
-                                                     size,
-                                                     imgSurface->Stride(),
-                                                     format);
-
-    if (copy) {
-      copy->Unmap();
-    }
-
-    if (!srcBuffer) {
-      // If we had to make a copy, then just return that. Otherwise aSurface
-      // must have supported GetAsImageSurface, so we can just wrap that data.
-      if (copy) {
-        srcBuffer = copy;
-      } else {
-        return GetWrappedDataSourceSurface(aSurface);
-      }
-    }
-
-    if (!srcBuffer) {
+    if (!dataSurf) {
       return nullptr;
     }
 
-#if MOZ_TREE_CAIRO
-    cairo_surface_t *nullSurf =
-    cairo_null_surface_create(CAIRO_CONTENT_COLOR_ALPHA);
-    cairo_surface_set_user_data(nullSurf,
-                                &kSourceSurface,
-                                imgSurface,
-                                nullptr);
-    cairo_surface_attach_snapshot(imgSurface->CairoSurface(), nullSurf, SourceSnapshotDetached);
-    cairo_surface_destroy(nullSurf);
-#else
-    cairo_surface_set_mime_data(imgSurface->CairoSurface(), "mozilla/magic", (const unsigned char*) "data", 4, SourceSnapshotDetached, imgSurface.get());
-#endif
+    srcBuffer = aTarget->OptimizeSourceSurface(dataSurf);
+
+    if (imgSurface && srcBuffer == dataSurf) {
+      // Our wrapping surface will hold a reference to its image surface. We cause
+      // a reference cycle if we add it to the cache. And caching it is pretty
+      // pointless since we'll just wrap it again next use.
+     return srcBuffer;
+    }
   }
 
   // Add user data to aSurface so we can cache lookups in the future.
@@ -1064,7 +1025,7 @@ gfxPlatform::CreateDrawTargetForData(unsigned char* aData, const IntSize& aSize,
 {
   NS_ASSERTION(mContentBackend != BackendType::NONE, "No backend.");
   if (mContentBackend == BackendType::CAIRO) {
-    nsRefPtr<gfxImageSurface> image = new gfxImageSurface(aData, gfxIntSize(aSize.width, aSize.height), aStride, SurfaceFormatToImageFormat(aFormat)); 
+    nsRefPtr<gfxImageSurface> image = new gfxImageSurface(aData, gfxIntSize(aSize.width, aSize.height), aStride, SurfaceFormatToImageFormat(aFormat));
     return Factory::CreateDrawTargetForCairoSurface(image->CairoSurface(), aSize);
   }
   return Factory::CreateDrawTargetForData(mContentBackend, aData, aSize, aStride, aFormat);
@@ -1396,18 +1357,18 @@ gfxPlatform::IsLangCJK(eFontPrefLang aLang)
 mozilla::layers::DiagnosticTypes
 gfxPlatform::GetLayerDiagnosticTypes()
 {
-  mozilla::layers::DiagnosticTypes type = DIAGNOSTIC_NONE;
+  mozilla::layers::DiagnosticTypes type = DiagnosticTypes::NO_DIAGNOSTIC;
   if (gfxPrefs::DrawLayerBorders()) {
-    type |= mozilla::layers::DIAGNOSTIC_LAYER_BORDERS;
+    type |= mozilla::layers::DiagnosticTypes::LAYER_BORDERS;
   }
   if (gfxPrefs::DrawTileBorders()) {
-    type |= mozilla::layers::DIAGNOSTIC_TILE_BORDERS;
+    type |= mozilla::layers::DiagnosticTypes::TILE_BORDERS;
   }
   if (gfxPrefs::DrawBigImageBorders()) {
-    type |= mozilla::layers::DIAGNOSTIC_BIGIMAGE_BORDERS;
+    type |= mozilla::layers::DiagnosticTypes::BIGIMAGE_BORDERS;
   }
   if (gfxPrefs::FlashLayerBorders()) {
-    type |= mozilla::layers::DIAGNOSTIC_FLASH_BORDERS;
+    type |= mozilla::layers::DiagnosticTypes::FLASH_BORDERS;
   }
   return type;
 }

@@ -1048,8 +1048,8 @@ nsCSSValue::AppendToString(nsCSSProperty aProperty, nsAString& aResult,
 
     case eCSSProperty_touch_action:
       nsStyleUtil::AppendBitmaskCSSValue(aProperty, intValue,
-                                         NS_STYLE_TOUCH_ACTION_PAN_X,
-                                         NS_STYLE_TOUCH_ACTION_PAN_Y,
+                                         NS_STYLE_TOUCH_ACTION_NONE,
+                                         NS_STYLE_TOUCH_ACTION_MANIPULATION,
                                          aResult);
       break;
 
@@ -2416,6 +2416,6 @@ size_t
 mozilla::css::GridTemplateAreasValue::SizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf) const
 {
   size_t n = mNamedAreas.SizeOfExcludingThis(aMallocSizeOf);
-  n += mTemplates.SizeOfIncludingThis(aMallocSizeOf);
+  n += mTemplates.SizeOfExcludingThis(aMallocSizeOf);
   return n;
 }
