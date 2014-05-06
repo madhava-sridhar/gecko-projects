@@ -725,8 +725,8 @@ IDBFactory::WrapObject(JSContext* aCx)
   return IDBFactoryBinding::Wrap(aCx, this);
 }
 
-NS_IMPL_ISUPPORTS1(IDBFactory::BackgroundCreateCallback,
-                   nsIIPCBackgroundChildCreateCallback)
+NS_IMPL_ISUPPORTS(IDBFactory::BackgroundCreateCallback,
+                  nsIIPCBackgroundChildCreateCallback)
 
 void
 IDBFactory::BackgroundCreateCallback::ActorCreated(PBackgroundChild* aActor)
