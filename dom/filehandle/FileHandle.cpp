@@ -70,42 +70,6 @@ FileHandle::~FileHandle()
 {
 }
 
-#if 0
-// static
-already_AddRefed<FileHandle>
-FileHandle::Create(nsPIDOMWindow* aWindow,
-                   nsIFile* aFile)
-{
-  MOZ_ASSERT(NS_IsMainThread(), "Wrong thread!");
-
-  nsRefPtr<FileHandle> newFileHandle = new FileHandle(aWindow);
-
-  nsresult rv = aFile->GetLeafName(newFileHandle->mName);
-  if (NS_WARN_IF(NS_FAILED(rv))) {
-    return nullptr;
-  }
-
-  newFileHandle->mFile = aFile;
-
-  nsCOMPtr<nsIFile> parent;
-  rv = aFile->GetParent(getter_AddRefs(parent));
-  if (NS_WARN_IF(NS_FAILED(rv))) {
-    return nullptr;
-  }
-
-  nsString storageId;
-  rv = aFile->GetLeafName(storageId);
-  if (NS_WARN_IF(NS_FAILED(rv))) {
-    return nullptr;
-  }
-
-  CopyUTF16toUTF8(storageId, newFileHandle->mStorageId);
-  newFileHandle->mFileName = newFileHandle->mName;
-
-  return newFileHandle.forget();
-}
-#endif
-
 bool
 FileHandle::IsShuttingDown()
 {

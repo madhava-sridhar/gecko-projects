@@ -50,15 +50,6 @@ class FileHandle : public DOMEventTargetHelper
   friend class FileHelper;
 
 public:
-  // The dafult FileHandle implementation is not used by any consumers yet, so
-  // we can temporarily disable it until we get rid of nsIOfflineStorage too.
-  // Othewise, we would have to create a fake nsIOfflineStorage implementation.
-#if 0
-  static already_AddRefed<FileHandle>
-  Create(nsPIDOMWindow* aWindow,
-         nsIFile* aFile);
-#endif
-
   const nsAString&
   Name() const
   {

@@ -7,7 +7,6 @@
 #include "IDBFileHandle.h"
 
 #include "IDBDatabase.h"
-#include "mozilla/Assertions.h"
 #include "mozilla/dom/File.h"
 #include "mozilla/dom/IDBFileHandleBinding.h"
 #include "mozilla/dom/quota/FileStreams.h"
