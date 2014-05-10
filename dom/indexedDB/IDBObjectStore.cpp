@@ -1812,6 +1812,17 @@ IDBObjectStore::OpenCursorInternal(bool aKeysOnly,
 
   mTransaction->OpenCursor(actor, params);
 
+#ifdef IDB_PROFILER_USE_MARKS
+  if (aKeysOnly) {
+    IDB_PROFILER_MARK("IndexedDB Request %llu: "
+                      "database(%s).transaction(%s).objectStore(%s)."
+                      "openKeyCursor(%s, %s)",
+                      "IDBRequest[%llu] MT IDBObjectStore.openKeyCursor()",
+                      request->GetSerialNumber(),
+                      IDB_PROFILER_STRING(Transaction()->Database()),
+                      IDB_PROFILER_STRING(Transaction()),
+                      IDB_PROFILER_STRING(this), IDB_PROFILER_STRING(aKeyRange),
+                      IDB_PROFILER_STRING(direction));
   } else {
     IDB_PROFILER_MARK("IndexedDB Request %llu: "
                       "database(%s).transaction(%s).objectStore(%s)."
@@ -1824,7 +1835,6 @@ IDBObjectStore::OpenCursorInternal(bool aKeysOnly,
                       IDB_PROFILER_STRING(direction));
   }
 #endif
-
   return request.forget();
 }
 
