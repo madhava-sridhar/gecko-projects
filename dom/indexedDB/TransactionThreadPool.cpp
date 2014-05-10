@@ -471,7 +471,7 @@ TransactionThreadPool::FinishTransaction(
   NS_ASSERTION(info, "We've never heard of this transaction?!?");
 
   const nsTArray<nsString>& objectStoreNames = aObjectStoreNames;
-  for (uint32_t index = 0, count = objectStoreNames.Length(); index < count;
+  for (size_t index = 0, count = objectStoreNames.Length(); index < count;
        index++) {
     TransactionInfoPair* blockInfo =
       dbTransactionInfo->blockingTransactions.Get(objectStoreNames[index]);
@@ -482,7 +482,7 @@ TransactionThreadPool::FinishTransaction(
       blockInfo->lastBlockingReads = nullptr;
     }
 
-    uint32_t i = blockInfo->lastBlockingWrites.IndexOf(info);
+    size_t i = blockInfo->lastBlockingWrites.IndexOf(info);
     if (i != blockInfo->lastBlockingWrites.NoIndex) {
       blockInfo->lastBlockingWrites.RemoveElementAt(i);
     }

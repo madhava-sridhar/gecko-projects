@@ -128,6 +128,13 @@ public:
   bool
   IsInvalidated() const
   {
+  }
+
+  // Whether or not the database has been invalidated. If it has then no further
+  // transactions for this database will be allowed to run. This function may be
+  // called on any thread.
+  bool IsInvalidated() const
+  {
     return mInvalidated;
   }
 

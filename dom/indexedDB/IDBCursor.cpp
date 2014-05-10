@@ -342,7 +342,7 @@ IDBCursor::ConvertDirection(IDBCursorDirection aDirection) -> Direction
       return PREV_UNIQUE;
 
     default:
-      MOZ_ASSUME_UNREACHABLE("Should never get here!");
+      MOZ_CRASH("Unknown direction!");
   }
 }
 
@@ -419,7 +419,7 @@ IDBCursor::GetDirection() const
       return IDBCursorDirection::Prevunique;
 
     default:
-      MOZ_ASSUME_UNREACHABLE("Should never get here!");
+      MOZ_CRASH("Bad direction!");
   }
 }
 
@@ -442,7 +442,7 @@ IDBCursor::GetSource(OwningIDBObjectStoreOrIDBIndex& aSource) const
       return;
 
     default:
-      MOZ_ASSUME_UNREACHABLE("Should never get here!");
+      MOZ_ASSERT_UNREACHABLE("Bad type!");
   }
 }
 
@@ -580,7 +580,7 @@ IDBCursor::Continue(JSContext* aCx,
         break;
 
       default:
-        MOZ_ASSUME_UNREACHABLE("Should never get here!");
+        MOZ_CRASH("Unknown direction type!");
     }
   }
 
@@ -959,6 +959,6 @@ IDBCursor::WrapObject(JSContext* aCx)
       return IDBCursorBinding::Wrap(aCx, this);
 
     default:
-      MOZ_ASSUME_UNREACHABLE("Should never get here!");
+      MOZ_CRASH("Bad type!");
   }
 }

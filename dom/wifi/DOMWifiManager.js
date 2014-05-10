@@ -95,11 +95,14 @@ DOMWifiManager.prototype = {
                       "WifiManager:setHttpProxy:Return:OK", "WifiManager:setHttpProxy:Return:NO",
                       "WifiManager:setStaticIpMode:Return:OK", "WifiManager:setStaticIpMode:Return:NO",
                       "WifiManager:importCert:Return:OK", "WifiManager:importCert:Return:NO",
+                      "WifiManager:getImportedCerts:Return:OK", "WifiManager:getImportedCerts:Return:NO",
+                      "WifiManager:deleteCert:Return:OK", "WifiManager:deleteCert:Return:NO",
                       "WifiManager:wifiDown", "WifiManager:wifiUp",
                       "WifiManager:onconnecting", "WifiManager:onassociate",
                       "WifiManager:onconnect", "WifiManager:ondisconnect",
                       "WifiManager:onwpstimeout", "WifiManager:onwpsfail",
                       "WifiManager:onwpsoverlap", "WifiManager:connectionInfoUpdate",
+                      "WifiManager:onauthenticating",
                       "WifiManager:onconnectingfailed"];
     this.initDOMRequestHelper(aWindow, messages);
     this._mm = Cc["@mozilla.org/childprocessmessagemanager;1"].getService(Ci.nsISyncMessageSender);
@@ -173,6 +176,19 @@ DOMWifiManager.prototype = {
     Cu.makeObjectPropsNormal(info);
 
     return info;
+  },
+
+  _convertWifiCertificateList: function(aList) {
+    let propList = {};
+    for (let k in aList) {
+      propList[k] = this._genReadonlyPropDesc(aList[k]);
+    }
+
+    let list = Cu.createObjectIn(this._window);
+    Object.defineProperties(list, propList);
+    Cu.makeObjectPropsNormal(list);
+
+    return list;
   },
 
   _sendMessageForRequest: function(name, data, request) {
@@ -266,6 +282,22 @@ DOMWifiManager.prototype = {
         Services.DOMRequest.fireError(request, msg.data);
         break;
 
+      case "WifiManager:getImportedCerts:Return:OK":
+        Services.DOMRequest.fireSuccess(request, this._convertWifiCertificateList(msg.data));
+        break;
+
+      case "WifiManager:getImportedCerts:Return:NO":
+        Services.DOMRequest.fireError(request, msg.data);
+        break;
+
+      case "WifiManager:deleteCert:Return:OK":
+        Services.DOMRequest.fireSuccess(request, msg.data);
+        break;
+
+      case "WifiManager:deleteCert:Return:NO":
+        Services.DOMRequest.fireError(request, msg.data);
+        break;
+
       case "WifiManager:wifiDown":
         this._enabled = false;
         this._currentNetwork = null;
@@ -332,6 +364,11 @@ DOMWifiManager.prototype = {
         this._currentNetwork = null;
         this._connectionStatus = "connectingfailed";
         this._lastConnectionInfo = null;
+        this._fireStatusChangeEvent();
+        break;
+      case "WifiManager:onauthenticating":
+        this._currentNetwork = msg.network;
+        this._connectionStatus = "authenticating";
         this._fireStatusChangeEvent();
         break;
     }
@@ -419,6 +456,21 @@ DOMWifiManager.prototype = {
                                 {
                                   certBlob: certBlob,
                                   certPassword: certPassword,
+                                  certNickname: certNickname
+                                }, request);
+    return request;
+  },
+
+  getImportedCerts: function nsIDOMWifiManager_getImportedCerts() {
+    var request = this.createRequest();
+    this._sendMessageForRequest("WifiManager:getImportedCerts", null, request);
+    return request;
+  },
+
+  deleteCert: function nsIDOMWifiManager_deleteCert(certNickname) {
+    var request = this.createRequest();
+    this._sendMessageForRequest("WifiManager:deleteCert",
+                                {
                                   certNickname: certNickname
                                 }, request);
     return request;
