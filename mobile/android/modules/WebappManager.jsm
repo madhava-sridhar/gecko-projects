@@ -29,16 +29,8 @@ XPCOMUtils.defineLazyGetter(this, "Strings", function() {
   return Services.strings.createBundle("chrome://browser/locale/webapp.properties");
 });
 
-function debug(aMessage) {
-  // We use *dump* instead of Services.console.logStringMessage so the messages
-  // have the INFO level of severity instead of the ERROR level.  And we don't
-  // append a newline character to the end of the message because *dump* spills
-  // into the Android native logging system, which strips newlines from messages
-  // and breaks messages into lines automatically at display time (i.e. logcat).
-#ifdef DEBUG
-  dump(aMessage);
-#endif
-}
+let Log = Cu.import("resource://gre/modules/AndroidLog.jsm", {}).AndroidLog;
+let debug = Log.d.bind(null, "WebappManager");
 
 this.WebappManager = {
   __proto__: DOMRequestIpcHelper.prototype,
@@ -359,8 +351,7 @@ this.WebappManager = {
       notification = this._notify({
         title: Strings.GetStringFromName("checkingForUpdatesTitle"),
         message: Strings.GetStringFromName("checkingForUpdatesMessage"),
-        // TODO: replace this with an animated icon.
-        icon: "drawable://alert_app",
+        icon: "drawable://alert_app_animation",
         progress: NaN,
       });
     }
@@ -400,10 +391,7 @@ this.WebappManager = {
       title: PluralForm.get(aApps.length, Strings.GetStringFromName("downloadingUpdateTitle")).
              replace("#1", aApps.length),
       message: Strings.formatStringFromName("downloadingUpdateMessage", [downloadingNames], 1),
-      // TODO: replace this with an animated icon.  UpdateService uses
-      // android.R.drawable.stat_sys_download, but I don't think we can reference
-      // a system icon with a drawable: URL here, so we'll have to craft our own.
-      icon: "drawable://alert_download",
+      icon: "drawable://alert_download_animation",
       // TODO: make this a determinate progress indicator once we can determine
       // the sizes of the APKs and observe their progress.
       progress: NaN,
