@@ -3433,7 +3433,13 @@ protected:
             PersistenceType aPersistenceType);
 
   virtual
-  ~FactoryOp();
+  ~FactoryOp()
+  {
+    // Normally this would be out-of-line since it is a virtual function but
+    // MSVC 2010 fails to link for some reason if it is not inlined here...
+    MOZ_ASSERT_IF(!mActorDestroyed,
+                  mState == State_Initial || mState == State_Completed);
+  }
 
   nsresult
   Open();
@@ -7327,12 +7333,6 @@ FactoryOp::FactoryOp(const nsACString& aGroup,
   QuotaManager::GetStorageId(aPersistenceType, aOrigin, Client::IDB, aName,
                              mDatabaseId);
   MOZ_ASSERT(!mDatabaseId.IsEmpty());
-}
-
-FactoryOp::~FactoryOp()
-{
-  MOZ_ASSERT_IF(!mActorDestroyed,
-                mState == State_Initial || mState == State_Completed);
 }
 
 void
