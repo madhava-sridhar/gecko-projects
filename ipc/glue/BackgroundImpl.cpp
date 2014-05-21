@@ -397,6 +397,10 @@ private:
   static bool
   GetOrCreateForCurrentThread(nsIIPCBackgroundChildCreateCallback* aCallback);
 
+  // Forwarded from BackgroundChild.
+  static void
+  DetachFromCurrentThread();
+
   // Forwarded from BackgroundChildImpl.
   static BackgroundChildImpl::ThreadLocal*
   GetThreadLocalForCurrentThread();
@@ -833,6 +837,13 @@ BackgroundChild::GetOrCreateForCurrentThread(
                                  nsIIPCBackgroundChildCreateCallback* aCallback)
 {
   return ChildImpl::GetOrCreateForCurrentThread(aCallback);
+}
+
+// static
+void
+BackgroundChild::DetachFromCurrentThread()
+{
+  ChildImpl::DetachFromCurrentThread();
 }
 
 // -----------------------------------------------------------------------------
@@ -1640,6 +1651,16 @@ ChildImpl::GetOrCreateForCurrentThread(
   }
 
   return true;
+}
+
+/* static */
+void
+ChildImpl::DetachFromCurrentThread()
+{
+  MOZ_ASSERT(sThreadLocalIndex != kBadThreadLocalIndex,
+             "BackgroundChild::Startup() was never called!");
+  DebugOnly<PRStatus> status = PR_SetThreadPrivate(sThreadLocalIndex, nullptr);
+  MOZ_ASSERT(status == PR_SUCCESS);
 }
 
 // static

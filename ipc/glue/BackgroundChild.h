@@ -56,6 +56,10 @@ public:
   static bool
   GetOrCreateForCurrentThread(nsIIPCBackgroundChildCreateCallback* aCallback);
 
+  // See above.
+  static void
+  DetachFromCurrentThread();
+
 private:
   // Only called by ContentChild or ContentParent.
   static void
