@@ -81,6 +81,14 @@
 #include "WorkerFeature.h"
 #include "WorkerRunnable.h"
 #include "WorkerScope.h"
+#include "nsIIPCBackgroundChildCreateCallback.h"
+#include "BackgroundChild.h"
+
+// BackgroundChild.h indirectly brings in windows.h via the chromium ipc
+// headers.  This breaks things here due API macro collision.
+#ifdef XP_WIN
+#undef CreateFile
+#endif
 
 // JS_MaybeGC will run once every second during normal execution.
 #define PERIODIC_GC_TIMER_DELAY_SEC 1
@@ -5638,9 +5646,39 @@ WorkerPrivate::CycleCollectInternal(JSContext* aCx, bool aCollectChildren)
   }
 }
 
+class WorkerBackgroundChildPrimer MOZ_FINAL :
+  public nsIIPCBackgroundChildCreateCallback
+{
+public:
+  WorkerBackgroundChildPrimer()
+  { }
+
+  NS_DECL_ISUPPORTS
+
+private:
+  ~WorkerBackgroundChildPrimer()
+  { }
+
+  virtual void
+  ActorCreated(PBackgroundChild* aActor) MOZ_OVERRIDE
+  {
+    MOZ_ASSERT(aActor, "Worker failed to create a PBackgroundChild actor!");
+  }
+
+  virtual void
+  ActorFailed() MOZ_OVERRIDE
+  {
+    MOZ_CRASH("Worker failed to create a PBackgroundChild actor!");
+  }
+};
+
+NS_IMPL_ISUPPORTS(WorkerBackgroundChildPrimer, nsIIPCBackgroundChildCreateCallback)
+
 void
 WorkerPrivate::SetThread(nsIThread* aThread)
 {
+  using mozilla::ipc::BackgroundChild;
+
 #ifdef DEBUG
   if (aThread) {
     bool isOnCurrentThread;
@@ -5667,6 +5705,12 @@ WorkerPrivate::SetThread(nsIThread* aThread)
 
       mThread = aThread;
 
+      nsCOMPtr<nsIIPCBackgroundChildCreateCallback> callback =
+        new WorkerBackgroundChildPrimer();
+      if (!BackgroundChild::GetOrCreateForCurrentThread(callback)) {
+        MOZ_CRASH("Worker failed to create PBackgroundChild!");
+      }
+
       if (!mPreStartRunnables.IsEmpty()) {
         for (uint32_t index = 0; index < mPreStartRunnables.Length(); index++) {
           MOZ_ALWAYS_TRUE(NS_SUCCEEDED(mThread->Dispatch(
@@ -5678,6 +5722,7 @@ WorkerPrivate::SetThread(nsIThread* aThread)
     }
     else {
       MOZ_ASSERT(mThread);
+      BackgroundChild::DetachFromCurrentThread();
       mThread.swap(doomedThread);
     }
   }
