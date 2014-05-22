@@ -698,14 +698,9 @@ IDBTransaction::GetMode(ErrorResult& aRv) const
 }
 
 DOMError*
-IDBTransaction::GetError(ErrorResult& aRv)
+IDBTransaction::GetError() const
 {
   AssertIsOnOwningThread();
-
-  if (IsOpen()) {
-    aRv.Throw(NS_ERROR_DOM_INVALID_STATE_ERR);
-    return nullptr;
-  }
 
   return mError;
 }

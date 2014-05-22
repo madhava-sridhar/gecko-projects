@@ -258,7 +258,7 @@ public:
   GetMode(ErrorResult& aRv) const;
 
   DOMError*
-  GetError(ErrorResult& aRv);
+  GetError() const;
 
   already_AddRefed<IDBObjectStore>
   ObjectStore(const nsAString& aName, ErrorResult& aRv);

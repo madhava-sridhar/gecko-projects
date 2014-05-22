@@ -355,6 +355,8 @@ child:
 
     async NotifyVisited(URIParams uri);
 
+    async SystemMemoryAvailable(uint64_t getterId, uint32_t memoryAvailable);
+
     PreferenceUpdate(PrefSetting pref);
 
     NotifyAlertsObserver(nsCString topic, nsString data);
@@ -433,6 +435,8 @@ parent:
 
     sync GetRandomValues(uint32_t length)
         returns (uint8_t[] randomValues);
+
+    async GetSystemMemory(uint64_t getterId);
 
     PHal();
 
