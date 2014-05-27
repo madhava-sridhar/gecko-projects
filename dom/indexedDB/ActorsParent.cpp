@@ -4463,14 +4463,14 @@ AppendConditionClause(const nsACString& aColumnName,
              NS_LITERAL_CSTRING(" ");
 
   if (aLessThan) {
-    aResult.AppendLiteral("<");
+    aResult.AppendLiteral('<');
   }
   else {
-    aResult.AppendLiteral(">");
+    aResult.AppendLiteral('>');
   }
 
   if (aEquals) {
-    aResult.AppendLiteral("=");
+    aResult.AppendLiteral('=');
   }
 
   aResult += NS_LITERAL_CSTRING(" :") + aArgName;
@@ -10702,7 +10702,7 @@ ObjectStoreAddOrPutRequestOp::DoDatabaseWork(TransactionBase* aTransaction)
       }
 
       if (index) {
-        fileIds.Append(NS_LITERAL_STRING(" "));
+        fileIds.Append(' ');
       }
       fileIds.AppendInt(id);
     }

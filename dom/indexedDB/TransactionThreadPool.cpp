@@ -845,8 +845,7 @@ TransactionThreadPool::TransactionQueue::Run()
     new FinishTransactionRunnable(mOwningThreadPool, mTransactionId,
                                   mDatabaseId, mObjectStoreNames, mMode,
                                   FinishCallback.forget());
-  if (NS_FAILED(mOwningThread->Dispatch(finishTransactionRunnable,
-                                        NS_DISPATCH_NORMAL))) {
+  if (NS_FAILED(mOwningThread->Dispatch(finishTransactionRunnable))) {
     NS_WARNING("Failed to dispatch finishTransactionRunnable!");
   }
 

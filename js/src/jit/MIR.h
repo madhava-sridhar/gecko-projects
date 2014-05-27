@@ -14,8 +14,6 @@
 
 #include "mozilla/Array.h"
 
-#include "jsinfer.h"
-
 #include "jit/CompilerRoot.h"
 #include "jit/FixedList.h"
 #include "jit/InlineList.h"
@@ -37,7 +35,7 @@ class BaselineInspector;
 class ValueNumberData;
 class Range;
 
-static const inline
+static inline
 MIRType MIRTypeFromValue(const js::Value &vp)
 {
     if (vp.isDouble())
@@ -1074,7 +1072,7 @@ class MConstant : public MNullaryInstruction
     const js::Value *vp() const {
         return &value_;
     }
-    const bool valueToBoolean() const {
+    bool valueToBoolean() const {
         // A hack to avoid this wordy pattern everywhere in the JIT.
         return ToBoolean(HandleValue::fromMarkedLocation(&value_));
     }
@@ -4892,7 +4890,17 @@ class MPhi MOZ_FINAL : public MDefinition, public InlineForwardListNode<MPhi>
     }
     void computeRange(TempAllocator &alloc);
 
-    MDefinition *operandIfRedundant();
+    MDefinition *operandIfRedundant() {
+        // If this phi is redundant (e.g., phi(a,a) or b=phi(a,this)),
+        // returns the operand that it will always be equal to (a, in
+        // those two cases).
+        MDefinition *first = getOperand(0);
+        for (size_t i = 1, e = numOperands(); i < e; i++) {
+            if (getOperand(i) != first && getOperand(i) != this)
+                return nullptr;
+        }
+        return first;
+    }
 
     bool canProduceFloat32() const {
         return canProduceFloat32_;
@@ -8569,13 +8577,13 @@ class MSetDOMProperty
   public:
     INSTRUCTION_HEADER(SetDOMProperty)
 
-    static MSetDOMProperty *New(TempAllocator &alloc, const JSJitSetterOp func, MDefinition *obj,
+    static MSetDOMProperty *New(TempAllocator &alloc, JSJitSetterOp func, MDefinition *obj,
                                 MDefinition *val)
     {
         return new(alloc) MSetDOMProperty(func, obj, val);
     }
 
-    const JSJitSetterOp fun() {
+    JSJitSetterOp fun() const {
         return func_;
     }
 
@@ -8642,7 +8650,7 @@ class MGetDOMProperty
         return new(alloc) MGetDOMProperty(info, obj, guard);
     }
 
-    const JSJitGetterOp fun() {
+    JSJitGetterOp fun() const {
         return info_->getter;
     }
     bool isInfallible() const {
@@ -8773,6 +8781,50 @@ class MFloor
 
     static MFloor *New(TempAllocator &alloc, MDefinition *num) {
         return new(alloc) MFloor(num);
+    }
+
+    MDefinition *num() const {
+        return getOperand(0);
+    }
+    AliasSet getAliasSet() const {
+        return AliasSet::None();
+    }
+    TypePolicy *typePolicy() {
+        return this;
+    }
+    bool isFloat32Commutative() const {
+        return true;
+    }
+    void trySpecializeFloat32(TempAllocator &alloc);
+#ifdef DEBUG
+    bool isConsistentFloat32Use(MUse *use) const {
+        return true;
+    }
+#endif
+    bool congruentTo(const MDefinition *ins) const {
+        return congruentIfOperandsEqual(ins);
+    }
+    void computeRange(TempAllocator &alloc);
+};
+
+// Inlined version of Math.ceil().
+class MCeil
+  : public MUnaryInstruction,
+    public FloatingPointPolicy<0>
+{
+    MCeil(MDefinition *num)
+      : MUnaryInstruction(num)
+    {
+        setResultType(MIRType_Int32);
+        setPolicyType(MIRType_Double);
+        setMovable();
+    }
+
+  public:
+    INSTRUCTION_HEADER(Ceil)
+
+    static MCeil *New(TempAllocator &alloc, MDefinition *num) {
+        return new(alloc) MCeil(num);
     }
 
     MDefinition *num() const {
@@ -9341,12 +9393,14 @@ class MGuardThreadExclusive
 };
 
 class MFilterTypeSet
-  : public MUnaryInstruction
+  : public MUnaryInstruction,
+    public FilterTypeSetPolicy
 {
     MFilterTypeSet(MDefinition *def, types::TemporaryTypeSet *types)
       : MUnaryInstruction(def)
     {
-        JS_ASSERT(!types->unknown());
+        MOZ_ASSERT(!types->unknown());
+        MOZ_ASSERT(def->type() == types->getKnownMIRType());
         setResultType(types->getKnownMIRType());
         setResultTypeSet(types);
     }
@@ -9358,6 +9412,9 @@ class MFilterTypeSet
         return new(alloc) MFilterTypeSet(def, types);
     }
 
+    TypePolicy *typePolicy() {
+        return this;
+    }
     bool congruentTo(const MDefinition *def) const {
         return false;
     }

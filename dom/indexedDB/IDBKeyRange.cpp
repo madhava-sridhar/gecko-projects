@@ -166,7 +166,7 @@ IDBKeyRange::GetBindingClause(const nsACString& aKeyColumnName,
     clause.Append(andStr + aKeyColumnName);
     clause.AppendLiteral(" >");
     if (!LowerOpen()) {
-      clause.AppendLiteral("=");
+      clause.AppendLiteral('=');
     }
     clause.Append(spacecolon + lowerKey);
   }
@@ -176,7 +176,7 @@ IDBKeyRange::GetBindingClause(const nsACString& aKeyColumnName,
     clause.Append(andStr + aKeyColumnName);
     clause.AppendLiteral(" <");
     if (!UpperOpen()) {
-      clause.AppendLiteral("=");
+      clause.AppendLiteral('=');
     }
     clause.Append(spacecolon + NS_LITERAL_CSTRING("upper_key"));
   }
