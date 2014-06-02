@@ -278,7 +278,8 @@ AsyncConnectionHelper::OnSuccess()
   NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
   NS_ASSERTION(mRequest, "Null request!");
 
-  PROFILER_MAIN_THREAD_LABEL("IndexedDB", "AsyncConnectionHelper::OnSuccess");
+  PROFILER_MAIN_THREAD_LABEL("AsyncConnectionHelper", "OnSuccess",
+    js::ProfileEntry::Category::STORAGE);
 
   nsRefPtr<nsIDOMEvent> event = CreateSuccessEvent(mRequest);
   if (!event) {

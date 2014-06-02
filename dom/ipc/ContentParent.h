@@ -94,7 +94,9 @@ public:
     static void RunAfterPreallocatedProcessReady(nsIRunnable* aRequest);
 
     static already_AddRefed<ContentParent>
-    GetNewOrUsed(bool aForBrowserElement = false);
+    GetNewOrUsed(bool aForBrowserElement = false,
+                 hal::ProcessPriority aPriority =
+                   hal::ProcessPriority::PROCESS_PRIORITY_FOREGROUND);
 
     /**
      * Create a subprocess suitable for use as a preallocated app process.
@@ -323,6 +325,10 @@ private:
      * is an abnormal shutdown (e.g. a crash).
      */
     void ShutDownProcess(bool aCloseWithError);
+
+    // Perform any steps necesssary to gracefully shtudown the message
+    // manager and null out mMessageManager.
+    void ShutDownMessageManager();
 
     PCompositorParent*
     AllocPCompositorParent(mozilla::ipc::Transport* aTransport,

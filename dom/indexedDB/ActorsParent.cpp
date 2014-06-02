@@ -396,7 +396,9 @@ CreateFileTables(mozIStorageConnection* aConnection)
   AssertIsOnIOThread();
   MOZ_ASSERT(aConnection);
 
-  PROFILER_LABEL("IndexedDB", "CreateFileTables");
+  PROFILER_LABEL("IndexedDB",
+                 "CreateFileTables",
+                 js::ProfileEntry::Category::STORAGE);
 
   // Table `file`
   nsresult rv = aConnection->ExecuteSimpleSQL(NS_LITERAL_CSTRING(
@@ -468,7 +470,9 @@ CreateTables(mozIStorageConnection* aConnection)
   AssertIsOnIOThread();
   MOZ_ASSERT(aConnection);
 
-  PROFILER_LABEL("IndexedDB", "CreateTables");
+  PROFILER_LABEL("IndexedDB",
+                 "CreateTables",
+                 js::ProfileEntry::Category::STORAGE);
 
   // Table `database`
   nsresult rv = aConnection->ExecuteSimpleSQL(NS_LITERAL_CSTRING(
@@ -604,7 +608,9 @@ UpgradeSchemaFrom4To5(mozIStorageConnection* aConnection)
   AssertIsOnIOThread();
   MOZ_ASSERT(aConnection);
 
-  PROFILER_LABEL("IndexedDB", "UpgradeSchemaFrom4To5");
+  PROFILER_LABEL("IndexedDB",
+                 "UpgradeSchemaFrom4To5",
+                 js::ProfileEntry::Category::STORAGE);
 
   nsresult rv;
 
@@ -721,7 +727,9 @@ UpgradeSchemaFrom5To6(mozIStorageConnection* aConnection)
   AssertIsOnIOThread();
   MOZ_ASSERT(aConnection);
 
-  PROFILER_LABEL("IndexedDB", "UpgradeSchemaFrom5To6");
+  PROFILER_LABEL("IndexedDB",
+                 "UpgradeSchemaFrom5To6",
+                 js::ProfileEntry::Category::STORAGE);
 
   // First, drop all the indexes we're no longer going to use.
   nsresult rv = aConnection->ExecuteSimpleSQL(NS_LITERAL_CSTRING(
@@ -1169,7 +1177,9 @@ UpgradeSchemaFrom6To7(mozIStorageConnection* aConnection)
   AssertIsOnIOThread();
   MOZ_ASSERT(aConnection);
 
-  PROFILER_LABEL("IndexedDB", "UpgradeSchemaFrom6To7");
+  PROFILER_LABEL("IndexedDB",
+                 "UpgradeSchemaFrom6To7",
+                 js::ProfileEntry::Category::STORAGE);
 
   nsresult rv = aConnection->ExecuteSimpleSQL(NS_LITERAL_CSTRING(
     "CREATE TEMPORARY TABLE temp_upgrade ("
@@ -1242,7 +1252,9 @@ UpgradeSchemaFrom7To8(mozIStorageConnection* aConnection)
   AssertIsOnIOThread();
   MOZ_ASSERT(aConnection);
 
-  PROFILER_LABEL("IndexedDB", "UpgradeSchemaFrom7To8");
+  PROFILER_LABEL("IndexedDB",
+                 "UpgradeSchemaFrom7To8",
+                 js::ProfileEntry::Category::STORAGE);
 
   nsresult rv = aConnection->ExecuteSimpleSQL(NS_LITERAL_CSTRING(
     "CREATE TEMPORARY TABLE temp_upgrade ("
@@ -1333,7 +1345,9 @@ private:
     MOZ_ASSERT(aArguments);
     MOZ_ASSERT(aResult);
 
-    PROFILER_LABEL("IndexedDB", "CompressDataBlobsFunction::OnFunctionCall");
+    PROFILER_LABEL("IndexedDB",
+                   "CompressDataBlobsFunction::OnFunctionCall",
+                   js::ProfileEntry::Category::STORAGE);
 
     uint32_t argc;
     nsresult rv = aArguments->GetNumEntries(&argc);
@@ -1393,7 +1407,9 @@ UpgradeSchemaFrom8To9_0(mozIStorageConnection* aConnection)
   AssertIsOnIOThread();
   MOZ_ASSERT(aConnection);
 
-  PROFILER_LABEL("IndexedDB", "UpgradeSchemaFrom8To9_0");
+  PROFILER_LABEL("IndexedDB",
+                 "UpgradeSchemaFrom8To9_0",
+                 js::ProfileEntry::Category::STORAGE);
 
   // We no longer use the dataVersion column.
   nsresult rv = aConnection->ExecuteSimpleSQL(NS_LITERAL_CSTRING(
@@ -1446,7 +1462,9 @@ UpgradeSchemaFrom9_0To10_0(mozIStorageConnection* aConnection)
   AssertIsOnIOThread();
   MOZ_ASSERT(aConnection);
 
-  PROFILER_LABEL("IndexedDB", "UpgradeSchemaFrom9_0To10_0");
+  PROFILER_LABEL("IndexedDB",
+                 "UpgradeSchemaFrom9_0To10_0",
+                 js::ProfileEntry::Category::STORAGE);
 
   nsresult rv = aConnection->ExecuteSimpleSQL(NS_LITERAL_CSTRING(
     "ALTER TABLE object_data ADD COLUMN file_ids TEXT;"
@@ -1481,7 +1499,9 @@ UpgradeSchemaFrom10_0To11_0(mozIStorageConnection* aConnection)
   AssertIsOnIOThread();
   MOZ_ASSERT(aConnection);
 
-  PROFILER_LABEL("IndexedDB", "UpgradeSchemaFrom10_0To11_0");
+  PROFILER_LABEL("IndexedDB",
+                 "UpgradeSchemaFrom10_0To11_0",
+                 js::ProfileEntry::Category::STORAGE);
 
   nsresult rv = aConnection->ExecuteSimpleSQL(NS_LITERAL_CSTRING(
     "CREATE TEMPORARY TABLE temp_upgrade ("
@@ -1657,7 +1677,9 @@ private:
     MOZ_ASSERT(aArguments);
     MOZ_ASSERT(aResult);
 
-    PROFILER_LABEL("IndexedDB", "EncodeKeysFunction::OnFunctionCall");
+    PROFILER_LABEL("IndexedDB",
+                   "EncodeKeysFunction::OnFunctionCall",
+                   js::ProfileEntry::Category::STORAGE);
 
     uint32_t argc;
     nsresult rv = aArguments->GetNumEntries(&argc);
@@ -1708,7 +1730,9 @@ UpgradeSchemaFrom11_0To12_0(mozIStorageConnection* aConnection)
   AssertIsOnIOThread();
   MOZ_ASSERT(aConnection);
 
-  PROFILER_LABEL("IndexedDB", "UpgradeSchemaFrom11_0To12_0");
+  PROFILER_LABEL("IndexedDB",
+                 "UpgradeSchemaFrom11_0To12_0",
+                 js::ProfileEntry::Category::STORAGE);
 
   NS_NAMED_LITERAL_CSTRING(encoderName, "encode");
 
@@ -1977,7 +2001,9 @@ UpgradeSchemaFrom12_0To13_0(mozIStorageConnection* aConnection,
   AssertIsOnIOThread();
   MOZ_ASSERT(aConnection);
 
-  PROFILER_LABEL("IndexedDB", "UpgradeSchemaFrom12_0To13_0");
+  PROFILER_LABEL("IndexedDB",
+                 "UpgradeSchemaFrom12_0To13_0",
+                 js::ProfileEntry::Category::STORAGE);
 
   nsresult rv;
 
@@ -2100,7 +2126,9 @@ CreateDatabaseConnection(nsIFile* aDBFile,
   MOZ_ASSERT(aFMDirectory);
   MOZ_ASSERT(aConnection);
 
-  PROFILER_LABEL("IndexedDB", "CreateDatabaseConnection");
+  PROFILER_LABEL("IndexedDB",
+                 "CreateDatabaseConnection",
+                 js::ProfileEntry::Category::STORAGE);
 
   nsresult rv;
   bool exists;
@@ -2333,7 +2361,9 @@ GetDatabaseConnection(const nsAString& aDatabaseFilePath,
   MOZ_ASSERT(StringEndsWith(aDatabaseFilePath, NS_LITERAL_STRING(".sqlite")));
   MOZ_ASSERT(aConnection);
 
-  PROFILER_LABEL("IndexedDB", "GetDatabaseConnection");
+  PROFILER_LABEL("IndexedDB",
+                 "GetDatabaseConnection",
+                 js::ProfileEntry::Category::STORAGE);
 
   nsresult rv;
   nsCOMPtr<nsIFile> dbFile =
@@ -4518,7 +4548,9 @@ GetStructuredCloneReadInfoFromStatement(mozIStorageStatement* aStatement,
   MOZ_ASSERT(aStatement);
   MOZ_ASSERT(aFileManager);
 
-  PROFILER_LABEL("IndexedDB", "GetStructuredCloneReadInfoFromStatement");
+  PROFILER_LABEL("IndexedDB",
+                 "GetStructuredCloneReadInfoFromStatement",
+                 js::ProfileEntry::Category::STORAGE);
 
 #ifdef DEBUG
   {
@@ -4610,7 +4642,7 @@ CopyData(nsIInputStream* aInputStream, nsIOutputStream* aOutputStream)
   MOZ_ASSERT(!NS_IsMainThread());
   MOZ_ASSERT(!IsOnBackgroundThread());
 
-  PROFILER_LABEL("IndexedDB", "CopyData");
+  PROFILER_LABEL("IndexedDB", "CopyData", js::ProfileEntry::Category::STORAGE);
 
   nsresult rv;
 
@@ -4659,7 +4691,9 @@ UpdateIndexes(TransactionBase* aTransaction,
   aTransaction->AssertIsOnTransactionThread();
   MOZ_ASSERT(!aObjectStoreKey.IsUnset());
 
-  PROFILER_LABEL("IndexedDB", "UpdateIndexes");
+  PROFILER_LABEL("IndexedDB",
+                 "UpdateIndexes",
+                 js::ProfileEntry::Category::STORAGE);
 
   nsresult rv;
   NS_NAMED_LITERAL_CSTRING(objectDataId, "object_data_id");
@@ -5420,7 +5454,9 @@ TransactionBase::EnsureConnection()
 
   AssertIsOnTransactionThread();
 
-  PROFILER_LABEL("IndexedDB", "TransactionBase::EnsureConnection");
+  PROFILER_LABEL("IndexedDB",
+                 "TransactionBase::EnsureConnection",
+                 js::ProfileEntry::Category::STORAGE);
 
   if (!mConnection) {
     nsCOMPtr<mozIStorageConnection> connection;
@@ -7490,7 +7526,9 @@ OpenDatabaseOp::DoDatabaseWork()
   AssertIsOnIOThread();
   MOZ_ASSERT(mState == State_DatabaseWorkOpen);
 
-  PROFILER_LABEL("IndexedDB", "OpenDatabaseHelper::DoDatabaseWork");
+  PROFILER_LABEL("IndexedDB",
+                 "OpenDatabaseHelper::DoDatabaseWork",
+                 js::ProfileEntry::Category::STORAGE);
 
   if (NS_WARN_IF(QuotaManager::IsShuttingDown()) ||
       mActorDestroyed) {
@@ -8559,7 +8597,9 @@ VersionChangeOp::DoDatabaseWork(TransactionBase* aTransaction)
   aTransaction->AssertIsOnTransactionThread();
   MOZ_ASSERT(mOpenDatabaseOp->mState == State_DatabaseWorkVersionChange);
 
-  PROFILER_LABEL("IndexedDB", "VersionChangeOp::DoDatabaseWork");
+  PROFILER_LABEL("IndexedDB",
+                 "VersionChangeOp::DoDatabaseWork",
+                 js::ProfileEntry::Category::STORAGE);
 
   mozIStorageConnection* connection = aTransaction->Connection();
   MOZ_ASSERT(connection);
@@ -8656,7 +8696,9 @@ DeleteDatabaseOp::LoadPreviousVersion(nsIFile* aDatabaseFile)
   MOZ_ASSERT(mState == State_DatabaseWorkOpen);
   MOZ_ASSERT(!mPreviousVersion);
 
-  PROFILER_LABEL("IndexedDB", "DeleteDatabaseOp::LoadPreviousVersion");
+  PROFILER_LABEL("IndexedDB",
+                 "DeleteDatabaseOp::LoadPreviousVersion",
+                 js::ProfileEntry::Category::STORAGE);
 
   nsresult rv;
 
@@ -8733,7 +8775,9 @@ DeleteDatabaseOp::DoDatabaseWork()
   AssertIsOnIOThread();
   MOZ_ASSERT(mState == State_DatabaseWorkOpen);
 
-  PROFILER_LABEL("IndexedDB", "DeleteDatabaseOp::DoDatabaseWork");
+  PROFILER_LABEL("IndexedDB",
+                 "DeleteDatabaseOp::DoDatabaseWork",
+                 js::ProfileEntry::Category::STORAGE);
 
   if (mActorDestroyed) {
     return NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
@@ -8992,7 +9036,8 @@ VersionChangeOp::RunOnIOThread()
   MOZ_ASSERT(mDeleteDatabaseOp->mState == State_DatabaseWorkVersionChange);
 
   PROFILER_LABEL("IndexedDB",
-                 "DeleteDatabaseOp::VersionChangeOp::RunOnIOThread");
+                 "DeleteDatabaseOp::VersionChangeOp::RunOnIOThread",
+                 js::ProfileEntry::Category::STORAGE);
 
   if (mActorDestroyed) {
     return NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
@@ -9400,7 +9445,9 @@ CommitOp::Run()
 {
   MOZ_ASSERT(mTransaction);
 
-  PROFILER_LABEL("IndexedDB", "CommitOp::Run");
+  PROFILER_LABEL("IndexedDB",
+                 "CommitOp::Run",
+                 js::ProfileEntry::Category::STORAGE);
 
   nsCOMPtr<mozIStorageConnection>& connection = mTransaction->mConnection;
 
@@ -9458,7 +9505,9 @@ CommitOp::TransactionFinishedBeforeUnblock()
   AssertIsOnBackgroundThread();
   MOZ_ASSERT(mTransaction);
 
-  PROFILER_LABEL("IndexedDB", "CommitOp::TransactionFinishedBeforeUnblock");
+  PROFILER_LABEL("IndexedDB",
+                 "CommitOp::TransactionFinishedBeforeUnblock",
+                 js::ProfileEntry::Category::STORAGE);
 
   mTransaction->UpdateMetadata(mResultCode);
 }
@@ -9470,7 +9519,9 @@ CommitOp::TransactionFinishedAfterUnblock()
   AssertIsOnBackgroundThread();
   MOZ_ASSERT(mTransaction);
 
-  PROFILER_LABEL("IndexedDB", "CommitOp::TransactionFinishedAfterUnblock");
+  PROFILER_LABEL("IndexedDB",
+                 "CommitOp::TransactionFinishedAfterUnblock",
+                 js::ProfileEntry::Category::STORAGE);
 
   IDB_PROFILER_MARK("IndexedDB Transaction %llu: Complete (rv = %lu)",
                     "IDBTransaction[%llu] MT Complete",
@@ -9986,7 +10037,9 @@ CreateObjectStoreOp::DoDatabaseWork(TransactionBase* aTransaction)
   MOZ_ASSERT(aTransaction);
   aTransaction->AssertIsOnTransactionThread();
 
-  PROFILER_LABEL("IndexedDB", "CreateObjectStoreOp::DoDatabaseWork");
+  PROFILER_LABEL("IndexedDB",
+                 "CreateObjectStoreOp::DoDatabaseWork",
+                 js::ProfileEntry::Category::STORAGE);
 
   if (NS_WARN_IF(IndexedDatabaseManager::InLowDiskSpaceMode())) {
     return NS_ERROR_DOM_INDEXEDDB_QUOTA_ERR;
@@ -10066,7 +10119,9 @@ DeleteObjectStoreOp::DoDatabaseWork(TransactionBase* aTransaction)
   MOZ_ASSERT(aTransaction);
   aTransaction->AssertIsOnTransactionThread();
 
-  PROFILER_LABEL("IndexedDB", "DeleteObjectStoreOp::DoDatabaseWork");
+  PROFILER_LABEL("IndexedDB",
+                 "DeleteObjectStoreOp::DoDatabaseWork",
+                 js::ProfileEntry::Category::STORAGE);
 
   TransactionBase::AutoSavepoint autoSave;
   nsresult rv = autoSave.Start(aTransaction);
@@ -10153,7 +10208,9 @@ CreateIndexOp::InsertDataFromObjectStore(TransactionBase* aTransaction)
   MOZ_ASSERT(aTransaction);
   MOZ_ASSERT(!IndexedDatabaseManager::InLowDiskSpaceMode());
 
-  PROFILER_LABEL("IndexedDB", "CreateIndexOp::InsertDataFromObjectStore");
+  PROFILER_LABEL("IndexedDB",
+                 "CreateIndexOp::InsertDataFromObjectStore",
+                 js::ProfileEntry::Category::STORAGE);
 
   TransactionBase::CachedStatement stmt;
   nsresult rv = aTransaction->GetCachedStatement(
@@ -10244,7 +10301,9 @@ CreateIndexOp::DoDatabaseWork(TransactionBase* aTransaction)
   MOZ_ASSERT(aTransaction);
   aTransaction->AssertIsOnTransactionThread();
 
-  PROFILER_LABEL("IndexedDB", "CreateIndexOp::DoDatabaseWork");
+  PROFILER_LABEL("IndexedDB",
+                 "CreateIndexOp::DoDatabaseWork",
+                 js::ProfileEntry::Category::STORAGE);
 
   if (NS_WARN_IF(IndexedDatabaseManager::InLowDiskSpaceMode())) {
     return NS_ERROR_DOM_INDEXEDDB_QUOTA_ERR;
@@ -10380,7 +10439,7 @@ ThreadLocalJSRuntime::Init()
 {
   MOZ_ASSERT(!IsOnBackgroundThread());
 
-  mRuntime = JS_NewRuntime(kRuntimeHeapSize, JS_NO_HELPER_THREADS);
+  mRuntime = JS_NewRuntime(kRuntimeHeapSize);
   if (NS_WARN_IF(!mRuntime)) {
     return false;
   }
@@ -10412,7 +10471,9 @@ DeleteIndexOp::DoDatabaseWork(TransactionBase* aTransaction)
   MOZ_ASSERT(aTransaction);
   aTransaction->AssertIsOnTransactionThread();
 
-  PROFILER_LABEL("IndexedDB", "DeleteIndexOp::DoDatabaseWork");
+  PROFILER_LABEL("IndexedDB",
+                 "DeleteIndexOp::DoDatabaseWork",
+                 js::ProfileEntry::Category::STORAGE);
 
   TransactionBase::AutoSavepoint autoSave;
   nsresult rv = autoSave.Start(aTransaction);
@@ -10532,7 +10593,9 @@ ObjectStoreAddOrPutRequestOp::DoDatabaseWork(TransactionBase* aTransaction)
   MOZ_ASSERT(aTransaction);
   aTransaction->AssertIsOnTransactionThread();
 
-  PROFILER_LABEL("IndexedDB", "ObjectStoreAddOrPutRequestOp::DoDatabaseWork");
+  PROFILER_LABEL("IndexedDB",
+                 "ObjectStoreAddOrPutRequestOp::DoDatabaseWork",
+                 js::ProfileEntry::Category::STORAGE);
 
   if (NS_WARN_IF(IndexedDatabaseManager::InLowDiskSpaceMode())) {
     return NS_ERROR_DOM_INDEXEDDB_QUOTA_ERR;
@@ -10788,7 +10851,9 @@ ObjectStoreGetRequestOp::DoDatabaseWork(TransactionBase* aTransaction)
                   OptionalKeyRange::TSerializedKeyRange);
   MOZ_ASSERT_IF(!mGetAll, mLimit == 1);
 
-  PROFILER_LABEL("IndexedDB", "ObjectStoreGetRequestOp::DoDatabaseWork");
+  PROFILER_LABEL("IndexedDB",
+                 "ObjectStoreGetRequestOp::DoDatabaseWork",
+                 js::ProfileEntry::Category::STORAGE);
 
   const bool hasKeyRange =
     mOptionalKeyRange.type() == OptionalKeyRange::TSerializedKeyRange;
@@ -10904,7 +10969,9 @@ ObjectStoreGetAllKeysRequestOp::DoDatabaseWork(TransactionBase* aTransaction)
   MOZ_ASSERT(aTransaction);
   aTransaction->AssertIsOnTransactionThread();
 
-  PROFILER_LABEL("IndexedDB", "ObjectStoreGetAllKeysRequestOp::DoDatabaseWork");
+  PROFILER_LABEL("IndexedDB",
+                 "ObjectStoreGetAllKeysRequestOp::DoDatabaseWork",
+                 js::ProfileEntry::Category::STORAGE);
 
   const bool hasKeyRange =
     mParams.optionalKeyRange().type() == OptionalKeyRange::TSerializedKeyRange;
@@ -10990,7 +11057,9 @@ ObjectStoreDeleteRequestOp::DoDatabaseWork(TransactionBase* aTransaction)
   MOZ_ASSERT(aTransaction);
   aTransaction->AssertIsOnTransactionThread();
 
-  PROFILER_LABEL("IndexedDB", "ObjectStoreDeleteRequestOp::DoDatabaseWork");
+  PROFILER_LABEL("IndexedDB",
+                 "ObjectStoreDeleteRequestOp::DoDatabaseWork",
+                 js::ProfileEntry::Category::STORAGE);
 
   TransactionBase::AutoSavepoint autoSave;
   nsresult rv = autoSave.Start(aTransaction);
@@ -11044,7 +11113,9 @@ ObjectStoreClearRequestOp::DoDatabaseWork(TransactionBase* aTransaction)
   MOZ_ASSERT(aTransaction);
   aTransaction->AssertIsOnTransactionThread();
 
-  PROFILER_LABEL("IndexedDB", "ObjectStoreClearRequestOp::DoDatabaseWork");
+  PROFILER_LABEL("IndexedDB",
+                 "ObjectStoreClearRequestOp::DoDatabaseWork",
+                 js::ProfileEntry::Category::STORAGE);
 
   TransactionBase::AutoSavepoint autoSave;
   nsresult rv = autoSave.Start(aTransaction);
@@ -11086,7 +11157,9 @@ ObjectStoreCountRequestOp::DoDatabaseWork(TransactionBase* aTransaction)
   MOZ_ASSERT(aTransaction);
   aTransaction->AssertIsOnTransactionThread();
 
-  PROFILER_LABEL("IndexedDB", "ObjectStoreCountRequestOp::DoDatabaseWork");
+  PROFILER_LABEL("IndexedDB",
+                 "ObjectStoreCountRequestOp::DoDatabaseWork",
+                 js::ProfileEntry::Category::STORAGE);
 
   const bool hasKeyRange =
     mParams.optionalKeyRange().type() == OptionalKeyRange::TSerializedKeyRange;
@@ -11249,7 +11322,9 @@ IndexGetRequestOp::DoDatabaseWork(TransactionBase* aTransaction)
                   OptionalKeyRange::TSerializedKeyRange);
   MOZ_ASSERT_IF(!mGetAll, mLimit == 1);
 
-  PROFILER_LABEL("IndexedDB", "IndexGetRequestOp::DoDatabaseWork");
+  PROFILER_LABEL("IndexedDB",
+                 "IndexGetRequestOp::DoDatabaseWork",
+                 js::ProfileEntry::Category::STORAGE);
 
   const bool hasKeyRange =
     mOptionalKeyRange.type() == OptionalKeyRange::TSerializedKeyRange;
@@ -11399,7 +11474,9 @@ IndexGetKeyRequestOp::DoDatabaseWork(TransactionBase* aTransaction)
                   OptionalKeyRange::TSerializedKeyRange);
   MOZ_ASSERT_IF(!mGetAll, mLimit == 1);
 
-  PROFILER_LABEL("IndexedDB", "IndexGetKeyRequestOp::DoDatabaseWork");
+  PROFILER_LABEL("IndexedDB",
+                 "IndexGetKeyRequestOp::DoDatabaseWork",
+                 js::ProfileEntry::Category::STORAGE);
 
   const bool hasKeyRange =
     mOptionalKeyRange.type() == OptionalKeyRange::TSerializedKeyRange;
@@ -11503,7 +11580,9 @@ IndexCountRequestOp::DoDatabaseWork(TransactionBase* aTransaction)
   MOZ_ASSERT(aTransaction);
   aTransaction->AssertIsOnTransactionThread();
 
-  PROFILER_LABEL("IndexedDB", "IndexCountRequestOp::DoDatabaseWork");
+  PROFILER_LABEL("IndexedDB",
+                 "IndexCountRequestOp::DoDatabaseWork",
+                 js::ProfileEntry::Category::STORAGE);
 
   const bool hasKeyRange =
     mParams.optionalKeyRange().type() == OptionalKeyRange::TSerializedKeyRange;
@@ -11646,7 +11725,9 @@ OpenOp::DoObjectStoreDatabaseWork(TransactionBase* aTransaction)
   MOZ_ASSERT(mCursor->mObjectStoreId);
   MOZ_ASSERT(mCursor->mFileManager);
 
-  PROFILER_LABEL("IndexedDB", "Cursor::OpenOp::DoObjectStoreDatabaseWork");
+  PROFILER_LABEL("IndexedDB",
+                 "Cursor::OpenOp::DoObjectStoreDatabaseWork",
+                 js::ProfileEntry::Category::STORAGE);
 
   const bool usingKeyRange =
     mOptionalKeyRange.type() == OptionalKeyRange::TSerializedKeyRange;
@@ -11816,7 +11897,9 @@ OpenOp::DoObjectStoreKeyDatabaseWork(TransactionBase* aTransaction)
                OpenCursorParams::TObjectStoreOpenKeyCursorParams);
   MOZ_ASSERT(mCursor->mObjectStoreId);
 
-  PROFILER_LABEL("IndexedDB", "Cursor::OpenOp::DoObjectStoreKeyDatabaseWork");
+  PROFILER_LABEL("IndexedDB",
+                 "Cursor::OpenOp::DoObjectStoreKeyDatabaseWork",
+                 js::ProfileEntry::Category::STORAGE);
 
   const bool usingKeyRange =
     mOptionalKeyRange.type() == OptionalKeyRange::TSerializedKeyRange;
@@ -11972,7 +12055,9 @@ OpenOp::DoIndexDatabaseWork(TransactionBase* aTransaction)
   MOZ_ASSERT(mCursor->mObjectStoreId);
   MOZ_ASSERT(mCursor->mIndexId);
 
-  PROFILER_LABEL("IndexedDB", "Cursor::OpenOp::DoIndexDatabaseWork");
+  PROFILER_LABEL("IndexedDB",
+                 "Cursor::OpenOp::DoIndexDatabaseWork",
+                 js::ProfileEntry::Category::STORAGE);
 
   const bool usingKeyRange =
     mOptionalKeyRange.type() == OptionalKeyRange::TSerializedKeyRange;
@@ -12202,7 +12287,9 @@ OpenOp::DoIndexKeyDatabaseWork(TransactionBase* aTransaction)
   MOZ_ASSERT(mCursor->mObjectStoreId);
   MOZ_ASSERT(mCursor->mIndexId);
 
-  PROFILER_LABEL("IndexedDB", "Cursor::OpenOp::DoIndexKeyDatabaseWork");
+  PROFILER_LABEL("IndexedDB",
+                 "Cursor::OpenOp::DoIndexKeyDatabaseWork",
+                 js::ProfileEntry::Category::STORAGE);
 
   const bool usingKeyRange =
     mOptionalKeyRange.type() == OptionalKeyRange::TSerializedKeyRange;
@@ -12476,7 +12563,9 @@ ContinueOp::DoDatabaseWork(TransactionBase* aTransaction)
   MOZ_ASSERT_IF(isIndex, mCursor->mIndexId);
   MOZ_ASSERT_IF(isIndex, !mCursor->mObjectKey.IsUnset());
 
-  PROFILER_LABEL("IndexedDB", "Cursor::ContinueOp::DoDatabaseWork");
+  PROFILER_LABEL("IndexedDB",
+                 "Cursor::ContinueOp::DoDatabaseWork",
+                 js::ProfileEntry::Category::STORAGE);
 
   // We need to pick a query based on whether or not a key was passed to the
   // continue function. If not we'll grab the the next item in the database that

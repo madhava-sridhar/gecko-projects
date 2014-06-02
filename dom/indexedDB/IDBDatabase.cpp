@@ -810,7 +810,8 @@ CreateFileHelper::DoDatabaseWork(mozIStorageConnection* aConnection)
   AssertIsOnIOThread();
   NS_ASSERTION(IndexedDatabaseManager::IsMainProcess(), "Wrong process!");
 
-  PROFILER_LABEL("IndexedDB", "CreateFileHelper::DoDatabaseWork");
+  PROFILER_LABEL("CreateFileHelper", "DoDatabaseWork",
+    js::ProfileEntry::Category::STORAGE);
 
   if (IndexedDatabaseManager::InLowDiskSpaceMode()) {
     NS_WARNING("Refusing to create file because disk space is low!");

@@ -20,8 +20,6 @@
 #include "gfxFT2Utils.h"
 #include "harfbuzz/hb.h"
 #include "harfbuzz/hb-ot.h"
-#include "gfxHarfBuzzShaper.h"
-#include "gfxGraphiteShaper.h"
 #include "nsUnicodeProperties.h"
 #include "nsUnicodeScriptCodes.h"
 #include "gfxFontconfigUtils.h"
@@ -661,19 +659,7 @@ public:
 #endif
 
 protected:
-    virtual bool ShapeText(gfxContext      *aContext,
-                           const char16_t *aText,
-                           uint32_t         aOffset,
-                           uint32_t         aLength,
-                           int32_t          aScript,
-                           gfxShapedText   *aShapedText,
-                           bool             aPreferPlatformShaping);
-
-    bool InitGlyphRunWithPango(const char16_t *aString,
-                               uint32_t         aOffset,
-                               uint32_t         aLength,
-                               int32_t          aScript,
-                               gfxShapedText   *aShapedText);
+    virtual already_AddRefed<gfxFont> GetSmallCapsFont();
 
 private:
     gfxFcFont(cairo_scaled_font_t *aCairoFont, gfxFcFontEntry *aFontEntry,
@@ -1601,40 +1587,39 @@ gfxFcFont::~gfxFcFont()
                                     nullptr);
 }
 
-bool
-gfxFcFont::ShapeText(gfxContext      *aContext,
-                     const char16_t *aText,
-                     uint32_t         aOffset,
-                     uint32_t         aLength,
-                     int32_t          aScript,
-                     gfxShapedText   *aShapedText,
-                     bool             aPreferPlatformShaping)
+already_AddRefed<gfxFont>
+gfxFcFont::GetSmallCapsFont()
 {
-    bool ok = false;
-
-    if (FontCanSupportGraphite()) {
-        if (gfxPlatform::GetPlatform()->UseGraphiteShaping()) {
-            if (!mGraphiteShaper) {
-                mGraphiteShaper = new gfxGraphiteShaper(this);
-            }
-            ok = mGraphiteShaper->ShapeText(aContext, aText, aOffset, aLength,
-                                            aScript, aShapedText);
-        }
+    gfxFontStyle style(*GetStyle());
+    style.size *= SMALL_CAPS_SCALE_FACTOR;
+    style.smallCaps = false;
+    gfxFcFontEntry* fe = static_cast<gfxFcFontEntry*>(GetFontEntry());
+    nsRefPtr<gfxFont> font = gfxFontCache::GetCache()->Lookup(fe, &style);
+    if (font) {
+        return font.forget();
     }
 
-    if (!ok) {
-        if (!mHarfBuzzShaper) {
-            mHarfBuzzShaper = new gfxHarfBuzzShaper(this);
-        }
-        ok = mHarfBuzzShaper->ShapeText(aContext, aText, aOffset, aLength,
-                                        aScript, aShapedText);
-    }
+    cairo_matrix_t fontMatrix;
+    cairo_scaled_font_get_font_matrix(mScaledFont, &fontMatrix);
+    cairo_matrix_scale(&fontMatrix,
+                       SMALL_CAPS_SCALE_FACTOR, SMALL_CAPS_SCALE_FACTOR);
 
-    NS_WARN_IF_FALSE(ok, "shaper failed, expect scrambled or missing text");
+    cairo_matrix_t ctm;
+    cairo_scaled_font_get_ctm(mScaledFont, &ctm);
 
-    PostShapingFixup(aContext, aText, aOffset, aLength, aShapedText);
+    cairo_font_options_t *options = cairo_font_options_create();
+    cairo_scaled_font_get_font_options(mScaledFont, options);
 
-    return ok;
+    cairo_scaled_font_t *smallFont =
+        cairo_scaled_font_create(cairo_scaled_font_get_font_face(mScaledFont),
+                                 &fontMatrix, &ctm, options);
+    cairo_font_options_destroy(options);
+
+    font = new gfxFcFont(smallFont, fe, &style);
+    gfxFontCache::GetCache()->AddNew(font);
+    cairo_scaled_font_destroy(smallFont);
+
+    return font.forget();
 }
 
 /* static */ void

@@ -154,6 +154,14 @@ IDBTransaction::Create(IDBDatabase* aDatabase,
       aObjectStoreNames[index]);
   }
 
+  // Remove any duplicate object store names
+  for (uint32_t index = objectStoreCount - 1; index > 0; index--) {
+    if (transaction->mObjectStoreNames[index] ==
+        transaction->mObjectStoreNames[index - 1]) {
+      transaction->mObjectStoreNames.RemoveElementAt(index);
+    }
+  }
+
   // XXX Fix!
   MOZ_ASSERT(NS_IsMainThread(), "This won't work on non-main threads!");
 

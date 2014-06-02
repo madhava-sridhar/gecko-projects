@@ -94,6 +94,7 @@
 #include "mozilla/dom/network/TCPServerSocketChild.h"
 #include "mozilla/dom/network/UDPSocketChild.h"
 #include "mozilla/dom/quota/QuotaManager.h"
+#include "mozilla/dom/workers/ServiceWorkerManager.h"
 #include "mozilla/OSFileConstants.h"
 #include "mozilla/Services.h"
 
@@ -252,6 +253,7 @@ using mozilla::dom::alarm::AlarmHalService;
 using mozilla::dom::indexedDB::IndexedDatabaseManager;
 using mozilla::dom::power::PowerManagerService;
 using mozilla::dom::quota::QuotaManager;
+using mozilla::dom::workers::ServiceWorkerManager;
 using mozilla::dom::TCPSocketChild;
 using mozilla::dom::TCPSocketParent;
 using mozilla::dom::TCPServerSocketChild;
@@ -292,6 +294,8 @@ NS_GENERIC_FACTORY_SINGLETON_CONSTRUCTOR(DOMRequestService,
                                          DOMRequestService::FactoryCreate)
 NS_GENERIC_FACTORY_SINGLETON_CONSTRUCTOR(QuotaManager,
                                          QuotaManager::FactoryCreate)
+NS_GENERIC_FACTORY_SINGLETON_CONSTRUCTOR(ServiceWorkerManager,
+                                         ServiceWorkerManager::FactoryCreate)
 #ifdef MOZ_WIDGET_GONK
 NS_GENERIC_FACTORY_SINGLETON_CONSTRUCTOR(SystemWorkerManager,
                                          SystemWorkerManager::FactoryCreate)
@@ -307,7 +311,8 @@ NS_GENERIC_FACTORY_SINGLETON_CONSTRUCTOR(nsSynthVoiceRegistry,
 #endif
 
 #ifdef MOZ_WIDGET_GONK
-NS_GENERIC_FACTORY_CONSTRUCTOR(AudioManager)
+NS_GENERIC_FACTORY_SINGLETON_CONSTRUCTOR(AudioManager,
+                                         AudioManager::GetInstance)
 #endif
 
 NS_GENERIC_FACTORY_CONSTRUCTOR(AudioChannelAgent)
@@ -597,7 +602,6 @@ NS_GENERIC_FACTORY_CONSTRUCTOR(CSPService)
 NS_GENERIC_FACTORY_CONSTRUCTOR(nsMixedContentBlocker)
 
 NS_GENERIC_FACTORY_CONSTRUCTOR(nsPrincipal)
-NS_GENERIC_FACTORY_CONSTRUCTOR(nsSecurityNameSet)
 NS_GENERIC_FACTORY_SINGLETON_CONSTRUCTOR(nsSystemPrincipal,
     nsScriptSecurityManager::SystemPrincipalSingletonConstructor)
 NS_GENERIC_FACTORY_CONSTRUCTOR_INIT(nsNullPrincipal, Init)
@@ -715,6 +719,7 @@ NS_DEFINE_NAMED_CID(NS_TEXTEDITOR_CID);
 NS_DEFINE_NAMED_CID(INDEXEDDB_MANAGER_CID);
 NS_DEFINE_NAMED_CID(DOMREQUEST_SERVICE_CID);
 NS_DEFINE_NAMED_CID(QUOTA_MANAGER_CID);
+NS_DEFINE_NAMED_CID(SERVICEWORKERMANAGER_CID);
 #ifdef MOZ_WIDGET_GONK
 NS_DEFINE_NAMED_CID(SYSTEMWORKERMANAGER_CID);
 #endif
@@ -750,7 +755,6 @@ NS_DEFINE_NAMED_CID(NS_SCRIPTSECURITYMANAGER_CID);
 NS_DEFINE_NAMED_CID(NS_PRINCIPAL_CID);
 NS_DEFINE_NAMED_CID(NS_SYSTEMPRINCIPAL_CID);
 NS_DEFINE_NAMED_CID(NS_NULLPRINCIPAL_CID);
-NS_DEFINE_NAMED_CID(NS_SECURITYNAMESET_CID);
 NS_DEFINE_NAMED_CID(THIRDPARTYUTIL_CID);
 NS_DEFINE_NAMED_CID(NS_STRUCTUREDCLONECONTAINER_CID);
 NS_DEFINE_NAMED_CID(NS_DEVICE_SENSORS_CID);
@@ -1005,6 +1009,7 @@ static const mozilla::Module::CIDEntry kLayoutCIDs[] = {
   { &kINDEXEDDB_MANAGER_CID, false, nullptr, IndexedDatabaseManagerConstructor },
   { &kDOMREQUEST_SERVICE_CID, false, nullptr, DOMRequestServiceConstructor },
   { &kQUOTA_MANAGER_CID, false, nullptr, QuotaManagerConstructor },
+  { &kSERVICEWORKERMANAGER_CID, false, nullptr, ServiceWorkerManagerConstructor },
 #ifdef MOZ_WIDGET_GONK
   { &kSYSTEMWORKERMANAGER_CID, true, nullptr, SystemWorkerManagerConstructor },
 #endif
@@ -1042,7 +1047,6 @@ static const mozilla::Module::CIDEntry kLayoutCIDs[] = {
   { &kNS_PRINCIPAL_CID, false, nullptr, nsPrincipalConstructor },
   { &kNS_SYSTEMPRINCIPAL_CID, false, nullptr, nsSystemPrincipalConstructor },
   { &kNS_NULLPRINCIPAL_CID, false, nullptr, nsNullPrincipalConstructor },
-  { &kNS_SECURITYNAMESET_CID, false, nullptr, nsSecurityNameSetConstructor },
   { &kNS_DEVICE_SENSORS_CID, false, nullptr, nsDeviceSensorsConstructor },
 #ifndef MOZ_WIDGET_GONK
 #if defined(ANDROID)
@@ -1162,6 +1166,7 @@ static const mozilla::Module::ContractIDEntry kLayoutContracts[] = {
   { INDEXEDDB_MANAGER_CONTRACTID, &kINDEXEDDB_MANAGER_CID },
   { DOMREQUEST_SERVICE_CONTRACTID, &kDOMREQUEST_SERVICE_CID },
   { QUOTA_MANAGER_CONTRACTID, &kQUOTA_MANAGER_CID },
+  { SERVICEWORKERMANAGER_CONTRACTID, &kSERVICEWORKERMANAGER_CID },
 #ifdef MOZ_WIDGET_GONK
   { SYSTEMWORKERMANAGER_CONTRACTID, &kSYSTEMWORKERMANAGER_CID },
 #endif
@@ -1198,7 +1203,6 @@ static const mozilla::Module::ContractIDEntry kLayoutContracts[] = {
   { NS_PRINCIPAL_CONTRACTID, &kNS_PRINCIPAL_CID },
   { NS_SYSTEMPRINCIPAL_CONTRACTID, &kNS_SYSTEMPRINCIPAL_CID },
   { NS_NULLPRINCIPAL_CONTRACTID, &kNS_NULLPRINCIPAL_CID },
-  { NS_SECURITYNAMESET_CONTRACTID, &kNS_SECURITYNAMESET_CID },
   { NS_DEVICE_SENSORS_CONTRACTID, &kNS_DEVICE_SENSORS_CID },
 #ifndef MOZ_WIDGET_GONK
 #if defined(ANDROID)
@@ -1243,7 +1247,6 @@ static const mozilla::Module::CategoryEntry kLayoutCategories[] = {
   { "content-policy", "CSPService", CSPSERVICE_CONTRACTID },
   { "content-policy", NS_MIXEDCONTENTBLOCKER_CONTRACTID, NS_MIXEDCONTENTBLOCKER_CONTRACTID },
   { "net-channel-event-sinks", "CSPService", CSPSERVICE_CONTRACTID },
-  { JAVASCRIPT_GLOBAL_STATIC_NAMESET_CATEGORY, "PrivilegeManager", NS_SECURITYNAMESET_CONTRACTID },
   { "app-startup", "Script Security Manager", "service," NS_SCRIPTSECURITYMANAGER_CONTRACTID },
   { TOPIC_WEB_APP_CLEAR_DATA, "QuotaManager", "service," QUOTA_MANAGER_CONTRACTID },
 #ifdef MOZ_WIDGET_GONK

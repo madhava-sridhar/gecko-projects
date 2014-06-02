@@ -425,7 +425,9 @@ TransactionThreadPool::FinishTransaction(
 {
   AssertIsOnOwningThread();
 
-  PROFILER_LABEL("IndexedDB", "TransactionThreadPool::FinishTransaction");
+  PROFILER_LABEL("IndexedDB",
+                 "TransactionThreadPool::FinishTransaction",
+                 js::ProfileEntry::Category::STORAGE);
 
   DatabaseTransactionInfo* dbTransactionInfo;
   if (!mTransactionsInProgress.Get(aDatabaseId, &dbTransactionInfo)) {
@@ -718,7 +720,9 @@ TransactionThreadPool::MaybeFireCallback(DatabasesCompleteCallback aCallback)
 {
   AssertIsOnOwningThread();
 
-  PROFILER_LABEL("IndexedDB", "TransactionThreadPool::MaybeFireCallback");
+  PROFILER_LABEL("IndexedDB",
+                 "TransactionThreadPool::MaybeFireCallback",
+                 js::ProfileEntry::Category::STORAGE);
 
   for (uint32_t index = 0; index < aCallback.mDatabaseIds.Length(); index++) {
     nsCString databaseId = aCallback.mDatabaseIds[index];
@@ -797,7 +801,9 @@ NS_IMPL_ISUPPORTS_INHERITED0(TransactionThreadPool::TransactionQueue,
 NS_IMETHODIMP
 TransactionThreadPool::TransactionQueue::Run()
 {
-  PROFILER_LABEL("IndexedDB", "TransactionQueue::Run");
+  PROFILER_LABEL("IndexedDB",
+                 "TransactionThreadPool::TransactionQueue""Run",
+                 js::ProfileEntry::Category::STORAGE);
 
   IDB_PROFILER_MARK("IndexedDB Transaction %llu: Beginning database work",
                     "IDBTransaction[%llu] DT Start",
@@ -880,7 +886,9 @@ FinishTransactionRunnable::Run()
   MOZ_ASSERT(mThreadPool);
   mThreadPool->AssertIsOnOwningThread();
 
-  PROFILER_LABEL("IndexedDB", "FinishTransactionRunnable::Run");
+  PROFILER_LABEL("IndexedDB",
+                 "TransactionThreadPool::FinishTransactionRunnable::Run",
+                 js::ProfileEntry::Category::STORAGE);
 
   nsRefPtr<FinishCallback> callback;
   mFinishCallback.swap(callback);

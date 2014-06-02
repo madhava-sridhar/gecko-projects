@@ -6,6 +6,7 @@
 
 #include "gfxCrashReporterUtils.h"
 #include "mozilla/Preferences.h"
+#include "mozilla/Assertions.h"
 #include "nsDirectoryServiceDefs.h"
 #include "nsDirectoryServiceUtils.h"
 #include "nsPrintfCString.h"
@@ -20,6 +21,9 @@ namespace mozilla {
 namespace gl {
 
 GLLibraryEGL sEGLLibrary;
+#ifdef MOZ_B2G
+ThreadLocal<EGLContext> GLLibraryEGL::sCurrentContext;
+#endif
 
 // should match the order of EGLExtensions, and be null-terminated.
 static const char *sEGLExtensionNames[] = {
@@ -103,6 +107,11 @@ GLLibraryEGL::EnsureInitialized()
     }
 
     mozilla::ScopedGfxFeatureReporter reporter("EGL");
+
+#ifdef MOZ_B2G
+    if (!sCurrentContext.init())
+	    MOZ_CRASH("Tls init failed");
+#endif
 
 #ifdef XP_WIN
 #ifdef MOZ_WEBGL
@@ -210,7 +219,7 @@ GLLibraryEGL::EnsureInitialized()
     }
 
     GLLibraryLoader::SymLoadStruct optionalSymbols[] = {
-        // On Android 4.2 and up, certain features like ANDROID_native_fence_sync
+        // On Android 4.3 and up, certain features like ANDROID_native_fence_sync
         // can only be queried by using a special eglQueryString.
         { (PRFuncPtr*) &mSymbols.fQueryStringImplementationANDROID,
           { "_Z35eglQueryStringImplementationANDROIDPvi", nullptr } },
@@ -219,7 +228,7 @@ GLLibraryEGL::EnsureInitialized()
 
     GLLibraryLoader::LoadSymbols(mEGLLibrary, &optionalSymbols[0]);
 
-#if defined(MOZ_WIDGET_GONK) && ANDROID_VERSION >= 17
+#if defined(MOZ_WIDGET_GONK) && ANDROID_VERSION >= 18
     MOZ_RELEASE_ASSERT(mSymbols.fQueryStringImplementationANDROID,
                        "Couldn't find eglQueryStringImplementationANDROID");
 #endif
