@@ -766,8 +766,8 @@ TransactionThreadPool::TransactionQueue::Unblock()
 
   // NB: Finish may be called before Unblock.
 
-  TransactionThreadPool::Get()->mThreadPool->
-    Dispatch(this, NS_DISPATCH_NORMAL);
+  TransactionThreadPool::Get()->mThreadPool-> Dispatch(this,
+                                                       NS_DISPATCH_NORMAL);
 }
 
 void
@@ -851,7 +851,8 @@ TransactionThreadPool::TransactionQueue::Run()
     new FinishTransactionRunnable(mOwningThreadPool, mTransactionId,
                                   mDatabaseId, mObjectStoreNames, mMode,
                                   FinishCallback.forget());
-  if (NS_FAILED(mOwningThread->Dispatch(finishTransactionRunnable))) {
+  if (NS_FAILED(mOwningThread->Dispatch(finishTransactionRunnable,
+                                        NS_DISPATCH_NORMAL))) {
     NS_WARNING("Failed to dispatch finishTransactionRunnable!");
   }
 
