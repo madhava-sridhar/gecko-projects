@@ -4,15 +4,16 @@
 
 #include "BackgroundParentImpl.h"
 
+#include "FileDescriptorSetParent.h"
 #include "mozilla/Assertions.h"
+#include "mozilla/dom/PBlobParent.h"
 #include "mozilla/dom/indexedDB/ActorsParent.h"
+#include "mozilla/dom/ipc/BlobParent.h"
 #include "mozilla/ipc/BackgroundParent.h"
 #include "mozilla/ipc/PBackgroundTestParent.h"
 #include "nsThreadUtils.h"
 #include "nsTraceRefcnt.h"
 #include "nsXULAppAPI.h"
-
-namespace indexedDB = mozilla::dom::indexedDB;
 
 using mozilla::ipc::AssertIsOnBackgroundThread;
 
@@ -116,7 +117,7 @@ BackgroundParentImpl::AllocPBackgroundIDBFactoryParent()
   AssertIsInMainProcess();
   AssertIsOnBackgroundThread();
 
-  return indexedDB::AllocPBackgroundIDBFactoryParent();
+  return mozilla::dom::indexedDB::AllocPBackgroundIDBFactoryParent();
 }
 
 bool
@@ -127,7 +128,7 @@ BackgroundParentImpl::RecvPBackgroundIDBFactoryConstructor(
   AssertIsOnBackgroundThread();
   MOZ_ASSERT(aActor);
 
-  return indexedDB::RecvPBackgroundIDBFactoryConstructor(aActor);
+  return mozilla::dom::indexedDB::RecvPBackgroundIDBFactoryConstructor(aActor);
 }
 
 bool
@@ -138,7 +139,51 @@ BackgroundParentImpl::DeallocPBackgroundIDBFactoryParent(
   AssertIsOnBackgroundThread();
   MOZ_ASSERT(aActor);
 
-  return indexedDB::DeallocPBackgroundIDBFactoryParent(aActor);
+  return mozilla::dom::indexedDB::DeallocPBackgroundIDBFactoryParent(aActor);
+}
+
+auto
+BackgroundParentImpl::AllocPBlobParent(const BlobConstructorParams& aParams)
+  -> PBlobParent*
+{
+  AssertIsInMainProcess();
+  AssertIsOnBackgroundThread();
+  MOZ_ASSERT(aParams.type() != BlobConstructorParams::T__None);
+
+  return mozilla::dom::BlobParent::Create(this, aParams);
+}
+
+bool
+BackgroundParentImpl::DeallocPBlobParent(PBlobParent* aActor)
+{
+  AssertIsInMainProcess();
+  AssertIsOnBackgroundThread();
+  MOZ_ASSERT(aActor);
+
+  mozilla::dom::BlobParent::Destroy(aActor);
+  return true;
+}
+
+PFileDescriptorSetParent*
+BackgroundParentImpl::AllocPFileDescriptorSetParent(
+                                          const FileDescriptor& aFileDescriptor)
+{
+  AssertIsInMainProcess();
+  AssertIsOnBackgroundThread();
+
+  return new FileDescriptorSetParent(aFileDescriptor);
+}
+
+bool
+BackgroundParentImpl::DeallocPFileDescriptorSetParent(
+                                               PFileDescriptorSetParent* aActor)
+{
+  AssertIsInMainProcess();
+  AssertIsOnBackgroundThread();
+  MOZ_ASSERT(aActor);
+
+  delete static_cast<FileDescriptorSetParent*>(aActor);
+  return true;
 }
 
 } // namespace ipc

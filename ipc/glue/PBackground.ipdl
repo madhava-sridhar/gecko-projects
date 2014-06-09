@@ -4,6 +4,10 @@
 
 include protocol PBackgroundIDBFactory;
 include protocol PBackgroundTest;
+include protocol PBlob;
+include protocol PFileDescriptorSet;
+
+include DOMTypes;
 
 namespace mozilla {
 namespace ipc {
@@ -12,12 +16,19 @@ protocol PBackground
 {
   manages PBackgroundIDBFactory;
   manages PBackgroundTest;
+  manages PBlob;
+  manages PFileDescriptorSet;
 
 parent:
   // Only called at startup during mochitests to check the basic infrastructure.
   PBackgroundTest(nsCString testArg);
 
   PBackgroundIDBFactory();
+
+both:
+  PBlob(BlobConstructorParams params);
+
+  PFileDescriptorSet(FileDescriptor fd);
 };
 
 } // namespace ipc

@@ -28,7 +28,8 @@
 #include "mozilla/dom/IDBObjectStoreBinding.h"
 #include "mozilla/dom/StructuredCloneTags.h"
 #include "mozilla/dom/indexedDB/PBackgroundIDBSharedTypes.h"
-#include "mozilla/dom/ipc/Blob.h"
+#include "mozilla/dom/ipc/BlobChild.h"
+#include "mozilla/dom/ipc/BlobParent.h"
 #include "mozilla/dom/ipc/nsIRemoteBlob.h"
 #include "nsCOMPtr.h"
 #include "nsDOMFile.h"
@@ -109,9 +110,9 @@ ActorFromRemoteBlob(nsIDOMBlob* aBlob)
 
   nsCOMPtr<nsIRemoteBlob> remoteBlob = do_QueryInterface(aBlob);
   if (remoteBlob) {
-    BlobChild* actor =
-      static_cast<BlobChild*>(static_cast<PBlobChild*>(remoteBlob->GetPBlob()));
-    NS_ASSERTION(actor, "Null actor?!");
+    BlobChild* actor = remoteBlob->GetBlobChild();
+    MOZ_ASSERT(actor);
+
     return actor;
   }
   return nullptr;

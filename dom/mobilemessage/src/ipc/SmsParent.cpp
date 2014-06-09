@@ -18,7 +18,7 @@
 #include "SmsSegmentInfo.h"
 #include "MobileMessageThread.h"
 #include "nsIDOMFile.h"
-#include "mozilla/dom/ipc/Blob.h"
+#include "mozilla/dom/ipc/BlobParent.h"
 #include "mozilla/dom/ContentParent.h"
 #include "mozilla/dom/mobilemessage/Constants.h" // For MessageType
 #include "nsContentUtils.h"

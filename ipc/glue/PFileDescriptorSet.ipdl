@@ -2,14 +2,15 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+include protocol PBackground;
 include protocol PContent;
 
 namespace mozilla {
-namespace dom {
+namespace ipc {
 
 protocol PFileDescriptorSet
 {
-  manager PContent;
+  manager PBackground or PContent;
 
 both:
   AddFileDescriptor(FileDescriptor fd);
@@ -17,5 +18,5 @@ both:
   __delete__();
 };
 
-} // namespace dom
+} // namespace ipc
 } // namespace mozilla

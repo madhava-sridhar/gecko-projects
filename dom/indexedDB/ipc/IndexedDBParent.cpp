@@ -14,7 +14,7 @@
 #include "mozilla/Attributes.h"
 #include "mozilla/dom/ContentParent.h"
 #include "mozilla/dom/IDBDatabaseBinding.h"
-#include "mozilla/dom/ipc/Blob.h"
+#include "mozilla/dom/ipc/BlobParent.h"
 #include "mozilla/dom/TabParent.h"
 #include "mozilla/unused.h"
 #include "nsCxPusher.h"

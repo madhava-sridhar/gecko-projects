@@ -12,7 +12,8 @@ EXPORTS += [
 ]
 
 EXPORTS.mozilla.dom.ipc += [
-    'Blob.h',
+    'BlobChild.h',
+    'BlobParent.h',
     'nsIRemoteBlob.h',
 ]
 
@@ -24,8 +25,6 @@ EXPORTS.mozilla.dom += [
     'ContentProcess.h',
     'CrashReporterChild.h',
     'CrashReporterParent.h',
-    'FileDescriptorSetChild.h',
-    'FileDescriptorSetParent.h',
     'FilePickerParent.h',
     'nsIContentChild.h',
     'nsIContentParent.h',
@@ -51,8 +50,6 @@ UNIFIED_SOURCES += [
     'ContentParent.cpp',
     'ContentProcess.cpp',
     'CrashReporterParent.cpp',
-    'FileDescriptorSetChild.cpp',
-    'FileDescriptorSetParent.cpp',
     'FilePickerParent.cpp',
     'nsIContentChild.cpp',
     'nsIContentParent.cpp',
@@ -89,7 +86,6 @@ IPDL_SOURCES += [
     'PCrashReporter.ipdl',
     'PCycleCollectWithLogs.ipdl',
     'PDocumentRenderer.ipdl',
-    'PFileDescriptorSet.ipdl',
     'PFilePicker.ipdl',
     'PMemoryReportRequest.ipdl',
     'PTabContext.ipdlh',

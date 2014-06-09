@@ -4,10 +4,10 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "mozilla/dom/FileDescriptorSetParent.h"
+#include "FileDescriptorSetParent.h"
 
 namespace mozilla {
-namespace dom {
+namespace ipc {
 
 FileDescriptorSetParent::FileDescriptorSetParent(
                                           const FileDescriptor& aFileDescriptor)
@@ -41,5 +41,5 @@ FileDescriptorSetParent::RecvAddFileDescriptor(
   return true;
 }
 
-} // dom namespace
-} // mozilla namespace
+} // namespace ipc
+} // namespace mozilla

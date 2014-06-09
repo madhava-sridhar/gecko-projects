@@ -17,6 +17,8 @@ EXPORTS.mozilla.ipc += [
     'BrowserProcessSubThread.h',
     'CrossProcessMutex.h',
     'FileDescriptor.h',
+    'FileDescriptorSetChild.h',
+    'FileDescriptorSetParent.h',
     'FileDescriptorUtils.h',
     'GeckoChildProcessHost.h',
     'InputStreamUtils.h',
@@ -117,6 +119,8 @@ UNIFIED_SOURCES += [
 SOURCES += [
     'BackgroundChildImpl.cpp',
     'BackgroundParentImpl.cpp',
+    'FileDescriptorSetChild.cpp',
+    'FileDescriptorSetParent.cpp',
     'GeckoChildProcessHost.cpp',
     'URIUtils.cpp',
 ]
@@ -130,6 +134,7 @@ IPDL_SOURCES = [
     'PBackground.ipdl',
     'PBackgroundSharedTypes.ipdlh',
     'PBackgroundTest.ipdl',
+    'PFileDescriptorSet.ipdl',
     'ProtocolTypes.ipdlh',
     'URIParams.ipdlh',
 ]

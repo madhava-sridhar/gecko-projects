@@ -55,6 +55,19 @@ protected:
   virtual bool
   DeallocPBackgroundIDBFactoryChild(PBackgroundIDBFactoryChild* aActor)
                                     MOZ_OVERRIDE;
+
+  virtual PBlobChild*
+  AllocPBlobChild(const BlobConstructorParams& aParams) MOZ_OVERRIDE;
+
+  virtual bool
+  DeallocPBlobChild(PBlobChild* aActor) MOZ_OVERRIDE;
+
+  virtual PFileDescriptorSetChild*
+  AllocPFileDescriptorSetChild(const FileDescriptor& aFileDescriptor)
+                               MOZ_OVERRIDE;
+
+  virtual bool
+  DeallocPFileDescriptorSetChild(PFileDescriptorSetChild* aActor) MOZ_OVERRIDE;
 };
 
 class BackgroundChildImpl::ThreadLocal MOZ_FINAL

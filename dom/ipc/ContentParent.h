@@ -10,7 +10,6 @@
 #include "mozilla/dom/PContentParent.h"
 #include "mozilla/dom/nsIContentParent.h"
 #include "mozilla/ipc/GeckoChildProcessHost.h"
-#include "mozilla/dom/ipc/Blob.h"
 #include "mozilla/Attributes.h"
 #include "mozilla/FileUtils.h"
 #include "mozilla/HalTypes.h"
@@ -39,6 +38,7 @@ namespace mozilla {
 
 namespace ipc {
 class OptionalURIParams;
+class PFileDescriptorSetParent;
 class URIParams;
 class TestShellParent;
 } // namespace ipc
@@ -61,7 +61,6 @@ class PStorageParent;
 class ClonedMessageData;
 class MemoryReport;
 class TabContext;
-class PFileDescriptorSetParent;
 
 class ContentParent : public PContentParent
                     , public nsIContentParent
@@ -71,6 +70,7 @@ class ContentParent : public PContentParent
 {
     typedef mozilla::ipc::GeckoChildProcessHost GeckoChildProcessHost;
     typedef mozilla::ipc::OptionalURIParams OptionalURIParams;
+    typedef mozilla::ipc::PFileDescriptorSetParent PFileDescriptorSetParent;
     typedef mozilla::ipc::TestShellParent TestShellParent;
     typedef mozilla::ipc::URIParams URIParams;
     typedef mozilla::dom::ClonedMessageData ClonedMessageData;
@@ -399,8 +399,9 @@ private:
     virtual bool
     DeallocPFileSystemRequestParent(PFileSystemRequestParent*) MOZ_OVERRIDE;
 
-    virtual PBlobParent* AllocPBlobParent(const BlobConstructorParams& aParams) MOZ_OVERRIDE;
-    virtual bool DeallocPBlobParent(PBlobParent*) MOZ_OVERRIDE;
+    virtual PBlobParent* AllocPBlobParent(const BlobConstructorParams& aParams)
+                                          MOZ_OVERRIDE;
+    virtual bool DeallocPBlobParent(PBlobParent* aActor) MOZ_OVERRIDE;
 
     virtual bool DeallocPCrashReporterParent(PCrashReporterParent* crashreporter) MOZ_OVERRIDE;
 
