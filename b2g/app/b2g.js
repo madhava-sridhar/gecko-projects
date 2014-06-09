@@ -88,9 +88,9 @@ pref("network.buffer.cache.count", 24);
 pref("network.buffer.cache.size",  16384);
 
 // predictive actions
-pref("network.seer.enable", false); // disabled on b2g
-pref("network.seer.max-db-size", 2097152); // bytes
-pref("network.seer.preserve", 50); // percentage of seer data to keep when cleaning up
+pref("network.predictor.enable", false); // disabled on b2g
+pref("network.predictor.max-db-size", 2097152); // bytes
+pref("network.predictor.preserve", 50); // percentage of predictor data to keep when cleaning up
 
 /* session history */
 pref("browser.sessionhistory.max_total_viewers", 1);
@@ -549,15 +549,7 @@ pref("app.update.incompatible.mode", 0);
 pref("app.update.staging.enabled", true);
 pref("app.update.service.enabled", true);
 
-// The URL hosting the update manifest.
-// Temporary hack to only put Flame builds on aus4. 18 is Jelly Bean (4.3).
-// This needs to be changed if Flame upgrades to 19 (Kit Kat) before other devices
-// move to aus4.
-#if ANDROID_VERSION == 18
 pref("app.update.url", "https://aus4.mozilla.org/update/3/%PRODUCT%/%VERSION%/%BUILD_ID%/%PRODUCT_DEVICE%/%LOCALE%/%CHANNEL%/%OS_VERSION%/%DISTRIBUTION%/%DISTRIBUTION_VERSION%/update.xml");
-#else
-pref("app.update.url", "http://update.boot2gecko.org/%CHANNEL%/update.xml");
-#endif
 pref("app.update.channel", "@MOZ_UPDATE_CHANNEL@");
 
 // Interval at which update manifest is fetched.  In units of seconds.
@@ -955,9 +947,14 @@ pref("apz.axis_lock_mode", 2);
 pref("apz.subframe.enabled", true);
 
 // Overscroll-related settings
-pref("apz.overscroll.enabled", false);
-pref("apz.overscroll.snap_back_accel", "0.003");
-pref("apz.overscroll.snap_back_init_vel", "1");
+pref("apz.overscroll.enabled", true);
+pref("apz.overscroll.fling_friction", "0.02");
+pref("apz.overscroll.fling_stopped_threshold", "0.4");
+pref("apz.overscroll.clamping", "0.5");
+pref("apz.overscroll.z_effect", "0.2");
+pref("apz.overscroll.snap_back.spring_stiffness", "0.6");
+pref("apz.overscroll.snap_back.spring_friction", "0.1");
+pref("apz.overscroll.snap_back.mass", "1000");
 
 // This preference allows FirefoxOS apps (and content, I think) to force
 // the use of software (instead of hardware accelerated) 2D canvases by
@@ -976,11 +973,19 @@ pref("browser.autofocus", false);
 // Enable wakelock
 pref("dom.wakelock.enabled", true);
 
+// Disable touch caret by default
+pref("touchcaret.enabled", false);
+
+// Disable selection caret by default
+pref("selectioncaret.enabled", false);
+
 // Enable sync and mozId with Firefox Accounts.
 #ifdef MOZ_SERVICES_FXACCOUNTS
 pref("services.sync.fxaccounts.enabled", true);
 pref("identity.fxaccounts.enabled", true);
 #endif
+
+pref("services.mobileid.server.uri", "http://msisdn.dev.mozaws.net");
 
 // Enable mapped array buffer
 pref("dom.mapped_arraybuffer.enabled", true);

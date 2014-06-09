@@ -300,7 +300,7 @@ IDBRequest::WrapObject(JSContext* aCx)
 }
 
 JS::Value
-IDBRequest::GetResult(JSContext* aCx, mozilla::ErrorResult& aRv)
+IDBRequest::GetResult(ErrorResult& aRv) const
 {
   AssertIsOnOwningThread();
 

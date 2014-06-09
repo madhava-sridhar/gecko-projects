@@ -31,6 +31,7 @@
 #include "mozilla/ClearOnShutdown.h"
 #include "mozilla/dom/asmjscache/AsmJSCache.h"
 #include "mozilla/dom/Element.h"
+#include "mozilla/dom/DataStoreService.h"
 #include "mozilla/dom/ExternalHelperAppParent.h"
 #include "mozilla/dom/PFileDescriptorSetParent.h"
 #include "mozilla/dom/PCycleCollectWithLogsParent.h"
@@ -308,7 +309,7 @@ MaybeTestPBackground()
 // XXX Workaround for bug 986973 to maintain the existing broken semantics
 template<>
 struct nsIConsoleService::COMTypeInfo<nsConsoleService, void> {
-  static const nsIID kIID NS_HIDDEN;
+  static const nsIID kIID;
 };
 const nsIID nsIConsoleService::COMTypeInfo<nsConsoleService, void>::kIID = NS_ICONSOLESERVICE_IID;
 
@@ -797,7 +798,10 @@ ContentParent::CreateBrowserOrApp(const TabContext& aContext,
                 // DeallocPBrowserParent() releases this ref.
                 tp.forget().take(),
                 aContext.AsIPCTabContext(),
-                chromeFlags);
+                chromeFlags,
+                cp->ChildID(),
+                cp->IsForApp(),
+                cp->IsForBrowser());
             return static_cast<TabParent*>(browser);
         }
         return nullptr;
@@ -895,7 +899,10 @@ ContentParent::CreateBrowserOrApp(const TabContext& aContext,
         // DeallocPBrowserParent() releases this ref.
         nsRefPtr<TabParent>(tp).forget().take(),
         aContext.AsIPCTabContext(),
-        chromeFlags);
+        chromeFlags,
+        p->ChildID(),
+        p->IsForApp(),
+        p->IsForBrowser());
 
     p->MaybeTakeCPUWakeLock(aFrameElement);
 
@@ -1496,6 +1503,7 @@ ContentParent::InitializeMembers()
     mNumDestroyingTabs = 0;
     mIsAlive = true;
     mSendPermissionUpdates = false;
+    mSendDataStoreInfos = false;
     mCalledClose = false;
     mCalledCloseWithError = false;
     mCalledKillHard = false;
@@ -2078,6 +2086,26 @@ ContentParent::RecvAudioChannelChangeDefVolChannel(const int32_t& aChannel,
 }
 
 bool
+ContentParent::RecvDataStoreGetStores(
+                                    const nsString& aName,
+                                    const IPC::Principal& aPrincipal,
+                                    InfallibleTArray<DataStoreSetting>* aValue)
+{
+  nsRefPtr<DataStoreService> service = DataStoreService::GetOrCreate();
+  if (NS_WARN_IF(!service)) {
+    return false;
+  }
+
+  nsresult rv = service->GetDataStoresFromIPC(aName, aPrincipal, aValue);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return false;
+  }
+
+  mSendDataStoreInfos = true;
+  return true;
+}
+
+bool
 ContentParent::RecvBroadcastVolume(const nsString& aVolumeName)
 {
 #ifdef MOZ_WIDGET_GONK
@@ -2386,7 +2414,10 @@ ContentParent::DeallocPJavaScriptParent(PJavaScriptParent *parent)
 
 PBrowserParent*
 ContentParent::AllocPBrowserParent(const IPCTabContext& aContext,
-                                   const uint32_t &aChromeFlags)
+                                   const uint32_t& aChromeFlags,
+                                   const uint64_t& aId,
+                                   const bool& aIsForApp,
+                                   const bool& aIsForBrowser)
 {
     unused << aChromeFlags;
 

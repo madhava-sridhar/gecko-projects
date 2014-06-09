@@ -142,7 +142,13 @@ public:
   }
 
   JS::Value
-  GetResult(JSContext* aCx, ErrorResult& aRv);
+  GetResult(ErrorResult& aRv) const;
+
+  JS::Value
+  GetResult(JSContext* aCx, ErrorResult& aRv) const
+  {
+    return GetResult(aRv);
+  }
 
   IDBTransaction*
   GetTransaction() const

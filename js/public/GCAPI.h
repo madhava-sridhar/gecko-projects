@@ -45,7 +45,7 @@ namespace JS {
     D(TOO_MUCH_MALLOC)                          \
     D(ALLOC_TRIGGER)                            \
     D(DEBUG_GC)                                 \
-    D(TRANSPLANT)                               \
+    D(COMPARTMENT_REVIVED)                      \
     D(RESET)                                    \
     D(OUT_OF_NURSERY)                           \
     D(EVICT_NURSERY)                            \
@@ -374,7 +374,8 @@ ShrinkGCBuffers(JSRuntime *rt);
  */
 class JS_PUBLIC_API(AutoAssertOnGC)
 {
-    JSRuntime *runtime;
+#ifdef DEBUG
+    js::gc::GCRuntime *gc;
     size_t gcNumber;
 
   public:
@@ -383,6 +384,14 @@ class JS_PUBLIC_API(AutoAssertOnGC)
     ~AutoAssertOnGC();
 
     static void VerifyIsSafeToGC(JSRuntime *rt);
+#else
+  public:
+    AutoAssertOnGC() {}
+    explicit AutoAssertOnGC(JSRuntime *rt) {}
+    ~AutoAssertOnGC() {}
+
+    static void VerifyIsSafeToGC(JSRuntime *rt) {}
+#endif
 };
 
 /*
