@@ -9,11 +9,13 @@
 #include "DataStoreCallbacks.h"
 #include "mozilla/dom/IDBDatabaseBinding.h"
 #include "mozilla/dom/IDBFactoryBinding.h"
+#include "mozilla/dom/IDBObjectStoreBinding.h"
 #include "mozilla/dom/indexedDB/IDBDatabase.h"
 #include "mozilla/dom/indexedDB/IDBFactory.h"
 #include "mozilla/dom/indexedDB/IDBIndex.h"
 #include "mozilla/dom/indexedDB/IDBObjectStore.h"
 #include "mozilla/dom/indexedDB/IDBRequest.h"
+#include "mozilla/dom/indexedDB/IDBTransaction.h"
 #include "nsIDOMEvent.h"
 
 #define DATASTOREDB_VERSION        1
