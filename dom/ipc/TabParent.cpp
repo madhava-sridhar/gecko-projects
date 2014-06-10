@@ -661,7 +661,7 @@ TabParent::AllocPIndexedDBPermissionRequestParent(const Principal& aPrincipal)
 {
   MOZ_ASSERT(NS_IsMainThread());
 
-  nsCOMPtr<nsIPrincipal> principal = aPrincipal;
+  nsCOMPtr<nsIPrincipal> principal(aPrincipal);
   if (!principal) {
     return nullptr;
   }
