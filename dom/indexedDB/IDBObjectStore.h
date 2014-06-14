@@ -26,8 +26,8 @@ class ErrorResult;
 
 namespace dom {
 
-class ContentParent;
 class DOMStringList;
+class nsIContentParent;
 class PBlobChild;
 class PBlobParent;
 template <typename> class Sequence;
@@ -115,7 +115,7 @@ public:
 
   // Called only in the main process.
   static nsresult
-  ConvertBlobsToActors(ContentParent* aContentParent,
+  ConvertBlobsToActors(nsIContentParent* aContentParent,
                        FileManager* aFileManager,
                        const nsTArray<StructuredCloneFile>& aFiles,
                        nsTArray<PBlobParent*>& aActors);
@@ -170,8 +170,9 @@ public:
     aName = Name();
   }
 
-  JS::Value
-  GetKeyPath(JSContext* aCx, ErrorResult& aRv);
+  void
+  GetKeyPath(JSContext* aCx, JS::MutableHandle<JS::Value> aResult,
+             ErrorResult& aRv);
 
   already_AddRefed<DOMStringList>
   IndexNames();

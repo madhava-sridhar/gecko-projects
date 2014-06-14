@@ -589,7 +589,8 @@ public:
     AutoSafeJSContext cx;
 
     ErrorResult error;
-    JS::Rooted<JS::Value> result(cx, mRequest->GetResult(error));
+    JS::Rooted<JS::Value> result(cx);
+    mRequest->GetResult(cx, &result, error);
     if (NS_WARN_IF(error.Failed())) {
       return error.ErrorCode();
     }

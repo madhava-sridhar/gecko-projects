@@ -171,6 +171,11 @@ class RefTest(object):
     # Likewise for safebrowsing.
     prefs['browser.safebrowsing.enabled'] = False
     prefs['browser.safebrowsing.malware.enabled'] = False
+    # And for snippets.
+    prefs['browser.snippets.enabled'] = False
+    prefs['browser.snippets.syncPromo.enabled'] = False
+    # And for useragent updates.
+    prefs['general.useragent.updates.enabled'] = False
 
     if options.e10s:
       prefs['browser.tabs.remote.autostart'] = True

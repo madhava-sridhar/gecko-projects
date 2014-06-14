@@ -98,6 +98,8 @@ using mozilla::Maybe;
 using mozilla::PodCopy;
 using mozilla::PodZero;
 
+using JS::AutoGCRooter;
+
 using js::frontend::Parser;
 
 #ifdef HAVE_VA_LIST_AS_ARRAY
@@ -1088,6 +1090,7 @@ JS_TransplantObject(JSContext *cx, HandleObject origobj, HandleObject target)
     JS_ASSERT(!origobj->is<CrossCompartmentWrapperObject>());
     JS_ASSERT(!target->is<CrossCompartmentWrapperObject>());
 
+    AutoMaybeTouchDeadZones agc(cx);
     AutoDisableProxyCheck adpc(cx->runtime());
 
     JSCompartment *destination = target->compartment();
@@ -5671,7 +5674,7 @@ JS_Stringify(JSContext *cx, MutableHandleValue vp, HandleObject replacer,
         HandlePropertyName null = cx->names().null;
         return callback(null->chars(), null->length(), data);
     }
-    return callback(sb.begin(), sb.length(), data);
+    return callback(sb.rawTwoByteBegin(), sb.length(), data);
 }
 
 JS_PUBLIC_API(bool)
@@ -5681,7 +5684,7 @@ JS_ParseJSON(JSContext *cx, const jschar *chars, uint32_t len, JS::MutableHandle
     CHECK_REQUEST(cx);
 
     RootedValue reviver(cx, NullValue());
-    return ParseJSONWithReviver(cx, ConstTwoByteChars(chars, len), len, reviver, vp);
+    return ParseJSONWithReviver(cx, mozilla::Range<const jschar>(chars, len), reviver, vp);
 }
 
 JS_PUBLIC_API(bool)
@@ -5689,7 +5692,7 @@ JS_ParseJSONWithReviver(JSContext *cx, const jschar *chars, uint32_t len, Handle
 {
     AssertHeapIsIdle(cx);
     CHECK_REQUEST(cx);
-    return ParseJSONWithReviver(cx, ConstTwoByteChars(chars, len), len, reviver, vp);
+    return ParseJSONWithReviver(cx, mozilla::Range<const jschar>(chars, len), reviver, vp);
 }
 
 /************************************************************************/

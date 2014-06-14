@@ -579,6 +579,11 @@ class PerThreadData : public PerThreadDataFriendFields
      */
     int32_t suppressGC;
 
+#ifdef DEBUG
+    // Whether this thread is actively Ion compiling.
+    bool ionCompiling;
+#endif
+
     // Number of active bytecode compilation on this thread.
     unsigned activeCompilations;
 
@@ -954,6 +959,15 @@ struct JSRuntime : public JS::shadow::Runtime,
     bool isHeapMajorCollecting() { return gc.isHeapMajorCollecting(); }
     bool isHeapMinorCollecting() { return gc.isHeapMinorCollecting(); }
     bool isHeapCollecting() { return gc.isHeapCollecting(); }
+
+    // Performance note: if isFJMinorCollecting turns out to be slow
+    // because reading the counter is slow then we may be able to
+    // augment the counter with a volatile flag that is set iff the
+    // counter is greater than zero.  (It will require some care to
+    // make sure the two variables stay in sync.)
+    bool isFJMinorCollecting() { return gc.fjCollectionCounter > 0; }
+    void incFJMinorCollecting() { gc.fjCollectionCounter++; }
+    void decFJMinorCollecting() { gc.fjCollectionCounter--; }
 
     int gcZeal() { return gc.zeal(); }
 
@@ -1653,6 +1667,32 @@ class RuntimeAllocPolicy
 };
 
 extern const JSSecurityCallbacks NullSecurityCallbacks;
+
+// Debugging RAII class which marks the current thread as performing an Ion
+// compilation, for use by CurrentThreadCan{Read,Write}CompilationData
+class AutoEnterIonCompilation
+{
+  public:
+    AutoEnterIonCompilation(MOZ_GUARD_OBJECT_NOTIFIER_ONLY_PARAM) {
+        MOZ_GUARD_OBJECT_NOTIFIER_INIT;
+
+#if defined(DEBUG) && defined(JS_THREADSAFE)
+        PerThreadData *pt = js::TlsPerThreadData.get();
+        JS_ASSERT(!pt->ionCompiling);
+        pt->ionCompiling = true;
+#endif
+    }
+
+    ~AutoEnterIonCompilation() {
+#if defined(DEBUG) && defined(JS_THREADSAFE)
+        PerThreadData *pt = js::TlsPerThreadData.get();
+        JS_ASSERT(pt->ionCompiling);
+        pt->ionCompiling = false;
+#endif
+    }
+
+    MOZ_DECL_USE_GUARD_OBJECT_NOTIFIER
+};
 
 } /* namespace js */
 

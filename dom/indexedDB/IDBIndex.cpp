@@ -185,21 +185,25 @@ IDBIndex::GetParentObject() const
   return mObjectStore->GetParentObject();
 }
 
-JS::Value
-IDBIndex::GetKeyPath(JSContext* aCx, ErrorResult& aRv)
+void
+IDBIndex::GetKeyPath(JSContext* aCx,
+                     JS::MutableHandle<JS::Value> aResult,
+                     ErrorResult& aRv)
 {
   AssertIsOnOwningThread();
 
   if (!mCachedKeyPath.isUndefined()) {
     MOZ_ASSERT(mRooted);
-    return mCachedKeyPath;
+    JS::ExposeValueToActiveJS(mCachedKeyPath);
+    aResult.set(mCachedKeyPath);
+    return;
   }
 
   MOZ_ASSERT(!mRooted);
 
   aRv = GetKeyPath().ToJSVal(aCx, mCachedKeyPath);
   if (NS_WARN_IF(aRv.Failed())) {
-    return JSVAL_VOID;
+    return;
   }
 
   if (mCachedKeyPath.isGCThing()) {
@@ -207,7 +211,8 @@ IDBIndex::GetKeyPath(JSContext* aCx, ErrorResult& aRv)
     mRooted = true;
   }
 
-  return mCachedKeyPath;
+  JS::ExposeValueToActiveJS(mCachedKeyPath);
+  aResult.set(mCachedKeyPath);
 }
 
 already_AddRefed<IDBRequest>

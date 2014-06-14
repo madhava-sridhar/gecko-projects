@@ -9,6 +9,7 @@
 #include "DataStoreCallbacks.h"
 #include "DataStoreService.h"
 #include "mozilla/dom/DataStoreBinding.h"
+#include "mozilla/dom/ToJSValue.h"
 #include "mozilla/dom/indexedDB/IDBObjectStore.h"
 #include "mozilla/dom/indexedDB/IDBRequest.h"
 #include "nsIDOMEvent.h"
@@ -58,7 +59,7 @@ DataStoreRevision::AddRevision(JSContext* aCx,
   }
 
   JS::Rooted<JS::Value> value(aCx);
-  if (!data.ToObject(aCx, &value)) {
+  if (!ToJSValue(aCx, data, &value)) {
     return NS_ERROR_FAILURE;
   }
 

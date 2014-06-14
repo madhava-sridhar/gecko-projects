@@ -186,9 +186,17 @@ public:
   }
 
   already_AddRefed<IDBRequest>
+  CreateMutableFile(const nsAString& aName,
+                    const Optional<nsAString>& aType,
+                    ErrorResult& aRv);
+
+  already_AddRefed<IDBRequest>
   MozCreateFileHandle(const nsAString& aName,
                       const Optional<nsAString>& aType,
-                      ErrorResult& aRv);
+                      ErrorResult& aRv)
+  {
+    return CreateMutableFile(aName, aType, aRv);
+  }
 
   void
   ClearBackgroundActor()

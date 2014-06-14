@@ -303,15 +303,17 @@ IDBCursor::GetSource(OwningIDBObjectStoreOrIDBIndex& aSource) const
   }
 }
 
-JS::Value
-IDBCursor::GetKey(JSContext* aCx, ErrorResult& aRv)
+void
+IDBCursor::GetKey(JSContext* aCx, JS::MutableHandle<JS::Value> aResult,
+                  ErrorResult& aRv)
 {
   AssertIsOnOwningThread();
 
   MOZ_ASSERT(!mKey.IsUnset() || !mHaveValue);
 
   if (!mHaveValue) {
-    return JSVAL_VOID;
+    aResult.setUndefined();
+    return;
   }
 
   if (!mHaveCachedKey) {
@@ -322,22 +324,25 @@ IDBCursor::GetKey(JSContext* aCx, ErrorResult& aRv)
 
     aRv = mKey.ToJSVal(aCx, mCachedKey);
     if (NS_WARN_IF(aRv.Failed())) {
-      return JSVAL_VOID;
+      return;
     }
 
     mHaveCachedKey = true;
   }
 
-  return mCachedKey;
+  JS::ExposeValueToActiveJS(mCachedKey);
+  aResult.set(mCachedKey);
 }
 
-JS::Value
-IDBCursor::GetPrimaryKey(JSContext* aCx, ErrorResult& aRv)
+void
+IDBCursor::GetPrimaryKey(JSContext* aCx, JS::MutableHandle<JS::Value> aResult,
+                         ErrorResult& aRv)
 {
   AssertIsOnOwningThread();
 
   if (!mHaveValue) {
-    return JSVAL_VOID;
+    aResult.setUndefined();
+    return;
   }
 
   if (!mHaveCachedPrimaryKey) {
@@ -355,23 +360,26 @@ IDBCursor::GetPrimaryKey(JSContext* aCx, ErrorResult& aRv)
 
     aRv = key.ToJSVal(aCx, mCachedPrimaryKey);
     if (NS_WARN_IF(aRv.Failed())) {
-      return JSVAL_VOID;
+      return;
     }
 
     mHaveCachedPrimaryKey = true;
   }
 
-  return mCachedPrimaryKey;
+  JS::ExposeValueToActiveJS(mCachedPrimaryKey);
+  aResult.set(mCachedPrimaryKey);
 }
 
-JS::Value
-IDBCursor::GetValue(JSContext* aCx, ErrorResult& aRv)
+void
+IDBCursor::GetValue(JSContext* aCx, JS::MutableHandle<JS::Value> aResult,
+                    ErrorResult& aRv)
 {
   AssertIsOnOwningThread();
   MOZ_ASSERT(mType == Type_ObjectStore || mType == Type_Index);
 
   if (!mHaveValue) {
-    return JSVAL_VOID;
+    aResult.setUndefined();
+    return;
   }
 
   if (!mHaveCachedValue) {
@@ -383,7 +391,7 @@ IDBCursor::GetValue(JSContext* aCx, ErrorResult& aRv)
     JS::Rooted<JS::Value> val(aCx);
     if (NS_WARN_IF(!IDBObjectStore::DeserializeValue(aCx, mCloneInfo, &val))) {
       aRv.Throw(NS_ERROR_DOM_DATA_CLONE_ERR);
-      return JSVAL_VOID;
+      return;
     }
 
     IDBObjectStore::ClearCloneReadInfo(mCloneInfo);
@@ -392,7 +400,8 @@ IDBCursor::GetValue(JSContext* aCx, ErrorResult& aRv)
     mHaveCachedValue = true;
   }
 
-  return mCachedValue;
+  JS::ExposeValueToActiveJS(mCachedValue);
+  aResult.set(mCachedValue);
 }
 
 void

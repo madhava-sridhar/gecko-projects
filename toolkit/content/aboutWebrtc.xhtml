@@ -368,20 +368,6 @@ function displayStats(globalReport) {
       document.getElementById('stats').replaceChild(newPcDiv, pcDiv);
     }
   });
-
-  globalReport.errors.forEach(function (error) {
-    var pcDivHeading = 'PeerConnection:' + error.pcid;
-
-    var pcDiv = document.getElementById(pcDivHeading);
-    var newPcDiv = buildPcDiv(error, pcDivHeading);
-    newPcDiv.id = pcDivHeading;
-
-    if (pcDiv) {
-      document.getElementById('stats').replaceChild(newPcDiv, pcDiv);
-    } else {
-      document.getElementById('stats').appendChild(newPcDiv);
-    }
-  });
 }
 
 function onLoad() {
@@ -390,6 +376,11 @@ function onLoad() {
     setDebugButton(true);
   } else {
     setDebugButton(false);
+  }
+  if (WebrtcGlobalInformation.aecDebug) {
+    setAECDebugButton(true);
+  } else {
+    setAECDebugButton(false);
   }
 }
 
@@ -409,6 +400,24 @@ function setDebugButton(on) {
   button.onclick = on ? stopDebugMode : startDebugMode;
 }
 
+function startAECDebugMode() {
+  WebrtcGlobalInformation.aecDebug = true;
+  setAECDebugButton(true);
+}
+
+function stopAECDebugMode() {
+  WebrtcGlobalInformation.aecDebug = false;
+  setAECDebugButton(false);
+}
+
+function setAECDebugButton(on) {
+  var button = document.getElementById("aec-debug-toggle-button");
+  button.innerHTML = on ? "Stop AEC logging" : "Start AEC logging";
+  button.onclick = on ? stopAECDebugMode : startAECDebugMode;
+}
+
+
+
   </script>
 
   <body id="body" onload="onLoad()">
@@ -419,6 +428,9 @@ function setDebugButton(on) {
     </button>
     <button id="debug-toggle-button" onclick="startDebugMode()">
       Start debug mode
+    </button>
+    <button id="aec-debug-toggle-button" onclick="startAECDebugMode()">
+      Start AEC logging
     </button>
     <div id="logs">
     </div>

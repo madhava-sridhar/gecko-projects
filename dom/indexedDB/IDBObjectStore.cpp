@@ -6,14 +6,12 @@
 
 #include "IDBObjectStore.h"
 
-#include "ActorsChild.h"
-#include "FileManager.h"
 #include "IDBCursor.h"
 #include "IDBDatabase.h"
 #include "IDBEvents.h"
-#include "IDBFileHandle.h"
 #include "IDBIndex.h"
 #include "IDBKeyRange.h"
+#include "IDBMutableFile.h"
 #include "IDBRequest.h"
 #include "IDBTransaction.h"
 #include "IndexedDatabase.h"
@@ -43,7 +41,7 @@ using namespace mozilla::dom::quota;
 
 namespace {
 
-struct FileHandleData
+struct MutableFileData
 {
   nsString type;
   nsString name;
@@ -171,8 +169,7 @@ bool
 ReadFileHandle(JSStructuredCloneReader* aReader,
                FileHandleData* aRetval)
 {
-  static_assert(SCTAG_DOM_FILEHANDLE == 0xFFFF8004,
-                "Update me!");
+  static_assert(SCTAG_DOM_MUTABLEFILE == 0xFFFF8004, "Update me!");
   MOZ_ASSERT(aReader && aRetval);
 
   nsCString type;
@@ -253,19 +250,19 @@ ReadBlobOrFile(JSStructuredCloneReader* aReader,
 class ValueDeserializationHelper
 {
 public:
-  static JSObject* CreateAndWrapFileHandle(JSContext* aCx,
-                                           IDBDatabase* aDatabase,
-                                           StructuredCloneFile& aFile,
-                                           const FileHandleData& aData)
+  static JSObject* CreateAndWrapMutableFile(JSContext* aCx,
+                                            IDBDatabase* aDatabase,
+                                            StructuredCloneFile& aFile,
+                                            const MutableFileData& aData)
   {
     MOZ_ASSERT(NS_IsMainThread());
 
     nsRefPtr<FileInfo>& fileInfo = aFile.mFileInfo;
 
-    nsRefPtr<IDBFileHandle> fileHandle = IDBFileHandle::Create(aData.name,
+    nsRefPtr<IDBMutableFile> mutableFile = IDBMutableFile::Create(aData.name,
       aData.type, aDatabase, fileInfo.forget());
 
-    return fileHandle->WrapObject(aCx);
+    return mutableFile->WrapObject(aCx);
   }
 
   static JSObject* CreateAndWrapBlobOrFile(JSContext* aCx,
@@ -357,12 +354,12 @@ public:
 class IndexDeserializationHelper
 {
 public:
-  static JSObject* CreateAndWrapFileHandle(JSContext* aCx,
-                                           IDBDatabase* aDatabase,
-                                           StructuredCloneFile& aFile,
-                                           const FileHandleData& aData)
+  static JSObject* CreateAndWrapMutableFile(JSContext* aCx,
+                                            IDBDatabase* aDatabase,
+                                            StructuredCloneFile& aFile,
+                                            const MutableFileData& aData)
   {
-    // FileHandle can't be used in index creation, so just make a dummy object.
+    // MutableFile can't be used in index creation, so just make a dummy object.
     return JS_NewObject(aCx, nullptr, JS::NullPtr(), JS::NullPtr());
   }
 
@@ -429,13 +426,13 @@ CommonStructuredCloneReadCallback(JSContext* aCx,
   // so that if people accidentally change them they notice.
   static_assert(SCTAG_DOM_BLOB == 0xFFFF8001 &&
                 SCTAG_DOM_FILE_WITHOUT_LASTMODIFIEDDATE == 0xFFFF8002 &&
-                SCTAG_DOM_FILEHANDLE == 0xFFFF8004 &&
+                SCTAG_DOM_MUTABLEFILE == 0xFFFF8004 &&
                 SCTAG_DOM_FILE == 0xFFFF8005,
                 "You changed our structured clone tag values and just ate "
                 "everyone's IndexedDB data.  I hope you are happy.");
 
   if (aTag == SCTAG_DOM_FILE_WITHOUT_LASTMODIFIEDDATE ||
-      aTag == SCTAG_DOM_FILEHANDLE ||
+      aTag == SCTAG_DOM_MUTABLEFILE ||
       aTag == SCTAG_DOM_BLOB ||
       aTag == SCTAG_DOM_FILE) {
     StructuredCloneReadInfo* cloneReadInfo =
@@ -449,7 +446,7 @@ CommonStructuredCloneReadCallback(JSContext* aCx,
     StructuredCloneFile& file = cloneReadInfo->mFiles[aData];
     IDBDatabase* database = cloneReadInfo->mDatabase;
 
-    if (aTag == SCTAG_DOM_FILEHANDLE) {
+    if (aTag == SCTAG_DOM_MUTABLEFILE) {
       FileHandleData data;
       if (!ReadFileHandle(aReader, &data)) {
         return nullptr;
@@ -780,25 +777,25 @@ IDBObjectStore::StructuredCloneWriteCallback(JSContext* aCx,
   IDBTransaction* transaction = cloneWriteInfo->mTransaction;
   FileManager* fileManager = transaction->Database()->Manager();
 
-  FileHandle* fileHandle = nullptr;
-  if (NS_SUCCEEDED(UNWRAP_OBJECT(FileHandle, aObj, fileHandle))) {
-    nsRefPtr<FileInfo> fileInfo = fileHandle->GetFileInfo();
+  MutableFile* mutableFile = nullptr;
+  if (NS_SUCCEEDED(UNWRAP_OBJECT(MutableFile, aObj, mutableFile))) {
+    nsRefPtr<FileInfo> fileInfo = mutableFile->GetFileInfo();
 
-    // Throw when trying to store non IDB file handles or IDB file handles
+    // Throw when trying to store non IDB mutable files or IDB mutable files
     // across databases.
     if (!fileInfo || fileInfo->Manager() != fileManager) {
       return false;
     }
 
-    NS_ConvertUTF16toUTF8 convType(fileHandle->Type());
+    NS_ConvertUTF16toUTF8 convType(mutableFile->Type());
     uint32_t convTypeLength =
       NativeEndian::swapToLittleEndian(convType.Length());
 
-    NS_ConvertUTF16toUTF8 convName(fileHandle->Name());
+    NS_ConvertUTF16toUTF8 convName(mutableFile->Name());
     uint32_t convNameLength =
       NativeEndian::swapToLittleEndian(convName.Length());
 
-    if (!JS_WriteUint32Pair(aWriter, SCTAG_DOM_FILEHANDLE,
+    if (!JS_WriteUint32Pair(aWriter, SCTAG_DOM_MUTABLEFILE,
                             cloneWriteInfo->mFiles.Length()) ||
         !JS_WriteBytes(aWriter, &convTypeLength, sizeof(uint32_t)) ||
         !JS_WriteBytes(aWriter, convType.get(), convType.Length()) ||
@@ -955,7 +952,7 @@ IDBObjectStore::ConvertActorsToBlobs(
 // static
 nsresult
 IDBObjectStore::ConvertBlobsToActors(
-                                    ContentParent* aContentParent,
+                                    nsIContentParent* aContentParent,
                                     FileManager* aFileManager,
                                     const nsTArray<StructuredCloneFile>& aFiles,
                                     nsTArray<PBlobParent*>& aActors)
@@ -1386,23 +1383,30 @@ IDBObjectStore::GetParentObject() const
 }
 
 JS::Value
-IDBObjectStore::GetKeyPath(JSContext* aCx, ErrorResult& aRv)
+IDBObjectStore::GetKeyPath(JSContext* aCx,
+                           JS::MutableHandle<JS::Value> aResult,
+                           ErrorResult& aRv)
 {
   NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
 
   if (!mCachedKeyPath.isUndefined()) {
-    return mCachedKeyPath;
+    JS::ExposeValueToActiveJS(mCachedKeyPath);
+    aResult.set(mCachedKeyPath);
+    return;
   }
 
   aRv = GetKeyPath().ToJSVal(aCx, mCachedKeyPath);
-  ENSURE_SUCCESS(aRv, JSVAL_VOID);
+  if (NS_WARN_IF(aRv.Failed())) {
+    return;
+  }
 
   if (mCachedKeyPath.isGCThing()) {
     mozilla::HoldJSObjects(this);
     mRooted = true;
   }
 
-  return mCachedKeyPath;
+  JS::ExposeValueToActiveJS(mCachedKeyPath);
+  aResult.set(mCachedKeyPath);
 }
 
 already_AddRefed<DOMStringList>
@@ -1778,6 +1782,22 @@ IDBObjectStore::OpenCursorInternal(bool aKeysOnly,
   if (keyRange) {
     SerializedKeyRange serializedKeyRange;
     keyRange->ToSerialized(serializedKeyRange);
+
+  // Our "parent" process may be either the root process or another content
+  // process if this indexedDB is managed by a PBrowser that is managed by a
+  // PContentBridge.  We need to find which one it is so that we can create
+  // PBlobs that are managed by the right nsIContentChild.
+  IndexedDBChild* rootActor =
+    static_cast<IndexedDBChild*>(objectStoreActor->Manager()->
+                                 Manager()->Manager());
+  nsIContentChild* blobCreator;
+  if (rootActor->GetManagerContent()) {
+    blobCreator = rootActor->GetManagerContent();
+  } else {
+    blobCreator = rootActor->GetManagerTab()->Manager();
+  }
+
+  nsresult rv = PackArgumentsForParentProcess(params, blobCreator);
 
     optionalKeyRange = Move(serializedKeyRange);
   } else {

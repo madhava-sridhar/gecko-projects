@@ -35,6 +35,15 @@ using namespace mozilla::dom::indexedDB;
 using namespace mozilla::dom::quota;
 using namespace mozilla::ipc;
 
+using mozilla::dom::ContentChild;
+using mozilla::dom::nsIContentParent;
+using mozilla::dom::IDBOpenDBOptions;
+using mozilla::dom::NonNull;
+using mozilla::dom::Optional;
+using mozilla::dom::TabChild;
+using mozilla::ErrorResult;
+using mozilla::Preferences;
+
 namespace {
 
 nsresult
@@ -61,7 +70,6 @@ GetPrincipalInfo(nsIPrincipal* aPrincipal,
   if (NS_WARN_IF(NS_FAILED(rv))) {
     return rv;
   }
-
   return NS_OK;
 }
 

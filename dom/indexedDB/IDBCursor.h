@@ -143,14 +143,20 @@ public:
   IDBCursorDirection
   GetDirection() const;
 
-  JS::Value
-  GetKey(JSContext* aCx, ErrorResult& aRv);
+  void
+  GetKey(JSContext* aCx,
+         JS::MutableHandle<JS::Value> aResult,
+         ErrorResult& aRv);
 
-  JS::Value
-  GetPrimaryKey(JSContext* aCx, ErrorResult& aRv);
+  void
+  GetPrimaryKey(JSContext* aCx,
+                JS::MutableHandle<JS::Value> aResult,
+                ErrorResult& aRv);
 
-  JS::Value
-  GetValue(JSContext* aCx, ErrorResult& aRv);
+  void
+  GetValue(JSContext* aCx,
+           JS::MutableHandle<JS::Value> aResult,
+           ErrorResult& aRv);
 
   void
   Continue(JSContext* aCx, JS::Handle<JS::Value> aKey, ErrorResult& aRv);

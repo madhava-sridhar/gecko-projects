@@ -96,7 +96,9 @@ public:
   }
 
   JS::Value
-  GetKeyPath(JSContext* aCx, ErrorResult& aRv);
+  GetKeyPath(JSContext* aCx,
+             JS::MutableHandle<JS::Value> aResult,
+             ErrorResult& aRv);
 
   already_AddRefed<IDBRequest>
   OpenCursor(JSContext* aCx,

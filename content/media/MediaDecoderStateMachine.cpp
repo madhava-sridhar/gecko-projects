@@ -417,7 +417,8 @@ void MediaDecoderStateMachine::SendStreamData()
       }
       minLastAudioPacketTime = std::min(minLastAudioPacketTime, stream->mLastAudioPacketTime);
       endPosition = std::max(endPosition,
-          TicksToTimeRoundDown(mInfo.mAudio.mRate, stream->mAudioFramesWritten));
+          mediaStream->TicksToTimeRoundDown(mInfo.mAudio.mRate,
+                                            stream->mAudioFramesWritten));
     }
 
     if (mInfo.HasVideo()) {
@@ -460,7 +461,7 @@ void MediaDecoderStateMachine::SendStreamData()
         stream->mHaveSentFinishVideo = true;
       }
       endPosition = std::max(endPosition,
-          TicksToTimeRoundDown(RATE_VIDEO, stream->mNextVideoTime - stream->mInitialTime));
+          mediaStream->TicksToTimeRoundDown(RATE_VIDEO, stream->mNextVideoTime - stream->mInitialTime));
     }
 
     if (!stream->mHaveSentFinish) {
@@ -1081,8 +1082,8 @@ int64_t MediaDecoderStateMachine::GetCurrentTimeViaMediaStreamSync()
   AssertCurrentThreadInMonitor();
   NS_ASSERTION(mSyncPointInDecodedStream >= 0, "Should have set up sync point");
   DecodedStreamData* stream = mDecoder->GetDecodedStream();
-  StreamTime streamDelta = stream->GetLastOutputTime() - mSyncPointInMediaStream;
-  return mSyncPointInDecodedStream + MediaTimeToMicroseconds(streamDelta);
+  int64_t streamDelta = stream->GetLastOutputTime() - mSyncPointInMediaStream;
+  return mSyncPointInDecodedStream + streamDelta;
 }
 
 void MediaDecoderStateMachine::StartPlayback()

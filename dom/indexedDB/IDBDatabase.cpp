@@ -12,8 +12,8 @@
 #include "FileManager.h"
 #include "IDBEvents.h"
 #include "IDBFactory.h"
-#include "IDBFileHandle.h"
 #include "IDBIndex.h"
+#include "IDBMutableFile.h"
 #include "IDBObjectStore.h"
 #include "IDBTransaction.h"
 #include "IDBFactory.h"
@@ -22,7 +22,6 @@
 #include "MainThreadUtils.h"
 #include "mozilla/storage.h"
 #include "mozilla/dom/BindingDeclarations.h"
-#include "mozilla/dom/ContentParent.h"
 #include "mozilla/dom/DOMStringList.h"
 #include "mozilla/dom/DOMStringListBinding.h"
 #include "mozilla/dom/IDBDatabaseBinding.h"
@@ -556,9 +555,9 @@ IDBDatabase::Transaction(const Sequence<nsString>& aStoreNames,
 }
 
 already_AddRefed<IDBRequest>
-IDBDatabase::MozCreateFileHandle(const nsAString& aName,
-                                 const Optional<nsAString>& aType,
-                                 ErrorResult& aRv)
+IDBDatabase::CreateMutableFile(const nsAString& aName,
+                               const Optional<nsAString>& aType,
+                               ErrorResult& aRv)
 {
   NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
 
@@ -847,9 +846,9 @@ nsresult
 CreateFileHelper::GetSuccessResult(JSContext* aCx,
                                    JS::MutableHandle<JS::Value> aVal)
 {
-  nsRefPtr<IDBFileHandle> fileHandle =
-    IDBFileHandle::Create(mName, mType, mDatabase, mFileInfo.forget());
-  IDB_ENSURE_TRUE(fileHandle, NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
+  nsRefPtr<IDBMutableFile> mutableFile =
+    IDBMutableFile::Create(mName, mType, mDatabase, mFileInfo.forget());
+  IDB_ENSURE_TRUE(mutableFile, NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
 
-  return WrapNative(aCx, NS_ISUPPORTS_CAST(EventTarget*, fileHandle), aVal);
+  return WrapNative(aCx, NS_ISUPPORTS_CAST(EventTarget*, mutableFile), aVal);
 }

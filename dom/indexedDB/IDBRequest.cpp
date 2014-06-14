@@ -299,8 +299,9 @@ IDBRequest::WrapObject(JSContext* aCx)
   return IDBRequestBinding::Wrap(aCx, this);
 }
 
-JS::Value
-IDBRequest::GetResult(ErrorResult& aRv) const
+void
+IDBRequest::GetResult(JS::MutableHandle<JS::Value> aResult,
+                      ErrorResult& aRv) const
 {
   AssertIsOnOwningThread();
 
@@ -309,7 +310,8 @@ IDBRequest::GetResult(ErrorResult& aRv) const
     return JS::UndefinedValue();
   }
 
-  return mResultVal;
+  JS::ExposeValueToActiveJS(mResultVal);
+  aResult.set(mResultVal);
 }
 
 void
