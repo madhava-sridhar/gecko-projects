@@ -95,7 +95,7 @@ public:
     aName = Name();
   }
 
-  JS::Value
+  void
   GetKeyPath(JSContext* aCx,
              JS::MutableHandle<JS::Value> aResult,
              ErrorResult& aRv);

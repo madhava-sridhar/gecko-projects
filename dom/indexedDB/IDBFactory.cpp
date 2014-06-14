@@ -42,7 +42,6 @@ using mozilla::dom::NonNull;
 using mozilla::dom::Optional;
 using mozilla::dom::TabChild;
 using mozilla::ErrorResult;
-using mozilla::Preferences;
 
 namespace {
 

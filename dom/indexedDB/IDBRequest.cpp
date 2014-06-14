@@ -307,7 +307,7 @@ IDBRequest::GetResult(JS::MutableHandle<JS::Value> aResult,
 
   if (!mHaveResultOrErrorCode) {
     aRv.Throw(NS_ERROR_DOM_INVALID_STATE_ERR);
-    return JS::UndefinedValue();
+    return;
   }
 
   JS::ExposeValueToActiveJS(mResultVal);

@@ -6,6 +6,7 @@
 
 #include "IDBObjectStore.h"
 
+#include "ActorsChild.h"
 #include "IDBCursor.h"
 #include "IDBDatabase.h"
 #include "IDBEvents.h"
@@ -167,7 +168,7 @@ StructuredCloneReadString(JSStructuredCloneReader* aReader,
 
 bool
 ReadFileHandle(JSStructuredCloneReader* aReader,
-               FileHandleData* aRetval)
+               MutableFileData* aRetval)
 {
   static_assert(SCTAG_DOM_MUTABLEFILE == 0xFFFF8004, "Update me!");
   MOZ_ASSERT(aReader && aRetval);
@@ -447,13 +448,13 @@ CommonStructuredCloneReadCallback(JSContext* aCx,
     IDBDatabase* database = cloneReadInfo->mDatabase;
 
     if (aTag == SCTAG_DOM_MUTABLEFILE) {
-      FileHandleData data;
+      MutableFileData data;
       if (!ReadFileHandle(aReader, &data)) {
         return nullptr;
       }
 
-      return DeserializationTraits::CreateAndWrapFileHandle(aCx, database,
-                                                            file, data);
+      return DeserializationTraits::CreateAndWrapMutableFile(aCx, database,
+                                                             file, data);
     }
 
     BlobOrFileData data;
@@ -1382,7 +1383,7 @@ IDBObjectStore::GetParentObject() const
   return mTransaction->GetParentObject();
 }
 
-JS::Value
+void
 IDBObjectStore::GetKeyPath(JSContext* aCx,
                            JS::MutableHandle<JS::Value> aResult,
                            ErrorResult& aRv)
@@ -1782,22 +1783,6 @@ IDBObjectStore::OpenCursorInternal(bool aKeysOnly,
   if (keyRange) {
     SerializedKeyRange serializedKeyRange;
     keyRange->ToSerialized(serializedKeyRange);
-
-  // Our "parent" process may be either the root process or another content
-  // process if this indexedDB is managed by a PBrowser that is managed by a
-  // PContentBridge.  We need to find which one it is so that we can create
-  // PBlobs that are managed by the right nsIContentChild.
-  IndexedDBChild* rootActor =
-    static_cast<IndexedDBChild*>(objectStoreActor->Manager()->
-                                 Manager()->Manager());
-  nsIContentChild* blobCreator;
-  if (rootActor->GetManagerContent()) {
-    blobCreator = rootActor->GetManagerContent();
-  } else {
-    blobCreator = rootActor->GetManagerTab()->Manager();
-  }
-
-  nsresult rv = PackArgumentsForParentProcess(params, blobCreator);
 
     optionalKeyRange = Move(serializedKeyRange);
   } else {
