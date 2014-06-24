@@ -4,6 +4,7 @@
 
 include protocol PBackgroundIDBTransaction;
 include protocol PBackgroundIDBVersionChangeTransaction;
+include protocol PBlob;
 
 include PBackgroundIDBSharedTypes;
 
@@ -39,8 +40,6 @@ struct ObjectStoreCursorResponse
 {
   Key key;
   SerializedStructuredCloneReadInfo cloneInfo;
-  // XXXFix blobs!
-  //PBlob[] blobs;
 };
 
 struct ObjectStoreKeyCursorResponse
@@ -53,8 +52,6 @@ struct IndexCursorResponse
   Key key;
   Key objectKey;
   SerializedStructuredCloneReadInfo cloneInfo;
-  // XXXFix blobs!
-  //PBlob[] blobs;
 };
 
 struct IndexKeyCursorResponse

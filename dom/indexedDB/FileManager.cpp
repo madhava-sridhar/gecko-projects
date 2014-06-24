@@ -4,27 +4,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "FileManager.h"
-
-#include "mozIStorageConnection.h"
-#include "mozIStorageStatement.h"
-#include "nsIInputStream.h"
-#include "nsISimpleEnumerator.h"
-
-#include "mozilla/dom/quota/Utilities.h"
-#include "mozStorageCID.h"
-#include "mozStorageHelper.h"
-
-#include "Client.h"
-#include "FileInfo.h"
-#include "IndexedDatabaseManager.h"
-#include "OpenDatabaseHelper.h"
-
-#include "IndexedDatabaseInlines.h"
-#include <algorithm>
-
-USING_INDEXEDDB_NAMESPACE
-using mozilla::dom::quota::AssertIsOnIOThread;
+#define JOURNAL_DIRECTORY_NAME "journals"
 
 namespace {
 
@@ -312,9 +292,13 @@ FileManager::InitDirectory(nsIFile* aDirectory,
 
     if (hasElements) {
       nsCOMPtr<mozIStorageConnection> connection;
-      rv = OpenDatabaseHelper::CreateDatabaseConnection(aDatabaseFile,
-        aDirectory, NullString(), aPersistenceType, aGroup, aOrigin,
-        getter_AddRefs(connection));
+      rv = CreateDatabaseConnection(aDatabaseFile,
+                                    aDirectory,
+                                    NullString(),
+                                    aPersistenceType,
+                                    aGroup,
+                                    aOrigin,
+                                    getter_AddRefs(connection));
       NS_ENSURE_SUCCESS(rv, rv);
 
       mozStorageTransaction transaction(connection, false);

@@ -77,25 +77,6 @@ struct StructuredCloneReadInfo
   StructuredCloneReadInfo(SerializedStructuredCloneReadInfo&& aOther);
 };
 
-struct StructuredCloneWriteInfo
-{
-  // In IndexedDatabaseInlines.h
-  inline StructuredCloneWriteInfo();
-  inline StructuredCloneWriteInfo(StructuredCloneWriteInfo&& aCloneWriteInfo);
-
-  inline bool
-  operator==(const StructuredCloneWriteInfo& aOther) const;
-
-  // In IndexedDatabaseInlines.h
-  inline bool
-  SetFromSerialized(const SerializedStructuredCloneWriteInfo& aOther);
-
-  JSAutoStructuredCloneBuffer mCloneBuffer;
-  nsTArray<StructuredCloneFile> mFiles;
-  IDBTransaction* mTransaction;
-  uint64_t mOffsetToKeyProp;
-};
-
 } // namespace indexedDB
 } // namespace dom
 } // namespace mozilla

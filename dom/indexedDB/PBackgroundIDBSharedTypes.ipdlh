@@ -37,6 +37,7 @@ struct SerializedKeyRange
 struct SerializedStructuredCloneReadInfo
 {
   uint8_t[] data;
+  PBlob[] blobs;
 };
 
 struct SerializedStructuredCloneWriteInfo
@@ -137,8 +138,7 @@ struct ObjectStoreAddPutParams
   SerializedStructuredCloneWriteInfo cloneInfo;
   Key key;
   IndexUpdateInfo[] indexUpdateInfos;
-  // XXX Fix me!
-  // PBlob[] blobs;
+  PBlob[] blobs;
 };
 
 struct ObjectStoreAddParams

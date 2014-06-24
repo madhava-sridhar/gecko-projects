@@ -33,15 +33,11 @@ struct ObjectStorePutResponse
 struct ObjectStoreGetResponse
 {
   SerializedStructuredCloneReadInfo cloneInfo;
-  // XXX Fix me!
-  //PBlob[] blobs;
 };
 
 struct ObjectStoreGetAllResponse
 {
   SerializedStructuredCloneReadInfo[] cloneInfos;
-  // XXX Fix me!
-  //BlobArray[] blobs;
 };
 
 struct ObjectStoreGetAllKeysResponse
@@ -63,8 +59,6 @@ struct ObjectStoreCountResponse
 struct IndexGetResponse
 {
   SerializedStructuredCloneReadInfo cloneInfo;
-  // XXX Fix me!
-  //PBlob[] blobs;
 };
 
 struct IndexGetKeyResponse
@@ -75,8 +69,6 @@ struct IndexGetKeyResponse
 struct IndexGetAllResponse
 {
   SerializedStructuredCloneReadInfo[] cloneInfos;
-  // XXX Fix me!
-  //BlobArray[] blobs;
 };
 
 struct IndexGetAllKeysResponse

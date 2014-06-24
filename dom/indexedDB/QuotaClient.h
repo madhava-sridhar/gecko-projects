@@ -4,14 +4,12 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#ifndef mozilla_dom_indexeddb_client_h__
-#define mozilla_dom_indexeddb_client_h__
+#ifndef mozilla_dom_indexeddb_quotaclient_h__
+#define mozilla_dom_indexeddb_quotaclient_h__
 
 #include "mozilla/Attributes.h"
 #include "mozilla/dom/quota/Client.h"
 #include "nsISupportsImpl.h"
-
-#define JOURNAL_DIRECTORY_NAME "journals"
 
 class nsACString;
 class nsIFile;
@@ -22,7 +20,9 @@ namespace mozilla {
 namespace dom {
 namespace indexedDB {
 
-class Client : public mozilla::dom::quota::Client
+// Implemented in ActorsParent.cpp.
+class QuotaClient MOZ_FINAL
+  : public mozilla::dom::quota::Client
 {
   typedef mozilla::dom::quota::OriginOrPatternString OriginOrPatternString;
   typedef mozilla::dom::quota::PersistenceType PersistenceType;
@@ -35,10 +35,10 @@ public:
   NS_IMETHOD_(MozExternalRefCountType)
   Release() MOZ_OVERRIDE;
 
-  virtual Type
+  virtual mozilla::dom::quota::Client::Type
   GetType() MOZ_OVERRIDE
   {
-    return IDB;
+    return mozilla::dom::quota::Client::IDB;
   }
 
   virtual nsresult
@@ -84,6 +84,9 @@ public:
   ShutdownTransactionService() MOZ_OVERRIDE;
 
 private:
+  ~QuotaClient()
+  { }
+
   nsresult
   GetDirectory(PersistenceType aPersistenceType, const nsACString& aOrigin,
                nsIFile** aDirectory);
@@ -101,4 +104,4 @@ private:
 } // namespace dom
 } // namespace mozilla
 
-#endif // mozilla_dom_indexeddb_client_h__
+#endif // mozilla_dom_indexeddb_quotaclient_h__

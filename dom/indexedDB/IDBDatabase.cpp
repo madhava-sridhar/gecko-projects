@@ -6,7 +6,6 @@
 
 #include "IDBDatabase.h"
 
-#include "ActorsChild.h"
 #include "AsyncConnectionHelper.h"
 #include "DatabaseInfo.h"
 #include "FileManager.h"
@@ -33,6 +32,9 @@
 #include "nsIDocument.h"
 #include "ProfilerHelpers.h"
 #include "ReportInternalError.h"
+
+// Include this last to avoid path problems on Windows.
+#include "ActorsChild.h"
 
 using namespace mozilla;
 using namespace mozilla::dom;
@@ -508,12 +510,15 @@ IDBDatabase::Transaction(const Sequence<nsString>& aStoreNames,
       MOZ_CRASH("Unknown mode!");
   }
 
-  // Now check to make sure the object store names we collected actually exist.
-  for (uint32_t nameCount = aStoreNames.Length(), nameIndex = 0;
-       nameIndex < nameCount;
-       nameIndex++) {
+  const nsTArray<ObjectStoreSpec>& objectStores = mSpec->objectStores();
+  const uint32_t nameCount = aStoreNames.Length();
+
+  nsTArray<nsString> sortedStoreNames;
+  sortedStoreNames.SetCapacity(nameCount);
+
+  // Check to make sure the object store names we collected actually exist.
+  for (uint32_t nameIndex = 0; nameIndex < nameCount; nameIndex++) {
     const nsString& name = aStoreNames[nameIndex];
-    const nsTArray<ObjectStoreSpec>& objectStores = mSpec->objectStores();
 
     bool found = false;
 
@@ -530,10 +535,19 @@ IDBDatabase::Transaction(const Sequence<nsString>& aStoreNames,
       aRv.Throw(NS_ERROR_DOM_INDEXEDDB_NOT_FOUND_ERR);
       return nullptr;
     }
+
+    sortedStoreNames.InsertElementSorted(name);
+  }
+
+  // Remove any duplicates.
+  for (uint32_t nameIndex = nameCount - 1; nameIndex > 0; nameIndex--) {
+    if (sortedStoreNames[nameIndex] == sortedStoreNames[nameIndex - 1]) {
+      sortedStoreNames.RemoveElementAt(nameIndex);
+    }
   }
 
   nsRefPtr<IDBTransaction> transaction =
-    IDBTransaction::Create(this, aStoreNames, mode);
+    IDBTransaction::Create(this, sortedStoreNames, mode);
   MOZ_ASSERT(transaction);
 
   BackgroundTransactionChild* actor =
@@ -541,7 +555,7 @@ IDBDatabase::Transaction(const Sequence<nsString>& aStoreNames,
 
   MOZ_ALWAYS_TRUE(
     mBackgroundActor->SendPBackgroundIDBTransactionConstructor(actor,
-                                                               aStoreNames,
+                                                               sortedStoreNames,
                                                                mode));
 
   transaction->SetBackgroundActor(actor);

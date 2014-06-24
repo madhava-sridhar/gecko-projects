@@ -6,7 +6,6 @@
 
 #include "IDBIndex.h"
 
-#include "ActorsChild.h"
 #include "FileInfo.h"
 #include "IDBCursor.h"
 #include "IDBEvents.h"
@@ -20,6 +19,9 @@
 #include "mozilla/dom/indexedDB/PBackgroundIDBSharedTypes.h"
 #include "ProfilerHelpers.h"
 #include "ReportInternalError.h"
+
+// Include this last to avoid path problems on Windows.
+#include "ActorsChild.h"
 
 using namespace mozilla;
 using namespace mozilla::dom;

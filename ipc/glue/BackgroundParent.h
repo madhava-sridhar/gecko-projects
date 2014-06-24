@@ -10,11 +10,13 @@
 #include "mozilla/ipc/Transport.h"
 
 template <class> struct already_AddRefed;
+class nsIDOMBlob;
 
 namespace mozilla {
 namespace dom {
 
 class ContentParent;
+class PBlobParent;
 
 } // namespace dom
 
@@ -50,6 +52,11 @@ public:
   // release) the returned pointer appropriately.
   static already_AddRefed<ContentParent>
   GetContentParent(PBackgroundParent* aBackgroundActor);
+
+  static mozilla::dom::PBlobParent*
+  GetOrCreateActorForBlob(PBackgroundParent* aBackgroundActor,
+                          nsIDOMBlob* aBlob,
+                          bool* aActorWasCreated = nullptr);
 
 private:
   // Only called by ContentParent for cross-process actors.

@@ -12,9 +12,9 @@
 #include "mozilla/dom/indexedDB/IDBWrapperCache.h"
 #include "nsAutoPtr.h"
 #include "nsCycleCollectionParticipant.h"
+#include "nsDataHashtable.h"
 #include "nsHashKeys.h"
 #include "nsIRunnable.h"
-#include "nsRefPtrHashtable.h"
 #include "nsString.h"
 #include "nsTArray.h"
 
@@ -30,6 +30,7 @@ namespace dom {
 
 class DOMError;
 class DOMStringList;
+class PBlobChild;
 
 namespace indexedDB {
 
@@ -37,7 +38,6 @@ class BackgroundCursorChild;
 class BackgroundRequestChild;
 class BackgroundTransactionChild;
 class BackgroundVersionChangeTransactionChild;
-class FileInfo;
 class IDBDatabase;
 class IDBObjectStore;
 class IDBRequest;
@@ -75,7 +75,7 @@ private:
   nsTArray<nsString> mObjectStoreNames;
   nsTArray<nsRefPtr<IDBObjectStore>> mObjectStores;
   nsTArray<nsRefPtr<IDBObjectStore>> mDeletedObjectStores;
-  nsRefPtrHashtable<nsISupportsHashKey, FileInfo> mCreatedFileInfos;
+  nsDataHashtable<nsISupportsHashKey, PBlobChild*> mBlobActorCache;
 
   // Tagged with mMode. If mMode is VERSION_CHANGE then mBackgroundActor will be
   // a BackgroundVersionChangeTransactionChild. Otherwise it will be a
@@ -227,14 +227,22 @@ public:
   void
   DeleteIndex(IDBObjectStore* aObjectStore, int64_t aIndexId);
 
-  already_AddRefed<FileInfo>
-  GetFileInfo(nsIDOMBlob* aBlob);
+  void
+  CacheBlobActor(nsIDOMBlob* aBlob, PBlobChild* aBlobActor);
 
   void
-  AddFileInfo(nsIDOMBlob* aBlob, FileInfo* aFileInfo);
+  ForgetBlobActor(nsIDOMBlob* aBlob);
+
+  PBlobChild*
+  GetCachedBlobActor(nsIDOMBlob* aBlob);
 
   void
-  ClearCreatedFileInfos();
+  ClearBlobActorCache()
+  {
+    AssertIsOnOwningThread();
+
+    mBlobActorCache.Clear();
+  }
 
   nsresult
   Abort(IDBRequest* aRequest);
@@ -297,7 +305,9 @@ public:
   PreHandleEvent(EventChainPreVisitor& aVisitor) MOZ_OVERRIDE;
 
 private:
-  IDBTransaction(IDBDatabase* aDatabase, Mode aMode);
+  IDBTransaction(IDBDatabase* aDatabase,
+                 const nsTArray<nsString>& aObjectStoreNames,
+                 Mode aMode);
   ~IDBTransaction();
 
   nsresult

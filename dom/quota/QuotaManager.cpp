@@ -29,7 +29,7 @@
 #include "mozilla/CondVar.h"
 #include "mozilla/dom/asmjscache/AsmJSCache.h"
 #include "mozilla/dom/FileService.h"
-#include "mozilla/dom/indexedDB/Client.h"
+#include "mozilla/dom/indexedDB/QuotaClient.h"
 #include "mozilla/Mutex.h"
 #include "mozilla/LazyIdleThread.h"
 #include "mozilla/Preferences.h"
@@ -1045,7 +1045,7 @@ QuotaManager::Init()
                "Should be using an auto array with correct capacity!");
 
   // Register IndexedDB
-  mClients.AppendElement(new indexedDB::Client());
+  mClients.AppendElement(new indexedDB::QuotaClient());
   mClients.AppendElement(asmjscache::CreateClient());
 
   return NS_OK;

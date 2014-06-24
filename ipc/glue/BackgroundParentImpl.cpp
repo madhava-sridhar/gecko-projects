@@ -15,6 +15,12 @@
 #include "nsTraceRefcnt.h"
 #include "nsXULAppAPI.h"
 
+#ifdef DISABLE_ASSERTS_FOR_FUZZING
+#define ASSERT_UNLESS_FUZZING(...) do { } while (0)
+#else
+#define ASSERT_UNLESS_FUZZING(...) MOZ_ASSERT(false)
+#endif
+
 using mozilla::ipc::AssertIsOnBackgroundThread;
 
 namespace {
@@ -148,7 +154,12 @@ BackgroundParentImpl::AllocPBlobParent(const BlobConstructorParams& aParams)
 {
   AssertIsInMainProcess();
   AssertIsOnBackgroundThread();
-  MOZ_ASSERT(aParams.type() != BlobConstructorParams::T__None);
+
+  if (NS_WARN_IF(aParams.type() !=
+                   BlobConstructorParams::TParentBlobConstructorParams)) {
+    ASSERT_UNLESS_FUZZING();
+    return nullptr;
+  }
 
   return mozilla::dom::BlobParent::Create(this, aParams);
 }

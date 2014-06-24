@@ -7,7 +7,6 @@
 #ifndef mozilla_dom_indexeddb_idbobjectstore_h__
 #define mozilla_dom_indexeddb_idbobjectstore_h__
 
-#include "js/Class.h"
 #include "js/RootingAPI.h"
 #include "mozilla/dom/IDBCursorBinding.h"
 #include "mozilla/dom/IDBIndexBinding.h"
@@ -18,6 +17,7 @@
 #include "nsTArray.h"
 #include "nsWrapperCache.h"
 
+class JSClass;
 class nsPIDOMWindow;
 
 namespace mozilla {
@@ -42,11 +42,8 @@ class IndexUpdateInfo;
 class Key;
 class KeyPath;
 class ObjectStoreSpec;
-class SerializedStructuredCloneReadInfo;
-class SerializedStructuredCloneWriteInfo;
 struct StructuredCloneFile;
 struct StructuredCloneReadInfo;
-struct StructuredCloneWriteInfo;
 
 class IDBObjectStore MOZ_FINAL
   : public nsISupports
@@ -70,6 +67,8 @@ class IDBObjectStore MOZ_FINAL
   bool mRooted;
 
 public:
+  struct StructuredCloneWriteInfo;
+
   static already_AddRefed<IDBObjectStore>
   Create(IDBTransaction* aTransaction, const ObjectStoreSpec& aSpec);
 
@@ -85,33 +84,15 @@ public:
   static void
   ClearCloneReadInfo(StructuredCloneReadInfo& aReadInfo);
 
-  static void
-  ClearCloneWriteInfo(StructuredCloneWriteInfo& aWriteInfo);
-
   static bool
   DeserializeValue(JSContext* aCx,
                    StructuredCloneReadInfo& aCloneReadInfo,
                    JS::MutableHandle<JS::Value> aValue);
 
   static bool
-  SerializeValue(JSContext* aCx,
-                 StructuredCloneWriteInfo& aCloneWriteInfo,
-                 JS::Handle<JS::Value> aValue);
-
-  static bool
   DeserializeIndexValue(JSContext* aCx,
                         StructuredCloneReadInfo& aCloneReadInfo,
                         JS::MutableHandle<JS::Value> aValue);
-
-  static bool
-  StructuredCloneWriteCallback(JSContext* aCx,
-                               JSStructuredCloneWriter* aWriter,
-                               JS::Handle<JSObject*> aObj,
-                               void* aClosure);
-
-  static nsresult
-  ConvertFileIdsToArray(const nsAString& aFileIds,
-                        nsTArray<int64_t>& aResult);
 
   // Called only in the main process.
   static nsresult

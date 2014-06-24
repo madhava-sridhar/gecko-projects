@@ -1442,13 +1442,9 @@ BlobChild::CommonInit(const ChildBlobConstructorParams& aParams)
 
   MOZ_ASSERT(remoteBlob);
 
-#ifdef DEBUG
-  {
-    bool isMutable;
-    MOZ_ASSERT(NS_SUCCEEDED(remoteBlob->GetMutable(&isMutable)));
-    MOZ_ASSERT(!isMutable);
-  }
-#endif
+  DebugOnly<bool> isMutable;
+  MOZ_ASSERT(NS_SUCCEEDED(remoteBlob->GetMutable(&isMutable)));
+  MOZ_ASSERT(!isMutable);
 
   remoteBlob.forget(&mRemoteBlob);
   mOwnsBlob = true;
@@ -2347,13 +2343,9 @@ BlobParent::CommonInit(const ParentBlobConstructorParams& aParams)
 
   MOZ_ASSERT(remoteBlob);
 
-#ifdef DEBUG
-  {
-    bool isMutable;
-    MOZ_ASSERT(NS_SUCCEEDED(remoteBlob->GetMutable(&isMutable)));
-    MOZ_ASSERT(!isMutable);
-  }
-#endif
+  DebugOnly<bool> isMutable;
+  MOZ_ASSERT(NS_SUCCEEDED(remoteBlob->GetMutable(&isMutable)));
+  MOZ_ASSERT(!isMutable);
 
   remoteBlob.forget(&mRemoteBlob);
   mOwnsBlob = true;
@@ -2732,9 +2724,7 @@ InputStreamChild::Recv__delete__(const InputStreamParams& aParams,
   }
 
   nsCOMPtr<nsIInputStream> stream = DeserializeInputStream(aParams, fds);
-  if (!stream) {
-    return false;
-  }
+  MOZ_ASSERT(stream);
 
   mRemoteStream->SetStream(stream);
   return true;

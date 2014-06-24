@@ -6,9 +6,7 @@
 
 #include "IDBTransaction.h"
 
-#include "ActorsChild.h"
 #include "BackgroundChildImpl.h"
-#include "FileInfo.h"
 #include "IDBDatabase.h"
 #include "IDBEvents.h"
 #include "IDBObjectStore.h"
@@ -19,11 +17,16 @@
 #include "mozilla/dom/DOMStringList.h"
 #include "mozilla/ipc/BackgroundChild.h"
 #include "nsIAppShell.h"
+#include "nsIDOMFile.h"
 #include "nsPIDOMWindow.h"
+#include "nsServiceManagerUtils.h"
 #include "nsTHashtable.h"
 #include "nsWidgetsCID.h"
 #include "ProfilerHelpers.h"
 #include "ReportInternalError.h"
+
+// Include this last to avoid path problems on Windows.
+#include "ActorsChild.h"
 
 using namespace mozilla;
 using namespace mozilla::dom;
@@ -35,9 +38,12 @@ NS_DEFINE_CID(kAppShellCID, NS_APPSHELL_CID);
 
 } // anonymous namespace
 
-IDBTransaction::IDBTransaction(IDBDatabase* aDatabase, Mode aMode)
+IDBTransaction::IDBTransaction(IDBDatabase* aDatabase,
+                               const nsTArray<nsString>& aObjectStoreNames,
+                               Mode aMode)
   : IDBWrapperCache(aDatabase)
   , mDatabase(aDatabase)
+  , mObjectStoreNames(aObjectStoreNames)
   , mNextObjectStoreId(0)
   , mNextIndexId(0)
   , mAbortCode(NS_OK)
@@ -64,6 +70,26 @@ IDBTransaction::IDBTransaction(IDBDatabase* aDatabase, Mode aMode)
     MOZ_ASSERT(threadLocal);
 
     mSerialNumber = threadLocal->mNextTransactionSerialNumber++;
+  }
+#endif
+
+#ifdef DEBUG
+  if (!aObjectStoreNames.IsEmpty()) {
+    nsTArray<nsString> sortedNames(aObjectStoreNames);
+    sortedNames.Sort();
+
+    const uint32_t count = sortedNames.Length();
+    MOZ_ASSERT(count == aObjectStoreNames.Length());
+
+    // Make sure the array is properly sorted.
+    for (uint32_t index = 0; index < count; index++) {
+      MOZ_ASSERT(aObjectStoreNames[index] == sortedNames[index]);
+    }
+
+    // Make sure there are no duplicates in our objectStore names.
+    for (uint32_t index = 0; index < count - 1; index++) {
+      MOZ_ASSERT(sortedNames[index] != sortedNames[index + 1]);
+    }
   }
 #endif
 }
@@ -105,8 +131,10 @@ IDBTransaction::CreateVersionChange(
   MOZ_ASSERT(aNextObjectStoreId > 0);
   MOZ_ASSERT(aNextIndexId > 0);
 
+  nsTArray<nsString> emptyObjectStoreNames;
+
   nsRefPtr<IDBTransaction> transaction =
-    new IDBTransaction(aDatabase, VERSION_CHANGE);
+    new IDBTransaction(aDatabase, emptyObjectStoreNames, VERSION_CHANGE);
 
   transaction->SetScriptOwner(aDatabase->GetScriptOwner());
   transaction->mBackgroundActor.mVersionChangeBackgroundActor = aActor;
@@ -140,26 +168,10 @@ IDBTransaction::Create(IDBDatabase* aDatabase,
   MOZ_ASSERT(!aObjectStoreNames.IsEmpty());
   MOZ_ASSERT(aMode == READ_ONLY || aMode == READ_WRITE);
 
-  nsRefPtr<IDBTransaction> transaction = new IDBTransaction(aDatabase, aMode);
+  nsRefPtr<IDBTransaction> transaction =
+    new IDBTransaction(aDatabase, aObjectStoreNames, aMode);
 
   transaction->SetScriptOwner(aDatabase->GetScriptOwner());
-
-  const uint32_t objectStoreCount = aObjectStoreNames.Length();
-
-  transaction->mObjectStoreNames.SetCapacity(objectStoreCount);
-
-  for (uint32_t index = 0; index < objectStoreCount; index++) {
-    transaction->mObjectStoreNames.InsertElementSorted(
-      aObjectStoreNames[index]);
-  }
-
-  // Remove any duplicate object store names
-  for (uint32_t index = objectStoreCount - 1; index > 0; index--) {
-    if (transaction->mObjectStoreNames[index] ==
-        transaction->mObjectStoreNames[index - 1]) {
-      transaction->mObjectStoreNames.RemoveElementAt(index);
-    }
-  }
 
   // XXX Fix!
   MOZ_ASSERT(NS_IsMainThread(), "This won't work on non-main threads!");
@@ -467,31 +479,34 @@ IDBTransaction::DeleteIndex(IDBObjectStore* aObjectStore,
                     SendDeleteIndex(aObjectStore->Id(), aIndexId));
 }
 
-already_AddRefed<FileInfo>
-IDBTransaction::GetFileInfo(nsIDOMBlob* aBlob)
+void
+IDBTransaction::CacheBlobActor(nsIDOMBlob* aBlob, PBlobChild* aBlobActor)
 {
   AssertIsOnOwningThread();
+  MOZ_ASSERT(aBlob);
+  MOZ_ASSERT(aBlobActor);
+  MOZ_ASSERT(!mBlobActorCache.Contains(aBlob));
 
-  nsRefPtr<FileInfo> fileInfo;
-  mCreatedFileInfos.Get(aBlob, getter_AddRefs(fileInfo));
-
-  return fileInfo.forget();
+  mBlobActorCache.Put(aBlob, aBlobActor);
 }
 
 void
-IDBTransaction::AddFileInfo(nsIDOMBlob* aBlob, FileInfo* aFileInfo)
+IDBTransaction::ForgetBlobActor(nsIDOMBlob* aBlob)
 {
   AssertIsOnOwningThread();
+  MOZ_ASSERT(aBlob);
+  MOZ_ASSERT(mBlobActorCache.Contains(aBlob));
 
-  mCreatedFileInfos.Put(aBlob, aFileInfo);
+  mBlobActorCache.Remove(aBlob);
 }
 
-void
-IDBTransaction::ClearCreatedFileInfos()
+PBlobChild*
+IDBTransaction::GetCachedBlobActor(nsIDOMBlob* aBlob)
 {
   AssertIsOnOwningThread();
+  MOZ_ASSERT(aBlob);
 
-  mCreatedFileInfos.Clear();
+  return mBlobActorCache.Get(aBlob);
 }
 
 nsresult
@@ -621,6 +636,8 @@ IDBTransaction::FireCompleteOrAbortEvents(nsresult aResult)
 {
   AssertIsOnOwningThread();
   MOZ_ASSERT(!mFiredCompleteOrAbort);
+
+  ClearBlobActorCache();
 
   mReadyState = DONE;
 

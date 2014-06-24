@@ -18,7 +18,6 @@
 #include "nsMultiplexInputStream.h"
 #include "nsNetCID.h"
 #include "nsStringStream.h"
-#include "nsThreadUtils.h"
 #include "nsXULAppAPI.h"
 
 using mozilla::dom::BlobChild;
@@ -43,7 +42,6 @@ SerializeInputStream(nsIInputStream* aInputStream,
                      InputStreamParams& aParams,
                      nsTArray<FileDescriptor>& aFileDescriptors)
 {
-  MOZ_ASSERT(NS_IsMainThread());
   MOZ_ASSERT(aInputStream);
 
   nsCOMPtr<nsIIPCSerializableInputStream> serializable =
@@ -64,8 +62,6 @@ SerializeInputStream(nsIInputStream* aInputStream,
                      OptionalInputStreamParams& aParams,
                      nsTArray<FileDescriptor>& aFileDescriptors)
 {
-  MOZ_ASSERT(NS_IsMainThread());
-
   if (aInputStream) {
     InputStreamParams params;
     SerializeInputStream(aInputStream, params, aFileDescriptors);
@@ -80,8 +76,6 @@ already_AddRefed<nsIInputStream>
 DeserializeInputStream(const InputStreamParams& aParams,
                        const nsTArray<FileDescriptor>& aFileDescriptors)
 {
-  MOZ_ASSERT(NS_IsMainThread());
-
   nsCOMPtr<nsIIPCSerializableInputStream> serializable;
 
   switch (aParams.type()) {
@@ -154,8 +148,6 @@ already_AddRefed<nsIInputStream>
 DeserializeInputStream(const OptionalInputStreamParams& aParams,
                        const nsTArray<FileDescriptor>& aFileDescriptors)
 {
-  MOZ_ASSERT(NS_IsMainThread());
-
   nsCOMPtr<nsIInputStream> stream;
 
   switch (aParams.type()) {

@@ -6,7 +6,6 @@
 
 #include "IDBCursor.h"
 
-#include "ActorsChild.h"
 #include "IDBDatabase.h"
 #include "IDBIndex.h"
 #include "IDBObjectStore.h"
@@ -19,6 +18,9 @@
 #include "nsString.h"
 #include "ProfilerHelpers.h"
 #include "ReportInternalError.h"
+
+// Include this last to avoid path problems on Windows.
+#include "ActorsChild.h"
 
 using namespace mozilla;
 using namespace mozilla::dom;

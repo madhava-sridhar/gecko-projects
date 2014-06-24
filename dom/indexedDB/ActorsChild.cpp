@@ -18,6 +18,7 @@
 #include "mozilla/dom/PermissionMessageUtils.h"
 #include "mozilla/dom/TabChild.h"
 #include "mozilla/dom/indexedDB/PIndexedDBPermissionRequestChild.h"
+#include "mozilla/dom/ipc/BlobChild.h"
 #include "mozilla/ipc/BackgroundUtils.h"
 #include "nsCOMPtr.h"
 #include "nsContentUtils.h"
@@ -420,6 +421,25 @@ protected:
   virtual bool
   Recv__delete__(const uint32_t& aPermission) MOZ_OVERRIDE;
 };
+
+void
+ConvertActorsToBlobs(const nsTArray<PBlobChild*>& aActors,
+                     nsTArray<StructuredCloneFile>& aFiles)
+{
+  MOZ_ASSERT(aFiles.IsEmpty());
+
+  if (!aActors.IsEmpty()) {
+    const uint32_t count = aActors.Length();
+    aFiles.SetCapacity(count);
+
+    for (uint32_t index = 0; index < count; index++) {
+      BlobChild* actor = static_cast<BlobChild*>(aActors[index]);
+
+      StructuredCloneFile* file = aFiles.AppendElement();
+      file->mFile = actor->GetBlob();
+    }
+  }
+}
 
 } // anonymous namespace
 
@@ -1597,15 +1617,13 @@ BackgroundRequestChild::HandleResponse(
   AssertIsOnOwningThread();
 
   // XXX Fix this somehow...
-  auto& cloneInfo = const_cast<SerializedStructuredCloneReadInfo&>(aResponse);
+  auto& serializedCloneInfo =
+    const_cast<SerializedStructuredCloneReadInfo&>(aResponse);
 
-  StructuredCloneReadInfo cloneReadInfo(Move(cloneInfo));
+  StructuredCloneReadInfo cloneReadInfo(Move(serializedCloneInfo));
+  cloneReadInfo.mDatabase = mTransaction->Database();
 
-  // XXX Fix blobs!
-  /*
-  IDBObjectStore::ConvertActorsToBlobs(aResponse.blobsChild(),
-                                       cloneReadInfo.mFiles);
-  */
+  ConvertActorsToBlobs(aResponse.blobsChild(), cloneReadInfo.mFiles);
 
   ResultHelper helper(mRequest, mTransaction, &cloneReadInfo);
 
@@ -1619,28 +1637,30 @@ BackgroundRequestChild::HandleResponse(
 {
   AssertIsOnOwningThread();
 
-  nsTArray<StructuredCloneReadInfo> cloneInfos;
+  nsTArray<StructuredCloneReadInfo> cloneReadInfos;
 
   if (!aResponse.IsEmpty()) {
     const uint32_t count = aResponse.Length();
 
-    cloneInfos.SetCapacity(count);
+    cloneReadInfos.SetCapacity(count);
 
     for (uint32_t index = 0; index < count; index++) {
       // XXX Fix this somehow...
       auto& serializedCloneInfo =
         const_cast<SerializedStructuredCloneReadInfo&>(aResponse[index]);
 
-      // XXX This should work but doesn't yet.
-      // cloneInfos.AppendElement(Move(serializedCloneInfo));
+      StructuredCloneReadInfo* cloneReadInfo = cloneReadInfos.AppendElement();
 
-      // XXX Fix blobs!
-      StructuredCloneReadInfo* cloneInfo = cloneInfos.AppendElement();
-      cloneInfo->mData.SwapElements(serializedCloneInfo.data());
+      *cloneReadInfo = Move(serializedCloneInfo);
+
+      cloneReadInfo->mDatabase = mTransaction->Database();
+
+      ConvertActorsToBlobs(serializedCloneInfo.blobsChild(),
+                           cloneReadInfo->mFiles);
     }
   }
 
-  ResultHelper helper(mRequest, mTransaction, &cloneInfos);
+  ResultHelper helper(mRequest, mTransaction, &cloneReadInfos);
 
   DispatchSuccessEvent(&helper);
   return true;
@@ -1830,11 +1850,7 @@ BackgroundCursorChild::HandleResponse(
 
   StructuredCloneReadInfo cloneReadInfo(Move(response.cloneInfo()));
 
-  // XXX Fix blobs!
-  /*
-  IDBObjectStore::ConvertActorsToBlobs(aResponse.blobsChild(),
-                                       cloneReadInfo.mFiles);
-  */
+  ConvertActorsToBlobs(response.cloneInfo().blobsChild(), cloneReadInfo.mFiles);
 
   nsRefPtr<IDBCursor> cursor = mCursor;
 
@@ -1887,11 +1903,8 @@ BackgroundCursorChild::HandleResponse(const IndexCursorResponse& aResponse)
 
   StructuredCloneReadInfo cloneReadInfo(Move(response.cloneInfo()));
 
-  // XXX Fix blobs!
-  /*
-  IDBObjectStore::ConvertActorsToBlobs(aResponse.blobsChild(),
-                                       cloneReadInfo.mFiles);
-  */
+  ConvertActorsToBlobs(aResponse.cloneInfo().blobsChild(),
+                       cloneReadInfo.mFiles);
 
   nsRefPtr<IDBCursor> cursor = mCursor;
 

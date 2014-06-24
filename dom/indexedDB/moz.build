@@ -14,7 +14,6 @@ XPIDL_MODULE = 'dom_indexeddb'
 
 EXPORTS.mozilla.dom.indexedDB += [
     'ActorsParent.h',
-    'Client.h',
     'DatabaseInfo.h',
     'FileInfo.h',
     'FileManager.h',
@@ -33,6 +32,7 @@ EXPORTS.mozilla.dom.indexedDB += [
     'IndexedDatabaseManager.h',
     'Key.h',
     'KeyPath.h',
+    'QuotaClient.h',
     'SerializationHelpers.h',
 ]
 
@@ -40,10 +40,8 @@ SOURCES += [
     'ActorsChild.cpp',
     'ActorsParent.cpp',
     'AsyncConnectionHelper.cpp',
-    'Client.cpp',
     'DatabaseInfo.cpp',
     'FileInfo.cpp',
-    'FileManager.cpp',
     'IDBCursor.cpp',
     'IDBDatabase.cpp',
     'IDBEvents.cpp',

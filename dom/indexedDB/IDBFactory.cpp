@@ -6,10 +6,10 @@
 
 #include "IDBFactory.h"
 
-#include "ActorsChild.h"
 #include "IDBRequest.h"
 #include "IndexedDatabaseManager.h"
 #include "mozilla/ErrorResult.h"
+#include "mozilla/Preferences.h"
 #include "mozilla/dom/BindingDeclarations.h"
 #include "mozilla/dom/IDBFactoryBinding.h"
 #include "mozilla/dom/TabChild.h"
@@ -23,11 +23,12 @@
 #include "ProfilerHelpers.h"
 #include "ReportInternalError.h"
 
+// Include this last to avoid path problems on Windows.
+#include "ActorsChild.h"
+
 #ifdef DEBUG
 #include "nsContentUtils.h" // For IsCallerChrome assertions.
 #endif
-
-#define PREF_INDEXEDDB_ENABLED "dom.indexedDB.enabled"
 
 using namespace mozilla;
 using namespace mozilla::dom;
@@ -44,6 +45,8 @@ using mozilla::dom::TabChild;
 using mozilla::ErrorResult;
 
 namespace {
+
+const char kPrefIndexedDBEnabled[] = "dom.indexedDB.enabled";
 
 nsresult
 GetPrincipalInfo(nsIPrincipal* aPrincipal,
@@ -145,6 +148,12 @@ IDBFactory::Create(nsPIDOMWindow* aWindow,
 {
   MOZ_ASSERT(NS_IsMainThread());
   MOZ_ASSERT(aWindow);
+  MOZ_ASSERT(aFactory);
+
+  if (NS_WARN_IF(!Preferences::GetBool(kPrefIndexedDBEnabled, false))) {
+    *aFactory = nullptr;
+    return NS_ERROR_DOM_INDEXEDDB_NOT_ALLOWED_ERR;
+  }
 
   if (aWindow->IsOuterWindow()) {
     aWindow = aWindow->GetCurrentInnerWindow();
@@ -188,11 +197,17 @@ IDBFactory::Create(JSContext* aCx,
   MOZ_ASSERT_IF(NS_IsMainThread(), nsContentUtils::IsCallerChrome());
   MOZ_ASSERT(aCx);
   MOZ_ASSERT(aOwningObject);
+  MOZ_ASSERT(aFactory);
   MOZ_ASSERT(JS_GetGlobalForObject(aCx, aOwningObject) == aOwningObject,
              "Not a global object!");
 
   if (!NS_IsMainThread()) {
     MOZ_CRASH("Implement me for workers!");
+  }
+
+  if (NS_WARN_IF(!Preferences::GetBool(kPrefIndexedDBEnabled, false))) {
+    *aFactory = nullptr;
+    return NS_ERROR_DOM_INDEXEDDB_NOT_ALLOWED_ERR;
   }
 
   // Make sure that the manager is up before we do anything here since lots of

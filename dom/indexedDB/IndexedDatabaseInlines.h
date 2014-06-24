@@ -38,58 +38,6 @@ StructuredCloneFile::operator==(const StructuredCloneFile& aOther) const
 }
 
 inline
-StructuredCloneWriteInfo::StructuredCloneWriteInfo()
-: mTransaction(nullptr),
-  mOffsetToKeyProp(0)
-{
-}
-
-inline
-StructuredCloneWriteInfo::StructuredCloneWriteInfo(
-                                    StructuredCloneWriteInfo&& aCloneWriteInfo)
-: mCloneBuffer(Move(aCloneWriteInfo.mCloneBuffer))
-, mTransaction(aCloneWriteInfo.mTransaction)
-, mOffsetToKeyProp(aCloneWriteInfo.mOffsetToKeyProp)
-{
-  mFiles.SwapElements(aCloneWriteInfo.mFiles);
-  aCloneWriteInfo.mTransaction = nullptr;
-  aCloneWriteInfo.mOffsetToKeyProp = 0;
-}
-
-inline
-bool
-StructuredCloneWriteInfo::operator==(
-                                   const StructuredCloneWriteInfo& aOther) const
-{
-  return this->mCloneBuffer.nbytes() == aOther.mCloneBuffer.nbytes() &&
-         this->mCloneBuffer.data() == aOther.mCloneBuffer.data() &&
-         this->mFiles == aOther.mFiles &&
-         this->mTransaction == aOther.mTransaction &&
-         this->mOffsetToKeyProp == aOther.mOffsetToKeyProp;
-}
-
-inline
-bool
-StructuredCloneWriteInfo::SetFromSerialized(
-                               const SerializedStructuredCloneWriteInfo& aOther)
-{
-  if (aOther.data().IsEmpty()) {
-    mCloneBuffer.clear();
-  } else {
-    uint64_t* aOtherBuffer =
-      reinterpret_cast<uint64_t*>(
-        const_cast<uint8_t*>(aOther.data().Elements()));
-    if (!mCloneBuffer.copy(aOtherBuffer, aOther.data().Length())) {
-      return false;
-    }
-  }
-
-  mFiles.Clear();
-  mOffsetToKeyProp = aOther.offsetToKeyProp();
-  return true;
-}
-
-inline
 StructuredCloneReadInfo::StructuredCloneReadInfo()
   : mDatabase(nullptr)
 {
