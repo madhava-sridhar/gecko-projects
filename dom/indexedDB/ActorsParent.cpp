@@ -96,6 +96,8 @@ using namespace mozilla::ipc;
 
 namespace {
   class Database;
+  class TransactionBase;
+  class Cursor;
 }
 
 namespace mozilla {
@@ -103,6 +105,8 @@ namespace dom {
 namespace indexedDB {
 
 using ::Database;
+using ::TransactionBase;
+using ::Cursor;
 
 } // namespace indexedDB
 } // namespace dom
@@ -3024,7 +3028,7 @@ public:
     return mActorDestroyed;
   }
 
-  NS_INLINE_DECL_THREADSAFE_REFCOUNTING(indexedDB::TransactionBase)
+  NS_INLINE_DECL_THREADSAFE_REFCOUNTING(mozilla::dom::indexedDB::TransactionBase)
 
   nsresult
   GetCachedStatement(const nsACString& aQuery,
@@ -4547,7 +4551,7 @@ private:
   bool mActorDestroyed;
 
 public:
-  NS_INLINE_DECL_THREADSAFE_REFCOUNTING(indexedDB::Cursor)
+  NS_INLINE_DECL_THREADSAFE_REFCOUNTING(mozilla::dom::indexedDB::Cursor)
 
 private:
   // Only created by TransactionBase.
