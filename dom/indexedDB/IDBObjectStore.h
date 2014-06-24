@@ -17,7 +17,7 @@
 #include "nsTArray.h"
 #include "nsWrapperCache.h"
 
-class JSClass;
+struct JSClass;
 class nsPIDOMWindow;
 
 namespace mozilla {

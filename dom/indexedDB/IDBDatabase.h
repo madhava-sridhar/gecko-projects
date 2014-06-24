@@ -28,7 +28,7 @@ class EventChainPostVisitor;
 namespace dom {
 
 class DOMStringList;
-class IDBObjectStoreParameters;
+struct IDBObjectStoreParameters;
 template <typename> class Sequence;
 
 namespace quota {

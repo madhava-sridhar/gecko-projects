@@ -2586,13 +2586,12 @@ protected:
                         nsAutoCString& aResult);
 
   static nsresult
-  DatabaseOperationBase::UpdateIndexes(
-                             TransactionBase* aTransaction,
-                             const UniqueIndexTable& aUniqueIndexTable,
-                             const Key& aObjectStoreKey,
-                             bool aOverwrite,
-                             int64_t aObjectDataId,
-                             const nsTArray<IndexUpdateInfo>& aUpdateInfoArray);
+  UpdateIndexes(TransactionBase* aTransaction,
+                const UniqueIndexTable& aUniqueIndexTable,
+                const Key& aObjectStoreKey,
+                bool aOverwrite,
+                int64_t aObjectDataId,
+                const nsTArray<IndexUpdateInfo>& aUpdateInfoArray);
 
 private:
   // Not to be overridden by subclasses.

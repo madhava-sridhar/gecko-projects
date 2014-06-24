@@ -88,7 +88,6 @@
 
 USING_QUOTA_NAMESPACE
 using namespace mozilla::dom;
-using namespace mozilla::ipc;
 using mozilla::dom::FileService;
 
 static_assert(

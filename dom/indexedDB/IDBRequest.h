@@ -26,7 +26,7 @@ namespace dom {
 
 class DOMError;
 struct ErrorEventInit;
-template <typename> class Nullable;
+template <typename> struct Nullable;
 class OwningIDBObjectStoreOrIDBIndexOrIDBCursor;
 
 namespace indexedDB {

@@ -23,7 +23,7 @@ namespace dom {
 
 class EventTarget;
 class GlobalObject;
-class IDBVersionChangeEventInit;
+struct IDBVersionChangeEventInit;
 
 namespace indexedDB {
 

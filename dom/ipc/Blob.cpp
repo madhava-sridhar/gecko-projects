@@ -99,11 +99,13 @@ void AssertCorrectThreadForManager<nsIContentParent>(nsIContentParent* aManager)
 template <>
 void AssertCorrectThreadForManager<PBackgroundChild>(PBackgroundChild* aManager)
 {
+#ifdef DEBUG
   if (aManager) {
     PBackgroundChild* backgroundChild = BackgroundChild::GetForCurrentThread();
     MOZ_ASSERT(backgroundChild);
     MOZ_ASSERT(backgroundChild == aManager);
   }
+#endif
 }
 
 template <>
