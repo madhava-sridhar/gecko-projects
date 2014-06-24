@@ -17,6 +17,7 @@
 
 #include "jsatom.h"
 #include "jscntxt.h"
+#include "jscompartment.h"
 #include "jsexn.h"
 #include "jsnum.h"
 
@@ -50,8 +51,9 @@ static const KeywordInfo keywords[] = {
 
 // Returns a KeywordInfo for the specified characters, or nullptr if the string
 // is not a keyword.
+template <typename CharT>
 static const KeywordInfo *
-FindKeyword(const jschar *s, size_t length)
+FindKeyword(const CharT *s, size_t length)
 {
     JS_ASSERT(length != 0);
 
@@ -87,30 +89,47 @@ FindKeyword(const jschar *s, size_t length)
     return nullptr;
 }
 
+static const KeywordInfo *
+FindKeyword(JSLinearString *str)
+{
+    JS::AutoCheckCannotGC nogc;
+    return str->hasLatin1Chars()
+           ? FindKeyword(str->latin1Chars(nogc), str->length())
+           : FindKeyword(str->twoByteChars(nogc), str->length());
+}
+
+template <typename CharT>
+static bool
+IsIdentifier(const CharT *chars, size_t length)
+{
+    if (length == 0)
+        return false;
+
+    if (!IsIdentifierStart(*chars))
+        return false;
+
+    const CharT *end = chars + length;
+    while (++chars != end) {
+        if (!IsIdentifierPart(*chars))
+            return false;
+    }
+
+    return true;
+}
+
 bool
 frontend::IsIdentifier(JSLinearString *str)
 {
-    const jschar *chars = str->chars();
-    size_t length = str->length();
-
-    if (length == 0)
-        return false;
-    jschar c = *chars;
-    if (!IsIdentifierStart(c))
-        return false;
-    const jschar *end = chars + length;
-    while (++chars != end) {
-        c = *chars;
-        if (!IsIdentifierPart(c))
-            return false;
-    }
-    return true;
+    JS::AutoCheckCannotGC nogc;
+    return str->hasLatin1Chars()
+           ? ::IsIdentifier(str->latin1Chars(nogc), str->length())
+           : ::IsIdentifier(str->twoByteChars(nogc), str->length());
 }
 
 bool
 frontend::IsKeyword(JSLinearString *str)
 {
-    return FindKeyword(str->chars(), str->length()) != nullptr;
+    return FindKeyword(str) != nullptr;
 }
 
 TokenStream::SourceCoords::SourceCoords(ExclusiveContext *cx, uint32_t ln)
@@ -692,8 +711,9 @@ TokenStream::reportCompileErrorNumberVA(uint32_t offset, unsigned flags, unsigne
         err.report.uclinebuf = windowBuf.stealChars();
         if (!err.report.uclinebuf)
             return false;
-        TwoByteChars tbchars(err.report.uclinebuf, windowLength);
-        err.report.linebuf = LossyTwoByteCharsToNewLatin1CharsZ(cx, tbchars).c_str();
+
+        mozilla::Range<const jschar> tbchars(err.report.uclinebuf, windowLength);
+        err.report.linebuf = JS::LossyTwoByteCharsToNewLatin1CharsZ(cx, tbchars).c_str();
         if (!err.report.linebuf)
             return false;
 
@@ -962,12 +982,8 @@ TokenStream::putIdentInTokenbuf(const jschar *identStart)
 }
 
 bool
-TokenStream::checkForKeyword(const jschar *s, size_t length, TokenKind *ttp)
+TokenStream::checkForKeyword(const KeywordInfo *kw, TokenKind *ttp)
 {
-    const KeywordInfo *kw = FindKeyword(s, length);
-    if (!kw)
-        return true;
-
     if (kw->tokentype == TOK_RESERVED)
         return reportError(JSMSG_RESERVED_ID, kw->chars);
 
@@ -990,6 +1006,26 @@ TokenStream::checkForKeyword(const jschar *s, size_t length, TokenKind *ttp)
 
     // Strict reserved word.
     return reportStrictModeError(JSMSG_RESERVED_ID, kw->chars);
+}
+
+bool
+TokenStream::checkForKeyword(const jschar *s, size_t length, TokenKind *ttp)
+{
+    const KeywordInfo *kw = FindKeyword(s, length);
+    if (!kw)
+        return true;
+
+    return checkForKeyword(kw, ttp);
+}
+
+bool
+TokenStream::checkForKeyword(JSAtom *atom, TokenKind *ttp)
+{
+    const KeywordInfo *kw = FindKeyword(atom);
+    if (!kw)
+        return true;
+
+    return checkForKeyword(kw, ttp);
 }
 
 enum FirstCharKind {

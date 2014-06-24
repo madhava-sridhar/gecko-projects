@@ -2751,7 +2751,7 @@ struct ArrayClearer
 
 NS_IMETHODIMP
 MediaStreamGraphImpl::CollectReports(nsIHandleReportCallback* aHandleReport,
-                                     nsISupports* aData)
+                                     nsISupports* aData, bool aAnonymize)
 {
   // Clears out the report array after we're done with it.
   ArrayClearer reportCleanup(mAudioStreamSizes);
@@ -2786,20 +2786,21 @@ MediaStreamGraphImpl::CollectReports(nsIHandleReportCallback* aHandleReport,
 
   for (size_t i = 0; i < mAudioStreamSizes.Length(); i++) {
     const AudioNodeSizes& usage = mAudioStreamSizes[i];
-    const char* const nodeType =  usage.mNodeType.get();
+    const char* const nodeType =  usage.mNodeType.IsEmpty() ?
+                                  "<unknown>" : usage.mNodeType.get();
 
     nsPrintfCString domNodePath("explicit/webaudio/audio-node/%s/dom-nodes",
-                                  nodeType);
+                                nodeType);
     REPORT(domNodePath, usage.mDomNode,
            "Memory used by AudioNode DOM objects (Web Audio).");
 
     nsPrintfCString enginePath("explicit/webaudio/audio-node/%s/engine-objects",
-                                nodeType);
+                               nodeType);
     REPORT(enginePath, usage.mEngine,
            "Memory used by AudioNode engine objects (Web Audio).");
 
     nsPrintfCString streamPath("explicit/webaudio/audio-node/%s/stream-objects",
-                                nodeType);
+                               nodeType);
     REPORT(streamPath, usage.mStream,
            "Memory used by AudioNode stream objects (Web Audio).");
 

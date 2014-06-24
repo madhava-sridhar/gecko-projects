@@ -668,10 +668,12 @@ js_ExpandErrorArguments(ExclusiveContext *cx, JSErrorCallback callback,
     *messagep = nullptr;
 
     /* Most calls supply js_GetErrorMessage; if this is so, assume nullptr. */
-    if (!callback || callback == js_GetErrorMessage)
+    if (!callback || callback == js_GetErrorMessage) {
         efs = js_GetLocalizedErrorMessage(cx, userRef, nullptr, errorNumber);
-    else
+    } else {
+        AutoSuppressGC suppressGC(cx);
         efs = callback(userRef, nullptr, errorNumber);
+    }
     if (efs) {
         reportp->exnType = efs->exnType;
 
@@ -756,10 +758,10 @@ js_ExpandErrorArguments(ExclusiveContext *cx, JSErrorCallback callback,
                 JS_ASSERT(expandedArgs == argCount);
                 *out = 0;
                 js_free(buffer);
-                TwoByteChars ucmsg(reportp->ucmessage,
-                                   PointerRangeSize(static_cast<const jschar *>(reportp->ucmessage),
-                                                    static_cast<const jschar *>(out)));
-                *messagep = LossyTwoByteCharsToNewLatin1CharsZ(cx, ucmsg).c_str();
+                size_t msgLen = PointerRangeSize(static_cast<const jschar *>(reportp->ucmessage),
+                                                 static_cast<const jschar *>(out));
+                mozilla::Range<const jschar> ucmsg(reportp->ucmessage, msgLen);
+                *messagep = JS::LossyTwoByteCharsToNewLatin1CharsZ(cx, ucmsg).c_str();
                 if (!*messagep)
                     goto error;
             }
@@ -1070,9 +1072,14 @@ js::InvokeInterruptCallback(JSContext *cx)
 
     // No need to set aside any pending exception here: ComputeStackString
     // already does that.
-    Rooted<JSString*> stack(cx, ComputeStackString(cx));
-    const jschar *chars = stack ? stack->getCharsZ(cx) : nullptr;
-    if (!chars)
+    JSString *stack = ComputeStackString(cx);
+    JSFlatString *flat = stack ? stack->ensureFlat(cx) : nullptr;
+
+    const jschar *chars;
+    AutoStableStringChars stableChars(cx);
+    if (flat && stableChars.initTwoByte(cx, flat))
+        chars = stableChars.twoByteRange().start().get();
+    else
         chars = MOZ_UTF16("(stack not available)");
     JS_ReportErrorFlagsAndNumberUC(cx, JSREPORT_WARNING, js_GetErrorMessage, nullptr,
                                    JSMSG_TERMINATED, chars);

@@ -34,7 +34,7 @@ namespace dom {
 class BlobChild;
 class BlobConstructorParams;
 class ClonedMessageData;
-struct IPCTabContext;
+class IPCTabContext;
 class PBlobChild;
 class PBrowserChild;
 

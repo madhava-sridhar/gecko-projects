@@ -668,7 +668,8 @@ NativeRegExpMacroAssembler::CheckNotBackReference(int start_reg, Label* on_no_ma
     Label loop;
     masm.bind(&loop);
     if (mode_ == ASCII) {
-        MOZ_ASSUME_UNREACHABLE("Ascii loading not implemented");
+        masm.load8ZeroExtend(Address(current_character, 0), temp0);
+        masm.load8ZeroExtend(Address(temp1, 0), temp2);
     } else {
         JS_ASSERT(mode_ == JSCHAR);
         masm.load16ZeroExtend(Address(current_character, 0), temp0);
@@ -755,7 +756,8 @@ NativeRegExpMacroAssembler::CheckNotBackReferenceIgnoreCase(int start_reg, Label
         masm.passABIArg(current_character);
         masm.passABIArg(current_position);
         masm.passABIArg(temp1);
-        masm.callWithABI(JS_FUNC_TO_DATA_PTR(void *, CaseInsensitiveCompareStrings));
+        int (*fun)(const jschar*, const jschar*, size_t) = CaseInsensitiveCompareStrings;
+        masm.callWithABI(JS_FUNC_TO_DATA_PTR(void *, fun));
         masm.storeCallResult(temp0);
 
         masm.PopRegsInMask(volatileRegs);
@@ -812,9 +814,12 @@ NativeRegExpMacroAssembler::CheckBitInTable(uint8_t *table, Label *on_bit_set)
 {
     IonSpew(SPEW_PREFIX "CheckBitInTable");
 
-    JS_ASSERT(mode_ != ASCII); // Ascii case not handled here.
-
     masm.movePtr(ImmPtr(table), temp0);
+
+    // kTableMask is currently 127, so we need to mask even if the input is
+    // Latin1. V8 has the same issue.
+    static_assert(JSString::MAX_LATIN1_CHAR > kTableMask,
+                  "No need to mask if MAX_LATIN1_CHAR <= kTableMask");
     masm.move32(Imm32(kTableSize - 1), temp1);
     masm.and32(current_character, temp1);
 
@@ -875,7 +880,15 @@ NativeRegExpMacroAssembler::LoadCurrentCharacterUnchecked(int cp_offset, int cha
     IonSpew(SPEW_PREFIX "LoadCurrentCharacterUnchecked(%d, %d)", cp_offset, characters);
 
     if (mode_ == ASCII) {
-        MOZ_ASSUME_UNREACHABLE("Ascii loading not implemented");
+        BaseIndex address(input_end_pointer, current_position, TimesOne, cp_offset);
+        if (characters == 4) {
+            masm.load32(address, current_character);
+        } else if (characters == 2) {
+            masm.load16ZeroExtend(address, current_character);
+        } else {
+            JS_ASSERT(characters = 1);
+            masm.load8ZeroExtend(address, current_character);
+        }
     } else {
         JS_ASSERT(mode_ == JSCHAR);
         JS_ASSERT(characters <= 2);
@@ -1134,9 +1147,22 @@ NativeRegExpMacroAssembler::CheckSpecialCharacterClass(jschar type, Label* on_no
     // (c - min) <= (max - min) check
     switch (type) {
       case 's':
-        // Match space-characters
-        if (mode_ == ASCII)
-            MOZ_ASSUME_UNREACHABLE("Ascii version not implemented");
+        // Match space-characters.
+        if (mode_ == ASCII) {
+            // One byte space characters are '\t'..'\r', ' ' and \u00a0.
+            Label success;
+            masm.branch32(Assembler::Equal, current_character, Imm32(' '), &success);
+
+            // Check range 0x09..0x0d.
+            masm.computeEffectiveAddress(Address(current_character, -'\t'), temp0);
+            masm.branch32(Assembler::BelowOrEqual, temp0, Imm32('\r' - '\t'), &success);
+
+            // \u00a0 (NBSP).
+            masm.branch32(Assembler::NotEqual, temp0, Imm32(0x00a0 - '\t'), branch);
+
+            masm.bind(&success);
+            return true;
+        }
         return false;
       case 'S':
         // The emitted code for generic character classes is good enough.

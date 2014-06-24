@@ -15,6 +15,7 @@
 
 #include "gc/Heap.h"
 #include "jit/IonFrames.h"
+#include "jit/RematerializedFrame.h"
 #include "vm/ArrayObject.h"
 #include "vm/ForkJoin.h"
 #include "vm/TypedArrayObject.h"
@@ -232,7 +233,7 @@ ForkJoinNursery::pjsCollection(int op)
 
     TIME_START(pjsCollection);
 
-    rt->incFJMinorCollecting();
+    rt->gc.incFJMinorCollecting();
     if (evacuate) {
         isEvacuating_ = true;
         evacuationZone_ = shared_->zone();
@@ -265,7 +266,7 @@ ForkJoinNursery::pjsCollection(int op)
     tail_ = &head_;
     movedSize_ = 0;
 
-    rt->decFJMinorCollecting();
+    rt->gc.decFJMinorCollecting();
 
     TIME_END(pjsCollection);
 
@@ -390,6 +391,7 @@ ForkJoinNursery::forwardFromRoots(ForkJoinNurseryCollectionTracer *trc)
     forwardFromUpdatable(trc);
     forwardFromStack(trc);
     forwardFromTenured(trc);
+    forwardFromRematerializedFrames(trc);
 }
 
 void
@@ -442,6 +444,13 @@ ForkJoinNursery::forwardFromTenured(ForkJoinNurseryCollectionTracer *trc)
                 traceObject(trc, objs[i]);
         }
     }
+}
+
+void
+ForkJoinNursery::forwardFromRematerializedFrames(ForkJoinNurseryCollectionTracer *trc)
+{
+    if (cx_->bailoutRecord->hasFrames())
+        jit::RematerializedFrame::MarkInVector(trc, cx_->bailoutRecord->frames());
 }
 
 /*static*/ void

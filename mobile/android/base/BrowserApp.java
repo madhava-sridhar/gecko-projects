@@ -487,7 +487,7 @@ abstract public class BrowserApp extends GeckoApp
             Telemetry.sendUIEvent(TelemetryContract.Event.LOAD_URL, TelemetryContract.Method.INTENT);
         }
 
-        ((GeckoApp.MainLayout) mMainLayout).setTouchEventInterceptor(new HideTabsTouchListener());
+        ((GeckoApp.MainLayout) mMainLayout).setTouchEventInterceptor(new HideOnTouchListener());
         ((GeckoApp.MainLayout) mMainLayout).setMotionEventInterceptor(new MotionEventInterceptor() {
             @Override
             public boolean onInterceptMotionEvent(View view, MotionEvent event) {
@@ -1113,7 +1113,7 @@ abstract public class BrowserApp extends GeckoApp
         final int sidebarWidth = getResources().getDimensionPixelSize(R.dimen.tabs_sidebar_width);
 
         ViewGroup.MarginLayoutParams lp = (ViewGroup.MarginLayoutParams) mTabsPanel.getLayoutParams();
-        lp.width = (isSideBar ? sidebarWidth : ViewGroup.LayoutParams.FILL_PARENT);
+        lp.width = (isSideBar ? sidebarWidth : ViewGroup.LayoutParams.MATCH_PARENT);
         mTabsPanel.requestLayout();
 
         final boolean sidebarIsShown = (isSideBar && mTabsPanel.isShown());
@@ -1130,6 +1130,10 @@ abstract public class BrowserApp extends GeckoApp
             // Do exactly the same thing as if you tapped 'Sync' in Settings.
             final Intent intent = new Intent(getContext(), FxAccountGetStartedActivity.class);
             intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            final NativeJSObject extras = message.optObject("extras", null);
+            if (extras != null) {
+                intent.putExtra("extras", extras.toString());
+            }
             getContext().startActivity(intent);
 
         } else if ("CharEncoding:Data".equals(event)) {
@@ -1985,18 +1989,27 @@ abstract public class BrowserApp extends GeckoApp
         mBrowserSearch.setUserVisibleHint(false);
     }
 
-    private class HideTabsTouchListener implements TouchEventInterceptor {
+    /**
+     * Hides certain UI elements (e.g. button toast, tabs tray) when the
+     * user touches the main layout.
+     */
+    private class HideOnTouchListener implements TouchEventInterceptor {
         private boolean mIsHidingTabs = false;
+        private final Rect mTempRect = new Rect();
 
         @Override
         public boolean onInterceptTouchEvent(View view, MotionEvent event) {
+            // Only try to hide the button toast if it's already inflated.
+            if (mToast != null) {
+                mToast.hide(false, ButtonToast.ReasonHidden.TOUCH_OUTSIDE);
+            }
+
             // We need to account for scroll state for the touched view otherwise
             // tapping on an "empty" part of the view will still be considered a
             // valid touch event.
             if (view.getScrollX() != 0 || view.getScrollY() != 0) {
-                Rect rect = new Rect();
-                view.getHitRect(rect);
-                rect.offset(-view.getScrollX(), -view.getScrollY());
+                view.getHitRect(mTempRect);
+                mTempRect.offset(-view.getScrollX(), -view.getScrollY());
 
                 int[] viewCoords = new int[2];
                 view.getLocationOnScreen(viewCoords);
@@ -2004,7 +2017,7 @@ abstract public class BrowserApp extends GeckoApp
                 int x = (int) event.getRawX() - viewCoords[0];
                 int y = (int) event.getRawY() - viewCoords[1];
 
-                if (!rect.contains(x, y))
+                if (!mTempRect.contains(x, y))
                     return false;
             }
 
@@ -2627,9 +2640,24 @@ abstract public class BrowserApp extends GeckoApp
      */
     @Override
     protected void onNewIntent(Intent intent) {
-        super.onNewIntent(intent);
-
         String action = intent.getAction();
+
+        final boolean isViewAction = Intent.ACTION_VIEW.equals(action);
+        final boolean isBookmarkAction = GeckoApp.ACTION_BOOKMARK.equals(action);
+
+        if (mInitialized && (isViewAction || isBookmarkAction)) {
+            // Dismiss editing mode if the user is loading a URL from an external app.
+            mBrowserToolbar.cancelEdit();
+
+            // GeckoApp.ACTION_BOOKMARK means we're opening a bookmark that
+            // was added to Android's homescreen.
+            final TelemetryContract.Method method =
+                (isViewAction ? TelemetryContract.Method.INTENT : TelemetryContract.Method.HOMESCREEN);
+
+            Telemetry.sendUIEvent(TelemetryContract.Event.LOAD_URL, method);
+        }
+
+        super.onNewIntent(intent);
 
         if (AppConstants.MOZ_ANDROID_BEAM && Build.VERSION.SDK_INT >= 10 && NfcAdapter.ACTION_NDEF_DISCOVERED.equals(action)) {
             String uri = intent.getDataString();
@@ -2637,14 +2665,6 @@ abstract public class BrowserApp extends GeckoApp
         }
 
         if (!mInitialized) {
-            return;
-        }
-
-        if (Intent.ACTION_VIEW.equals(action)) {
-            // Dismiss editing mode if the user is loading a URL from an external app.
-            mBrowserToolbar.cancelEdit();
-
-            Telemetry.sendUIEvent(TelemetryContract.Event.LOAD_URL, TelemetryContract.Method.INTENT);
             return;
         }
 

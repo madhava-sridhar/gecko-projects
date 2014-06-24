@@ -151,7 +151,6 @@ public:
 
   static
   already_AddRefed<TestInterface> Test2(const GlobalObject&,
-                                        JSContext*,
                                         const DictForConstructor&,
                                         JS::Handle<JS::Value>,
                                         JS::Handle<JSObject*>,
@@ -573,6 +572,7 @@ public:
   void PassUnion13(JSContext*, const ObjectOrLongOrNull& arg);
   void PassUnion14(JSContext*, const ObjectOrLongOrNull& arg);
   void PassUnionWithCallback(const EventHandlerNonNullOrNullOrLong& arg);
+  void PassUnionWithByteString(const ByteStringOrLong&);
 #endif
   void PassNullableUnion(JSContext*, const Nullable<ObjectOrLong>&);
   void PassOptionalUnion(JSContext*, const Optional<ObjectOrLong>&);
@@ -682,8 +682,7 @@ public:
 
   // Static methods and attributes
   static void StaticMethod(const GlobalObject&, bool);
-  static void StaticMethodWithContext(const GlobalObject&, JSContext*,
-                                      JS::Value);
+  static void StaticMethodWithContext(const GlobalObject&, JS::Value);
   static bool StaticAttribute(const GlobalObject&);
   static void SetStaticAttribute(const GlobalObject&, bool);
 

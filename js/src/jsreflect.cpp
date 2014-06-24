@@ -3254,13 +3254,7 @@ reflect_parse(JSContext *cx, uint32_t argc, jsval *vp)
                 if (!str)
                     return false;
 
-                size_t length = str->length();
-                const jschar *chars = str->getChars(cx);
-                if (!chars)
-                    return false;
-
-                TwoByteChars tbchars(chars, length);
-                filename = LossyTwoByteCharsToNewLatin1CharsZ(cx, tbchars).c_str();
+                filename = JS_EncodeString(cx, str);
                 if (!filename)
                     return false;
             }
@@ -3300,11 +3294,16 @@ reflect_parse(JSContext *cx, uint32_t argc, jsval *vp)
     if (!flat)
         return false;
 
+    AutoStableStringChars flatChars(cx);
+    if (!flatChars.initTwoByte(cx, flat))
+        return false;
+
     CompileOptions options(cx);
     options.setFileAndLine(filename, lineno);
     options.setCanLazilyParse(false);
-    Parser<FullParseHandler> parser(cx, &cx->tempLifoAlloc(), options, flat->chars(),
-                                    flat->length(), /* foldConstants = */ false, nullptr, nullptr);
+    mozilla::Range<const jschar> chars = flatChars.twoByteRange();
+    Parser<FullParseHandler> parser(cx, &cx->tempLifoAlloc(), options, chars.start().get(),
+                                    chars.length(), /* foldConstants = */ false, nullptr, nullptr);
 
     serialize.setParser(&parser);
 

@@ -34,7 +34,7 @@ namespace dom {
 class BlobConstructorParams;
 class BlobParent;
 class ContentParent;
-struct IPCTabContext;
+class IPCTabContext;
 class PBlobParent;
 
 class nsIContentParent : public nsISupports

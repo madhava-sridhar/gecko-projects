@@ -1,4 +1,4 @@
-﻿/* This Source Code Form is subject to the terms of the Mozilla Public
+/* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
@@ -17,6 +17,15 @@ const iceStateTransitions = {
   "failed": ["new", "disconnected", "closed"],
   "closed": []
   }
+
+const signalingStateTransitions = {
+  "stable": ["have-local-offer", "have-remote-offer", "closed"],
+  "have-local-offer": ["have-remote-pranswer", "stable", "closed", "have-local-offer"],
+  "have-remote-pranswer": ["stable", "closed", "have-remote-pranswer"],
+  "have-remote-offer": ["have-local-pranswer", "stable", "closed", "have-remote-offer"],
+  "have-local-pranswer": ["stable", "closed", "have-local-pranswer"],
+  "closed": []
+}
 
 /**
  * This class mimics a state machine and handles a list of commands by
@@ -340,6 +349,15 @@ MediaElementChecker.prototype = {
 };
 
 /**
+ * Only calls info() if SimpleTest.info() is available
+ */
+function safeInfo(message) {
+  if (typeof(info) === "function") {
+    info(message);
+  }
+}
+
+/**
  * Query function for determining if any IP address is available for
  * generating SDP.
  *
@@ -363,18 +381,18 @@ function isNetworkReady() {
 
       for (var j = 0; j < length; j++) {
         var ip = ips.value[j];
-        // skip IPv6 address
+        // skip IPv6 address until bug 797262 is implemented
         if (ip.indexOf(":") < 0) {
-          info("Network interface is ready with address: " + ip);
+          safeInfo("Network interface is ready with address: " + ip);
           return true;
         }
       }
     }
     // ip address is not available
-    info("Network interface is not ready, required additional network setup");
+    safeInfo("Network interface is not ready, required additional network setup");
     return false;
   }
-  info("Network setup is not required");
+  safeInfo("Network setup is not required");
   return true;
 }
 
@@ -393,12 +411,12 @@ function getNetworkUtils() {
      *
      * @param aCallback callback after data connection is ready.
      */
-    prepareNetwork: function(aCallback) {
+    prepareNetwork: function(onSuccess) {
       script.addMessageListener('network-ready', function (message) {
         info("Network interface is ready");
-        aCallback();
+        onSuccess();
       });
-      info("Setup network interface");
+      info("Setting up network interface");
       script.sendAsyncMessage("prepare-network", true);
     },
     /**
@@ -406,17 +424,59 @@ function getNetworkUtils() {
      *
      * @param aCallback callback after data connection is closed.
      */
-    tearDownNetwork: function(aCallback) {
-      script.addMessageListener('network-disabled', function (message) {
-        ok(true, 'network-disabled');
-        script.destroy();
-        aCallback();
-      });
-      script.sendAsyncMessage("network-cleanup", true);
+    tearDownNetwork: function(onSuccess, onFailure) {
+      if (isNetworkReady()) {
+        script.addMessageListener('network-disabled', function (message) {
+          info("Network interface torn down");
+          script.destroy();
+          onSuccess();
+        });
+        info("Tearing down network interface");
+        script.sendAsyncMessage("network-cleanup", true);
+      } else {
+        info("No network to tear down");
+        onFailure();
+      }
     }
   };
 
   return utils;
+}
+
+/**
+ * Setup network on Gonk if needed and execute test once network is up
+ *
+ */
+function startNetworkAndTest(onSuccess) {
+  if (!isNetworkReady()) {
+    SimpleTest.waitForExplicitFinish();
+    var utils = getNetworkUtils();
+    // Trigger network setup to obtain IP address before creating any PeerConnection.
+    utils.prepareNetwork(onSuccess);
+  } else {
+    onSuccess();
+  }
+}
+
+/**
+ * A wrapper around SimpleTest.finish() to handle B2G network teardown
+ */
+function networkTestFinished() {
+  if ("nsINetworkInterfaceListService" in SpecialPowers.Ci) {
+    var utils = getNetworkUtils();
+    utils.tearDownNetwork(SimpleTest.finish, SimpleTest.finish);
+  } else {
+    SimpleTest.finish();
+  }
+}
+
+/**
+ * A wrapper around runTest() which handles B2G network setup and teardown
+ */
+function runNetworkTest(testFunction) {
+  startNetworkAndTest(function() {
+    runTest(testFunction);
+  });
 }
 
 /**
@@ -463,27 +523,6 @@ function PeerConnectionTest(options) {
     }
   }
 
-  var netTeardownCommand = null;
-  if (!isNetworkReady()) {
-    var utils = getNetworkUtils();
-    // Trigger network setup to obtain IP address before creating any PeerConnection.
-    utils.prepareNetwork(function() {
-      ok(isNetworkReady(),'setup network connection successfully');
-    });
-
-    netTeardownCommand = [
-      [
-        'TEARDOWN_NETWORK',
-        function(test) {
-          utils.tearDownNetwork(function() {
-            info('teardown network connection');
-            test.next();
-          });
-        }
-      ]
-    ];
-  }
-
   if (options.is_local)
     this.pcLocal = new PeerConnectionWrapper('pcLocal', options.config_local);
   else
@@ -501,11 +540,6 @@ function PeerConnectionTest(options) {
   }
   if (!options.is_remote) {
     this.chain.filterOut(/^PC_REMOTE/);
-  }
-
-  // Insert network teardown after testcase execution.
-  if (netTeardownCommand) {
-    this.chain.append(netTeardownCommand);
   }
 
   var self = this;
@@ -774,7 +808,7 @@ PeerConnectionTest.prototype.teardown = function PCT_teardown() {
   this.close(function () {
     info("Test finished");
     if (window.SimpleTest)
-      SimpleTest.finish();
+      networkTestFinished();
     else
       finish();
   });
@@ -1088,29 +1122,36 @@ DataChannelTest.prototype = Object.create(PeerConnectionTest.prototype, {
 
       function dataChannelConnected(channel) {
         clearTimeout(dcConnectionTimeout);
-        is(channel.readyState, "open", peer + " dataChannels[0] is in state: 'open'");
+        is(channel.readyState, "open", peer + " dataChannels[0] switched to state: 'open'");
         onSuccess();
       }
 
-      if ((peer.dataChannels.length >= 1) &&
-          (peer.dataChannels[0].readyState === "open")) {
-        is(peer.dataChannels[0].readyState, "open", peer + " dataChannels[0] is in state: 'open'");
-        onSuccess();
-        return;
+      if (peer.dataChannels.length >= 1) {
+        if (peer.dataChannels[0].readyState === "open") {
+          is(peer.dataChannels[0].readyState, "open", peer + " dataChannels[0] is already in state: 'open'");
+          onSuccess();
+          return;
+        } else {
+          is(peer.dataChannels[0].readyState, "connecting", peer + " dataChannels[0] is in state: 'connecting'");
+        }
+      } else {
+        info(peer + "'s dataChannels[] is empty");
       }
 
       // TODO: drno: convert dataChannels into an object and make
-      //             registerDataChannelOPenEvent a generic function
+      //             registerDataChannelOpenEvent a generic function
       if (peer == this.pcLocal) {
         peer.dataChannels[0].onopen = dataChannelConnected;
       } else {
         peer.registerDataChannelOpenEvents(dataChannelConnected);
       }
 
-      dcConnectionTimeout = setTimeout(function () {
-        info(peer + " timed out while waiting for dataChannels[0] to connect");
-        onFailure();
-      }, 60000);
+      if (onFailure) {
+        dcConnectionTimeout = setTimeout(function () {
+          info(peer + " timed out while waiting for dataChannels[0] to connect");
+          onFailure();
+        }, 60000);
+      }
     }
   }
 
@@ -1303,7 +1344,6 @@ function PeerConnectionWrapper(label, configuration) {
 
   info("Creating " + this);
   this._pc = new mozRTCPeerConnection(this.configuration);
-  is(this._pc.iceConnectionState, "new", "iceConnectionState starts at 'new'");
 
   /**
    * Setup callback handlers
@@ -1326,8 +1366,6 @@ function PeerConnectionWrapper(label, configuration) {
       self.next_ice_state = "";
     }
   };
-  this.ondatachannel = unexpectedEventAndFinish(this, 'ondatachannel');
-  this.onsignalingstatechange = unexpectedEventAndFinish(this, 'onsignalingstatechange');
 
   /**
    * Callback for native peer connection 'onaddstream' events.
@@ -1350,10 +1388,12 @@ function PeerConnectionWrapper(label, configuration) {
     self.attachMedia(event.stream, type, 'remote');
 
     Object.keys(self.addStreamCallbacks).forEach(function(name) {
-      info(this + " calling addStreamCallback " + name);
+      info(self + " calling addStreamCallback " + name);
       self.addStreamCallbacks[name]();
     });
    };
+
+  this.ondatachannel = unexpectedEventAndFinish(this, 'ondatachannel');
 
   /**
    * Callback for native peer connection 'ondatachannel' events. If no custom handler
@@ -1370,6 +1410,9 @@ function PeerConnectionWrapper(label, configuration) {
     self.ondatachannel = unexpectedEventAndFinish(self, 'ondatachannel');
   };
 
+  this.onsignalingstatechange = unexpectedEventAndFinish(this, 'onsignalingstatechange');
+  this.signalingStateCallbacks = {};
+
   /**
    * Callback for native peer connection 'onsignalingstatechange' events. If no
    * custom handler has been specified via 'this.onsignalingstatechange', a
@@ -1378,12 +1421,15 @@ function PeerConnectionWrapper(label, configuration) {
    * @param {Object} aEvent
    *        Event data which includes the newly created data channel
    */
-  this._pc.onsignalingstatechange = function (aEvent) {
+  this._pc.onsignalingstatechange = function (anEvent) {
     info(self + ": 'onsignalingstatechange' event fired");
 
+    Object.keys(self.signalingStateCallbacks).forEach(function(name) {
+      self.signalingStateCallbacks[name](anEvent);
+    });
     // this calls the eventhandler only once and then overwrites it with the
     // default unexpectedEvent handler
-    self.onsignalingstatechange(aEvent);
+    self.onsignalingstatechange(anEvent);
     self.onsignalingstatechange = unexpectedEventAndFinish(self, 'onsignalingstatechange');
   };
 }
@@ -1646,6 +1692,28 @@ PeerConnectionWrapper.prototype = {
   },
 
   /**
+   * Registers a callback for the signaling state change and
+   * appends the new state to an array for logging it later.
+   */
+  logSignalingState: function PCW_logSignalingState() {
+    var self = this;
+
+    function _logSignalingState(state) {
+      var newstate = self._pc.signalingState;
+      var oldstate = self.signalingStateLog[self.signalingStateLog.length - 1]
+      if (Object.keys(signalingStateTransitions).indexOf(oldstate) != -1) {
+        ok(signalingStateTransitions[oldstate].indexOf(newstate) != -1, self + ": legal signaling state transition from " + oldstate + " to " + newstate);
+      } else {
+        ok(false, self + ": old signaling state " + oldstate + " missing in signaling transition array");
+      }
+      self.signalingStateLog.push(newstate);
+    }
+
+    self.signalingStateLog = [self._pc.signalingState];
+    self.signalingStateCallbacks.logSignalingStatus = _logSignalingState;
+  },
+
+  /**
    * Adds an ICE candidate and automatically handles the failure case.
    *
    * @param {object} candidate
@@ -1732,11 +1800,11 @@ PeerConnectionWrapper.prototype = {
       var newstate = self._pc.iceConnectionState;
       var oldstate = self.iceConnectionLog[self.iceConnectionLog.length - 1]
       if (Object.keys(iceStateTransitions).indexOf(oldstate) != -1) {
-        ok(iceStateTransitions[oldstate].indexOf(newstate) != -1, "Legal ICE state transition from " + oldstate + " to " + newstate);
+        ok(iceStateTransitions[oldstate].indexOf(newstate) != -1, self + ": legal ICE state transition from " + oldstate + " to " + newstate);
       } else {
-        ok(false, "Old ICE state " + oldstate + " missing in ICE transition array");
+        ok(false, self + ": old ICE state " + oldstate + " missing in ICE transition array");
       }
-      self.iceConnectionLog.push(self._pc.iceConnectionState);
+      self.iceConnectionLog.push(newstate);
     }
 
     self.iceConnectionLog = [self._pc.iceConnectionState];
@@ -1859,8 +1927,8 @@ PeerConnectionWrapper.prototype = {
     var addStreamTimeout = null;
 
     function _checkMediaTracks(constraintsRemote, onSuccess) {
-      if (self.addStreamTimeout !== null) {
-        clearTimeout(self.addStreamTimeout);
+      if (addStreamTimeout !== null) {
+        clearTimeout(addStreamTimeout);
       }
 
       var localConstraintAudioTracks =
@@ -1909,8 +1977,10 @@ PeerConnectionWrapper.prototype = {
         _checkMediaTracks(constraintsRemote, onSuccess);
       };
       addStreamTimeout = setTimeout(function () {
-        ok(false, self + " checkMediaTracks() timed out waiting for onaddstream event to fire");
-        onSuccess();
+        ok(self.onAddStreamFired, self + " checkMediaTracks() timed out waiting for onaddstream event to fire");
+        if (!self.onAddStreamFired) {
+          onSuccess();
+        }
       }, 60000);
     }
   },

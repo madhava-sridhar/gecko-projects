@@ -28,9 +28,12 @@ this.Translation = {
   STATE_TRANSLATING: 1,
   STATE_TRANSLATED: 2,
   STATE_ERROR: 3,
+  STATE_UNAVAILABLE: 4,
 
-  supportedSourceLanguages: ["en", "zh", "ja", "es", "de", "fr", "ru", "ar", "ko", "pt"],
-  supportedTargetLanguages: ["en", "pl", "tr", "vi"],
+  serviceUnavailable: false,
+
+  supportedSourceLanguages: ["zh", "de", "en", "fr", "ja", "ko", "pt", "ru", "es"],
+  supportedTargetLanguages: ["zh", "de", "en", "fr", "ja", "ko", "pt", "ru", "es"],
 
   _defaultTargetLanguage: "",
   get defaultTargetLanguage() {
@@ -45,9 +48,16 @@ this.Translation = {
 
   documentStateReceived: function(aBrowser, aData) {
     if (aData.state == this.STATE_OFFER) {
-      if (this.supportedSourceLanguages.indexOf(aData.detectedLanguage) == -1 ||
-          aData.detectedLanguage == this.defaultTargetLanguage)
+      if (aData.detectedLanguage == this.defaultTargetLanguage) {
+        // Detected language is the same as the user's locale.
         return;
+      }
+
+      if (this.supportedSourceLanguages.indexOf(aData.detectedLanguage) == -1) {
+        // Detected language is not part of the supported languages.
+        TranslationHealthReport.recordMissedTranslationOpportunity(aData.detectedLanguage);
+        return;
+      }
 
       TranslationHealthReport.recordTranslationOpportunity(aData.detectedLanguage);
     }
@@ -70,6 +80,12 @@ this.Translation = {
 
     if (trUI.shouldShowInfoBar(aBrowser.currentURI))
       trUI.showTranslationInfoBar();
+  },
+
+  openProviderAttribution: function() {
+    Cu.import("resource:///modules/RecentWindow.jsm");
+    RecentWindow.getMostRecentBrowserWindow().openUILinkIn(
+      "http://aka.ms/MicrosoftTranslatorAttribution", "tab");
   }
 };
 
@@ -90,10 +106,16 @@ this.Translation = {
  */
 function TranslationUI(aBrowser) {
   this.browser = aBrowser;
-  aBrowser.messageManager.addMessageListener("Translation:Finished", this);
 }
 
 TranslationUI.prototype = {
+  get browser() this._browser,
+  set browser(aBrowser) {
+    if (this._browser)
+      this._browser.messageManager.removeMessageListener("Translation:Finished", this);
+    aBrowser.messageManager.addMessageListener("Translation:Finished", this);
+    this._browser = aBrowser;
+  },
   translate: function(aFrom, aTo) {
     if (aFrom == aTo ||
         (this.state == Translation.STATE_TRANSLATED &&
@@ -121,7 +143,17 @@ TranslationUI.prototype = {
     if (notification)
       PopupNotifications.remove(notification);
 
-    let callback = aTopic => {
+    let callback = (aTopic, aNewBrowser) => {
+      if (aTopic == "swapping") {
+        let infoBarVisible =
+          this.notificationBox.getNotificationWithValue("translation");
+        aNewBrowser.translationUI = this;
+        this.browser = aNewBrowser;
+        if (infoBarVisible)
+          this.showTranslationInfoBar();
+        return true;
+      }
+
       if (aTopic != "showing")
         return false;
       let notification = this.notificationBox.getNotificationWithValue("translation");
@@ -171,6 +203,11 @@ TranslationUI.prototype = {
   },
 
   shouldShowInfoBar: function(aURI) {
+    // Never show the infobar automatically while the translation
+    // service is temporarily unavailable.
+    if (Translation.serviceUnavailable)
+      return false;
+
     // Check if we should never show the infobar for this language.
     let neverForLangs =
       Services.prefs.getCharPref("browser.translation.neverForLanguages");
@@ -210,6 +247,9 @@ TranslationUI.prototype = {
           // Record the number of characters translated.
           TranslationHealthReport.recordTranslation(msg.data.from, msg.data.to,
                                                     msg.data.characterCount);
+        } else if (msg.data.unavailable) {
+          Translation.serviceUnavailable = true;
+          this.state = Translation.STATE_UNAVAILABLE;
         } else {
           this.state = Translation.STATE_ERROR;
         }
@@ -230,6 +270,17 @@ let TranslationHealthReport = {
   recordTranslationOpportunity: function (language) {
     this._withProvider(provider => provider.recordTranslationOpportunity(language));
    },
+
+  /**
+   * Record a missed translation opportunity in the health report.
+   * A missed opportunity is when the language detected is not part
+   * of the supported languages.
+   * @param language
+   *        The language of the page.
+   */
+  recordMissedTranslationOpportunity: function (language) {
+    this._withProvider(provider => provider.recordMissedTranslationOpportunity(language));
+  },
 
    /**
    * Record a translation in the health report.
@@ -258,6 +309,13 @@ let TranslationHealthReport = {
    */
   recordLanguageChange: function (beforeFirstTranslation) {
     this._withProvider(provider => provider.recordLanguageChange(beforeFirstTranslation));
+  },
+
+  /**
+   * Record a denied translation offer.
+   */
+  recordDeniedTranslationOffer: function () {
+    this._withProvider(provider => provider.recordDeniedTranslationOffer());
   },
 
   /**
@@ -310,12 +368,15 @@ TranslationMeasurement1.prototype = Object.freeze({
 
   fields: {
     translationOpportunityCount: DAILY_COUNTER_FIELD,
+    missedTranslationOpportunityCount: DAILY_COUNTER_FIELD,
     pageTranslatedCount: DAILY_COUNTER_FIELD,
     charactersTranslatedCount: DAILY_COUNTER_FIELD,
     translationOpportunityCountsByLanguage: DAILY_LAST_TEXT_FIELD,
+    missedTranslationOpportunityCountsByLanguage: DAILY_LAST_TEXT_FIELD,
     pageTranslatedCountsByLanguage: DAILY_LAST_TEXT_FIELD,
     detectedLanguageChangedBefore: DAILY_COUNTER_FIELD,
     detectedLanguageChangedAfter: DAILY_COUNTER_FIELD,
+    deniedTranslationOffer: DAILY_COUNTER_FIELD,
     detectLanguageEnabled: DAILY_LAST_NUMERIC_FIELD,
     showTranslationUI: DAILY_LAST_NUMERIC_FIELD,
   },
@@ -357,6 +418,7 @@ TranslationMeasurement1.prototype = Object.freeze({
       // Special case the serialization of these fields so that
       // they are sent as objects, not stringified objects.
       _parseInPlace(result, "translationOpportunityCountsByLanguage");
+      _parseInPlace(result, "missedTranslationOpportunityCountsByLanguage");
       _parseInPlace(result, "pageTranslatedCountsByLanguage");
 
       return result;
@@ -396,6 +458,25 @@ TranslationProvider.prototype = Object.freeze({
     }.bind(this));
   },
 
+  recordMissedTranslationOpportunity: function (language, date=new Date()) {
+    let m = this.getMeasurement(TranslationMeasurement1.prototype.name,
+                                TranslationMeasurement1.prototype.version);
+
+    return this._enqueueTelemetryStorageTask(function* recordTask() {
+      yield m.incrementDailyCounter("missedTranslationOpportunityCount", date);
+
+      let langCounts = yield m._getDailyLastTextFieldAsJSON(
+        "missedTranslationOpportunityCountsByLanguage", date);
+
+      langCounts[language] = (langCounts[language] || 0) + 1;
+      langCounts = JSON.stringify(langCounts);
+
+      yield m.setDailyLastText("missedTranslationOpportunityCountsByLanguage",
+                               langCounts, date);
+
+    }.bind(this));
+  },
+
   recordTranslation: function (langFrom, langTo, numCharacters, date=new Date()) {
     let m = this.getMeasurement(TranslationMeasurement1.prototype.name,
                                 TranslationMeasurement1.prototype.version);
@@ -429,6 +510,15 @@ TranslationProvider.prototype = Object.freeze({
         } else {
           yield m.incrementDailyCounter("detectedLanguageChangedAfter");
         }
+    }.bind(this));
+  },
+
+  recordDeniedTranslationOffer: function () {
+    let m = this.getMeasurement(TranslationMeasurement1.prototype.name,
+                                TranslationMeasurement1.prototype.version);
+
+    return this._enqueueTelemetryStorageTask(function* recordTask() {
+      yield m.incrementDailyCounter("deniedTranslationOffer");
     }.bind(this));
   },
 

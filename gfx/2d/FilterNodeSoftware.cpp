@@ -19,22 +19,7 @@
 // #define DEBUG_DUMP_SURFACES
 
 #ifdef DEBUG_DUMP_SURFACES
-#include "gfxImageSurface.h"
-namespace mozilla {
-namespace gfx {
-static void
-DumpAsPNG(SourceSurface* aSurface)
-{
-  RefPtr<DataSourceSurface> dataSource = aSurface->GetDataSurface();
-  IntSize size = dataSource->GetSize();
-  nsRefPtr<gfxImageSurface> imageSurface =
-    new gfxImageSurface(dataSource->GetData(), gfxIntSize(size.width, size.height),
-                        dataSource->Stride(),
-                        aSurface->GetFormat() == SurfaceFormat::A8 ? gfxImageFormat::A8 : gfxImageFormat::ARGB32);
-  imageSurface->PrintAsDataURL();
-}
-} // namespace gfx
-} // namespace mozilla
+#include "gfxUtils.h" // not part of Moz2D
 #endif
 
 namespace mozilla {
@@ -672,7 +657,7 @@ FilterNodeSoftware::Draw(DrawTarget* aDrawTarget,
 
 #ifdef DEBUG_DUMP_SURFACES
   printf("output from %s:\n", GetName());
-  printf("<img src='"); DumpAsPNG(result); printf("'>\n");
+  printf("<img src='"); gfxUtils::DumpAsDataURL(result); printf("'>\n");
   printf("</pre>\n");
 #endif
 
@@ -852,7 +837,7 @@ FilterNodeSoftware::GetInputDataSourceSurface(uint32_t aInputEnumIndex,
   }
 
 #ifdef DEBUG_DUMP_SURFACES
-  printf("<img src='"); DumpAsPNG(result); printf("'></section>");
+  printf("<img src='"); gfxUtils::DumpAsDataURL(result); printf("'></section>");
 #endif
 
   MOZ_ASSERT(!result || result->GetSize() == aRect.Size(), "wrong surface size");
@@ -2225,15 +2210,6 @@ ColorComponentAtPoint(const uint8_t *aData, int32_t aStride, Float x, Float y, s
   const uint8_t &cuu = ColorComponentAtPoint(aData, aStride, lx + 1, ly + 1, bpp, c);
   return ((cll * tlx + cul * tux) * tly +
           (clu * tlx + cuu * tux) * tuy + f * f / 2) / (f * f);
-}
-
-static inline uint32_t
-ColorAtPoint(const uint8_t *aData, int32_t aStride, Float x, Float y)
-{
-  return ColorComponentAtPoint(aData, aStride, x, y, 4, 0) |
-         (ColorComponentAtPoint(aData, aStride, x, y, 4, 1) << 8) |
-         (ColorComponentAtPoint(aData, aStride, x, y, 4, 2) << 16) |
-         (ColorComponentAtPoint(aData, aStride, x, y, 4, 3) << 24);
 }
 
 static int32_t

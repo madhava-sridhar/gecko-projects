@@ -813,23 +813,17 @@ static PLDHashOperator
 EnumAppendAllSheets(nsRefPtrHashKey<nsIContent> *aKey, void* aClosure)
 {
   nsIContent *boundContent = aKey->GetKey();
-  nsTArray<nsCSSStyleSheet*>* array =
-    static_cast<nsTArray<nsCSSStyleSheet*>*>(aClosure);
+  nsTArray<CSSStyleSheet*>* array =
+    static_cast<nsTArray<CSSStyleSheet*>*>(aClosure);
   for (nsXBLBinding *binding = boundContent->GetXBLBinding(); binding;
        binding = binding->GetBaseBinding()) {
-    nsXBLPrototypeResources::sheet_array_type* sheets =
-      binding->PrototypeBinding()->GetStyleSheets();
-    if (sheets) {
-      // Copy from nsTArray<nsRefPtr<nsCSSStyleSheet> > to
-      // nsTArray<nsCSSStyleSheet*>.
-      array->AppendElements(*sheets);
-    }
+    binding->PrototypeBinding()->AppendStyleSheetsTo(*array);
   }
   return PL_DHASH_NEXT;
 }
 
 void
-nsBindingManager::AppendAllSheets(nsTArray<nsCSSStyleSheet*>& aArray)
+nsBindingManager::AppendAllSheets(nsTArray<CSSStyleSheet*>& aArray)
 {
   if (mBoundContentSet) {
     mBoundContentSet->EnumerateEntries(EnumAppendAllSheets, &aArray);
@@ -840,12 +834,12 @@ static void
 InsertAppendedContent(XBLChildrenElement* aPoint,
                       nsIContent* aFirstNewContent)
 {
-  size_t insertionIndex;
+  int32_t insertionIndex;
   if (nsIContent* prevSibling = aFirstNewContent->GetPreviousSibling()) {
     // If we have a previous sibling, then it must already be in aPoint. Find
     // it and insert after it.
     insertionIndex = aPoint->IndexOfInsertedChild(prevSibling);
-    MOZ_ASSERT(insertionIndex != aPoint->NoIndex);
+    MOZ_ASSERT(insertionIndex != -1);
 
     // Our insertion index is one after our previous sibling's index.
     ++insertionIndex;
@@ -853,7 +847,7 @@ InsertAppendedContent(XBLChildrenElement* aPoint,
     // Otherwise, we append.
     // TODO This is wrong for nested insertion points. In that case, we need to
     // keep track of the right index to insert into.
-    insertionIndex = aPoint->mInsertedChildren.Length();
+    insertionIndex = aPoint->InsertedChildrenLength();
   }
 
   // Do the inserting.
@@ -1083,15 +1077,15 @@ nsBindingManager::HandleChildInsertion(nsIContent* aContainer,
     // TODO If there were multiple insertion points, this approximation can be
     // wrong. We need to re-run the distribution algorithm. In the meantime,
     // this should work well enough.
-    size_t index = aAppend ? point->mInsertedChildren.Length() : 0;
+    uint32_t index = aAppend ? point->InsertedChildrenLength() : 0;
     for (nsIContent* currentSibling = aChild->GetPreviousSibling();
          currentSibling;
          currentSibling = currentSibling->GetPreviousSibling()) {
       // If we find one of our previous siblings in the insertion point, the
       // index following it is the correct insertion point. Otherwise, we guess
       // based on whether we're appending or inserting.
-      size_t pointIndex = point->IndexOfInsertedChild(currentSibling);
-      if (pointIndex != point->NoIndex) {
+      int32_t pointIndex = point->IndexOfInsertedChild(currentSibling);
+      if (pointIndex != -1) {
         index = pointIndex + 1;
         break;
       }

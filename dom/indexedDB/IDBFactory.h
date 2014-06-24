@@ -34,7 +34,7 @@ class PrincipalInfo;
 
 namespace dom {
 
-class IDBOpenDBOptions;
+struct IDBOpenDBOptions;
 class TabChild;
 
 namespace indexedDB {

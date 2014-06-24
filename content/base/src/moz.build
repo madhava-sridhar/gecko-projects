@@ -5,6 +5,7 @@
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 EXPORTS += [
+    'AutocompleteFieldList.h',
     'mozAutoDocUpdate.h',
     'nsAtomListUtils.h',
     'nsAttrAndChildArray.h',
@@ -146,7 +147,6 @@ UNIFIED_SOURCES += [
     'nsMixedContentBlocker.cpp',
     'nsNameSpaceManager.cpp',
     'nsNoDataProtocolContentPolicy.cpp',
-    'nsNodeInfo.cpp',
     'nsNodeUtils.cpp',
     'nsPlainTextSerializer.cpp',
     'nsPropertyTable.cpp',

@@ -360,7 +360,7 @@ nsXBLBinding::GenerateAnonymousContent()
         if (point) {
           point->AppendInsertedChild(child);
         } else {
-          nsINodeInfo *ni = child->NodeInfo();
+          NodeInfo *ni = child->NodeInfo();
           if (ni->NamespaceID() != kNameSpaceID_XUL ||
               (!ni->Equals(nsGkAtoms::_template) &&
                !ni->Equals(nsGkAtoms::observes))) {
@@ -702,7 +702,7 @@ UpdateInsertionParent(XBLChildrenElement* aPoint,
   }
 
   for (size_t i = 0; i < aPoint->InsertedChildrenLength(); ++i) {
-    nsIContent* child = aPoint->mInsertedChildren[i];
+    nsIContent* child = aPoint->InsertedChild(i);
 
     MOZ_ASSERT(child->GetParentNode());
 

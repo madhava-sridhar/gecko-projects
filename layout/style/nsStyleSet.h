@@ -13,10 +13,10 @@
 #define nsStyleSet_h_
 
 #include "mozilla/Attributes.h"
+#include "mozilla/CSSStyleSheet.h"
 #include "mozilla/MemoryReporting.h"
 
 #include "nsIStyleRuleProcessor.h"
-#include "nsCSSStyleSheet.h"
 #include "nsBindingManager.h"
 #include "nsRuleNode.h"
 #include "nsTArray.h"
@@ -338,7 +338,7 @@ class nsStyleSet
     --mUnusedRuleNodeCount;
   }
 
-  nsCSSStyleSheet::EnsureUniqueInnerResult EnsureUniqueInnerOnCSSSheets();
+  mozilla::CSSStyleSheet::EnsureUniqueInnerResult EnsureUniqueInnerOnCSSSheets();
 
   nsIStyleRule* InitialStyleRule();
 
@@ -407,7 +407,7 @@ class nsStyleSet
     // or "display: grid" but we can tell we're not going to honor that (e.g. if
     // it's the outer frame of a button widget, and we're the inline frame for
     // the button's label).
-    eSkipFlexOrGridItemStyleFixup = 1 << 3
+    eSkipParentDisplayBasedStyleFixup = 1 << 3
   };
 
   already_AddRefed<nsStyleContext>

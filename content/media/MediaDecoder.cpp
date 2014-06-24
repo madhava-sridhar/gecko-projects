@@ -429,6 +429,7 @@ MediaDecoder::MediaDecoder() :
   mIgnoreProgressData(false),
   mInfiniteStream(false),
   mOwner(nullptr),
+  mPlaybackStatistics(new MediaChannelStatistics()),
   mPinnedForSeek(false),
   mShuttingDown(false),
   mPausedForPlaybackRateNull(false),
@@ -940,7 +941,7 @@ double MediaDecoder::ComputePlaybackRate(bool* aReliable)
     *aReliable = true;
     return length * static_cast<double>(USECS_PER_S) / mDuration;
   }
-  return mPlaybackStatistics.GetRateAtLastStop(aReliable);
+  return mPlaybackStatistics->GetRateAtLastStop(aReliable);
 }
 
 void MediaDecoder::UpdatePlaybackRate()
@@ -1032,7 +1033,7 @@ void MediaDecoder::NotifyBytesConsumed(int64_t aBytes, int64_t aOffset)
     return;
   }
   if (aOffset >= mDecoderPosition) {
-    mPlaybackStatistics.AddBytes(aBytes);
+    mPlaybackStatistics->AddBytes(aBytes);
   }
   mDecoderPosition = aOffset + aBytes;
 }
@@ -1528,7 +1529,7 @@ int64_t MediaDecoder::GetEndMediaTime() const {
 }
 
 // Drop reference to state machine.  Only called during shutdown dance.
-void MediaDecoder::ReleaseStateMachine() {
+void MediaDecoder::BreakCycles() {
   mDecoderStateMachine = nullptr;
 }
 
@@ -1743,7 +1744,7 @@ MediaDecoder::IsAppleMP3Enabled()
 
 NS_IMETHODIMP
 MediaMemoryTracker::CollectReports(nsIHandleReportCallback* aHandleReport,
-                                   nsISupports* aData)
+                                   nsISupports* aData, bool aAnonymize)
 {
   int64_t video = 0, audio = 0;
   size_t resources = 0;

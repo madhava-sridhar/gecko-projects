@@ -20,12 +20,12 @@ interface nsITelephonyListener : nsISupports
    *        Number of the other party.
    * @param numberPresentation
    *        Presentation of the call number.
-   *        One of the nsITelephonyService::CALL_PRESENTATION_* values.
+   *        One of the nsITelephonyProvider::CALL_PRESENTATION_* values.
    * @param name
    *        Name of the other party.
    * @param namePresentation
    *        Presentation of the call name.
-   *        One of the nsITelephonyService::CALL_PRESENTATION_* values.
+   *        One of the nsITelephonyProvider::CALL_PRESENTATION_* values.
    * @param isOutgoing
    *        Indicates whether this call is outgoing or incoming.
    * @param isEmergency
@@ -84,12 +84,12 @@ interface nsITelephonyListener : nsISupports
    *        Number of the other party.
    * @param numberPresentation
    *        Presentation of the call number.
-   *        One of the nsITelephonyService::CALL_PRESENTATION_* values.
+   *        One of the nsITelephonyProvider::CALL_PRESENTATION_* values.
    * @param name
    *        Name of the other party.
    * @param namePresentation
    *        Presentation of the call name.
-   *        One of the nsITelephonyService::CALL_PRESENTATION_* values.
+   *        One of the nsITelephonyProvider::CALL_PRESENTATION_* values.
    * @param isOutgoing
    *        Indicates whether this call is outgoing or incoming.
    * @param isConference
@@ -151,12 +151,12 @@ interface nsITelephonyListener : nsISupports
    *        Number of the other party.
    * @param numberPresentation
    *        Presentation of the call number.
-   *        One of the nsITelephonyService::CALL_PRESENTATION_* values.
+   *        One of the nsITelephonyProvider::CALL_PRESENTATION_* values.
    * @param name
    *        Name of the other party.
    * @param namePresentation
    *        Presentation of the call name.
-   *        One of the nsITelephonyService::CALL_PRESENTATION_* values.
+   *        One of the nsITelephonyProvider::CALL_PRESENTATION_* values.
    */
   void notifyCdmaCallWaiting(in unsigned long clientId,
                              in AString number,

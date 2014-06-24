@@ -24,135 +24,14 @@ XPCOMUtils.defineLazyModuleGetter(this, "CommonUtils",
 XPCOMUtils.defineLazyModuleGetter(this, "CryptoUtils",
                                   "resource://services-crypto/utils.js");
 
-XPCOMUtils.defineLazyModuleGetter(this, "HAWKAuthenticatedRESTRequest",
+XPCOMUtils.defineLazyModuleGetter(this, "HawkClient",
+                                  "resource://services-common/hawkclient.js");
+
+XPCOMUtils.defineLazyModuleGetter(this, "deriveHawkCredentials",
                                   "resource://services-common/hawkrequest.js");
 
-/**
- * We don't have push notifications on desktop currently, so this is a
- * workaround to get them going for us.
- *
- * XXX Handle auto-reconnections if connection fails for whatever reason
- * (bug 1013248).
- */
-let PushHandlerHack = {
-  // This is the uri of the push server.
-  pushServerUri: Services.prefs.getCharPref("services.push.serverURL"),
-  // This is the channel id we're using for notifications
-  channelID: "8b1081ce-9b35-42b5-b8f5-3ff8cb813a50",
-  // Stores the push url if we're registered and we have one.
-  pushUrl: undefined,
-
-  /**
-   * Call to start the connection to the push socket server. On
-   * connection, it will automatically say hello and register the channel
-   * id with the server.
-   *
-   * Register callback parameters:
-   * - {String|null} err: Encountered error, if any
-   * - {String} url: The push url obtained from the server
-   *
-   * @param {Function} registerCallback Callback to be called once we are
-   *                     registered.
-   * @param {Function} notificationCallback Callback to be called when a
-   *                     push notification is received.
-   */
-  initialize: function(registerCallback, notificationCallback) {
-    if (Services.io.offline) {
-      registerCallback("offline");
-      return;
-    }
-
-    this._registerCallback = registerCallback;
-    this._notificationCallback = notificationCallback;
-
-    this.websocket = Cc["@mozilla.org/network/protocol;1?name=wss"]
-                       .createInstance(Ci.nsIWebSocketChannel);
-
-    this.websocket.protocol = "push-notification";
-
-    var pushURI = Services.io.newURI(this.pushServerUri, null, null);
-    this.websocket.asyncOpen(pushURI, this.pushServerUri, this, null);
-  },
-
-  /**
-   * Listener method, handles the start of the websocket stream.
-   * Sends a hello message to the server.
-   *
-   * @param {nsISupports} aContext Not used
-   */
-  onStart: function() {
-    var helloMsg = { messageType: "hello", uaid: "", channelIDs: [] };
-    this.websocket.sendMsg(JSON.stringify(helloMsg));
-  },
-
-  /**
-   * Listener method, called when the websocket is closed.
-   *
-   * @param {nsISupports} aContext Not used
-   * @param {nsresult} aStatusCode Reason for stopping (NS_OK = successful)
-   */
-  onStop: function(aContext, aStatusCode) {
-    // XXX We really should be handling auto-reconnect here, this will be
-    // implemented in bug 994151. For now, just log a warning, so that a
-    // developer can find out it has happened and not get too confused.
-    Cu.reportError("Loop Push server web socket closed! Code: " + aStatusCode);
-    this.pushUrl = undefined;
-  },
-
-  /**
-   * Listener method, called when the websocket is closed by the server.
-   * If there are errors, onStop may be called without ever calling this
-   * method.
-   *
-   * @param {nsISupports} aContext Not used
-   * @param {integer} aCode the websocket closing handshake close code
-   * @param {String} aReason the websocket closing handshake close reason
-   */
-  onServerClose: function(aContext, aCode) {
-    // XXX We really should be handling auto-reconnect here, this will be
-    // implemented in bug 994151. For now, just log a warning, so that a
-    // developer can find out it has happened and not get too confused.
-    Cu.reportError("Loop Push server web socket closed (server)! Code: " + aCode);
-    this.pushUrl = undefined;
-  },
-
-  /**
-   * Listener method, called when the websocket receives a message.
-   *
-   * @param {nsISupports} aContext Not used
-   * @param {String} aMsg The message data
-   */
-  onMessageAvailable: function(aContext, aMsg) {
-    var msg = JSON.parse(aMsg);
-
-    switch(msg.messageType) {
-      case "hello":
-        this._registerChannel();
-        break;
-      case "register":
-        this.pushUrl = msg.pushEndpoint;
-        this._registerCallback(null, this.pushUrl);
-        break;
-      case "notification":
-        msg.updates.forEach(function(update) {
-          if (update.channelID === this.channelID) {
-            this._notificationCallback(update.version);
-          }
-        }.bind(this));
-        break;
-    }
-  },
-
-  /**
-   * Handles registering a service
-   */
-  _registerChannel: function() {
-    this.websocket.sendMsg(JSON.stringify({
-      messageType: "register",
-      channelID: this.channelID
-    }));
-  }
-};
+XPCOMUtils.defineLazyModuleGetter(this, "MozLoopPushHandler",
+                                  "resource:///modules/loop/MozLoopPushHandler.jsm");
 
 /**
  * Internal helper methods and state
@@ -238,10 +117,12 @@ let MozLoopServiceInternal = {
    * Starts registration of Loop with the push server, and then will register
    * with the Loop server. It will return early if already registered.
    *
+   * @param {Object} mockPushHandler Optional, test-only mock push handler. Used
+   *                                 to allow mocking of the MozLoopPushHandler.
    * @returns {Promise} a promise that is resolved with no params on completion, or
    *          rejected with an error code or string.
    */
-  promiseRegisteredWithServers: function() {
+  promiseRegisteredWithServers: function(mockPushHandler) {
     if (this._registeredDeferred) {
       return this._registeredDeferred.promise;
     }
@@ -251,38 +132,68 @@ let MozLoopServiceInternal = {
     // it back to null on error.
     let result = this._registeredDeferred.promise;
 
-    PushHandlerHack.initialize(this.onPushRegistered.bind(this),
-                               this.onHandleNotification.bind(this));
+    this._pushHandler = mockPushHandler || MozLoopPushHandler;
+
+    this._pushHandler.initialize(this.onPushRegistered.bind(this),
+      this.onHandleNotification.bind(this));
 
     return result;
   },
 
   /**
-   * Derives hawk credentials for the given token and context.
+   * Performs a hawk based request to the loop server.
    *
-   * @param {String} tokenHex The token value in hex.
-   * @param {String} context  The context for the token.
+   * @param {String} path The path to make the request to.
+   * @param {String} method The request method, e.g. 'POST', 'GET'.
+   * @param {Object} payloadObj An object which is converted to JSON and
+   *                            transmitted with the request.
    */
-  deriveHawkCredentials: function(tokenHex, context) {
-    const PREFIX_NAME = "identity.mozilla.com/picl/v1/";
+  hawkRequest: function(path, method, payloadObj) {
+    if (!this._hawkClient) {
+      this._hawkClient = new HawkClient(this.loopServerUri);
+    }
 
-    let token = CommonUtils.hexToBytes(tokenHex);
-    let keyWord = CommonUtils.stringToBytes(PREFIX_NAME + context);
+    let sessionToken;
+    try {
+      sessionToken = Services.prefs.getCharPref("loop.hawk-session-token");
+    } catch (x) {
+      // It is ok for this not to exist, we'll default to sending no-creds
+    }
 
-    // XXX Using 2 * 32 for now to be in sync with client.js, but we might
-    // want to make this 3 * 32 to allow for extra, if we start using the extra
-    // field.
-    let out = CryptoUtils.hkdf(token, undefined, keyWord, 2 * 32);
+    let credentials;
+    if (sessionToken) {
+      credentials = deriveHawkCredentials(sessionToken, "sessionToken", 2 * 32);
+    }
 
-    return {
-      algorithm: "sha256",
-      key: out.slice(32, 64),
-      id: CommonUtils.bytesAsHex(out.slice(0, 32))
-    };
+    return this._hawkClient.request(path, method, credentials, payloadObj);
   },
 
   /**
-   * Callback from PushHandlerHack - The push server has been registered
+   * Used to store a session token from a request if it exists in the headers.
+   *
+   * @param {Object} headers The request headers, which may include a
+   *                         "hawk-session-token" to be saved.
+   * @return true on success or no token, false on failure.
+   */
+  storeSessionToken: function(headers) {
+    let sessionToken = headers["hawk-session-token"];
+    if (sessionToken) {
+      // XXX should do more validation here
+      if (sessionToken.length === 64) {
+        Services.prefs.setCharPref("loop.hawk-session-token", sessionToken);
+      } else {
+        // XXX Bubble the precise details up to the UI somehow (bug 1013248).
+        console.warn("Loop server sent an invalid session token");
+        this._registeredDeferred.reject("session-token-wrong-size");
+        this._registeredDeferred = null;
+        return false;
+      }
+    }
+    return true;
+  },
+
+  /**
+   * Callback from MozLoopPushHandler - The push server has been registered
    * and has given us a push url.
    *
    * @param {String} pushUrl The push url given by the push server.
@@ -304,43 +215,42 @@ let MozLoopServiceInternal = {
    * @param {Boolean} noRetry Optional, don't retry if authentication fails.
    */
   registerWithLoopServer: function(pushUrl, noRetry) {
-    let sessionToken;
-    try {
-      sessionToken = Services.prefs.getCharPref("loop.hawk-session-token");
-    } catch (x) {
-      // It is ok for this not to exist, we'll default to sending no-creds
-    }
+    this.hawkRequest("/registration", "POST", { simple_push_url: pushUrl})
+      .then((response) => {
+        // If this failed we got an invalid token. storeSessionToken rejects
+        // the _registeredDeferred promise for us, so here we just need to
+        // early return.
+        if (!this.storeSessionToken(response.headers))
+          return;
 
-    let credentials;
-    if (sessionToken) {
-      credentials = this.deriveHawkCredentials(sessionToken, "sessionToken");
-    }
+        this.registeredLoopServer = true;
+        this._registeredDeferred.resolve();
+        // No need to clear the promise here, everything was good, so we don't need
+        // to re-register.
+      }, (error) => {
+        if (error.errno == 401) {
+          if (this.urlExpiryTimeIsInFuture()) {
+            // XXX Should this be reported to the user is a visible manner?
+            Cu.reportError("Loop session token is invalid, all previously "
+                           + "generated urls will no longer work.");
+          }
 
-    let uri = Services.io.newURI(this.loopServerUri, null, null).resolve("/registration");
-    this.loopXhr = new HAWKAuthenticatedRESTRequest(uri, credentials);
-
-    this.loopXhr.dispatch('POST', { simple_push_url: pushUrl }, (error) => {
-      if (this.loopXhr.response.status == 401) {
-        if (this.urlExpiryTimeIsInFuture()) {
-          // XXX Should this be reported to the user is a visible manner?
-          Cu.reportError("Loop session token is invalid, all previously "
-                         + "generated urls will no longer work.");
+          // Authorization failed, invalid token, we need to try again with a new token.
+          Services.prefs.clearUserPref("loop.hawk-session-token");
+          this.registerWithLoopServer(pushUrl, true);
+          return;
         }
 
-        // Authorization failed, invalid token, we need to try again with a new token.
-        Services.prefs.clearUserPref("loop.hawk-session-token");
-        this.registerWithLoopServer(pushUrl, true);
-
-        return;
+        // XXX Bubble the precise details up to the UI somehow (bug 1013248).
+        Cu.reportError("Failed to register with the loop server. error: " + error);
+        this._registeredDeferred.reject(error.errno);
+        this._registeredDeferred = null;
       }
-
-      // No authorization issues, so complete registration.
-      this.onLoopRegistered(error);
-    });
+    );
   },
 
   /**
-   * Callback from PushHandlerHack - A push notification has been received from
+   * Callback from MozLoopPushHandler - A push notification has been received from
    * the server.
    *
    * @param {String} version The version information from the server.
@@ -351,43 +261,6 @@ let MozLoopServiceInternal = {
     }
 
     this.openChatWindow(null, "LooP", "about:loopconversation#incoming/" + version);
-  },
-
-  /**
-   * Callback from the loopXhr. Checks the registration result.
-   */
-  onLoopRegistered: function(error) {
-    let status = this.loopXhr.response.status;
-    if (status != 200) {
-      // XXX Bubble the precise details up to the UI somehow (bug 1013248).
-      Cu.reportError("Failed to register with the loop server. Code: " +
-        status + " Text: " + this.loopXhr.response.statusText);
-      this._registeredDeferred.reject(status);
-      this._registeredDeferred = null;
-      return;
-    }
-
-    let sessionToken = this.loopXhr.response.headers["hawk-session-token"];
-    if (sessionToken) {
-
-      // XXX should do more validation here
-      if (sessionToken.length === 64) {
-
-        Services.prefs.setCharPref("loop.hawk-session-token", sessionToken);
-      } else {
-        // XXX Bubble the precise details up to the UI somehow (bug 1013248).
-        console.warn("Loop server sent an invalid session token");
-        this._registeredDeferred.reject("session-token-wrong-size");
-        this._registeredDeferred = null;
-        return;
-      }
-    }
-
-    // If we made it this far, we registered just fine.
-    this.registeredLoopServer = true;
-    this._registeredDeferred.resolve();
-    // No need to clear the promise here, everything was good, so we don't need
-    // to re-register.
   },
 
   /**
@@ -495,11 +368,13 @@ this.MozLoopService = {
    * Starts registration of Loop with the push server, and then will register
    * with the Loop server. It will return early if already registered.
    *
+   * @param {Object} mockPushHandler Optional, test-only mock push handler. Used
+   *                                 to allow mocking of the MozLoopPushHandler.
    * @returns {Promise} a promise that is resolved with no params on completion, or
    *          rejected with an error code or string.
    */
-  register: function() {
-    return MozLoopServiceInternal.promiseRegisteredWithServers();
+  register: function(mockPushHandler) {
+    return MozLoopServiceInternal.promiseRegisteredWithServers(mockPushHandler);
   },
 
   /**

@@ -906,53 +906,14 @@ AtomIsEventHandlerName(nsIAtom *aName)
 nsIScriptGlobalObject *
 nsJSContext::GetGlobalObject()
 {
-  AutoJSContext cx;
-  JS::Rooted<JSObject*> global(mContext, GetWindowProxy());
-  if (!global) {
+  // Note: this could probably be simplified somewhat more; see bug 974327
+  // comments 1 and 3.
+  if (!mWindowProxy) {
     return nullptr;
   }
 
-  if (mGlobalObjectRef)
-    return mGlobalObjectRef;
-
-#ifdef DEBUG
-  {
-    JSObject *inner = JS_ObjectToInnerObject(cx, global);
-
-    // If this assertion hits then it means that we have a window object as
-    // our global, but we never called CreateOuterObject.
-    NS_ASSERTION(inner == global, "Shouldn't be able to innerize here");
-  }
-#endif
-
-  const JSClass *c = JS_GetClass(global);
-
-  nsCOMPtr<nsIScriptGlobalObject> sgo;
-  if (IsDOMClass(c)) {
-    sgo = do_QueryInterface(UnwrapDOMObjectToISupports(global));
-  } else {
-    if ((~c->flags) & (JSCLASS_HAS_PRIVATE |
-                       JSCLASS_PRIVATE_IS_NSISUPPORTS)) {
-      return nullptr;
-    }
-
-    nsISupports *priv = static_cast<nsISupports*>(js::GetObjectPrivate(global));
-
-    nsCOMPtr<nsIXPConnectWrappedNative> wrapped_native =
-      do_QueryInterface(priv);
-    if (wrapped_native) {
-      // The global object is a XPConnect wrapped native, the native in
-      // the wrapper might be the nsIScriptGlobalObject
-
-      sgo = do_QueryWrappedNative(wrapped_native);
-    } else {
-      sgo = do_QueryInterface(priv);
-    }
-  }
-
-  // This'll return a pointer to something we're about to release, but
-  // that's ok, the JS object will hold it alive long enough.
-  return sgo;
+  MOZ_ASSERT(mGlobalObjectRef);
+  return mGlobalObjectRef;
 }
 
 JSContext*
@@ -1634,6 +1595,7 @@ nsJSContext::InitClasses(JS::Handle<JSObject*> aGlobalObj)
 {
   JSOptionChangedCallback(js_options_dot_str, this);
   AutoJSAPI jsapi;
+  jsapi.Init();
   JSContext* cx = jsapi.cx();
   JSAutoCompartment ac(cx, aGlobalObj);
 
@@ -1810,6 +1772,12 @@ TimeUntilNow(TimeStamp start)
 
 struct CycleCollectorStats
 {
+  void Init()
+  {
+    Clear();
+    mMaxSliceTimeSinceClear = 0;
+  }
+
   void Clear()
   {
     mBeginSliceTime = TimeStamp();
@@ -1837,6 +1805,7 @@ struct CycleCollectorStats
     mEndSliceTime = TimeStamp::Now();
     uint32_t sliceTime = TimeBetween(mBeginSliceTime, mEndSliceTime);
     mMaxSliceTime = std::max(mMaxSliceTime, sliceTime);
+    mMaxSliceTimeSinceClear = std::max(mMaxSliceTimeSinceClear, sliceTime);
     mTotalSliceTime += sliceTime;
     mBeginSliceTime = TimeStamp();
     MOZ_ASSERT(mExtraForgetSkippableCalls == 0, "Forget to reset extra forget skippable calls?");
@@ -1868,6 +1837,9 @@ struct CycleCollectorStats
 
   // The longest pause of any slice in the current CC.
   uint32_t mMaxSliceTime;
+
+  // The longest slice time since ClearMaxCCSliceTime() was called.
+  uint32_t mMaxSliceTimeSinceClear;
 
   // The total amount of time spent actually running the current CC.
   uint32_t mTotalSliceTime;
@@ -1992,6 +1964,18 @@ nsJSContext::RunCycleCollectorWorkSlice(int64_t aWorkBudget)
   gCCStats.PrepareForCycleCollectionSlice();
   nsCycleCollector_collectSliceWork(aWorkBudget);
   gCCStats.FinishCycleCollectionSlice();
+}
+
+void
+nsJSContext::ClearMaxCCSliceTime()
+{
+  gCCStats.mMaxSliceTimeSinceClear = 0;
+}
+
+uint32_t
+nsJSContext::GetMaxCCSliceTimeSinceClear()
+{
+  return gCCStats.mMaxSliceTimeSinceClear;
 }
 
 static void
@@ -2719,7 +2703,7 @@ mozilla::dom::StartupJSEnvironment()
   sShuttingDown = false;
   sContextCount = 0;
   sSecurityManager = nullptr;
-  gCCStats.Clear();
+  gCCStats.Init();
   sExpensiveCollectorPokes = 0;
 }
 

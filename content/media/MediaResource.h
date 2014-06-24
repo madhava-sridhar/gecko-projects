@@ -36,6 +36,7 @@ class nsIPrincipal;
 namespace mozilla {
 
 class MediaDecoder;
+class MediaChannelStatistics;
 
 /**
  * This class is useful for estimating rates of data passing through
@@ -112,6 +113,7 @@ public:
     return static_cast<double>(mAccumulatedBytes)/seconds;
   }
 private:
+  ~MediaChannelStatistics() {}
   int64_t      mAccumulatedBytes;
   TimeDuration mAccumulatedTime;
   TimeStamp    mLastStartTime;

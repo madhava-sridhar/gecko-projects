@@ -57,8 +57,6 @@ DevTools.prototype = {
       // testing/profiles/prefs_general.js so lets set it to the same as it is
       // in a default browser profile for the duration of the test.
       Services.prefs.setBoolPref("dom.send_after_paint_to_content", false);
-    } else {
-      Services.prefs.setBoolPref("dom.send_after_paint_to_content", true);
     }
   },
 
@@ -273,25 +271,25 @@ DevTools.prototype = {
 
       this._toolboxes.set(target, toolbox);
 
-      toolbox.once("destroyed", function() {
+      toolbox.once("destroyed", () => {
         this._toolboxes.delete(target);
         this.emit("toolbox-destroyed", target);
-      }.bind(this));
+      });
 
       // If we were asked for a specific tool then we need to wait for the
       // tool to be ready, otherwise we can just wait for toolbox open
       if (toolId != null) {
-        toolbox.once(toolId + "-ready", function(event, panel) {
+        toolbox.once(toolId + "-ready", (event, panel) => {
           this.emit("toolbox-ready", toolbox);
           deferred.resolve(toolbox);
-        }.bind(this));
+        });
         toolbox.open();
       }
       else {
-        toolbox.open().then(function() {
+        toolbox.open().then(() => {
           deferred.resolve(toolbox);
           this.emit("toolbox-ready", toolbox);
-        }.bind(this));
+        });
       }
     }
 
@@ -434,9 +432,13 @@ let gDevToolsBrowser = {
       win.DeveloperToolbar.show(false);
     }
 
+    // Enable WebIDE?
+    let webIDEEnabled = Services.prefs.getBoolPref("devtools.webide.enabled");
+    toggleCmd("Tools:WebIDE", webIDEEnabled);
+
     // Enable App Manager?
     let appMgrEnabled = Services.prefs.getBoolPref("devtools.appmanager.enabled");
-    toggleCmd("Tools:DevAppMgr", appMgrEnabled);
+    toggleCmd("Tools:DevAppMgr", !webIDEEnabled && appMgrEnabled);
 
     // Enable Browser Toolbox?
     let chromeEnabled = Services.prefs.getBoolPref("devtools.chrome.enabled");
@@ -501,12 +503,14 @@ let gDevToolsBrowser = {
       } else {
         toolbox.destroy();
       }
+      gDevTools.emit("select-tool-command", toolId);
     } else {
       gDevTools.showToolbox(target, toolId).then(() => {
         let target = devtools.TargetFactory.forTab(gBrowser.selectedTab);
         let toolbox = gDevTools.getToolbox(target);
 
         toolbox.fireCustomKey(toolId);
+        gDevTools.emit("select-tool-command", toolId);
       });
     }
   },
@@ -522,16 +526,19 @@ let gDevToolsBrowser = {
    * Open the App Manager
    */
   openAppManager: function(gBrowser) {
-    if (Services.prefs.getBoolPref("devtools.webide.enabled")) {
-      let win = Services.wm.getMostRecentWindow("devtools:webide");
-      if (win) {
-        win.focus();
-      } else {
-        let ww = Cc["@mozilla.org/embedcomp/window-watcher;1"].getService(Ci.nsIWindowWatcher);
-        ww.openWindow(null, "chrome://webide/content/", "webide", "chrome,centerscreen,resizable", null);
-      }
+    gBrowser.selectedTab = gBrowser.addTab("about:app-manager");
+  },
+
+  /**
+   * Open WebIDE
+   */
+  openWebIDE: function() {
+    let win = Services.wm.getMostRecentWindow("devtools:webide");
+    if (win) {
+      win.focus();
     } else {
-      gBrowser.selectedTab = gBrowser.addTab("about:app-manager");
+      let ww = Cc["@mozilla.org/embedcomp/window-watcher;1"].getService(Ci.nsIWindowWatcher);
+      ww.openWindow(null, "chrome://webide/content/", "webide", "chrome,centerscreen,resizable", null);
     }
   },
 

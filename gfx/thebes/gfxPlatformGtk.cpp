@@ -125,9 +125,9 @@ gfxPlatformGtk::CreateOffscreenSurface(const IntSize& size,
     }
 
     if (newSurface && needsClear) {
-        gfxContext tmpCtx(newSurface);
-        tmpCtx.SetOperator(gfxContext::OPERATOR_CLEAR);
-        tmpCtx.Paint();
+        nsRefPtr<gfxContext> tmpCtx = new gfxContext(newSurface);
+        tmpCtx->SetOperator(gfxContext::OPERATOR_CLEAR);
+        tmpCtx->Paint();
     }
 
     return newSurface.forget();
@@ -250,18 +250,6 @@ gfxPlatformGtk::GetScreenDepth() const
     }
 
     return sDepth;
-}
-
-bool
-gfxPlatformGtk::SupportsOffMainThreadCompositing()
-{
-  // Nightly builds have OMTC support by default for Electrolysis testing.
-#if defined(MOZ_X11) && !defined(NIGHTLY_BUILD)
-  return (PR_GetEnv("MOZ_USE_OMTC") != nullptr) ||
-         (PR_GetEnv("MOZ_OMTC_ENABLED") != nullptr);
-#else
-  return true;
-#endif
 }
 
 void

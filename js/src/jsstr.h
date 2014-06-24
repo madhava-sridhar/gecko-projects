@@ -48,27 +48,41 @@ SkipSpace(const CharT *s, const CharT *end)
 
 // Return less than, equal to, or greater than zero depending on whether
 // s1 is less than, equal to, or greater than s2.
+template <typename Char1, typename Char2>
 inline int32_t
-CompareChars(const jschar *s1, size_t l1, const jschar *s2, size_t l2)
+CompareChars(const Char1 *s1, size_t len1, const Char2 *s2, size_t len2)
 {
-    size_t n = Min(l1, l2);
+    size_t n = Min(len1, len2);
     for (size_t i = 0; i < n; i++) {
         if (int32_t cmp = s1[i] - s2[i])
             return cmp;
     }
 
-    return (int32_t)(l1 - l2);
+    return int32_t(len1 - len2);
 }
+
+extern int32_t
+CompareChars(const jschar *s1, size_t len1, JSLinearString *s2);
 
 }  /* namespace js */
 
 struct JSSubString {
+    JSLinearString  *base;
+    size_t          offset;
     size_t          length;
-    const jschar    *chars;
-};
 
-extern const jschar js_empty_ucstr[];
-extern const JSSubString js_EmptySubString;
+    JSSubString() { mozilla::PodZero(this); }
+
+    void initEmpty(JSLinearString *base) {
+        this->base = base;
+        offset = length = 0;
+    }
+    void init(JSLinearString *base, size_t offset, size_t length) {
+        this->base = base;
+        this->offset = offset;
+        this->length = length;
+    }
+};
 
 /*
  * Shorthands for ASCII (7-bit) decimal and hex conversion.
@@ -183,6 +197,9 @@ EqualStrings(JSContext *cx, JSLinearString *str1, JSLinearString *str2, bool *re
 extern bool
 EqualStrings(JSLinearString *str1, JSLinearString *str2);
 
+extern bool
+EqualChars(JSLinearString *str1, JSLinearString *str2);
+
 /*
  * Return less than, equal to, or greater than zero depending on whether
  * str1 is less than, equal to, or greater than str2.
@@ -201,15 +218,13 @@ StringEqualsAscii(JSLinearString *str, const char *asciiBytes);
 
 /* Return true if the string contains a pattern anywhere inside it. */
 extern bool
-StringHasPattern(const jschar *text, uint32_t textlen,
-                 const jschar *pat, uint32_t patlen);
+StringHasPattern(JSLinearString *text, const jschar *pat, uint32_t patlen);
 
 extern int
-StringFindPattern(const jschar *text, uint32_t textlen,
-                  const jschar *pat, uint32_t patlen);
+StringFindPattern(JSLinearString *text, JSLinearString *pat, size_t start);
 
 extern bool
-StringHasRegExpMetaChars(const jschar *chars, size_t length);
+StringHasRegExpMetaChars(JSLinearString *str);
 
 } /* namespace js */
 
@@ -219,8 +234,9 @@ js_strlen(const jschar *s);
 extern int32_t
 js_strcmp(const jschar *lhs, const jschar *rhs);
 
-extern jschar *
-js_strchr_limit(const jschar *s, jschar c, const jschar *limit);
+template <typename CharT>
+extern const CharT *
+js_strchr_limit(const CharT *s, jschar c, const CharT *limit);
 
 static MOZ_ALWAYS_INLINE void
 js_strncpy(jschar *dst, const jschar *src, size_t nelem)
@@ -233,11 +249,23 @@ js_strdup(js::ThreadSafeContext *cx, const jschar *s);
 
 namespace js {
 
+template <typename Char1, typename Char2>
 inline bool
-EqualCharsLatin1TwoByte(const Latin1Char *s1, const jschar *s2, size_t len)
+EqualChars(const Char1 *s1, const Char2 *s2, size_t len);
+
+template <typename Char1>
+inline bool
+EqualChars(const Char1 *s1, const Char1 *s2, size_t len)
 {
-    for (const Latin1Char *s1end = s1 + len; s1 < s1end; s1++, s2++) {
-        if (jschar(*s1) != *s2)
+    return mozilla::PodEqual(s1, s2, len);
+}
+
+template <typename Char1, typename Char2>
+inline bool
+EqualChars(const Char1 *s1, const Char2 *s2, size_t len)
+{
+    for (const Char1 *s1end = s1 + len; s1 < s1end; s1++, s2++) {
+        if (*s1 != *s2)
             return false;
     }
     return true;
@@ -290,6 +318,9 @@ str_replace(JSContext *cx, unsigned argc, js::Value *vp);
 extern bool
 str_fromCharCode(JSContext *cx, unsigned argc, Value *vp);
 
+extern bool
+str_fromCharCode_one_arg(JSContext *cx, HandleValue code, MutableHandleValue rval);
+
 } /* namespace js */
 
 extern bool
@@ -337,8 +368,9 @@ PutEscapedString(char *buffer, size_t size, JSLinearString *str, uint32_t quote)
     return n;
 }
 
+template <typename CharT>
 inline size_t
-PutEscapedString(char *buffer, size_t bufferSize, const jschar *chars, size_t length, uint32_t quote)
+PutEscapedString(char *buffer, size_t bufferSize, const CharT *chars, size_t length, uint32_t quote)
 {
     size_t n = PutEscapedStringImpl(buffer, bufferSize, nullptr, chars, length, quote);
 

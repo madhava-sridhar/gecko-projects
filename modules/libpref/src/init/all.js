@@ -138,6 +138,11 @@ pref("dom.webcrypto.enabled", true);
 // Whether the UndoManager API is enabled
 pref("dom.undo_manager.enabled", false);
 
+// Whether to run add-on code in different compartments from browser code. This
+// causes a separate compartment for each (addon, global) combination, which may
+// significantly increase the number of compartments in the system.
+pref("dom.compartment_per_addon", false);
+
 // Fastback caching - if this pref is negative, then we calculate the number
 // of content viewers to cache based on the amount of available memory.
 pref("browser.sessionhistory.max_total_viewers", -1);
@@ -260,11 +265,8 @@ pref("media.navigator.video.default_minfps",10);
 
 pref("media.webrtc.debug.trace_mask", 0);
 pref("media.webrtc.debug.multi_log", false);
-#if defined(ANDROID) || defined(XP_WIN)
+pref("media.webrtc.debug.aec_log_dir", "");
 pref("media.webrtc.debug.log_file", "");
-#else
-pref("media.webrtc.debug.log_file", "/tmp/WebRTC.log");
-#endif
 pref("media.webrtc.debug.aec_dump_max_size", 4194304); // 4MB
 
 #ifdef MOZ_WIDGET_GONK
@@ -275,6 +277,7 @@ pref("media.peerconnection.video.enabled", true);
 pref("media.navigator.video.max_fs", 1200); // 640x480 == 1200mb
 pref("media.navigator.video.max_fr", 30);
 pref("media.peerconnection.video.h264_enabled", false);
+pref("media.getusermedia.aec", 4);
 #else
 pref("media.navigator.video.default_width",0);  // adaptive default
 pref("media.navigator.video.default_height",0); // adaptive default
@@ -282,6 +285,7 @@ pref("media.peerconnection.enabled", true);
 pref("media.peerconnection.video.enabled", true);
 pref("media.navigator.video.max_fs", 0); // unrestricted
 pref("media.navigator.video.max_fr", 0); // unrestricted
++pref("media.getusermedia.aec", 1);
 #endif
 pref("media.peerconnection.video.min_bitrate", 200);
 pref("media.peerconnection.video.start_bitrate", 300);
@@ -301,7 +305,6 @@ pref("media.peerconnection.identity.timeout", 10000);
 // setting (for Xxx = Ec, Agc, or Ns).  Defaults are all set to kXxxDefault here.
 pref("media.peerconnection.turn.disable", false);
 pref("media.getusermedia.aec_enabled", true);
-pref("media.getusermedia.aec", 1);
 pref("media.getusermedia.agc_enabled", false);
 pref("media.getusermedia.agc", 1);
 pref("media.getusermedia.noise_enabled", true);
@@ -849,7 +852,7 @@ pref("javascript.options.ion",              true);
 pref("javascript.options.asmjs",            true);
 pref("javascript.options.native_regexp",    true);
 pref("javascript.options.parallel_parsing", true);
-pref("javascript.options.ion.parallel_compilation", true);
+pref("javascript.options.ion.offthread_compilation", true);
 // This preference instructs the JS engine to discard the
 // source of any privileged JS after compilation. This saves
 // memory, but makes things like Function.prototype.toSource()
@@ -1051,8 +1054,8 @@ pref("network.http.pipelining.reschedule-timeout", 1500);
 // restarted without pipelining.
 pref("network.http.pipelining.read-timeout", 30000);
 
-// Prompt for 307 redirects
-pref("network.http.prompt-temp-redirect", true);
+// Prompt for redirects resulting in unsafe HTTP requests
+pref("network.http.prompt-temp-redirect", false);
 
 // If true generate CORRUPTED_CONTENT errors for entities that
 // contain an invalid Assoc-Req response header
@@ -3786,36 +3789,29 @@ pref("layers.offmainthreadcomposition.enabled", false);
 // -1 -> default (match layout.frame_rate or 60 FPS)
 // 0  -> full-tilt mode: Recomposite even if not transaction occured.
 pref("layers.offmainthreadcomposition.frame-rate", -1);
-#ifndef XP_WIN
+
 // Asynchonous video compositing using the ImageBridge IPDL protocol.
 // requires off-main-thread compositing.
-pref("layers.async-video.enabled",false);
-#endif
+pref("layers.async-video.enabled", true);
+pref("layers.async-video-oop.enabled",true);
 
 #ifdef XP_WIN
 pref("layers.offmainthreadcomposition.enabled", true);
-pref("layers.async-video.enabled", true);
-#endif
-
-#ifdef MOZ_X11
-// OMTC off by default on Linux, but if activated, use new textures and async-video.
-pref("layers.async-video.enabled", true);
+// XXX - see bug 1009616
+pref("layers.async-video-oop.enabled", false);
 #endif
 
 #ifdef MOZ_WIDGET_QT
 pref("layers.offmainthreadcomposition.enabled", true);
-pref("layers.async-video.enabled",true);
 #endif
 
 #ifdef XP_MACOSX
 pref("layers.offmainthreadcomposition.enabled", true);
-pref("layers.async-video.enabled",true);
 #endif
 
 // ANDROID covers android and b2g
 #ifdef ANDROID
 pref("layers.offmainthreadcomposition.enabled", true);
-pref("layers.async-video.enabled",true);
 #endif
 
 // same effect as layers.offmainthreadcomposition.enabled, but specifically for

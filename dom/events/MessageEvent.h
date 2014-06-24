@@ -14,7 +14,7 @@
 namespace mozilla {
 namespace dom {
 
-class MessageEventInit;
+struct MessageEventInit;
 class MessagePort;
 class MessagePortBase;
 class MessagePortList;
@@ -70,7 +70,7 @@ public:
   }
 
   static already_AddRefed<MessageEvent>
-  Constructor(const GlobalObject& aGlobal, JSContext* aCx,
+  Constructor(const GlobalObject& aGlobal,
               const nsAString& aType,
               const MessageEventInit& aEventInit,
               ErrorResult& aRv);

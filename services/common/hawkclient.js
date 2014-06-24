@@ -176,7 +176,7 @@ this.HawkClient.prototype = {
    *        An object that can be encodable as JSON as the payload of the
    *        request
    * @return Promise
-   *        Returns a promise that resolves to the text response of the API call,
+   *        Returns a promise that resolves to the response of the API call,
    *        or is rejected with an error.  If the server response can be parsed
    *        as JSON and contains an 'error' property, the promise will be
    *        rejected with this JSON-parsed response.
@@ -188,7 +188,7 @@ this.HawkClient.prototype = {
     let uri = this.host + path;
     let self = this;
 
-    function onComplete(error) {
+    function _onComplete(error) {
       let restResponse = this.response;
       let status = restResponse.status;
 
@@ -239,9 +239,21 @@ this.HawkClient.prototype = {
         return deferred.reject(self._constructError(restResponse, "Request failed"));
       }
       // It's up to the caller to know how to decode the response.
-      // We just return the raw text.
-      deferred.resolve(this.response.body);
+      // We just return the whole response.
+      deferred.resolve(this.response);
     };
+
+    function onComplete(error) {
+      try {
+        // |this| is the RESTRequest object and we need to ensure _onComplete
+        // gets the same one.
+        _onComplete.call(this, error);
+      } catch (ex) {
+        log.error("Unhandled exception processing response:" +
+                  CommonUtils.exceptionStr(ex));
+        deferred.reject(ex);
+      }
+    }
 
     let extra = {
       now: this.now(),

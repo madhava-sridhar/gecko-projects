@@ -27,9 +27,9 @@ struct AutoMarkInDeadZone
       : zone(zone),
         scheduled(zone->scheduledForDestruction)
     {
-        JSRuntime *rt = zone->runtimeFromMainThread();
-        if (rt->gc.manipulatingDeadZones && zone->scheduledForDestruction) {
-            rt->gc.objectsMarkedInDeadZones++;
+        gc::GCRuntime &gc = zone->runtimeFromMainThread()->gc;
+        if (gc.isManipulatingDeadZones() && zone->scheduledForDestruction) {
+            gc.incObjectsMarkedInDeadZone();
             zone->scheduledForDestruction = false;
         }
     }
@@ -453,7 +453,7 @@ class GCZoneGroupIter {
   public:
     explicit GCZoneGroupIter(JSRuntime *rt) {
         JS_ASSERT(rt->isHeapBusy());
-        current = rt->gc.currentZoneGroup;
+        current = rt->gc.getCurrentZoneGroup();
     }
 
     bool done() const { return !current; }
@@ -704,6 +704,23 @@ AllocateObjectForCacheHit(JSContext *cx, AllocKind kind, InitialHeap heap)
     }
 
     return obj;
+}
+
+inline bool
+IsInsideGGCNursery(const js::gc::Cell *cell)
+{
+#ifdef JSGC_GENERATIONAL
+    if (!cell)
+        return false;
+    uintptr_t addr = uintptr_t(cell);
+    addr &= ~js::gc::ChunkMask;
+    addr |= js::gc::ChunkLocationOffset;
+    uint32_t location = *reinterpret_cast<uint32_t *>(addr);
+    JS_ASSERT(location != 0);
+    return location & js::gc::ChunkLocationBitNursery;
+#else
+    return false;
+#endif
 }
 
 } /* namespace gc */
