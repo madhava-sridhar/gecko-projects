@@ -112,6 +112,9 @@ class BackgroundRequestChildBase
 protected:
   nsRefPtr<IDBRequest> mRequest;
 
+private:
+  bool mActorDestroyed;
+
 public:
   void
   AssertIsOnOwningThread() const
@@ -128,11 +131,21 @@ public:
     return mRequest;
   }
 
+  bool
+  IsActorDestroyed() const
+  {
+    AssertIsOnOwningThread();
+    return mActorDestroyed;
+  }
+
 protected:
   BackgroundRequestChildBase(IDBRequest* aRequest);
 
   virtual
   ~BackgroundRequestChildBase();
+
+  void
+  NoteActorDestroyed();
 };
 
 class BackgroundFactoryRequestChild MOZ_FINAL
@@ -177,6 +190,9 @@ private:
   HandleResponse(const DeleteDatabaseRequestResponse& aResponse);
 
   // IPDL methods are only called by IPDL.
+  virtual void
+  ActorDestroy(ActorDestroyReason aWhy) MOZ_OVERRIDE;
+
   virtual bool
   Recv__delete__(const FactoryRequestResponse& aResponse) MOZ_OVERRIDE;
 
@@ -495,6 +511,9 @@ private:
   HandleResponse(uint64_t aResponse);
 
   // IPDL methods are only called by IPDL.
+  virtual void
+  ActorDestroy(ActorDestroyReason aWhy) MOZ_OVERRIDE;
+
   virtual bool
   Recv__delete__(const RequestResponse& aResponse) MOZ_OVERRIDE;
 };

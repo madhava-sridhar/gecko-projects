@@ -94,6 +94,20 @@ using namespace mozilla::ipc;
 #define ASSERT_UNLESS_FUZZING(...) MOZ_ASSERT(false)
 #endif
 
+namespace {
+  class Database;
+}
+
+namespace mozilla {
+namespace dom {
+namespace indexedDB {
+
+using ::Database;
+
+} // namespace indexedDB
+} // namespace dom
+} // namespace mozilla
+
 /*******************************************************************************
  * Constants
  ******************************************************************************/
@@ -2807,7 +2821,7 @@ public:
                   aPrincipalInfo.type() == PrincipalInfo::TSystemPrincipalInfo);
   }
 
-  NS_INLINE_DECL_THREADSAFE_REFCOUNTING(indexedDB::Database)
+  NS_INLINE_DECL_THREADSAFE_REFCOUNTING(mozilla::dom::indexedDB::Database)
 
   void
   Invalidate();
@@ -8585,6 +8599,8 @@ FactoryOp::CheckPermission(ContentParent* aContentParent,
       }
 
       mChromeWriteAccessAllowed = canWrite;
+    } else {
+      mChromeWriteAccessAllowed = true;
     }
 
     if (State_Initial == mState) {

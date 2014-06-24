@@ -611,6 +611,7 @@ PermissionRequestChildProcessActor::Recv__delete__(
 
 BackgroundRequestChildBase::BackgroundRequestChildBase(IDBRequest* aRequest)
   : mRequest(aRequest)
+  , mActorDestroyed(false)
 {
   MOZ_ASSERT(aRequest);
   aRequest->AssertIsOnOwningThread();
@@ -635,6 +636,15 @@ BackgroundRequestChildBase::AssertIsOnOwningThread() const
 }
 
 #endif // DEBUG
+
+void
+BackgroundRequestChildBase::NoteActorDestroyed()
+{
+  AssertIsOnOwningThread();
+  MOZ_ASSERT(!mActorDestroyed);
+
+  mActorDestroyed = true;
+}
 
 /*******************************************************************************
  * BackgroundFactoryChild
@@ -840,6 +850,14 @@ BackgroundFactoryRequestChild::HandleResponse(
   DispatchSuccessEvent(&helper, successEvent);
 
   return true;
+}
+
+void
+BackgroundFactoryRequestChild::ActorDestroy(ActorDestroyReason aWhy)
+{
+  AssertIsOnOwningThread();
+
+  NoteActorDestroyed();
 }
 
 bool
@@ -1568,12 +1586,14 @@ BackgroundRequestChild::BackgroundRequestChild(IDBRequest* aRequest)
 BackgroundRequestChild::~BackgroundRequestChild()
 {
   AssertIsOnOwningThread();
-  MOZ_ASSERT(mTransaction);
-  mTransaction->AssertIsOnOwningThread();
+  MOZ_ASSERT_IF(!IsActorDestroyed(), mTransaction);
 
   MOZ_COUNT_DTOR(indexedDB::BackgroundRequestChild);
 
-  mTransaction->OnRequestFinished();
+  if (mTransaction) {
+    mTransaction->AssertIsOnOwningThread();
+    mTransaction->OnRequestFinished();
+  }
 }
 
 bool
@@ -1694,6 +1714,21 @@ BackgroundRequestChild::HandleResponse(uint64_t aResponse)
   value.setNumber(static_cast<double>(aResponse));
 
   return HandleResponse(value);
+}
+
+void
+BackgroundRequestChild::ActorDestroy(ActorDestroyReason aWhy)
+{
+  AssertIsOnOwningThread();
+
+  if (mTransaction) {
+    mTransaction->AssertIsOnOwningThread();
+    mTransaction->OnRequestFinished();
+
+    mTransaction = nullptr;
+  }
+
+  NoteActorDestroyed();
 }
 
 bool
@@ -1962,6 +1997,8 @@ BackgroundCursorChild::ActorDestroy(ActorDestroyReason aWhy)
     mCursor = nullptr;
 #endif
   }
+
+  NoteActorDestroyed();
 }
 
 bool
