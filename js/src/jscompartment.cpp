@@ -279,10 +279,10 @@ CopyStringPure(JSContext *cx, JSString *str)
         /* Only use AutoStableStringChars if the NoGC allocation fails. */
         if (str->hasLatin1Chars()) {
             JS::AutoCheckCannotGC nogc;
-            copy = js_NewStringCopyN<NoGC>(cx, str->asLinear().latin1Chars(nogc), len);
+            copy = NewStringCopyN<NoGC>(cx, str->asLinear().latin1Chars(nogc), len);
         } else {
             JS::AutoCheckCannotGC nogc;
-            copy = js_NewStringCopyN<NoGC>(cx, str->asLinear().twoByteChars(nogc), len);
+            copy = NewStringCopyNDontDeflate<NoGC>(cx, str->asLinear().twoByteChars(nogc), len);
         }
         if (copy)
             return copy;
@@ -292,8 +292,8 @@ CopyStringPure(JSContext *cx, JSString *str)
             return nullptr;
 
         return chars.isLatin1()
-               ? js_NewStringCopyN<CanGC>(cx, chars.latin1Range().start().get(), len)
-               : js_NewStringCopyN<CanGC>(cx, chars.twoByteRange().start().get(), len);
+               ? NewStringCopyN<CanGC>(cx, chars.latin1Range().start().get(), len)
+               : NewStringCopyNDontDeflate<CanGC>(cx, chars.twoByteRange().start().get(), len);
     }
 
     if (str->hasLatin1Chars()) {
@@ -301,14 +301,14 @@ CopyStringPure(JSContext *cx, JSString *str)
         if (!str->asRope().copyLatin1CharsZ(cx, copiedChars))
             return nullptr;
 
-        return js_NewString<CanGC>(cx, copiedChars.forget(), len);
+        return NewString<CanGC>(cx, copiedChars.forget(), len);
     }
 
     ScopedJSFreePtr<jschar> copiedChars;
     if (!str->asRope().copyTwoByteCharsZ(cx, copiedChars))
         return nullptr;
 
-    return js_NewString<CanGC>(cx, copiedChars.forget(), len);
+    return NewString<CanGC>(cx, copiedChars.forget(), len);
 }
 
 bool
@@ -461,23 +461,6 @@ JSCompartment::wrap(JSContext *cx, MutableHandleObject obj, HandleObject existin
 }
 
 bool
-JSCompartment::wrapId(JSContext *cx, jsid *idp)
-{
-    MOZ_ASSERT(*idp != JSID_VOID, "JSID_VOID is an out-of-band sentinel value");
-    if (JSID_IS_INT(*idp))
-        return true;
-    RootedValue value(cx, IdToValue(*idp));
-    if (!wrap(cx, &value))
-        return false;
-    RootedId id(cx);
-    if (!ValueToId<CanGC>(cx, value, &id))
-        return false;
-
-    *idp = id;
-    return true;
-}
-
-bool
 JSCompartment::wrap(JSContext *cx, PropertyOp *propp)
 {
     RootedValue value(cx, CastAsObjectJsval(*propp));
@@ -516,18 +499,6 @@ JSCompartment::wrap(JSContext *cx, MutableHandle<PropertyDescriptor> desc)
 }
 
 bool
-JSCompartment::wrap(JSContext *cx, AutoIdVector &props)
-{
-    jsid *vector = props.begin();
-    int length = props.length();
-    for (size_t n = 0; n < size_t(length); ++n) {
-        if (!wrapId(cx, &vector[n]))
-            return false;
-    }
-    return true;
-}
-
-bool
 JSCompartment::wrap(JSContext *cx, MutableHandle<PropDesc> desc)
 {
     if (desc.isUndefined())
@@ -552,12 +523,6 @@ JSCompartment::wrap(JSContext *cx, MutableHandle<PropDesc> desc)
         if (!comp->wrap(cx, &set))
             return false;
         desc.setSetter(set);
-    }
-    if (desc.descriptorValue().isObject()) {
-        RootedObject descObj(cx, &desc.descriptorValue().toObject());
-        if (!comp->wrap(cx, &descObj))
-            return false;
-        desc.setDescriptorObject(descObj);
     }
     return true;
 }

@@ -61,13 +61,14 @@ PRLogModuleInfo* gMediaDecoderLog;
 
 class MediaMemoryTracker : public nsIMemoryReporter
 {
+  virtual ~MediaMemoryTracker();
+
   NS_DECL_THREADSAFE_ISUPPORTS
   NS_DECL_NSIMEMORYREPORTER
 
   MOZ_DEFINE_MALLOC_SIZE_OF(MallocSizeOf);
 
   MediaMemoryTracker();
-  virtual ~MediaMemoryTracker();
   void InitMemoryReporter();
 
   static StaticRefPtr<MediaMemoryTracker> sUniqueInstance;
@@ -417,7 +418,6 @@ MediaDecoder::MediaDecoder() :
   mInitialPlaybackRate(1.0),
   mInitialPreservesPitch(true),
   mDuration(-1),
-  mTransportSeekable(true),
   mMediaSeekable(true),
   mSameOriginMedia(false),
   mReentrantMonitor("media.decoder"),
@@ -551,8 +551,6 @@ nsresult MediaDecoder::InitializeStateMachine(MediaDecoder* aCloneDonor)
   }
   {
     ReentrantMonitorAutoEnter mon(GetReentrantMonitor());
-    mDecoderStateMachine->SetTransportSeekable(mTransportSeekable);
-    mDecoderStateMachine->SetMediaSeekable(mMediaSeekable);
     mDecoderStateMachine->SetDuration(mDuration);
     mDecoderStateMachine->SetVolume(mInitialVolume);
     mDecoderStateMachine->SetAudioCaptured(mInitialAudioCaptured);
@@ -1286,25 +1284,14 @@ void MediaDecoder::SetMediaSeekable(bool aMediaSeekable) {
   ReentrantMonitorAutoEnter mon(GetReentrantMonitor());
   MOZ_ASSERT(NS_IsMainThread() || OnDecodeThread());
   mMediaSeekable = aMediaSeekable;
-  if (mDecoderStateMachine) {
-    mDecoderStateMachine->SetMediaSeekable(aMediaSeekable);
-  }
 }
 
-void MediaDecoder::SetTransportSeekable(bool aTransportSeekable)
+bool
+MediaDecoder::IsTransportSeekable()
 {
   ReentrantMonitorAutoEnter mon(GetReentrantMonitor());
-  MOZ_ASSERT(NS_IsMainThread() || OnDecodeThread());
-  mTransportSeekable = aTransportSeekable;
-  if (mDecoderStateMachine) {
-    mDecoderStateMachine->SetTransportSeekable(aTransportSeekable);
-  }
-}
-
-bool MediaDecoder::IsTransportSeekable()
-{
-  MOZ_ASSERT(NS_IsMainThread());
-  return mTransportSeekable;
+  MOZ_ASSERT(OnDecodeThread() || NS_IsMainThread());
+  return GetResource()->IsTransportSeekable();
 }
 
 bool MediaDecoder::IsMediaSeekable()

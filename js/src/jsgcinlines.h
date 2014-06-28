@@ -59,7 +59,7 @@ ThreadSafeContext::isThreadLocal(T thing) const
 
 #ifdef JSGC_FJGENERATIONAL
     ForkJoinContext *cx = static_cast<ForkJoinContext*>(const_cast<ThreadSafeContext*>(this));
-    if (cx->fjNursery().isInsideNewspace(thing))
+    if (cx->nursery().isInsideNewspace(thing))
         return true;
 #endif
 
@@ -481,10 +481,8 @@ typedef CompartmentsIterT<GCZoneGroupIter> GCCompartmentGroupIter;
  */
 template <AllowGC allowGC>
 inline JSObject *
-TryNewNurseryObject(ThreadSafeContext *cxArg, size_t thingSize, size_t nDynamicSlots)
+TryNewNurseryObject(JSContext *cx, size_t thingSize, size_t nDynamicSlots)
 {
-    JSContext *cx = cxArg->asJSContext();
-
     JS_ASSERT(!IsAtomsCompartment(cx->compartment()));
     JSRuntime *rt = cx->runtime();
     Nursery &nursery = rt->gc.nursery;
@@ -508,9 +506,9 @@ TryNewNurseryObject(ThreadSafeContext *cxArg, size_t thingSize, size_t nDynamicS
 #ifdef JSGC_FJGENERATIONAL
 template <AllowGC allowGC>
 inline JSObject *
-TryNewFJNurseryObject(ForkJoinContext *cx, size_t thingSize, size_t nDynamicSlots)
+TryNewNurseryObject(ForkJoinContext *cx, size_t thingSize, size_t nDynamicSlots)
 {
-    ForkJoinNursery &nursery = cx->fjNursery();
+    ForkJoinNursery &nursery = cx->nursery();
     bool tooLarge = false;
     JSObject *obj = nursery.allocateObject(thingSize, nDynamicSlots, tooLarge);
     if (obj)
@@ -547,6 +545,7 @@ CheckAllocatorState(ThreadSafeContext *cx, AllocKind kind)
     JS_ASSERT_IF(rt->isAtomsCompartment(ncx->compartment()),
                  kind == FINALIZE_STRING ||
                  kind == FINALIZE_FAT_INLINE_STRING ||
+                 kind == FINALIZE_SYMBOL ||
                  kind == FINALIZE_JITCODE);
     JS_ASSERT(!rt->isHeapBusy());
     JS_ASSERT(rt->gc.isAllocAllowed());
@@ -606,22 +605,27 @@ AllocateObject(ThreadSafeContext *cx, AllocKind kind, size_t nDynamicSlots, Init
     size_t thingSize = Arena::thingSize(kind);
 
     JS_ASSERT(thingSize == Arena::thingSize(kind));
+    JS_ASSERT(thingSize >= sizeof(JSObject));
+    static_assert(sizeof(JSObject) >= CellSize,
+                  "All allocations must be at least the allocator-imposed minimum size.");
+
     if (!CheckAllocatorState<allowGC>(cx, kind))
         return nullptr;
 
 #ifdef JSGC_GENERATIONAL
-    if (cx->hasNursery() && ShouldNurseryAllocate(cx->nursery(), kind, heap)) {
-        JSObject *obj = TryNewNurseryObject<allowGC>(cx, thingSize, nDynamicSlots);
+    if (cx->isJSContext() &&
+        ShouldNurseryAllocate(cx->asJSContext()->nursery(), kind, heap)) {
+        JSObject *obj = TryNewNurseryObject<allowGC>(cx->asJSContext(), thingSize, nDynamicSlots);
         if (obj)
             return obj;
     }
 #endif
 #ifdef JSGC_FJGENERATIONAL
     if (cx->isForkJoinContext() &&
-        ShouldFJNurseryAllocate(cx->asForkJoinContext()->fjNursery(), kind, heap))
+        ShouldFJNurseryAllocate(cx->asForkJoinContext()->nursery(), kind, heap))
     {
         JSObject *obj =
-            TryNewFJNurseryObject<allowGC>(cx->asForkJoinContext(), thingSize, nDynamicSlots);
+            TryNewNurseryObject<allowGC>(cx->asForkJoinContext(), thingSize, nDynamicSlots);
         if (obj)
             return obj;
     }
@@ -652,6 +656,9 @@ template <typename T, AllowGC allowGC>
 inline T *
 AllocateNonObject(ThreadSafeContext *cx)
 {
+    static_assert(sizeof(T) >= CellSize,
+                  "All allocations must be at least the allocator-imposed minimum size.");
+
     AllocKind kind = MapTypeToFinalizeKind<T>::kind;
     size_t thingSize = sizeof(T);
 
@@ -747,27 +754,27 @@ NewTypeObject(js::ThreadSafeContext *cx)
     return gc::AllocateNonObject<types::TypeObject, js::CanGC>(cx);
 }
 
-} /* namespace js */
-
 template <js::AllowGC allowGC>
 inline JSString *
-js_NewGCString(js::ThreadSafeContext *cx)
+NewGCString(js::ThreadSafeContext *cx)
 {
     return js::gc::AllocateNonObject<JSString, allowGC>(cx);
 }
 
 template <js::AllowGC allowGC>
 inline JSFatInlineString *
-js_NewGCFatInlineString(js::ThreadSafeContext *cx)
+NewGCFatInlineString(js::ThreadSafeContext *cx)
 {
     return js::gc::AllocateNonObject<JSFatInlineString, allowGC>(cx);
 }
 
 inline JSExternalString *
-js_NewGCExternalString(js::ThreadSafeContext *cx)
+NewGCExternalString(js::ThreadSafeContext *cx)
 {
     return js::gc::AllocateNonObject<JSExternalString, js::CanGC>(cx);
 }
+
+} /* namespace js */
 
 inline JSScript *
 js_NewGCScript(js::ThreadSafeContext *cx)

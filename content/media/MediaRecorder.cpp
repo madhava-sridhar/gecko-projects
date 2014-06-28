@@ -129,13 +129,13 @@ class MediaRecorder::Session: public nsIObserver
     {
       MOZ_ASSERT(NS_GetCurrentThread() == mSession->mReadThread);
 
-      mSession->Extract();
       LOG(PR_LOG_DEBUG, ("Session.ExtractRunnable shutdown = %d", mSession->mEncoder->IsShutdown()));
       if (!mSession->mEncoder->IsShutdown()) {
+        mSession->Extract(false);
         NS_DispatchToCurrentThread(new ExtractRunnable(mSession));
       } else {
-        // Flush out remainding encoded data.
-        NS_DispatchToMainThread(new PushBlobRunnable(mSession));
+        // Flush out remaining encoded data.
+        mSession->Extract(true);
         // Destroy this Session object in main thread.
         NS_DispatchToMainThread(new DestroyRunnable(already_AddRefed<Session>(mSession)));
       }
@@ -238,13 +238,6 @@ public:
     mLastBlobTimeStamp = TimeStamp::Now();
   }
 
-  // Only DestroyRunnable is allowed to delete Session object.
-  virtual ~Session()
-  {
-    LOG(PR_LOG_DEBUG, ("Session.~Session (%p)", this));
-    CleanupStreams();
-  }
-
   void Start()
   {
     LOG(PR_LOG_DEBUG, ("Session.Start %p", this));
@@ -299,15 +292,20 @@ public:
   }
 
 private:
-
-  // Pull encoded meida data from MediaEncoder and put into EncodedBufferCache.
+  // Only DestroyRunnable is allowed to delete Session object.
+  virtual ~Session()
+  {
+    LOG(PR_LOG_DEBUG, ("Session.~Session (%p)", this));
+    CleanupStreams();
+  }
+  // Pull encoded media data from MediaEncoder and put into EncodedBufferCache.
   // Destroy this session object in the end of this function.
-  void Extract()
+  // If the bool aForceFlush is true, we will force to dispatch a
+  // PushBlobRunnable to main thread.
+  void Extract(bool aForceFlush)
   {
     MOZ_ASSERT(NS_GetCurrentThread() == mReadThread);
     LOG(PR_LOG_DEBUG, ("Session.Extract %p", this));
-    // Whether push encoded data back to onDataAvailable automatically.
-    const bool pushBlob = (mTimeSlice > 0) ? true : false;
 
     // Pull encoded media data from MediaEncoder
     nsTArray<nsTArray<uint8_t> > encodedBuf;
@@ -318,11 +316,16 @@ private:
       mEncodedBufferCache->AppendBuffer(encodedBuf[i]);
     }
 
-    if (pushBlob) {
-      if ((TimeStamp::Now() - mLastBlobTimeStamp).ToMilliseconds() > mTimeSlice) {
-        NS_DispatchToMainThread(new PushBlobRunnable(this));
-        mLastBlobTimeStamp = TimeStamp::Now();
-      }
+    // Whether push encoded data back to onDataAvailable automatically or we
+    // need a flush.
+    bool pushBlob = false;
+    if ((mTimeSlice > 0) &&
+        ((TimeStamp::Now()-mLastBlobTimeStamp).ToMilliseconds() > mTimeSlice)) {
+      pushBlob = true;
+    }
+    if (pushBlob || aForceFlush) {
+      NS_DispatchToMainThread(new PushBlobRunnable(this));
+      mLastBlobTimeStamp = TimeStamp::Now();
     }
   }
 

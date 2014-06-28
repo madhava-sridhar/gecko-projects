@@ -131,13 +131,8 @@ jit::CheckOverRecursedPar(ForkJoinContext *cx)
     JS_ASSERT(ForkJoinContext::current() == cx);
     int stackDummy_;
 
-    // When an interrupt is requested, the main thread stack limit is
-    // overwritten with a sentinel value that brings us here.
-    // Therefore, we must check whether this is really a stack overrun
-    // and, if not, check whether an interrupt was requested.
-    //
-    // When not on the main thread, we don't overwrite the stack
-    // limit, but we do still call into this routine if the interrupt
+    // In PJS, unlike sequential execution, we don't overwrite the stack limit
+    // on interrupt, but we do still call into this routine if the interrupt
     // flag is set, so we still need to double check.
 
 #if defined(JS_ARM_SIMULATOR) || defined(JS_MIPS_SIMULATOR)
@@ -147,13 +142,7 @@ jit::CheckOverRecursedPar(ForkJoinContext *cx)
     }
 #endif
 
-    uintptr_t realStackLimit;
-    if (cx->isMainThread())
-        realStackLimit = GetNativeStackLimit(cx);
-    else
-        realStackLimit = cx->perThreadData->jitStackLimit;
-
-    if (!JS_CHECK_STACK_SIZE(realStackLimit, &stackDummy_)) {
+    if (!JS_CHECK_STACK_SIZE(cx->perThreadData->jitStackLimit, &stackDummy_)) {
         cx->bailoutRecord->joinCause(ParallelBailoutOverRecursed);
         return false;
     }
@@ -178,10 +167,8 @@ jit::ExtendArrayPar(ForkJoinContext *cx, JSObject *array, uint32_t length)
 {
     JSObject::EnsureDenseResult res =
         array->ensureDenseElementsPreservePackedFlag(cx, 0, length);
-    if (res != JSObject::ED_OK) {
-        fprintf(stderr, "==== NGNG\n");
+    if (res != JSObject::ED_OK)
         return nullptr;
-    }
     return array;
 }
 
@@ -308,8 +295,24 @@ CompareStringsPar(ForkJoinContext *cx, JSString *left, JSString *right, int32_t 
     if (!leftInspector.ensureChars(cx, nogc) || !rightInspector.ensureChars(cx, nogc))
         return false;
 
-    *res = CompareChars(leftInspector.twoByteChars(), left->length(),
-                        rightInspector.twoByteChars(), right->length());
+    if (leftInspector.hasLatin1Chars()) {
+        if (rightInspector.hasLatin1Chars()) {
+            *res = CompareChars(leftInspector.latin1Chars(), left->length(),
+                                rightInspector.latin1Chars(), right->length());
+        } else {
+            *res = CompareChars(leftInspector.latin1Chars(), left->length(),
+                                rightInspector.twoByteChars(), right->length());
+        }
+    } else {
+        if (rightInspector.hasLatin1Chars()) {
+            *res = CompareChars(leftInspector.twoByteChars(), left->length(),
+                                rightInspector.latin1Chars(), right->length());
+        } else {
+            *res = CompareChars(leftInspector.twoByteChars(), left->length(),
+                                rightInspector.twoByteChars(), right->length());
+        }
+    }
+
     return true;
 }
 
@@ -528,7 +531,9 @@ jit::BailoutPar(BailoutStack *sp, uint8_t **entryFramePointer)
 
     JitActivationIterator jitActivations(cx->perThreadData);
     IonBailoutIterator frameIter(jitActivations, sp);
-    cx->bailoutRecord->joinCause(ParallelBailoutUnsupported);
+    SnapshotIterator snapIter(frameIter);
+
+    cx->bailoutRecord->setIonBailoutKind(snapIter.bailoutKind());
     cx->bailoutRecord->rematerializeFrames(cx, frameIter);
 
     MOZ_ASSERT(frameIter.done());

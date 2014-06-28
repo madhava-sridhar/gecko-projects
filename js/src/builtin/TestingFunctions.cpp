@@ -764,6 +764,7 @@ static const struct TraceKindPair {
     { "all",        -1                  },
     { "object",     JSTRACE_OBJECT      },
     { "string",     JSTRACE_STRING      },
+    { "symbol",     JSTRACE_SYMBOL      },
 };
 
 static bool
@@ -879,10 +880,10 @@ static bool
 SaveStack(JSContext *cx, unsigned argc, jsval *vp)
 {
     CallArgs args = CallArgsFromVp(argc, vp);
-    Rooted<SavedFrame*> frame(cx);
-    if (!cx->compartment()->savedStacks().saveCurrentStack(cx, &frame))
+    Rooted<JSObject*> stack(cx);
+    if (!JS::CaptureCurrentStack(cx, &stack))
         return false;
-    args.rval().setObject(*frame.get());
+    args.rval().setObject(*stack);
     return true;
 }
 
@@ -1852,7 +1853,7 @@ FindPath(JSContext *cx, unsigned argc, jsval *vp)
                                JSPROP_ENUMERATE, nullptr, nullptr))
             return false;
 
-        RootedString edge(cx, js_NewString<CanGC>(cx, edges[i].get(), js_strlen(edges[i])));
+        RootedString edge(cx, NewString<CanGC>(cx, edges[i].get(), js_strlen(edges[i])));
         if (!edge)
             return false;
         edges[i].forget();

@@ -275,7 +275,6 @@ public:
   };
 
   MediaDecoder();
-  virtual ~MediaDecoder();
 
   // Reset the decoder and notify the media element that
   // server connection is closed.
@@ -608,7 +607,7 @@ public:
 
   // Set a flag indicating whether seeking is supported
   virtual void SetMediaSeekable(bool aMediaSeekable) MOZ_OVERRIDE;
-  virtual void SetTransportSeekable(bool aTransportSeekable) MOZ_FINAL MOZ_OVERRIDE;
+
   // Returns true if this media supports seeking. False for example for WebM
   // files without an index and chained ogg files.
   virtual bool IsMediaSeekable() MOZ_FINAL MOZ_OVERRIDE;
@@ -999,6 +998,8 @@ public:
   }
 
 protected:
+  virtual ~MediaDecoder();
+
   /******
    * The following members should be accessed with the decoder lock held.
    ******/
@@ -1036,10 +1037,6 @@ protected:
 
   // True when playback should start with audio captured (not playing).
   bool mInitialAudioCaptured;
-
-  // True if the resource is seekable at a transport level (server supports byte
-  // range requests, local file, etc.).
-  bool mTransportSeekable;
 
   // True if the media is seekable (i.e. supports random access).
   bool mMediaSeekable;

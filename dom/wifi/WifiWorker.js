@@ -1,4 +1,4 @@
-/* -*- Mode: Java; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- indent-tabs-mode: nil; js-indent-level: 2 -*- */
 /* vim: set shiftwidth=2 tabstop=2 autoindent cindent expandtab: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
@@ -1957,10 +1957,10 @@ function WifiWorker() {
         net.phase1 = quote(net.phase1);
 
       if (hasValidProperty("phase2")) {
-        if (net.eap === "PEAP") {
-          net.phase2 = quote("auth=" + net.phase2);
-        } else {  // TLS, TTLS
+        if (net.phase2 === "TLS") {
           net.phase2 = quote("autheap=" + net.phase2);
+        } else { // PAP, MSCHAPV2, etc.
+          net.phase2 = quote("auth=" + net.phase2);
         }
       }
 

@@ -1000,7 +1000,7 @@ nsFlexContainerFrame::GenerateFlexItemForChild(
     nsIntSize widgetMinSize(0, 0);
     bool canOverride = true;
     aPresContext->GetTheme()->
-      GetMinimumWidgetSize(childRS.rendContext, aChildFrame,
+      GetMinimumWidgetSize(aPresContext, aChildFrame,
                            disp->mAppearance,
                            &widgetMinSize, &canOverride);
 
@@ -3303,7 +3303,7 @@ nsFlexContainerFrame::DoFlexLayout(nsPresContext*           aPresContext,
   // flex container's content box (with respect to its border-box), so that
   // we can compute our flex item's final positions.
   nsMargin containerBorderPadding(aReflowState.ComputedPhysicalBorderPadding());
-  ApplySkipSides(containerBorderPadding, &aReflowState);
+  containerBorderPadding.ApplySkipSides(GetSkipSides(&aReflowState));
   const nsPoint containerContentBoxOrigin(containerBorderPadding.left,
                                           containerBorderPadding.top);
 

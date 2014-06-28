@@ -69,7 +69,7 @@ CodeGeneratorShared::CodeGeneratorShared(MIRGenerator *gen, LIRGraph *graph, Mac
         // relies on the a priori stack adjustment (in the prologue) on platforms
         // (like x64) which require the stack to be aligned.
         if (StackKeptAligned || gen->needsInitialStackAlignment()) {
-            unsigned alignmentAtCall = AsmJSSizeOfRetAddr + frameDepth_;
+            unsigned alignmentAtCall = AsmJSFrameSize + frameDepth_;
             if (unsigned rem = alignmentAtCall % StackAlignment)
                 frameDepth_ += StackAlignment - rem;
         }
@@ -177,6 +177,7 @@ CodeGeneratorShared::encodeAllocation(LSnapshot *snapshot, MDefinition *mir,
         break;
       case MIRType_Int32:
       case MIRType_String:
+      case MIRType_Symbol:
       case MIRType_Object:
       case MIRType_Boolean:
       case MIRType_Double:
@@ -521,8 +522,17 @@ class VerifyOp
         masm.branchPtr(Assembler::NotEqual, dump, reg, failure_);
     }
     void operator()(FloatRegister reg, Address dump) {
-        masm.loadDouble(dump, ScratchFloatReg);
-        masm.branchDouble(Assembler::DoubleNotEqual, ScratchFloatReg, reg, failure_);
+        FloatRegister scratch;
+#ifdef JS_CODEGEN_ARM
+        if (reg.isDouble())
+            scratch = ScratchDoubleReg;
+        else
+            scratch = ScratchFloat32Reg;
+#else
+        scratch = ScratchFloat32Reg;
+#endif
+        masm.loadDouble(dump, scratch);
+        masm.branchDouble(Assembler::DoubleNotEqual, scratch, reg, failure_);
     }
 };
 

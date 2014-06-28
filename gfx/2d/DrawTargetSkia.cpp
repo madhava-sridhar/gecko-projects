@@ -277,12 +277,12 @@ struct AutoPaintSetup {
       mPaint.setXfermodeMode(SkXfermode::kSrcOver_Mode);
       SkPaint temp;
       temp.setXfermodeMode(GfxOpToSkiaOp(aOptions.mCompositionOp));
-      temp.setAlpha(U8CPU(aOptions.mAlpha*255+0.5));
+      temp.setAlpha(ColorFloatToByte(aOptions.mAlpha));
       //TODO: Get a rect here
       mCanvas->saveLayer(nullptr, &temp);
       mNeedsRestore = true;
     } else {
-      mPaint.setAlpha(U8CPU(aOptions.mAlpha*255.0+0.5));
+      mPaint.setAlpha(ColorFloatToByte(aOptions.mAlpha));
       mAlpha = aOptions.mAlpha;
     }
     mPaint.setFilterLevel(SkPaint::kLow_FilterLevel);
@@ -337,6 +337,17 @@ DrawTargetSkia::DrawSurface(SourceSurface *aSurface,
   }
 
   mCanvas->drawBitmapRectToRect(bitmap.mBitmap, &sourceRect, destRect, &paint.mPaint);
+}
+
+DrawTargetType
+DrawTargetSkia::GetType() const
+{
+#ifdef USE_SKIA_GPU
+  if (mGrContext) {
+    return DrawTargetType::HARDWARE_RASTER;
+  }
+#endif
+  return DrawTargetType::SOFTWARE_RASTER;
 }
 
 void
@@ -536,9 +547,10 @@ DrawTargetSkia::Mask(const Pattern &aSource,
   TempBitmap tmpBitmap;
   SetPaintPattern(maskPaint, aMask, tmpBitmap);
   
-  SkLayerRasterizer *raster = new SkLayerRasterizer();
-  raster->addLayer(maskPaint);
-  SkSafeUnref(paint.mPaint.setRasterizer(raster));
+  SkLayerRasterizer::Builder builder;
+  builder.addLayer(maskPaint);
+  SkAutoTUnref<SkRasterizer> raster(builder.detachRasterizer());
+  paint.mPaint.setRasterizer(raster.get());
 
   mCanvas->drawRect(SkRectCoveringWholeSurface(), paint.mPaint);
 }
@@ -564,9 +576,10 @@ DrawTargetSkia::MaskSurface(const Pattern &aSource,
     transform.postTranslate(SkFloatToScalar(aOffset.x), SkFloatToScalar(aOffset.y));
     maskPaint.getShader()->setLocalMatrix(transform);
 
-    SkLayerRasterizer *raster = new SkLayerRasterizer();
-    raster->addLayer(maskPaint);
-    SkSafeUnref(paint.mPaint.setRasterizer(raster));
+    SkLayerRasterizer::Builder builder;
+    builder.addLayer(maskPaint);
+    SkAutoTUnref<SkRasterizer> raster(builder.detachRasterizer());
+    paint.mPaint.setRasterizer(raster.get());
 
     IntSize size = aMask->GetSize();
     Rect rect = Rect(aOffset.x, aOffset.y, size.width, size.height);

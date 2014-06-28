@@ -342,7 +342,8 @@ ActorFromRemoteBlob(nsIDOMBlob* aBlob)
 {
   MOZ_ASSERT(aBlob);
 
-  nsCOMPtr<nsIRemoteBlob> remoteBlob = do_QueryInterface(aBlob);
+  nsRefPtr<DOMFile> blob = static_cast<DOMFile*>(aBlob);
+  nsCOMPtr<nsIRemoteBlob> remoteBlob = do_QueryInterface(blob->Impl());
   if (remoteBlob) {
     BlobChild* actor = remoteBlob->GetBlobChild();
     MOZ_ASSERT(actor);
@@ -565,15 +566,6 @@ public:
       return true;
     }
 
-    nsCOMPtr<nsIDOMFile> domFile = do_QueryInterface(aFile.mFile);
-    MOZ_ASSERT(domFile);
-
-    if (NS_WARN_IF(!ResolveMysteryFile(domFile,
-                                       aData.name,
-                                       aData.type,
-                                       aData.size,
-                                       aData.lastModifiedDate))) {
-      return false;
     }
 
     JS::Rooted<JS::Value> wrappedFile(aCx);
@@ -1062,7 +1054,8 @@ IDBObjectStore::ConvertBlobsToActors(
         return NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
       }
 
-      nsCOMPtr<nsIDOMBlob> blob = new nsDOMFileFile(nativeFile, file.mFileInfo);
+      nsCOMPtr<nsIDOMBlob> blob = DOMFile::CreateFromFile(nativeFile,
+                                                          file.mFileInfo);
 
       BlobParent* actor =
         aContentParent->GetOrCreateActorForBlob(blob);

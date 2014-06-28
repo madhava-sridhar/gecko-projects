@@ -1,4 +1,4 @@
-/* -*- Mode: Java; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- indent-tabs-mode: nil; js-indent-level: 2 -*- */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -638,6 +638,11 @@ pref("devtools.defaultColorUnit", "hex");
 // Used for devtools debugging
 pref("devtools.dump.emit", false);
 
+// Disable device discovery logging
+pref("devtools.discovery.log", false);
+// Disable scanning for DevTools devices via WiFi
+pref("devtools.remote.wifi.scan", false);
+
 // view source
 pref("view_source.syntax_highlight", true);
 pref("view_source.wrap_long_lines", false);
@@ -983,7 +988,7 @@ pref("network.http.default-socket-type", "");
 // the packet is lost or delayed on the route.
 pref("network.http.keep-alive.timeout", 115);
 
-// Timeout connections if an initial response is not received after 10 mins.
+// Timeout connections if an initial response is not received after 5 mins.
 pref("network.http.response.timeout", 300);
 
 // Limit the absolute number of http connections.
@@ -1408,6 +1413,8 @@ pref("network.predictor.preserve", 80); // percentage of predictor data to keep 
 
 // Allow insecure NTLMv1 when needed.
 pref("network.negotiate-auth.allow-insecure-ntlm-v1", false);
+// Allow insecure NTLMv1 for HTTPS protected sites by default.
+pref("network.negotiate-auth.allow-insecure-ntlm-v1-https", true);
 
 // This list controls which URIs can use the negotiate-auth protocol.  This
 // list should be limited to the servers you know you'll need to login to.
@@ -1611,7 +1618,7 @@ pref("security.notification_enable_delay", 500);
 pref("security.csp.enable", true);
 pref("security.csp.debug", false);
 pref("security.csp.experimentalEnabled", false);
-pref("security.csp.newbackend.enable", false);
+pref("security.csp.newbackend.enable", true);
 
 // Mixed content blocking
 pref("security.mixed_content.block_active_content", false);
@@ -1887,6 +1894,9 @@ pref("layout.css.DOMPoint.enabled", true);
 // Is support for DOMQuad enabled?
 pref("layout.css.DOMQuad.enabled", true);
 
+// Is support for DOMMatrix enabled?
+pref("layout.css.DOMMatrix.enabled", true);
+
 // Is support for GeometryUtils.getBoxQuads enabled?
 #ifdef RELEASE_BUILD
 pref("layout.css.getBoxQuads.enabled", false);
@@ -1961,6 +1971,9 @@ pref("layout.css.grid.enabled", false);
 
 // Is support for CSS box-decoration-break enabled?
 pref("layout.css.box-decoration-break.enabled", false);
+
+// Is layout of CSS outline-style:auto enabled?
+pref("layout.css.outline-style-auto.enabled", false);
 
 // pref for which side vertical scrollbars should be on
 // 0 = end-side in UI direction
@@ -3714,8 +3727,9 @@ pref("webgl.msaa-force", false);
 pref("webgl.prefer-16bpp", false);
 pref("webgl.default-no-alpha", false);
 pref("webgl.force-layers-readback", false);
-pref("webgl.lose-context-on-heap-minimize", false);
+pref("webgl.lose-context-on-memory-preasure", false);
 pref("webgl.can-lose-context-in-foreground", true);
+pref("webgl.restore-context-when-visible", true);
 pref("webgl.max-warnings-per-context", 32);
 pref("webgl.enable-draft-extensions", false);
 pref("webgl.enable-privileged-extensions", false);
@@ -3923,6 +3937,9 @@ pref("dom.battery.enabled", true);
 
 // Image srcset
 pref("dom.image.srcset.enabled", false);
+
+// <picture> element and sizes
+pref("dom.image.picture.enabled", false);
 
 // WebSMS
 pref("dom.sms.enabled", false);

@@ -140,8 +140,6 @@ public:
   }
 #endif
 
-  ~MediaEngineWebRTCVideoSource() { Shutdown(); }
-
   virtual void GetName(nsAString&);
   virtual void GetUUID(nsAString&);
   virtual nsresult Allocate(const VideoTrackConstraintsN &aConstraints,
@@ -205,6 +203,9 @@ public:
     return NS_OK;
   }
 
+protected:
+  ~MediaEngineWebRTCVideoSource() { Shutdown(); }
+
 private:
   static const unsigned int KMaxDeviceNameLength = 128;
   static const unsigned int KMaxUniqueIdLength = 256;
@@ -218,7 +219,7 @@ private:
   mozilla::ReentrantMonitor mCallbackMonitor; // Monitor for camera callback handling
   // This is only modified on MainThread (AllocImpl and DeallocImpl)
   nsRefPtr<ICameraControl> mCameraControl;
-  nsRefPtr<nsIDOMFile> mLastCapture;
+  nsCOMPtr<nsIDOMFile> mLastCapture;
 
   // These are protected by mMonitor below
   int mRotation;
@@ -286,7 +287,6 @@ public:
     mDeviceUUID.Assign(NS_ConvertUTF8toUTF16(uuid));
     Init();
   }
-  ~MediaEngineWebRTCAudioSource() { Shutdown(); }
 
   virtual void GetName(nsAString&);
   virtual void GetUUID(nsAString&);
@@ -320,6 +320,8 @@ public:
   NS_DECL_THREADSAFE_ISUPPORTS
 
 protected:
+  ~MediaEngineWebRTCAudioSource() { Shutdown(); }
+
   // mSamples is an int to avoid conversions when comparing/etc to
   // samplingFreq & length. Making mSamples protected instead of private is a
   // silly way to avoid -Wunused-private-field warnings when PR_LOGGING is not

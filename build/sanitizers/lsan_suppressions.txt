@@ -31,11 +31,6 @@ leak:GI___strdup
 ### Many leaks only affect some test suites.  The suite annotations are not checked.
 ###
 
-# Bug 800200 - JSD1 is leaking, but it is about to be removed, so ignore it. m4
-leak:jsd_CreateLock
-leak:jsdScript::GetExecutableLines
-leak:jsdService::ActivateDebugger
-
 # Bug 979928 - WebRTC is leaky. m2, m3
 leak:/media/mtransport/
 leak:/media/webrtc/signaling/
@@ -72,9 +67,6 @@ leak:AllocateArrayBufferContents
 # Bug 1022010 - Small leak under _render_glyph_outline. bc1
 leak:_render_glyph_outline
 
-# Bug 1022042 - compareVariants in the test plugin leaks identifiers. oth
-leak:compareVariants(_NPP*,
-
 # Bug 1022954 - ScriptSource leaks sourceMapURL_ sometimes. dt
 leak:ScriptSource::setSourceMapURL
 
@@ -88,6 +80,8 @@ leak:nsPSPrinterList::GetPrinterList
 # Bug 1028456 - More leaks with _PR_Getfd, in nsLocalFile::CopyToNative and do_create. bc1, bc3
 leak:_PR_Getfd
 
+# Bug 1028483 - The XML parser sometimes leaks an object. bc3
+leak:processInternalEntity
 
 ###
 ### Leaks with system libraries in their stacks. These show up across a number of tests.
