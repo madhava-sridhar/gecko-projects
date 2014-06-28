@@ -10452,9 +10452,11 @@ nsGlobalWindow::GetLocalStorage(nsIDOMStorage ** aLocalStorage)
   return rv.ErrorCode();
 }
 
-indexedDB::IDBFactory*
+mozilla::dom::indexedDB::IDBFactory*
 nsGlobalWindow::GetIndexedDB(ErrorResult& aError)
 {
+  using mozilla::dom::indexedDB::IDBFactory;
+
   if (!mIndexedDB) {
     // If the document has the sandboxed origin flag set
     // don't allow access to indexedDB.
@@ -10500,7 +10502,7 @@ nsGlobalWindow::GetIndexedDB(ErrorResult& aError)
     }
 
     // This may be null if being created from a file.
-    aError = indexedDB::IDBFactory::Create(this, getter_AddRefs(mIndexedDB));
+    aError = IDBFactory::CreateForWindow(this, getter_AddRefs(mIndexedDB));
   }
 
   return mIndexedDB;

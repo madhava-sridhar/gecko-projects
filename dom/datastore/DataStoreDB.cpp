@@ -7,6 +7,7 @@
 #include "DataStoreDB.h"
 
 #include "DataStoreCallbacks.h"
+#include "jsapi.h"
 #include "mozilla/dom/IDBDatabaseBinding.h"
 #include "mozilla/dom/IDBFactoryBinding.h"
 #include "mozilla/dom/IDBObjectStoreBinding.h"
@@ -16,7 +17,12 @@
 #include "mozilla/dom/indexedDB/IDBObjectStore.h"
 #include "mozilla/dom/indexedDB/IDBRequest.h"
 #include "mozilla/dom/indexedDB/IDBTransaction.h"
+#include "nsComponentManagerUtils.h"
+#include "nsContentUtils.h"
+#include "nsCxPusher.h"
 #include "nsIDOMEvent.h"
+#include "nsIPrincipal.h"
+#include "nsIXPConnect.h"
 
 #define DATASTOREDB_VERSION        1
 #define DATASTOREDB_NAME           "DataStoreDB"
@@ -45,7 +51,36 @@ nsresult
 DataStoreDB::CreateFactoryIfNeeded()
 {
   if (!mFactory) {
-    nsresult rv = IDBFactory::Create(nullptr, getter_AddRefs(mFactory));
+    nsresult rv;
+    nsCOMPtr<nsIPrincipal> principal =
+      do_CreateInstance("@mozilla.org/nullprincipal;1", &rv);
+    if (NS_WARN_IF(NS_FAILED(rv))) {
+      return rv;
+    }
+
+    nsIXPConnect* xpc = nsContentUtils::XPConnect();
+    MOZ_ASSERT(xpc);
+
+    AutoSafeJSContext cx;
+
+    nsCOMPtr<nsIXPConnectJSObjectHolder> globalHolder;
+    rv = xpc->CreateSandbox(cx, principal, getter_AddRefs(globalHolder));
+    if (NS_WARN_IF(NS_FAILED(rv))) {
+      return rv;
+    }
+
+    JS::Rooted<JSObject*> global(cx, globalHolder->GetJSObject());
+    if (NS_WARN_IF(NS_FAILED(rv))) {
+      return NS_ERROR_UNEXPECTED;
+    }
+
+    // The CreateSandbox call returns a proxy to the actual sandbox object. We
+    // don't need a proxy here.
+    global = js::UncheckedUnwrap(global);
+
+    JSAutoCompartment ac(cx, global);
+
+    rv = IDBFactory::CreateForDatastore(cx, global, getter_AddRefs(mFactory));
     if (NS_WARN_IF(NS_FAILED(rv))) {
       return rv;
     }

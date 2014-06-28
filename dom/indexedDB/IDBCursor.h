@@ -59,13 +59,9 @@ private:
     Type_IndexKey,
   };
 
-  // This is not actually used except to hold the other DOM objects alive.
-  nsRefPtr<IDBRequest> mRequest;
-
-  // Weak references, held alive through mRequest.
-  IDBObjectStore* mSourceObjectStore;
-  IDBIndex* mSourceIndex;
-  IDBTransaction* mTransaction;
+  nsRefPtr<IDBObjectStore> mSourceObjectStore;
+  nsRefPtr<IDBIndex> mSourceIndex;
+  nsRefPtr<IDBTransaction> mTransaction;
 
   BackgroundCursorChild* mBackgroundActor;
 
@@ -92,23 +88,20 @@ private:
 
 public:
   static already_AddRefed<IDBCursor>
-  Create(IDBRequest* aRequest,
-         IDBObjectStore* aObjectStore,
+  Create(IDBObjectStore* aObjectStore,
          BackgroundCursorChild* aBackgroundActor,
          Direction aDirection,
          const Key& aKey,
          StructuredCloneReadInfo&& aCloneInfo);
 
   static already_AddRefed<IDBCursor>
-  Create(IDBRequest* aRequest,
-         IDBObjectStore* aObjectStore,
+  Create(IDBObjectStore* aObjectStore,
          BackgroundCursorChild* aBackgroundActor,
          Direction aDirection,
          const Key& aKey);
 
   static already_AddRefed<IDBCursor>
-  Create(IDBRequest* aRequest,
-         IDBIndex* aIndex,
+  Create(IDBIndex* aIndex,
          BackgroundCursorChild* aBackgroundActor,
          Direction aDirection,
          const Key& aKey,
@@ -116,8 +109,7 @@ public:
          StructuredCloneReadInfo&& aCloneInfo);
 
   static already_AddRefed<IDBCursor>
-  Create(IDBRequest* aRequest,
-         IDBIndex* aIndex,
+  Create(IDBIndex* aIndex,
          BackgroundCursorChild* aBackgroundActor,
          Direction aDirection,
          const Key& aKey,
@@ -202,7 +194,6 @@ public:
 
 private:
   IDBCursor(Type aType,
-            IDBRequest* aRequest,
             IDBObjectStore* aSourceObjectStore,
             IDBIndex* aSourceIndex,
             IDBTransaction* aTransaction,

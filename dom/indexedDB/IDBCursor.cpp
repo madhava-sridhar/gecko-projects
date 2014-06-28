@@ -27,15 +27,13 @@ using namespace mozilla::dom;
 using namespace mozilla::dom::indexedDB;
 
 IDBCursor::IDBCursor(Type aType,
-                     IDBRequest* aRequest,
                      IDBObjectStore* aSourceObjectStore,
                      IDBIndex* aSourceIndex,
                      IDBTransaction* aTransaction,
                      BackgroundCursorChild* aBackgroundActor,
                      Direction aDirection,
                      const Key& aKey)
-  : mRequest(aRequest)
-  , mSourceObjectStore(aSourceObjectStore)
+  : mSourceObjectStore(aSourceObjectStore)
   , mSourceIndex(aSourceIndex)
   , mTransaction(aTransaction)
   , mBackgroundActor(aBackgroundActor)
@@ -84,22 +82,24 @@ IDBCursor::~IDBCursor()
 
 // static
 already_AddRefed<IDBCursor>
-IDBCursor::Create(IDBRequest* aRequest,
-                  IDBObjectStore* aObjectStore,
+IDBCursor::Create(IDBObjectStore* aObjectStore,
                   BackgroundCursorChild* aBackgroundActor,
                   Direction aDirection,
                   const Key& aKey,
                   StructuredCloneReadInfo&& aCloneInfo)
 {
-  MOZ_ASSERT(aRequest);
-  aRequest->AssertIsOnOwningThread();
   MOZ_ASSERT(aObjectStore);
+  aObjectStore->AssertIsOnOwningThread();
   MOZ_ASSERT(aBackgroundActor);
   MOZ_ASSERT(!aKey.IsUnset());
 
   nsRefPtr<IDBCursor> cursor =
-    new IDBCursor(Type_ObjectStore, aRequest, aObjectStore, nullptr,
-                  aObjectStore->Transaction(), aBackgroundActor, aDirection,
+    new IDBCursor(Type_ObjectStore,
+                  aObjectStore,
+                  nullptr,
+                  aObjectStore->Transaction(),
+                  aBackgroundActor,
+                  aDirection,
                   aKey);
 
   cursor->mCloneInfo = Move(aCloneInfo);
@@ -109,21 +109,23 @@ IDBCursor::Create(IDBRequest* aRequest,
 
 // static
 already_AddRefed<IDBCursor>
-IDBCursor::Create(IDBRequest* aRequest,
-                  IDBObjectStore* aObjectStore,
+IDBCursor::Create(IDBObjectStore* aObjectStore,
                   BackgroundCursorChild* aBackgroundActor,
                   Direction aDirection,
                   const Key& aKey)
 {
-  MOZ_ASSERT(aRequest);
-  aRequest->AssertIsOnOwningThread();
   MOZ_ASSERT(aObjectStore);
+  aObjectStore->AssertIsOnOwningThread();
   MOZ_ASSERT(aBackgroundActor);
   MOZ_ASSERT(!aKey.IsUnset());
 
   nsRefPtr<IDBCursor> cursor =
-    new IDBCursor(Type_ObjectStoreKey, aRequest, aObjectStore, nullptr,
-                  aObjectStore->Transaction(), aBackgroundActor, aDirection,
+    new IDBCursor(Type_ObjectStoreKey,
+                  aObjectStore,
+                  nullptr,
+                  aObjectStore->Transaction(),
+                  aBackgroundActor,
+                  aDirection,
                   aKey);
 
   return cursor.forget();
@@ -131,25 +133,27 @@ IDBCursor::Create(IDBRequest* aRequest,
 
 // static
 already_AddRefed<IDBCursor>
-IDBCursor::Create(IDBRequest* aRequest,
-                  IDBIndex* aIndex,
+IDBCursor::Create(IDBIndex* aIndex,
                   BackgroundCursorChild* aBackgroundActor,
                   Direction aDirection,
                   const Key& aKey,
                   const Key& aPrimaryKey,
                   StructuredCloneReadInfo&& aCloneInfo)
 {
-  MOZ_ASSERT(aRequest);
-  aRequest->AssertIsOnOwningThread();
   MOZ_ASSERT(aIndex);
+  aIndex->AssertIsOnOwningThread();
   MOZ_ASSERT(aBackgroundActor);
   MOZ_ASSERT(!aKey.IsUnset());
   MOZ_ASSERT(!aPrimaryKey.IsUnset());
 
   nsRefPtr<IDBCursor> cursor =
-    new IDBCursor(Type_Index, aRequest, nullptr, aIndex,
-                  aIndex->ObjectStore()->Transaction(), aBackgroundActor,
-                  aDirection, aKey);
+    new IDBCursor(Type_Index,
+                  nullptr,
+                  aIndex,
+                  aIndex->ObjectStore()->Transaction(),
+                  aBackgroundActor,
+                  aDirection,
+                  aKey);
 
   cursor->mPrimaryKey = Move(aPrimaryKey);
   cursor->mCloneInfo = Move(aCloneInfo);
@@ -159,24 +163,26 @@ IDBCursor::Create(IDBRequest* aRequest,
 
 // static
 already_AddRefed<IDBCursor>
-IDBCursor::Create(IDBRequest* aRequest,
-                  IDBIndex* aIndex,
+IDBCursor::Create(IDBIndex* aIndex,
                   BackgroundCursorChild* aBackgroundActor,
                   Direction aDirection,
                   const Key& aKey,
                   const Key& aPrimaryKey)
 {
-  MOZ_ASSERT(aRequest);
-  aRequest->AssertIsOnOwningThread();
   MOZ_ASSERT(aIndex);
+  aIndex->AssertIsOnOwningThread();
   MOZ_ASSERT(aBackgroundActor);
   MOZ_ASSERT(!aKey.IsUnset());
   MOZ_ASSERT(!aPrimaryKey.IsUnset());
 
   nsRefPtr<IDBCursor> cursor =
-    new IDBCursor(Type_IndexKey, aRequest, nullptr, aIndex,
-                  aIndex->ObjectStore()->Transaction(), aBackgroundActor,
-                  aDirection, aKey);
+    new IDBCursor(Type_IndexKey,
+                  nullptr,
+                  aIndex,
+                  aIndex->ObjectStore()->Transaction(),
+                  aBackgroundActor,
+                  aDirection,
+                  aKey);
 
   cursor->mPrimaryKey = Move(aPrimaryKey);
 
@@ -790,7 +796,9 @@ NS_IMPL_CYCLE_COLLECTION_CLASS(IDBCursor)
 
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(IDBCursor)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE_SCRIPT_OBJECTS
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mRequest)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mSourceObjectStore)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mSourceIndex)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mTransaction)
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
 
 NS_IMPL_CYCLE_COLLECTION_TRACE_BEGIN(IDBCursor)
@@ -807,7 +815,7 @@ NS_IMPL_CYCLE_COLLECTION_TRACE_BEGIN(IDBCursor)
 NS_IMPL_CYCLE_COLLECTION_TRACE_END
 
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(IDBCursor)
-  // Don't unlink mRequest!
+  // Don't unlink mSourceObjectStore or mSourceIndex or mTransaction!
   NS_IMPL_CYCLE_COLLECTION_UNLINK_PRESERVED_WRAPPER
   tmp->DropJSObjects();
 NS_IMPL_CYCLE_COLLECTION_UNLINK_END

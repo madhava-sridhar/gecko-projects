@@ -143,8 +143,8 @@ IDBFactory::~IDBFactory()
 
 // static
 nsresult
-IDBFactory::Create(nsPIDOMWindow* aWindow,
-                   IDBFactory** aFactory)
+IDBFactory::CreateForWindow(nsPIDOMWindow* aWindow,
+                            IDBFactory** aFactory)
 {
   MOZ_ASSERT(NS_IsMainThread());
   MOZ_ASSERT(aWindow);
@@ -160,16 +160,17 @@ IDBFactory::Create(nsPIDOMWindow* aWindow,
     IDB_ENSURE_TRUE(aWindow, NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
   }
 
-  // Make sure that the manager is up before we do anything here since lots of
-  // decisions depend on which process we're running in.
-  IndexedDatabaseManager* mgr = IndexedDatabaseManager::GetOrCreate();
-  IDB_ENSURE_TRUE(mgr, NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
-
   nsCOMPtr<nsIScriptObjectPrincipal> sop = do_QueryInterface(aWindow);
-  IDB_ENSURE_TRUE(sop, NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
+  if (NS_WARN_IF(!sop)) {
+    IDB_REPORT_INTERNAL_ERR();
+    return NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
+  }
 
   nsCOMPtr<nsIPrincipal> principal = sop->GetPrincipal();
-  IDB_ENSURE_TRUE(principal, NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
+  if (NS_WARN_IF(!principal)) {
+    IDB_REPORT_INTERNAL_ERR();
+    return NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
+  }
 
   nsAutoPtr<PrincipalInfo> principalInfo(new PrincipalInfo());
 
@@ -190,19 +191,67 @@ IDBFactory::Create(nsPIDOMWindow* aWindow,
 
 // static
 nsresult
-IDBFactory::Create(JSContext* aCx,
-                   JS::Handle<JSObject*> aOwningObject,
-                   IDBFactory** aFactory)
+IDBFactory::CreateForChromeJS(JSContext* aCx,
+                              JS::Handle<JSObject*> aOwningObject,
+                              IDBFactory** aFactory)
 {
-  MOZ_ASSERT_IF(NS_IsMainThread(), nsContentUtils::IsCallerChrome());
+  MOZ_ASSERT(NS_IsMainThread());
+  MOZ_ASSERT(nsContentUtils::IsCallerChrome());
+
+  nsAutoPtr<PrincipalInfo> principalInfo(
+    new PrincipalInfo(SystemPrincipalInfo()));
+
+  nsresult rv =
+    CreateForJSInternal(aCx, aOwningObject, principalInfo, aFactory);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+
+  MOZ_ASSERT(!principalInfo);
+
+  return NS_OK;
+}
+
+nsresult
+IDBFactory::CreateForDatastore(JSContext* aCx,
+                               JS::Handle<JSObject*> aOwningObject,
+                               IDBFactory** aFactory)
+{
+  MOZ_ASSERT(NS_IsMainThread());
+
+  // There should be a null principal pushed here, but it's still chrome...
+  MOZ_ASSERT(!nsContentUtils::IsCallerChrome());
+
+  nsAutoPtr<PrincipalInfo> principalInfo(
+    new PrincipalInfo(SystemPrincipalInfo()));
+
+  nsresult rv =
+    CreateForJSInternal(aCx, aOwningObject, principalInfo, aFactory);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+
+  MOZ_ASSERT(!principalInfo);
+
+  return NS_OK;
+}
+
+// static
+nsresult
+IDBFactory::CreateForJSInternal(JSContext* aCx,
+                                JS::Handle<JSObject*> aOwningObject,
+                                nsAutoPtr<PrincipalInfo>& aPrincipalInfo,
+                                IDBFactory** aFactory)
+{
   MOZ_ASSERT(aCx);
   MOZ_ASSERT(aOwningObject);
+  MOZ_ASSERT(aPrincipalInfo);
   MOZ_ASSERT(aFactory);
   MOZ_ASSERT(JS_GetGlobalForObject(aCx, aOwningObject) == aOwningObject,
              "Not a global object!");
 
   if (!NS_IsMainThread()) {
-    MOZ_CRASH("Implement me for workers!");
+    MOZ_CRASH("Not yet supported off the main thread!");
   }
 
   if (NS_WARN_IF(!Preferences::GetBool(kPrefIndexedDBEnabled, false))) {
@@ -210,13 +259,8 @@ IDBFactory::Create(JSContext* aCx,
     return NS_ERROR_DOM_INDEXEDDB_NOT_ALLOWED_ERR;
   }
 
-  // Make sure that the manager is up before we do anything here since lots of
-  // decisions depend on which process we're running in.
-  IndexedDatabaseManager* mgr = IndexedDatabaseManager::GetOrCreate();
-  IDB_ENSURE_TRUE(mgr, NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
-
   nsRefPtr<IDBFactory> factory = new IDBFactory();
-  factory->mPrincipalInfo = new PrincipalInfo(SystemPrincipalInfo());
+  factory->mPrincipalInfo = aPrincipalInfo.forget();
   factory->mOwningObject = aOwningObject;
 
   mozilla::HoldJSObjects(factory.get());
@@ -422,20 +466,28 @@ IDBFactory::OpenInternal(nsIPrincipal* aPrincipal,
     }
   }
 
-  AutoJSContext cx;
-  nsPIDOMWindow* window;
-  JS::Rooted<JSObject*> scriptOwner(cx);
+  AutoJSAPI autoJS;
+  nsRefPtr<IDBOpenDBRequest> request;
 
   if (mWindow) {
-    window = mWindow;
-    scriptOwner = static_cast<nsGlobalWindow*>(window)->FastGetGlobalJSObject();
+    if (NS_WARN_IF(!autoJS.InitUsingWin(mWindow))) {
+      IDB_REPORT_INTERNAL_ERR();
+      aRv.Throw(NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
+      return nullptr;
+    }
+
+    JS::Rooted<JSObject*> scriptOwner(autoJS.cx(),
+      static_cast<nsGlobalWindow*>(mWindow.get())->FastGetGlobalJSObject());
+    MOZ_ASSERT(scriptOwner);
+
+    request = IDBOpenDBRequest::CreateForWindow(this, mWindow, scriptOwner);
   } else {
-    window = nullptr;
-    scriptOwner = mOwningObject;
+    autoJS.Init();
+    JS::Rooted<JSObject*> scriptOwner(autoJS.cx(), mOwningObject);
+
+    request = IDBOpenDBRequest::CreateForJS(this, scriptOwner);
   }
 
-  nsRefPtr<IDBOpenDBRequest> request =
-    IDBOpenDBRequest::Create(this, window, scriptOwner);
   MOZ_ASSERT(request);
 
   // If we already have a background actor then we can start this request now.

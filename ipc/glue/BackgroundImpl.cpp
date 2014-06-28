@@ -1094,7 +1094,8 @@ ParentImpl::GetContentParent(PBackgroundParent* aBackgroundActor)
     // will run before the reference we hand out can be released, and the
     // ContentParent can't die as long as the existing reference is maintained.
     nsCOMPtr<nsIRunnable> runnable =
-      NS_NewNonOwningRunnableMethod(actor->mContent, &ContentParent::AddRef);
+      NS_NewNonOwningRunnableMethod(actor->mContent.get(),
+                                    &ContentParent::AddRef);
     MOZ_ASSERT(runnable);
 
     MOZ_ALWAYS_TRUE(NS_SUCCEEDED(NS_DispatchToMainThread(runnable)));

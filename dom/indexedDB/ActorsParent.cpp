@@ -94,24 +94,6 @@ using namespace mozilla::ipc;
 #define ASSERT_UNLESS_FUZZING(...) MOZ_ASSERT(false)
 #endif
 
-namespace {
-  class Database;
-  class TransactionBase;
-  class Cursor;
-}
-
-namespace mozilla {
-namespace dom {
-namespace indexedDB {
-
-using ::Database;
-using ::TransactionBase;
-using ::Cursor;
-
-} // namespace indexedDB
-} // namespace dom
-} // namespace mozilla
-
 /*******************************************************************************
  * Constants
  ******************************************************************************/
@@ -2486,6 +2468,30 @@ GetDatabaseConnection(const nsAString& aDatabaseFilePath,
  * Actor class declarations
  ******************************************************************************/
 
+// These forward declarations and using statements are needed to make the
+// refcount macros happy since we have other classes in the global namespace
+// whose names conflict. Grr.
+
+namespace {
+
+class Cursor;
+class Database;
+class TransactionBase;
+
+} // anonymous namespace
+
+namespace mozilla {
+namespace dom {
+namespace indexedDB {
+
+using ::Cursor;
+using ::Database;
+using ::TransactionBase;
+
+} // namespace indexedDB
+} // namespace dom
+} // namespace mozilla
+
 namespace {
 
 class TransactionBase;
@@ -2772,6 +2778,7 @@ private:
                                       MOZ_OVERRIDE;
 };
 
+struct DatabaseActorInfo;
 class VersionChangeTransaction;
 
 class Database MOZ_FINAL
@@ -2931,7 +2938,7 @@ private:
   }
 
   bool
-  CloseInternal();
+  CloseInternal(DatabaseActorInfo* aActorInfo);
 
   // IPDL methods are only called by IPDL.
   virtual void
@@ -3695,6 +3702,14 @@ public:
 
   virtual void
   NoteDatabaseBlocked(Database* aDatabase) = 0;
+
+#ifdef DEBUG
+  bool
+  HasBlockedDatabases() const
+  {
+    return !mMaybeBlockedDatabases.IsEmpty();
+  }
+#endif
 
 protected:
   FactoryOp(already_AddRefed<ContentParent> aContentParent,
@@ -4744,7 +4759,8 @@ private:
   ~DatabaseActorInfo()
   {
     MOZ_ASSERT(mLiveDatabases.IsEmpty());
-    MOZ_ASSERT(!mWaitingFactoryOp);
+    MOZ_ASSERT(!mWaitingFactoryOp ||
+               !mWaitingFactoryOp->HasBlockedDatabases());
     MOZ_COUNT_DTOR(indexedDB::DatabaseActorInfo);
   }
 };
@@ -5125,6 +5141,11 @@ BackgroundFactoryParent::AllocPBackgroundIDBFactoryRequestParent(
     return nullptr;
   }
 
+  if (NS_WARN_IF(principalInfo->type() == PrincipalInfo::TNullPrincipalInfo)) {
+    ASSERT_UNLESS_FUZZING();
+    return nullptr;
+  }
+
   nsRefPtr<ContentParent> contentParent =
     BackgroundParent::GetContentParent(Manager());
 
@@ -5261,15 +5282,16 @@ Database::Invalidate()
 
   Helper::AbortTransactions(mTransactions);
 
-  MOZ_ALWAYS_TRUE(CloseInternal());
-
   DatabaseActorInfo* info;
   MOZ_ALWAYS_TRUE(gLiveDatabaseHashtable->Get(Id(), &info));
+
+  MOZ_ALWAYS_TRUE(CloseInternal(info));
 
   MOZ_ALWAYS_TRUE(info->mLiveDatabases.RemoveElement(this));
 
   if (info->mLiveDatabases.IsEmpty()) {
-    MOZ_ASSERT(!info->mWaitingFactoryOp);
+    MOZ_ASSERT(!info->mWaitingFactoryOp ||
+               !info->mWaitingFactoryOp->HasBlockedDatabases());
     gLiveDatabaseHashtable->Remove(Id());
   }
 
@@ -5308,7 +5330,7 @@ Database::SetActorAlive()
 }
 
 bool
-Database::CloseInternal()
+Database::CloseInternal(DatabaseActorInfo* aActorInfo)
 {
   AssertIsOnBackgroundThread();
 
@@ -5324,13 +5346,14 @@ Database::CloseInternal()
 
   mClosed = true;
 
-  DatabaseActorInfo* info;
-  MOZ_ALWAYS_TRUE(gLiveDatabaseHashtable->Get(Id(), &info));
+  if (!aActorInfo) {
+    MOZ_ALWAYS_TRUE(gLiveDatabaseHashtable->Get(Id(), &aActorInfo));
+  }
 
-  MOZ_ASSERT(info->mLiveDatabases.Contains(this));
+  MOZ_ASSERT(aActorInfo->mLiveDatabases.Contains(this));
 
-  if (info->mWaitingFactoryOp) {
-    info->mWaitingFactoryOp->NoteDatabaseClosed(this);
+  if (aActorInfo->mWaitingFactoryOp) {
+    aActorInfo->mWaitingFactoryOp->NoteDatabaseClosed(this);
   }
 
   return true;
@@ -5562,7 +5585,7 @@ Database::RecvClose()
 {
   AssertIsOnBackgroundThread();
 
-  if (NS_WARN_IF(!CloseInternal())) {
+  if (NS_WARN_IF(!CloseInternal(nullptr))) {
     ASSERT_UNLESS_FUZZING();
     return false;
   }
@@ -8403,6 +8426,12 @@ FactoryOp::Open()
     return NS_ERROR_DOM_INDEXEDDB_NOT_ALLOWED_ERR;
   }
 
+  // This has to be started on the main thread currently.
+  if (NS_WARN_IF(!IndexedDatabaseManager::GetOrCreate())) {
+    IDB_REPORT_INTERNAL_ERR();
+    return NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
+  }
+
   QuotaManager::GetStorageId(mPersistenceType, mOrigin, Client::IDB, mName,
                              mDatabaseId);
 
@@ -8547,6 +8576,7 @@ FactoryOp::CheckPermission(ContentParent* aContentParent,
 {
   MOZ_ASSERT(NS_IsMainThread());
   MOZ_ASSERT(mState == State_Initial || mState == State_PermissionRetry);
+  MOZ_ASSERT(mPrincipalInfo.type() != PrincipalInfo::TNullPrincipalInfo);
 
   if (NS_WARN_IF(!Preferences::GetBool(kPrefIndexedDBEnabled, false))) {
     if (aContentParent) {
@@ -9379,34 +9409,23 @@ OpenDatabaseOp::BeginVersionChange()
   mMetadata = info->mMetadata;
 
   const uint32_t liveCount = info->mLiveDatabases.Length();
-
-  // See if any other databases need to be closed.
-  uint32_t blockedCount = 0;
-
   if (liveCount > 1) {
     FallibleTArray<Database*> maybeBlockedDatabases;
-    if (NS_WARN_IF(!maybeBlockedDatabases.SetCapacity(liveCount - 1))) {
-      return NS_ERROR_OUT_OF_MEMORY;
-    }
-
     for (uint32_t index = 0; index < liveCount; index++) {
       Database* database = info->mLiveDatabases[index];
-      if (database != mDatabase && !database->IsClosed()) {
-        if (NS_WARN_IF(!maybeBlockedDatabases.AppendElement(database))) {
-          return NS_ERROR_OUT_OF_MEMORY;
-        }
+      if (database != mDatabase &&
+          !database->IsClosed() &&
+          NS_WARN_IF(!maybeBlockedDatabases.AppendElement(database))) {
+        return NS_ERROR_OUT_OF_MEMORY;
       }
     }
 
     if (!maybeBlockedDatabases.IsEmpty()) {
-      blockedCount = maybeBlockedDatabases.Length();
-
       mMaybeBlockedDatabases.SwapElements(maybeBlockedDatabases);
     }
   }
 
-  // XXX Combine with block below.
-  if (!blockedCount) {
+  if (mMaybeBlockedDatabases.IsEmpty()) {
     // No other databases need to be notified, we can jump directly to the
     // transaction thread pool.
     mVersionChangeTransaction.swap(transaction);
@@ -9435,8 +9454,8 @@ OpenDatabaseOp::BeginVersionChange()
     return rv;
   }
 
-  for (uint32_t index = 0;
-       index < blockedCount;
+  for (uint32_t count = mMaybeBlockedDatabases.Length(), index = 0;
+       index < count;
        /* incremented conditionally */) {
     if (mMaybeBlockedDatabases[index]->SendVersionChange(
                                            mMetadata->mCommonMetadata.version(),
@@ -9445,11 +9464,11 @@ OpenDatabaseOp::BeginVersionChange()
     } else {
       // We don't want to wait forever if we were not able to send the message.
       mMaybeBlockedDatabases.RemoveElementAt(index);
-      blockedCount--;
+      count--;
     }
   }
 
-  if (!blockedCount) {
+  if (mMaybeBlockedDatabases.IsEmpty()) {
     // We didn't need to wait after all.
     mVersionChangeTransaction.swap(transaction);
 
@@ -9461,6 +9480,8 @@ OpenDatabaseOp::BeginVersionChange()
 
     return NS_OK;
   }
+
+  MOZ_ASSERT(!mMaybeBlockedDatabases.IsEmpty());
 
   mWasBlocked = true;
 
@@ -9480,20 +9501,28 @@ OpenDatabaseOp::NoteDatabaseClosed(Database* aDatabase)
   AssertIsOnOwningThread();
   MOZ_ASSERT(mState == State_WaitingForOtherDatabasesToClose ||
              mState == State_BlockedWaitingForOtherDatabasesToClose);
+  MOZ_ASSERT(!mMaybeBlockedDatabases.IsEmpty());
 
-  nsresult rv = NS_OK;
+  bool actorDestroyed = IsActorDestroyed() || mDatabase->IsActorDestroyed();
 
-  if (IsActorDestroyed() || mDatabase->IsActorDestroyed()) {
-    rv =  NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
-  } else if (mMaybeBlockedDatabases.RemoveElement(aDatabase) &&
-             mMaybeBlockedDatabases.IsEmpty()) {
-    mState = State_DatabaseWorkVersionChange;
-    rv = DispatchToWorkThread();
+  nsresult rv = actorDestroyed ? NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR : NS_OK;
+
+  if (mMaybeBlockedDatabases.RemoveElement(aDatabase) &&
+      mMaybeBlockedDatabases.IsEmpty()) {
+    if (actorDestroyed) {
+      DatabaseActorInfo* info;
+      MOZ_ALWAYS_TRUE(gLiveDatabaseHashtable->Get(mDatabaseId, &info));
+      MOZ_ASSERT(info->mWaitingFactoryOp == this);
+      info->mWaitingFactoryOp = nullptr;
+    } else {
+      mState = State_DatabaseWorkVersionChange;
+      rv = DispatchToWorkThread();
+    }
   }
 
   if (NS_WARN_IF(NS_FAILED(rv))) {
     if (NS_SUCCEEDED(mResultCode)) {
-      mResultCode =  rv;
+      mResultCode = rv;
     }
 
     mState = State_SendingResults;
@@ -10233,67 +10262,52 @@ DeleteDatabaseOp::BeginVersionChange()
   }
 
   DatabaseActorInfo* info;
-  MOZ_ALWAYS_TRUE(gLiveDatabaseHashtable->Get(mDatabaseId, &info));
+  if (gLiveDatabaseHashtable->Get(mDatabaseId, &info)) {
+    MOZ_ASSERT(!info->mWaitingFactoryOp);
 
-  MOZ_ASSERT(!info->mWaitingFactoryOp);
-
-  const uint32_t liveCount = info->mLiveDatabases.Length();
-
-  // See if any other databases need to be closed.
-  uint32_t blockedCount = 0;
-
-  if (liveCount) {
-    FallibleTArray<Database*> maybeBlockedDatabases;
-    if (NS_WARN_IF(!maybeBlockedDatabases.SetCapacity(liveCount - 1))) {
-      return NS_ERROR_OUT_OF_MEMORY;
-    }
-
-    for (uint32_t index = 0; index < liveCount; index++) {
-      Database* database = info->mLiveDatabases[index];
-      if (!database->IsClosed()) {
-        if (NS_WARN_IF(!maybeBlockedDatabases.AppendElement(database))) {
+    if (const uint32_t liveCount = info->mLiveDatabases.Length()) {
+      FallibleTArray<Database*> maybeBlockedDatabases;
+      for (uint32_t index = 0; index < liveCount; index++) {
+        Database* database = info->mLiveDatabases[index];
+        if (!database->IsClosed() &&
+            NS_WARN_IF(!(maybeBlockedDatabases.AppendElement(database)))) {
           return NS_ERROR_OUT_OF_MEMORY;
         }
       }
+
+      if (!maybeBlockedDatabases.IsEmpty()) {
+        mMaybeBlockedDatabases.SwapElements(maybeBlockedDatabases);
+      }
     }
 
-    if (!maybeBlockedDatabases.IsEmpty()) {
-      blockedCount = maybeBlockedDatabases.Length();
+    if (!mMaybeBlockedDatabases.IsEmpty()) {
+      for (uint32_t count = mMaybeBlockedDatabases.Length(), index = 0;
+           index < count;
+           /* incremented conditionally */) {
+        if (mMaybeBlockedDatabases[index]->SendVersionChange(mPreviousVersion,
+                                                             null_t())) {
+          index++;
+        } else {
+          // We don't want to wait forever if we were not able to send the
+          // message.
+          mMaybeBlockedDatabases.RemoveElementAt(index);
+          count--;
+        }
+      }
 
-      mMaybeBlockedDatabases.SwapElements(maybeBlockedDatabases);
+      if (!mMaybeBlockedDatabases.IsEmpty()) {
+        info->mWaitingFactoryOp = this;
+
+        mState = State_WaitingForOtherDatabasesToClose;
+        return NS_OK;
+      }
     }
   }
 
-  if (!blockedCount) {
-    // No other databases need to be notified, we can jump directly to the
-    // QuotaManager IO thread.
-    mState = State_DatabaseWorkVersionChange;
-    return DispatchToWorkThread();
-  }
-
-  for (uint32_t index = 0;
-       index < blockedCount;
-       /* incremented conditionally */) {
-    if (mMaybeBlockedDatabases[index]->SendVersionChange(mPreviousVersion,
-                                                         null_t())) {
-      index++;
-    } else {
-      // We don't want to wait forever if we were not able to send the message.
-      mMaybeBlockedDatabases.RemoveElementAt(index);
-      blockedCount--;
-    }
-  }
-
-  if (!blockedCount) {
-    // We didn't need to wait after all.
-    mState = State_DatabaseWorkVersionChange;
-    return DispatchToWorkThread();
-  }
-
-  info->mWaitingFactoryOp = this;
-
-  mState = State_WaitingForOtherDatabasesToClose;
-  return NS_OK;
+  // No other databases need to be notified, we can jump directly to the
+  // QuotaManager IO thread.
+  mState = State_DatabaseWorkVersionChange;
+  return DispatchToWorkThread();
 }
 
 nsresult
@@ -10320,19 +10334,28 @@ DeleteDatabaseOp::NoteDatabaseClosed(Database* aDatabase)
   AssertIsOnOwningThread();
   MOZ_ASSERT(mState == State_WaitingForOtherDatabasesToClose ||
              mState == State_BlockedWaitingForOtherDatabasesToClose);
-  nsresult rv = NS_OK;
+  MOZ_ASSERT(!mMaybeBlockedDatabases.IsEmpty());
 
-  if (IsActorDestroyed()) {
-    rv =  NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
-  } else if (mMaybeBlockedDatabases.RemoveElement(aDatabase) &&
-             mMaybeBlockedDatabases.IsEmpty()) {
-    mState = State_DatabaseWorkVersionChange;
-    rv = DispatchToWorkThread();
+  bool actorDestroyed = IsActorDestroyed();
+
+  nsresult rv = actorDestroyed ? NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR : NS_OK;
+
+  if (mMaybeBlockedDatabases.RemoveElement(aDatabase) &&
+      mMaybeBlockedDatabases.IsEmpty()) {
+    if (actorDestroyed) {
+      DatabaseActorInfo* info;
+      MOZ_ALWAYS_TRUE(gLiveDatabaseHashtable->Get(mDatabaseId, &info));
+      MOZ_ASSERT(info->mWaitingFactoryOp == this);
+      info->mWaitingFactoryOp = nullptr;
+    } else {
+      mState = State_DatabaseWorkVersionChange;
+      rv = DispatchToWorkThread();
+    }
   }
 
   if (NS_WARN_IF(NS_FAILED(rv))) {
     if (NS_SUCCEEDED(mResultCode)) {
-      mResultCode =  rv;
+      mResultCode = rv;
     }
 
     mState = State_SendingResults;
@@ -10584,23 +10607,25 @@ VersionChangeOp::RunOnOwningThread()
     if (info) {
       MOZ_ASSERT(!info->mLiveDatabases.IsEmpty());
 
-      nsTArray<Database*> liveDatabases(info->mLiveDatabases);
-
+      FallibleTArray<Database*> liveDatabases;
+      if (NS_WARN_IF(!liveDatabases.AppendElements(info->mLiveDatabases))) {
+        deleteOp->SetFailureCode(NS_ERROR_OUT_OF_MEMORY);
+      } else {
 #ifdef DEBUG
-      // The code below should result in the deletion of |info|. Set to null
-      // here to make sure we find invalid uses later.
-      info = nullptr;
+        // The code below should result in the deletion of |info|. Set to null
+        // here to make sure we find invalid uses later.
+        info = nullptr;
 #endif
+        for (uint32_t count = liveDatabases.Length(), index = 0;
+             index < count;
+             index++) {
+          nsRefPtr<Database> database = liveDatabases[index];
+          database->Invalidate();
+        }
 
-      for (uint32_t count = liveDatabases.Length(), index = 0;
-           index < count;
-           index++) {
-        nsRefPtr<Database> database = liveDatabases[index];
-        database->Invalidate();
+        MOZ_ASSERT(!gLiveDatabaseHashtable->Get(deleteOp->mDatabaseId));
       }
     }
-
-    MOZ_ASSERT(!gLiveDatabaseHashtable->Get(deleteOp->mDatabaseId));
   }
 
   deleteOp->mState = State_SendingResults;

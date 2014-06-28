@@ -15,6 +15,7 @@
 #include "IndexedDatabase.h"
 #include "IndexedDatabaseInlines.h"
 #include "mozilla/BasicEvents.h"
+#include "mozilla/Maybe.h"
 #include "mozilla/dom/PermissionMessageUtils.h"
 #include "mozilla/dom/TabChild.h"
 #include "mozilla/dom/indexedDB/PIndexedDBPermissionRequestChild.h"
@@ -47,30 +48,45 @@ class MOZ_STACK_CLASS AutoSetCurrentTransaction MOZ_FINAL
 {
   typedef mozilla::ipc::BackgroundChildImpl BackgroundChildImpl;
 
-  BackgroundChildImpl::ThreadLocal* mThreadLocal;
-  IDBTransaction* mTransaction;
+  IDBTransaction* const mTransaction;
+  IDBTransaction* mPreviousTransaction;
+  IDBTransaction** mThreadLocalSlot;
 
 public:
   AutoSetCurrentTransaction(IDBTransaction* aTransaction)
-    : mThreadLocal(nullptr)
-    , mTransaction(aTransaction)
+    : mTransaction(aTransaction)
+    , mPreviousTransaction(nullptr)
+    , mThreadLocalSlot(nullptr)
   {
+#ifdef MOZ_ENABLE_PROFILER_SPS
+    // This is currently only needed so that we can get useful serial numbers in
+    // the profiler.
     if (aTransaction) {
-      mThreadLocal = BackgroundChildImpl::GetThreadLocalForCurrentThread();
-      MOZ_ASSERT(mThreadLocal);
+      BackgroundChildImpl::ThreadLocal* threadLocal =
+        BackgroundChildImpl::GetThreadLocalForCurrentThread();
+      MOZ_ASSERT(threadLocal);
 
-      MOZ_ASSERT(!mThreadLocal->mCurrentTransaction);
-      mThreadLocal->mCurrentTransaction = aTransaction;
+      // Hang onto this location for resetting later.
+      mThreadLocalSlot = &threadLocal->mCurrentTransaction;
+
+      // Save the current value.
+      mPreviousTransaction = *mThreadLocalSlot;
+
+      // Set the new value.
+      *mThreadLocalSlot = aTransaction;
     }
+#endif // MOZ_ENABLE_PROFILER_SPS
   }
 
   ~AutoSetCurrentTransaction()
   {
-    MOZ_ASSERT((mThreadLocal && mTransaction) ||
-               (!mThreadLocal && !mTransaction));
-    if (mThreadLocal) {
-      MOZ_ASSERT(mTransaction == mThreadLocal->mCurrentTransaction);
-      mThreadLocal->mCurrentTransaction = nullptr;
+    MOZ_ASSERT_IF(mThreadLocalSlot, mTransaction);
+
+    if (mThreadLocalSlot) {
+      MOZ_ASSERT(*mThreadLocalSlot == mTransaction);
+
+      // Reset old value.
+      *mThreadLocalSlot = mPreviousTransaction;
     }
   }
 
@@ -1800,13 +1816,41 @@ BackgroundRequestChild::Recv__delete__(const RequestResponse& aResponse)
  * BackgroundCursorChild
  ******************************************************************************/
 
+class BackgroundCursorChild::DelayedDeleteRunnable MOZ_FINAL
+  : public nsIRunnable
+{
+  BackgroundCursorChild* mActor;
+  nsRefPtr<IDBRequest> mRequest;
+
+public:
+  DelayedDeleteRunnable(BackgroundCursorChild* aActor)
+    : mActor(aActor)
+    , mRequest(aActor->mRequest)
+  {
+    MOZ_ASSERT(aActor);
+    aActor->AssertIsOnOwningThread();
+    MOZ_ASSERT(mRequest);
+  }
+
+  // Does not need to be threadsafe since this only runs on one thread.
+  NS_DECL_ISUPPORTS
+
+private:
+  ~DelayedDeleteRunnable()
+  { }
+
+  NS_DECL_NSIRUNNABLE
+};
+
 BackgroundCursorChild::BackgroundCursorChild(IDBRequest* aRequest,
                                              IDBObjectStore* aObjectStore,
                                              Direction aDirection)
-  : BackgroundTransactionRequestChildBase(aRequest)
+  : mRequest(aRequest)
+  , mTransaction(aRequest->GetTransaction())
   , mObjectStore(aObjectStore)
   , mIndex(nullptr)
   , mCursor(nullptr)
+  , mStrongRequest(aRequest)
   , mDirection(aDirection)
 {
   MOZ_ASSERT(aObjectStore);
@@ -1814,15 +1858,22 @@ BackgroundCursorChild::BackgroundCursorChild(IDBRequest* aRequest,
   MOZ_ASSERT(mTransaction);
 
   MOZ_COUNT_CTOR(indexedDB::BackgroundCursorChild);
+
+#ifdef DEBUG
+  mOwningThread = PR_GetCurrentThread();
+  MOZ_ASSERT(mOwningThread);
+#endif
 }
 
 BackgroundCursorChild::BackgroundCursorChild(IDBRequest* aRequest,
                                              IDBIndex* aIndex,
                                              Direction aDirection)
-  : BackgroundTransactionRequestChildBase(aRequest)
+  : mRequest(aRequest)
+  , mTransaction(aRequest->GetTransaction())
   , mObjectStore(nullptr)
   , mIndex(aIndex)
   , mCursor(nullptr)
+  , mStrongRequest(aRequest)
   , mDirection(aDirection)
 {
   MOZ_ASSERT(aIndex);
@@ -1830,12 +1881,27 @@ BackgroundCursorChild::BackgroundCursorChild(IDBRequest* aRequest,
   MOZ_ASSERT(mTransaction);
 
   MOZ_COUNT_CTOR(indexedDB::BackgroundCursorChild);
+
+#ifdef DEBUG
+  mOwningThread = PR_GetCurrentThread();
+  MOZ_ASSERT(mOwningThread);
+#endif
 }
 
 BackgroundCursorChild::~BackgroundCursorChild()
 {
   MOZ_COUNT_DTOR(indexedDB::BackgroundCursorChild);
 }
+
+#ifdef DEBUG
+
+void
+BackgroundCursorChild::AssertIsOnOwningThread() const
+{
+  MOZ_ASSERT(mOwningThread == PR_GetCurrentThread());
+}
+
+#endif // DEBUG
 
 void
 BackgroundCursorChild::SendContinueInternal(const CursorRequestParams& aParams)
@@ -1844,7 +1910,11 @@ BackgroundCursorChild::SendContinueInternal(const CursorRequestParams& aParams)
   MOZ_ASSERT(mRequest);
   MOZ_ASSERT(mTransaction);
   MOZ_ASSERT(mCursor);
+  MOZ_ASSERT(!mStrongRequest);
   MOZ_ASSERT(!mStrongCursor);
+
+  // Make sure all our DOM objects stay alive.
+  mStrongCursor = mCursor;
 
   MOZ_ASSERT(mRequest->ReadyState() == IDBRequestReadyState::Done);
   mRequest->Reset();
@@ -1852,24 +1922,61 @@ BackgroundCursorChild::SendContinueInternal(const CursorRequestParams& aParams)
   mTransaction->OnNewRequest();
 
   MOZ_ALWAYS_TRUE(PBackgroundIDBCursorChild::SendContinue(aParams));
-
-  mStrongCursor = mCursor;
 }
 
 void
 BackgroundCursorChild::SendDeleteMeInternal()
 {
   AssertIsOnOwningThread();
+  MOZ_ASSERT(!mStrongRequest);
   MOZ_ASSERT(!mStrongCursor);
+
+  mRequest = nullptr;
+  mTransaction = nullptr;
+  mObjectStore = nullptr;
+  mIndex = nullptr;
 
   if (mCursor) {
     mCursor->ClearBackgroundActor();
-
-    mObjectStore = nullptr;
-    mIndex = nullptr;
     mCursor = nullptr;
 
     MOZ_ALWAYS_TRUE(PBackgroundIDBCursorChild::SendDeleteMe());
+  }
+}
+
+void
+BackgroundCursorChild::HandleResponse(nsresult aResponse)
+{
+  AssertIsOnOwningThread();
+  MOZ_ASSERT(NS_FAILED(aResponse));
+  MOZ_ASSERT(NS_ERROR_GET_MODULE(aResponse) == NS_ERROR_MODULE_DOM_INDEXEDDB);
+  MOZ_ASSERT(mRequest);
+  MOZ_ASSERT(mTransaction);
+  MOZ_ASSERT(!mStrongRequest);
+  MOZ_ASSERT(!mStrongCursor);
+
+  DispatchErrorEvent(mRequest, aResponse, mTransaction);
+}
+
+void
+BackgroundCursorChild::HandleResponse(const void_t& aResponse)
+{
+  AssertIsOnOwningThread();
+  MOZ_ASSERT(mRequest);
+  MOZ_ASSERT(mTransaction);
+  MOZ_ASSERT(!mStrongRequest);
+  MOZ_ASSERT(!mStrongCursor);
+
+  if (mCursor) {
+    mCursor->Reset();
+  }
+
+  ResultHelper helper(mRequest, mTransaction, &JS::NullHandleValue);
+  DispatchSuccessEvent(&helper);
+
+  if (!mCursor) {
+    nsCOMPtr<nsIRunnable> deleteRunnable = new DelayedDeleteRunnable(this);
+    MOZ_ALWAYS_TRUE(NS_SUCCEEDED(NS_DispatchToCurrentThread(deleteRunnable)));
   }
 }
 
@@ -1878,7 +1985,11 @@ BackgroundCursorChild::HandleResponse(
                                      const ObjectStoreCursorResponse& aResponse)
 {
   AssertIsOnOwningThread();
+  MOZ_ASSERT(mRequest);
+  MOZ_ASSERT(mTransaction);
   MOZ_ASSERT(mObjectStore);
+  MOZ_ASSERT(!mStrongRequest);
+  MOZ_ASSERT(!mStrongCursor);
 
   // XXX Fix this somehow...
   auto& response = const_cast<ObjectStoreCursorResponse&>(aResponse);
@@ -1887,18 +1998,21 @@ BackgroundCursorChild::HandleResponse(
 
   ConvertActorsToBlobs(response.cloneInfo().blobsChild(), cloneReadInfo.mFiles);
 
-  nsRefPtr<IDBCursor> cursor = mCursor;
+  Maybe<nsRefPtr<IDBCursor>> newCursor;
 
-  if (cursor) {
-    cursor->Reset(Move(response.key()), Move(cloneReadInfo));
+  if (mCursor) {
+    mCursor->Reset(Move(response.key()), Move(cloneReadInfo));
   } else {
-    cursor = IDBCursor::Create(mRequest, mObjectStore, this, mDirection,
-                               Move(response.key()), Move(cloneReadInfo));
-    mCursor = cursor;
+    newCursor.construct();
+    newCursor.ref() = IDBCursor::Create(mObjectStore,
+                                        this,
+                                        mDirection,
+                                        Move(response.key()),
+                                        Move(cloneReadInfo));
+    mCursor = newCursor.ref();
   }
 
   ResultHelper helper(mRequest, mTransaction, mCursor);
-
   DispatchSuccessEvent(&helper);
 }
 
@@ -1907,23 +2021,29 @@ BackgroundCursorChild::HandleResponse(
                                   const ObjectStoreKeyCursorResponse& aResponse)
 {
   AssertIsOnOwningThread();
+  MOZ_ASSERT(mRequest);
+  MOZ_ASSERT(mTransaction);
   MOZ_ASSERT(mObjectStore);
+  MOZ_ASSERT(!mStrongRequest);
+  MOZ_ASSERT(!mStrongCursor);
 
   // XXX Fix this somehow...
   auto& response = const_cast<ObjectStoreKeyCursorResponse&>(aResponse);
 
-  nsRefPtr<IDBCursor> cursor = mCursor;
+  Maybe<nsRefPtr<IDBCursor>> newCursor;
 
-  if (cursor) {
-    cursor->Reset(Move(response.key()));
+  if (mCursor) {
+    mCursor->Reset(Move(response.key()));
   } else {
-    cursor = IDBCursor::Create(mRequest, mObjectStore, this, mDirection,
-                               Move(response.key()));
-    mCursor = cursor;
+    newCursor.construct();
+    newCursor.ref() = IDBCursor::Create(mObjectStore,
+                                        this,
+                                        mDirection,
+                                        Move(response.key()));
+    mCursor = newCursor.ref();
   }
 
   ResultHelper helper(mRequest, mTransaction, mCursor);
-
   DispatchSuccessEvent(&helper);
 }
 
@@ -1931,7 +2051,11 @@ void
 BackgroundCursorChild::HandleResponse(const IndexCursorResponse& aResponse)
 {
   AssertIsOnOwningThread();
+  MOZ_ASSERT(mRequest);
+  MOZ_ASSERT(mTransaction);
   MOZ_ASSERT(mIndex);
+  MOZ_ASSERT(!mStrongRequest);
+  MOZ_ASSERT(!mStrongCursor);
 
   // XXX Fix this somehow...
   auto& response = const_cast<IndexCursorResponse&>(aResponse);
@@ -1941,20 +2065,24 @@ BackgroundCursorChild::HandleResponse(const IndexCursorResponse& aResponse)
   ConvertActorsToBlobs(aResponse.cloneInfo().blobsChild(),
                        cloneReadInfo.mFiles);
 
-  nsRefPtr<IDBCursor> cursor = mCursor;
+  Maybe<nsRefPtr<IDBCursor>> newCursor;
 
-  if (cursor) {
-    cursor->Reset(Move(response.key()), Move(response.objectKey()),
-                  Move(cloneReadInfo));
+  if (mCursor) {
+    mCursor->Reset(Move(response.key()),
+                   Move(response.objectKey()),
+                   Move(cloneReadInfo));
   } else {
-    cursor = IDBCursor::Create(mRequest, mIndex, this, mDirection,
-                               Move(response.key()), Move(response.objectKey()),
-                               Move(cloneReadInfo));
-    mCursor = cursor;
+    newCursor.construct();
+    newCursor.ref() = IDBCursor::Create(mIndex,
+                                        this,
+                                        mDirection,
+                                        Move(response.key()),
+                                        Move(response.objectKey()),
+                                        Move(cloneReadInfo));
+    mCursor = newCursor.ref();
   }
 
   ResultHelper helper(mRequest, mTransaction, mCursor);
-
   DispatchSuccessEvent(&helper);
 }
 
@@ -1962,24 +2090,30 @@ void
 BackgroundCursorChild::HandleResponse(const IndexKeyCursorResponse& aResponse)
 {
   AssertIsOnOwningThread();
+  MOZ_ASSERT(mRequest);
+  MOZ_ASSERT(mTransaction);
   MOZ_ASSERT(mIndex);
+  MOZ_ASSERT(!mStrongRequest);
+  MOZ_ASSERT(!mStrongCursor);
 
   // XXX Fix this somehow...
   auto& response = const_cast<IndexKeyCursorResponse&>(aResponse);
 
-  nsRefPtr<IDBCursor> cursor = mCursor;
+  Maybe<nsRefPtr<IDBCursor>> newCursor;
 
-  if (cursor) {
-    cursor->Reset(Move(response.key()), Move(response.objectKey()));
+  if (mCursor) {
+    mCursor->Reset(Move(response.key()), Move(response.objectKey()));
   } else {
-    cursor = IDBCursor::Create(mRequest, mIndex, this, mDirection,
-                               Move(response.key()),
-                               Move(response.objectKey()));
-    mCursor = cursor;
+    newCursor.construct();
+    newCursor.ref() = IDBCursor::Create(mIndex,
+                                        this,
+                                        mDirection,
+                                        Move(response.key()),
+                                        Move(response.objectKey()));
+    mCursor = newCursor.ref();
   }
 
   ResultHelper helper(mRequest, mTransaction, mCursor);
-
   DispatchSuccessEvent(&helper);
 }
 
@@ -1987,18 +2121,22 @@ void
 BackgroundCursorChild::ActorDestroy(ActorDestroyReason aWhy)
 {
   AssertIsOnOwningThread();
+  MOZ_ASSERT(!mStrongRequest);
   MOZ_ASSERT(!mStrongCursor);
 
   if (mCursor) {
     mCursor->ClearBackgroundActor();
 #ifdef DEBUG
-    mObjectStore = nullptr;
-    mIndex = nullptr;
     mCursor = nullptr;
 #endif
   }
 
-  NoteActorDestroyed();
+#ifdef DEBUG
+  mRequest = nullptr;
+  mTransaction = nullptr;
+  mObjectStore = nullptr;
+  mIndex = nullptr;
+#endif
 }
 
 bool
@@ -2009,32 +2147,22 @@ BackgroundCursorChild::RecvResponse(const CursorResponse& aResponse)
   MOZ_ASSERT(mRequest);
   MOZ_ASSERT(mTransaction);
   MOZ_ASSERT_IF(mCursor, mStrongCursor);
+  MOZ_ASSERT_IF(!mCursor, mStrongRequest);
+
+  nsRefPtr<IDBRequest> request;
+  mStrongRequest.swap(request);
 
   nsRefPtr<IDBCursor> cursor;
   mStrongCursor.swap(cursor);
 
   switch (aResponse.type()) {
-    case CursorResponse::Tnsresult: {
-      nsresult response = aResponse.get_nsresult();
-      MOZ_ASSERT(NS_FAILED(response));
-      MOZ_ASSERT(NS_ERROR_GET_MODULE(response) ==
-                 NS_ERROR_MODULE_DOM_INDEXEDDB);
-      MOZ_ASSERT(mTransaction);
-
-      DispatchErrorEvent(mRequest, response, mTransaction);
+    case CursorResponse::Tnsresult:
+      HandleResponse(aResponse.get_nsresult());
       break;
-    }
 
-    case CursorResponse::Tvoid_t: {
-      if (mCursor) {
-        mCursor->Reset();
-      }
-
-      ResultHelper helper(mRequest, mTransaction, &JS::NullHandleValue);
-
-      DispatchSuccessEvent(&helper);
+    case CursorResponse::Tvoid_t:
+      HandleResponse(aResponse.get_void_t());
       break;
-    }
 
     case CursorResponse::TObjectStoreCursorResponse:
       HandleResponse(aResponse.get_ObjectStoreCursorResponse());
@@ -2059,4 +2187,23 @@ BackgroundCursorChild::RecvResponse(const CursorResponse& aResponse)
   mTransaction->OnRequestFinished();
 
   return true;
+}
+
+NS_IMPL_ISUPPORTS(BackgroundCursorChild::DelayedDeleteRunnable,
+                  nsIRunnable)
+
+NS_IMETHODIMP
+BackgroundCursorChild::
+DelayedDeleteRunnable::Run()
+{
+  MOZ_ASSERT(mActor);
+  mActor->AssertIsOnOwningThread();
+  MOZ_ASSERT(mRequest);
+
+  mActor->SendDeleteMeInternal();
+
+  mActor = nullptr;
+  mRequest = nullptr;
+
+  return NS_OK;
 }

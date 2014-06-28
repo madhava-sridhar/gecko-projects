@@ -19,6 +19,7 @@
 #include "nsTArrayForwardDeclare.h"
 
 class nsIEventTarget;
+struct PRThread;
 
 namespace mozilla {
 namespace ipc {
@@ -519,20 +520,31 @@ private:
 };
 
 class BackgroundCursorChild MOZ_FINAL
-  : public BackgroundTransactionRequestChildBase
-  , public PBackgroundIDBCursorChild
+  : public PBackgroundIDBCursorChild
 {
   friend class BackgroundTransactionChild;
   friend class BackgroundVersionChangeTransactionChild;
 
+  class DelayedDeleteRunnable;
+
+  IDBRequest* mRequest;
+  IDBTransaction* mTransaction;
   IDBObjectStore* mObjectStore;
   IDBIndex* mIndex;
   IDBCursor* mCursor;
 
-  // Only set while a request is in progress.
+  // This is only set while a request is in progress and we have not yet created
+  // a cursor.
+  nsRefPtr<IDBRequest> mStrongRequest;
+
+  // This is only set while a request is in progress.
   nsRefPtr<IDBCursor> mStrongCursor;
 
   Direction mDirection;
+
+#ifdef DEBUG
+  PRThread* mOwningThread;
+#endif
 
 public:
   BackgroundCursorChild(IDBRequest* aRequest,
@@ -544,6 +556,14 @@ public:
                         Direction aDirection);
 
   void
+  AssertIsOnOwningThread() const
+#ifdef DEBUG
+  ;
+#else
+  { }
+#endif
+
+  void
   SendContinueInternal(const CursorRequestParams& aParams);
 
   void
@@ -553,6 +573,12 @@ private:
   // Only destroyed by BackgroundTransactionChild or
   // BackgroundVersionChangeTransactionChild.
   ~BackgroundCursorChild();
+
+  void
+  HandleResponse(nsresult aResponse);
+
+  void
+  HandleResponse(const void_t& aResponse);
 
   void
   HandleResponse(const ObjectStoreCursorResponse& aResponse);

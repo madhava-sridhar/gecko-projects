@@ -77,16 +77,19 @@ class IDBFactory MOZ_FINAL
   bool mBackgroundActorFailed;
 
 public:
-  // Called when using IndexedDB from a window.
   static nsresult
-  Create(nsPIDOMWindow* aWindow,
-         IDBFactory** aFactory);
+  CreateForWindow(nsPIDOMWindow* aWindow,
+                  IDBFactory** aFactory);
 
-  // Called when using IndexedDB without a window.
   static nsresult
-  Create(JSContext* aCx,
-         JS::Handle<JSObject*> aOwningObject,
-         IDBFactory** aFactory);
+  CreateForChromeJS(JSContext* aCx,
+                    JS::Handle<JSObject*> aOwningObject,
+                    IDBFactory** aFactory);
+
+  static nsresult
+  CreateForDatastore(JSContext* aCx,
+                    JS::Handle<JSObject*> aOwningObject,
+                    IDBFactory** aFactory);
 
   void
   AssertIsOnOwningThread() const
@@ -168,6 +171,12 @@ public:
 private:
   IDBFactory();
   ~IDBFactory();
+
+  static nsresult
+  CreateForJSInternal(JSContext* aCx,
+                      JS::Handle<JSObject*> aOwningObject,
+                      nsAutoPtr<PrincipalInfo>& aPrincipalInfo,
+                      IDBFactory** aFactory);
 
   already_AddRefed<IDBOpenDBRequest>
   OpenInternal(nsIPrincipal* aPrincipal,

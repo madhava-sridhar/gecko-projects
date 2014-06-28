@@ -206,14 +206,14 @@ class IDBOpenDBRequest MOZ_FINAL
   nsRefPtr<IDBFactory> mFactory;
 
 public:
-  NS_DECL_ISUPPORTS_INHERITED
-  NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(IDBOpenDBRequest, IDBRequest)
+  static already_AddRefed<IDBOpenDBRequest>
+  CreateForWindow(IDBFactory* aFactory,
+                  nsPIDOMWindow* aOwner,
+                  JS::Handle<JSObject*> aScriptOwner);
 
-  static
-  already_AddRefed<IDBOpenDBRequest>
-  Create(IDBFactory* aFactory,
-         nsPIDOMWindow* aOwner,
-         JS::Handle<JSObject*> aScriptOwner);
+  static already_AddRefed<IDBOpenDBRequest>
+  CreateForJS(IDBFactory* aFactory,
+              JS::Handle<JSObject*> aScriptOwner);
 
   void
   SetTransaction(IDBTransaction* aTransaction);
@@ -234,16 +234,19 @@ public:
     return mFactory;
   }
 
+  IMPL_EVENT_HANDLER(blocked);
+  IMPL_EVENT_HANDLER(upgradeneeded);
+
+  NS_DECL_ISUPPORTS_INHERITED
+  NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(IDBOpenDBRequest, IDBRequest)
+
   // nsWrapperCache
   virtual JSObject*
   WrapObject(JSContext* aCx) MOZ_OVERRIDE;
 
-  // WebIDL
-  IMPL_EVENT_HANDLER(blocked);
-  IMPL_EVENT_HANDLER(upgradeneeded);
-
 private:
-  IDBOpenDBRequest(nsPIDOMWindow* aOwner);
+  IDBOpenDBRequest(IDBFactory* aFactory, nsPIDOMWindow* aOwner);
+
   ~IDBOpenDBRequest();
 };
 

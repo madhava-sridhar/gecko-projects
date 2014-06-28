@@ -78,16 +78,14 @@ IDBRequest::InitMembers()
   mHaveResultOrErrorCode = false;
 
 #ifdef MOZ_ENABLE_PROFILER_SPS
-  // XXX This should be threadlocal!
-  /*
-  BackgroundChildImpl::ThreadLocal* threadLocal =
-    BackgroundChildImpl::GetThreadLocalForCurrentThread();
-  MOZ_ASSERT(threadLocal);
+  {
+    using namespace mozilla::ipc;
+    BackgroundChildImpl::ThreadLocal* threadLocal =
+      BackgroundChildImpl::GetThreadLocalForCurrentThread();
+    MOZ_ASSERT(threadLocal);
 
-  mSerialNumber = threadLocal->mNextRequestSerialNumber++;
-  */
-  static uint64_t sNextSerial = 1;
-  mSerialNumber = sNextSerial++;
+    mSerialNumber = threadLocal->mNextRequestSerialNumber++;
+  }
 #endif
 }
 
@@ -147,17 +145,18 @@ IDBRequest::GetSource(
 {
   AssertIsOnOwningThread();
 
-  // At most one of mSourceAs* is allowed to be non-null.  Check that by summing
-  // the double negation of each one and asserting the sum is at most 1.
-  MOZ_ASSERT(!!mSourceAsObjectStore + !!mSourceAsIndex + !!mSourceAsCursor <=
-             1);
+  MOZ_ASSERT_IF(mSourceAsObjectStore, !mSourceAsIndex);
+  MOZ_ASSERT_IF(mSourceAsIndex, !mSourceAsObjectStore);
+  MOZ_ASSERT_IF(mSourceAsCursor, mSourceAsObjectStore || mSourceAsIndex);
 
-  if (mSourceAsObjectStore) {
+  // Always check cursor first since cursor requests hold both the cursor and
+  // the objectStore or index the cursor came from.
+  if (mSourceAsCursor) {
+    aSource.SetValue().SetAsIDBCursor() = mSourceAsCursor;
+  } else if (mSourceAsObjectStore) {
     aSource.SetValue().SetAsIDBObjectStore() = mSourceAsObjectStore;
   } else if (mSourceAsIndex) {
     aSource.SetValue().SetAsIDBIndex() = mSourceAsIndex;
-  } else if (mSourceAsCursor) {
-    aSource.SetValue().SetAsIDBCursor() = mSourceAsCursor;
   } else {
     aSource.SetNull();
   }
@@ -289,8 +288,6 @@ IDBRequest::SetSource(IDBCursor* aSource)
   MOZ_ASSERT(!mSourceAsCursor);
 
   mSourceAsCursor = aSource;
-  mSourceAsObjectStore = nullptr;
-  mSourceAsIndex = nullptr;
 }
 
 JSObject*
@@ -417,10 +414,14 @@ IDBRequest::PreHandleEvent(EventChainPreVisitor& aVisitor)
   return NS_OK;
 }
 
-IDBOpenDBRequest::IDBOpenDBRequest(nsPIDOMWindow* aOwner)
+IDBOpenDBRequest::IDBOpenDBRequest(IDBFactory* aFactory, nsPIDOMWindow* aOwner)
   : IDBRequest(aOwner)
+  , mFactory(aFactory)
 {
   AssertIsOnOwningThread();
+  MOZ_ASSERT(aFactory);
+
+  // aOwner may be null.
 }
 
 IDBOpenDBRequest::~IDBOpenDBRequest()
@@ -430,19 +431,36 @@ IDBOpenDBRequest::~IDBOpenDBRequest()
 
 // static
 already_AddRefed<IDBOpenDBRequest>
-IDBOpenDBRequest::Create(IDBFactory* aFactory,
-                         nsPIDOMWindow* aOwner,
-                         JS::Handle<JSObject*> aScriptOwner)
+IDBOpenDBRequest::CreateForWindow(IDBFactory* aFactory,
+                                  nsPIDOMWindow* aOwner,
+                                  JS::Handle<JSObject*> aScriptOwner)
 {
   MOZ_ASSERT(aFactory);
   aFactory->AssertIsOnOwningThread();
+  MOZ_ASSERT(aOwner);
+  MOZ_ASSERT(aScriptOwner);
 
-  nsRefPtr<IDBOpenDBRequest> request = new IDBOpenDBRequest(aOwner);
+  nsRefPtr<IDBOpenDBRequest> request = new IDBOpenDBRequest(aFactory, aOwner);
+  request->CaptureCaller();
 
   request->SetScriptOwner(aScriptOwner);
-  request->mFactory = aFactory;
 
+  return request.forget();
+}
+
+// static
+already_AddRefed<IDBOpenDBRequest>
+IDBOpenDBRequest::CreateForJS(IDBFactory* aFactory,
+                              JS::Handle<JSObject*> aScriptOwner)
+{
+  MOZ_ASSERT(aFactory);
+  aFactory->AssertIsOnOwningThread();
+  MOZ_ASSERT(aScriptOwner);
+
+  nsRefPtr<IDBOpenDBRequest> request = new IDBOpenDBRequest(aFactory, nullptr);
   request->CaptureCaller();
+
+  request->SetScriptOwner(aScriptOwner);
 
   return request.forget();
 }
