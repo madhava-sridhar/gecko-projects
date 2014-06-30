@@ -567,10 +567,13 @@ IDBCursor::Update(JSContext* aCx, JS::Handle<JS::Value> aValue,
   MOZ_ASSERT(!mKey.IsUnset());
   MOZ_ASSERT_IF(mType == Type_Index, !mPrimaryKey.IsUnset());
 
-  IDBObjectStore* objectStore =
-    (mType == Type_ObjectStore) ?
-    mSourceObjectStore :
-    mSourceIndex->ObjectStore();
+  IDBObjectStore* objectStore;
+  if (mType == Type_ObjectStore) {
+    objectStore = mSourceObjectStore;
+  } else {
+    objectStore = mSourceIndex->ObjectStore();
+  }
+
   MOZ_ASSERT(objectStore);
 
   const Key& primaryKey = (mType == Type_ObjectStore) ? mKey : mPrimaryKey;
@@ -670,10 +673,13 @@ IDBCursor::Delete(JSContext* aCx, ErrorResult& aRv)
   MOZ_ASSERT(mType == Type_ObjectStore || mType == Type_Index);
   MOZ_ASSERT(!mKey.IsUnset());
 
-  IDBObjectStore* objectStore =
-    (mType == Type_ObjectStore) ?
-    mSourceObjectStore :
-    mSourceIndex->ObjectStore();
+  IDBObjectStore* objectStore;
+  if (mType == Type_ObjectStore) {
+    objectStore = mSourceObjectStore;
+  } else {
+    objectStore = mSourceIndex->ObjectStore();
+  }
+
   MOZ_ASSERT(objectStore);
 
   const Key& primaryKey = (mType == Type_ObjectStore) ? mKey : mPrimaryKey;
