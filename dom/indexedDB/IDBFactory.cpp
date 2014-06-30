@@ -463,6 +463,16 @@ IDBFactory::OpenInternal(nsIPrincipal* aPrincipal,
         return nullptr;
       }
       MOZ_ASSERT(mBackgroundActor);
+    } else if (mPendingRequests.IsEmpty()) {
+      // We need to start the sequence to create a background actor for this
+      // thread.
+      nsRefPtr<BackgroundCreateCallback> cb =
+        new BackgroundCreateCallback(this);
+      if (NS_WARN_IF(!BackgroundChild::GetOrCreateForCurrentThread(cb))) {
+        IDB_REPORT_INTERNAL_ERR();
+        aRv.Throw(NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
+        return nullptr;
+      }
     }
   }
 
@@ -500,18 +510,6 @@ IDBFactory::OpenInternal(nsIPrincipal* aPrincipal,
     }
   } else {
     mPendingRequests.AppendElement(new PendingRequestInfo(request, params));
-
-    if (mPendingRequests.Length() == 1) {
-      // We need to start the sequence to create a background actor for this
-      // thread.
-      nsRefPtr<BackgroundCreateCallback> cb =
-        new BackgroundCreateCallback(this);
-      if (NS_WARN_IF(!BackgroundChild::GetOrCreateForCurrentThread(cb))) {
-        IDB_REPORT_INTERNAL_ERR();
-        aRv.Throw(NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
-        return nullptr;
-      }
-    }
   }
 
 #ifdef IDB_PROFILER_USE_MARKS
