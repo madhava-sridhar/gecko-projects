@@ -71,9 +71,9 @@ public:
   }
 
 protected:
-  virtual already_AddRefed<nsIDOMBlob> CreateSlice(uint64_t aStart,
-                                                   uint64_t aLength,
-                                                   const nsAString& aContentType) MOZ_OVERRIDE;
+  virtual already_AddRefed<DOMFileImpl> CreateSlice(uint64_t aStart,
+                                                    uint64_t aLength,
+                                                    const nsAString& aContentType) MOZ_OVERRIDE;
 
 private: // Data
   ZipCentral mCentral;

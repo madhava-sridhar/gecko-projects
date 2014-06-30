@@ -566,12 +566,21 @@ public:
       return true;
     }
 
+    nsCOMPtr<nsIDOMFile> domFile = do_QueryInterface(aFile.mFile);
+    MOZ_ASSERT(domFile);
+
+    if (NS_WARN_IF(!ResolveMysteryFile(domFile,
+                                       aData.name,
+                                       aData.type,
+                                       aData.size,
+                                       aData.lastModifiedDate))) {
+      return false;
     }
 
     JS::Rooted<JS::Value> wrappedFile(aCx);
     nsresult rv =
       nsContentUtils::WrapNative(aCx,
-                                 domFile,
+                                 aFile.mFile,
                                  &NS_GET_IID(nsIDOMFile),
                                  &wrappedFile);
     if (NS_WARN_IF(NS_FAILED(rv))) {

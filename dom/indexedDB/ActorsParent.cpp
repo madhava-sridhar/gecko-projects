@@ -102,11 +102,11 @@ namespace {
 
 // If JS_STRUCTURED_CLONE_VERSION changes then we need to update our major
 // schema version.
-static_assert(JS_STRUCTURED_CLONE_VERSION == 2,
+static_assert(JS_STRUCTURED_CLONE_VERSION == 3,
               "Need to update the major schema version.");
 
 // Major schema version. Bump for almost everything.
-const uint32_t kMajorSchemaVersion = 14;
+const uint32_t kMajorSchemaVersion = 15;
 
 // Minor schema version. Should almost always be 0 (maybe bump on release
 // branches if we have to).
@@ -2098,6 +2098,17 @@ UpgradeSchemaFrom13_0To14_0(mozIStorageConnection* aConnection)
 }
 
 nsresult
+UpgradeSchemaFrom14_0To15_0(mozIStorageConnection* aConnection)
+{
+  // The only change between 14 and 15 was a different structured
+  // clone format, but it's backwards-compatible.
+  nsresult rv = aConnection->SetSchemaVersion(MakeSchemaVersion(15, 0));
+  NS_ENSURE_SUCCESS(rv, rv);
+
+  return NS_OK;
+}
+
+nsresult
 GetDatabaseFileURL(nsIFile* aDatabaseFile,
                    PersistenceType aPersistenceType,
                    const nsACString& aGroup,
@@ -2330,7 +2341,7 @@ CreateDatabaseConnection(nsIFile* aDBFile,
       }
     } else  {
       // This logic needs to change next time we change the schema!
-      static_assert(kSQLiteSchemaVersion == int32_t((14 << 4) + 0),
+      static_assert(kSQLiteSchemaVersion == int32_t((15 << 4) + 0),
                     "Need upgrade code from schema version increase.");
 
       while (schemaVersion != kSQLiteSchemaVersion) {
@@ -2355,6 +2366,8 @@ CreateDatabaseConnection(nsIFile* aDBFile,
           rv = UpgradeSchemaFrom12_0To13_0(connection, &vacuumNeeded);
         } else if (schemaVersion == MakeSchemaVersion(13, 0)) {
           rv = UpgradeSchemaFrom13_0To14_0(connection);
+        } else if (schemaVersion == MakeSchemaVersion(14, 0)) {
+          rv = UpgradeSchemaFrom14_0To15_0(connection);
         } else {
           NS_WARNING("Unable to open IndexedDB database, no upgrade path is "
                      "available!");
@@ -3135,10 +3148,10 @@ public:
   RollbackSavepoint();
 
   already_AddRefed<FileInfo>
-  GetFileInfo(nsIDOMBlob* aBlob);
+  GetFileInfo(DOMFileImpl* aBlobImpl);
 
   bool
-  AddFileInfo(nsIDOMBlob* aBlob, FileInfo* aFileInfo);
+  AddFileInfo(DOMFileImpl* aBlobImpl, FileInfo* aFileInfo);
 
 protected:
   TransactionBase(Database* aDatabase,
@@ -4268,7 +4281,7 @@ private:
 
 struct ObjectStoreAddOrPutRequestOp::BlobInfo
 {
-  nsCOMPtr<nsIDOMBlob> mBlob;
+  nsRefPtr<DOMFileImpl> mBlobImpl;
   nsRefPtr<FileInfo> mFileInfo;
   nsCOMPtr<nsIInputStream> mInputStream;
   bool mCopiedSuccessfully;
@@ -4766,11 +4779,11 @@ private:
 };
 
 class NonMainThreadHackBlob MOZ_FINAL
-  : public nsDOMFileFile
+  : public DOMFileImplFile
 {
 public:
   NonMainThreadHackBlob(nsIFile* aFile, FileInfo* aFileInfo)
-    : nsDOMFileFile(aFile, aFileInfo)
+    : DOMFileImplFile(aFile, aFileInfo)
   {
     // Getting the content type is not currently supported off the main thread.
     // This isn't a problem here because:
@@ -4899,11 +4912,11 @@ ConvertBlobsToActors(PBackgroundParent* aBackgroundActor,
     MOZ_ASSERT(NS_SUCCEEDED(nativeFile->IsFile(&isFile)));
     MOZ_ASSERT(isFile);
 
-    nsCOMPtr<nsIDOMBlob> blob =
+    nsRefPtr<DOMFileImpl> impl =
       new NonMainThreadHackBlob(nativeFile, file.mFileInfo);
 
     PBlobParent* actor =
-      BackgroundParent::GetOrCreateActorForBlob(aBackgroundActor, blob);
+      BackgroundParent::GetOrCreateActorForBlobImpl(aBackgroundActor, impl);
     if (!actor) {
       // This can only fail if the child has crashed.
       IDB_REPORT_INTERNAL_ERR();
@@ -6335,26 +6348,26 @@ TransactionBase::RollbackSavepoint()
 }
 
 already_AddRefed<FileInfo>
-TransactionBase::GetFileInfo(nsIDOMBlob* aBlob)
+TransactionBase::GetFileInfo(DOMFileImpl* aBlobImpl)
 {
   AssertIsOnBackgroundThread();
-  MOZ_ASSERT(aBlob);
+  MOZ_ASSERT(aBlobImpl);
 
   nsRefPtr<FileInfo> fileInfo;
-  mCreatedFileInfos.Get(aBlob, getter_AddRefs(fileInfo));
+  mCreatedFileInfos.Get(aBlobImpl, getter_AddRefs(fileInfo));
 
   return fileInfo.forget();
 }
 
 bool
-TransactionBase::AddFileInfo(nsIDOMBlob* aBlob, FileInfo* aFileInfo)
+TransactionBase::AddFileInfo(DOMFileImpl* aBlobImpl, FileInfo* aFileInfo)
 {
   AssertIsOnBackgroundThread();
-  MOZ_ASSERT(aBlob);
+  MOZ_ASSERT(aBlobImpl);
   MOZ_ASSERT(aFileInfo);
-  MOZ_ASSERT(!mCreatedFileInfos.Contains(aBlob));
+  MOZ_ASSERT(!mCreatedFileInfos.Contains(aBlobImpl));
 
-  if (NS_WARN_IF(!mCreatedFileInfos.Put(aBlob, aFileInfo, fallible))) {
+  if (NS_WARN_IF(!mCreatedFileInfos.Put(aBlobImpl, aFileInfo, fallible))) {
     return false;
   }
 
@@ -12172,14 +12185,14 @@ ObjectStoreAddOrPutRequestOp::Init(TransactionBase* aTransaction)
     auto* blobActor = static_cast<BlobParent*>(blobs[index]);
     MOZ_ASSERT(blobActor);
 
-    nsCOMPtr<nsIDOMBlob> blob = blobActor->GetBlob();
-    MOZ_ASSERT(blob);
+    nsRefPtr<DOMFileImpl> blobImpl = blobActor->GetBlobImpl();
+    MOZ_ASSERT(blobImpl);
 
     nsCOMPtr<nsIInputStream> inputStream;
 
-    nsRefPtr<FileInfo> fileInfo = aTransaction->GetFileInfo(blob);
+    nsRefPtr<FileInfo> fileInfo = aTransaction->GetFileInfo(blobImpl);
     if (!fileInfo) {
-      fileInfo = blob->GetFileInfo(fileManager);
+      fileInfo = blobImpl->GetFileInfo(fileManager);
       if (!fileInfo) {
         fileInfo = fileManager->GetNewFileInfo();
         if (NS_WARN_IF(!fileInfo)) {
@@ -12187,11 +12200,11 @@ ObjectStoreAddOrPutRequestOp::Init(TransactionBase* aTransaction)
         }
 
         if (NS_WARN_IF(NS_FAILED(
-              blob->GetInternalStream(getter_AddRefs(inputStream))))) {
+              blobImpl->GetInternalStream(getter_AddRefs(inputStream))))) {
           return false;
         }
 
-        if (NS_WARN_IF(!aTransaction->AddFileInfo(blob, fileInfo))) {
+        if (NS_WARN_IF(!aTransaction->AddFileInfo(blobImpl, fileInfo))) {
           return false;
         }
 
@@ -12202,7 +12215,7 @@ ObjectStoreAddOrPutRequestOp::Init(TransactionBase* aTransaction)
     BlobInfo* blobInfo = mBlobInfos.AppendElement();
     MOZ_ASSERT(blobInfo);
 
-    blobInfo->mBlob.swap(blob);
+    blobInfo->mBlobImpl.swap(blobImpl);
     blobInfo->mFileInfo.swap(fileInfo);
     blobInfo->mInputStream.swap(inputStream);
   }
@@ -12514,7 +12527,7 @@ ObjectStoreAddOrPutRequestOp::Cleanup()
       const BlobInfo& blobInfo = mBlobInfos[index];
 
       if (blobInfo.mCopiedSuccessfully) {
-        blobInfo.mBlob->AddFileInfo(blobInfo.mFileInfo);
+        blobInfo.mBlobImpl->AddFileInfo(blobInfo.mFileInfo);
       }
     }
 

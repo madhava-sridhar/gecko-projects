@@ -802,17 +802,18 @@ BackgroundParent::GetContentParent(PBackgroundParent* aBackgroundActor)
 
 // static
 PBlobParent*
-BackgroundParent::GetOrCreateActorForBlob(PBackgroundParent* aBackgroundActor,
-                                          nsIDOMBlob* aBlob,
-                                          bool* aActorWasCreated)
+BackgroundParent::GetOrCreateActorForBlobImpl(
+                                            PBackgroundParent* aBackgroundActor,
+                                            DOMFileImpl* aBlobImpl,
+                                            bool* aActorWasCreated)
 {
   AssertIsOnBackgroundThread();
   MOZ_ASSERT(aBackgroundActor);
-  MOZ_ASSERT(aBlob);
+  MOZ_ASSERT(aBlobImpl);
 
   // If the blob represents a remote blob for this ContentParent then we can
   // simply pass its actor back here.
-  if (nsCOMPtr<nsIRemoteBlob> remoteBlob = do_QueryInterface(aBlob)) {
+  if (nsCOMPtr<nsIRemoteBlob> remoteBlob = do_QueryInterface(aBlobImpl)) {
     BlobParent* actor = remoteBlob->GetBlobParent();
     if (actor && actor->GetBackgroundManager() == aBackgroundActor) {
       if (aActorWasCreated) {
@@ -822,21 +823,11 @@ BackgroundParent::GetOrCreateActorForBlob(PBackgroundParent* aBackgroundActor,
     }
   }
 
-  {
-    nsCOMPtr<nsIMutable> mutableBlob = do_QueryInterface(aBlob);
-    MOZ_ASSERT(mutableBlob);
-
-    MOZ_ALWAYS_TRUE(NS_SUCCEEDED(mutableBlob->SetMutable(false)));
-  }
-
-  // XXX This is only safe so long as all blob implementations in our tree
-  //     inherit nsDOMFileBase. If that ever changes then this will need to grow
-  //     a real interface or something.
-  const auto* blob = static_cast<nsDOMFileBase*>(aBlob);
+  MOZ_ALWAYS_TRUE(NS_SUCCEEDED(aBlobImpl->SetMutable(false)));
 
   ChildBlobConstructorParams params;
 
-  if (blob->IsSizeUnknown() || blob->IsDateUnknown()) {
+  if (aBlobImpl->IsSizeUnknown() || aBlobImpl->IsDateUnknown()) {
     // We don't want to call GetSize or GetLastModifiedDate
     // yet since that may stat a file on the main thread
     // here. Instead we'll learn the size lazily from the
@@ -844,17 +835,18 @@ BackgroundParent::GetOrCreateActorForBlob(PBackgroundParent* aBackgroundActor,
     params = MysteryBlobConstructorParams();
   } else {
     nsString contentType;
-    MOZ_ALWAYS_TRUE(NS_SUCCEEDED(aBlob->GetType(contentType)));
+    MOZ_ALWAYS_TRUE(NS_SUCCEEDED(aBlobImpl->GetType(contentType)));
 
     uint64_t length;
-    MOZ_ALWAYS_TRUE(NS_SUCCEEDED(aBlob->GetSize(&length)));
+    MOZ_ALWAYS_TRUE(NS_SUCCEEDED(aBlobImpl->GetSize(&length)));
 
-    if (nsCOMPtr<nsIDOMFile> file = do_QueryInterface(aBlob)) {
+    if (aBlobImpl->IsFile()) {
       nsString name;
-      MOZ_ALWAYS_TRUE(NS_SUCCEEDED(file->GetName(name)));
+      MOZ_ALWAYS_TRUE(NS_SUCCEEDED(aBlobImpl->GetName(name)));
 
       uint64_t modDate;
-      MOZ_ALWAYS_TRUE(NS_SUCCEEDED(file->GetMozLastModifiedDate(&modDate)));
+      MOZ_ALWAYS_TRUE(NS_SUCCEEDED(
+        aBlobImpl->GetMozLastModifiedDate(&modDate)));
 
       params = FileBlobConstructorParams(name, contentType, length, modDate);
     } else {
@@ -862,7 +854,7 @@ BackgroundParent::GetOrCreateActorForBlob(PBackgroundParent* aBackgroundActor,
     }
   }
 
-  BlobParent* actor = BlobParent::Create(aBackgroundActor, aBlob);
+  BlobParent* actor = BlobParent::Create(aBackgroundActor, aBlobImpl);
   if (NS_WARN_IF(!actor) ||
       NS_WARN_IF(!aBackgroundActor->SendPBlobConstructor(actor, params))) {
     if (aActorWasCreated) {
@@ -934,7 +926,8 @@ BackgroundChild::GetOrCreateActorForBlob(PBackgroundChild* aBackgroundActor,
 
   // If the blob represents a remote blob then we can simply pass its actor back
   // here.
-  if (nsCOMPtr<nsIRemoteBlob> remoteBlob = do_QueryInterface(aBlob)) {
+  const auto* domFile = static_cast<DOMFile*>(aBlob);
+  if (nsCOMPtr<nsIRemoteBlob> remoteBlob = do_QueryInterface(domFile->Impl())) {
     BlobChild* actor = remoteBlob->GetBlobChild();
     if (actor && actor->GetBackgroundManager() == aBackgroundActor) {
       if (aActorWasCreated) {
@@ -954,8 +947,8 @@ BackgroundChild::GetOrCreateActorForBlob(PBackgroundChild* aBackgroundActor,
   // XXX This is only safe so long as all blob implementations in our tree
   //     inherit nsDOMFileBase. If that ever changes then this will need to grow
   //     a real interface or something.
-  MOZ_ASSERT(!static_cast<nsDOMFileBase*>(aBlob)->IsSizeUnknown());
-  MOZ_ASSERT(!static_cast<nsDOMFileBase*>(aBlob)->IsDateUnknown());
+  MOZ_ASSERT(!static_cast<DOMFileImplBase*>(domFile->Impl())->IsSizeUnknown());
+  MOZ_ASSERT(!static_cast<DOMFileImplBase*>(domFile->Impl())->IsDateUnknown());
 
   ParentBlobConstructorParams params;
 

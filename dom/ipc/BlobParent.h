@@ -24,6 +24,7 @@ class PBackgroundParent;
 
 namespace dom {
 
+class DOMFileImpl;
 class nsIContentParent;
 class PBlobStreamParent;
 
@@ -45,6 +46,9 @@ class BlobParent MOZ_FINAL
   PBackgroundParent* mBackgroundManager;
   nsCOMPtr<nsIContentParent> mContentManager;
 
+  // This is only set when the blob is created with an existing DOMFileImpl.
+  nsRefPtr<DOMFileImpl> mBlobImpl;
+
   nsCOMPtr<nsIEventTarget> mEventTarget;
 
   // nsIInputStreams backed by files must ensure that the files are actually
@@ -57,7 +61,7 @@ class BlobParent MOZ_FINAL
   nsTArray<nsRevocableEventPtr<OpenStreamRunnable>> mOpenStreamRunnables;
 
   bool mOwnsBlob;
-  bool mBlobIsFile;
+  bool mOwnsRemoteBlob;
 
 public:
   // These create functions are called on the sending side.
@@ -71,6 +75,12 @@ public:
   Create(PBackgroundParent* aManager, nsIDOMBlob* aBlob)
   {
     return new BlobParent(aManager, aBlob);
+  }
+
+  static BlobParent*
+  Create(PBackgroundParent* aManager, DOMFileImpl* aBlobImpl)
+  {
+    return new BlobParent(aManager, aBlobImpl);
   }
 
   // These create functions are called on the receiving side.
@@ -108,18 +118,13 @@ public:
 
   // Get the blob associated with this actor. This may always be called on the
   // sending side. It may also be called on the receiving side unless this is a
-  // "mystery" blob that has not yet received a SetMysteryBlobInfo() call.
+  // "mystery" blob that has not yet received a SetMysteryBlobInfo() call. Must
+  // only be called on a DOM thread since blobs are cycle-collected objects.
   already_AddRefed<nsIDOMBlob>
   GetBlob();
 
-  // Use this for files.
-  bool
-  SetMysteryBlobInfo(const nsString& aName, const nsString& aContentType,
-                     uint64_t aLength, uint64_t aLastModifiedDate);
-
-  // Use this for non-file blobs.
-  bool
-  SetMysteryBlobInfo(const nsString& aContentType, uint64_t aLength);
+  already_AddRefed<DOMFileImpl>
+  GetBlobImpl();
 
   void
   AssertIsOnOwningThread() const
@@ -134,6 +139,8 @@ private:
   BlobParent(nsIContentParent* aManager, nsIDOMBlob* aBlob);
 
   BlobParent(PBackgroundParent* aManager, nsIDOMBlob* aBlob);
+
+  BlobParent(PBackgroundParent* aManager, DOMFileImpl* aBlobImpl);
 
   // These constructors are called on the receiving side.
   BlobParent(nsIContentParent* aManager,
@@ -151,9 +158,12 @@ private:
   void
   CommonInit(const ParentBlobConstructorParams& aParams);
 
-  template <class ParentManagerType>
   static BlobParent*
-  CreateFromParams(ParentManagerType* aManager,
+  CreateFromParams(nsIContentParent* aManager,
+                   const ParentBlobConstructorParams& aParams);
+
+  static BlobParent*
+  CreateFromParams(PBackgroundParent* aManager,
                    const ParentBlobConstructorParams& aParams);
 
   template <class ParentManagerType>

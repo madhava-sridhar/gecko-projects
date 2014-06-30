@@ -22,6 +22,7 @@ class PBackgroundChild;
 
 namespace dom {
 
+class DOMFileImpl;
 class nsIContentChild;
 class PBlobStreamChild;
 
@@ -43,7 +44,6 @@ class BlobChild MOZ_FINAL
   nsCOMPtr<nsIEventTarget> mEventTarget;
 
   bool mOwnsBlob;
-  bool mBlobIsFile;
 
 public:
   // These create functions are called on the sending side.
@@ -96,6 +96,9 @@ public:
   // "mystery" blob that has not yet received a SetMysteryBlobInfo() call.
   already_AddRefed<nsIDOMBlob>
   GetBlob();
+
+  already_AddRefed<DOMFileImpl>
+  GetBlobImpl();
 
   // Use this for files.
   bool
@@ -164,9 +167,6 @@ private:
   // These methods are only called by the IPDL message machinery.
   virtual void
   ActorDestroy(ActorDestroyReason aWhy) MOZ_OVERRIDE;
-
-  virtual bool
-  RecvResolveMystery(const ResolveMysteryParams& aParams) MOZ_OVERRIDE;
 
   virtual PBlobStreamChild*
   AllocPBlobStreamChild() MOZ_OVERRIDE;

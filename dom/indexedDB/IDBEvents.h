@@ -12,6 +12,9 @@
 #include "mozilla/dom/Event.h"
 #include "mozilla/dom/Nullable.h"
 
+#define IDBVERSIONCHANGEEVENT_IID \
+  {0x3b65d4c3, 0x73ad, 0x492e, {0xb1, 0x2d, 0x15, 0xf9, 0xda, 0xc2, 0x08, 0x4b}}
+
 class nsAString;
 class nsDependentString;
 
@@ -94,6 +97,8 @@ public:
     return mNewVersion;
   }
 
+  NS_DECLARE_STATIC_IID_ACCESSOR(IDBVERSIONCHANGEEVENT_IID)
+
   NS_DECL_ISUPPORTS_INHERITED
   NS_FORWARD_TO_EVENT
 
@@ -117,6 +122,8 @@ private:
                  uint64_t aOldVersion,
                  Nullable<uint64_t> aNewVersion);
 };
+
+NS_DEFINE_STATIC_IID_ACCESSOR(IDBVersionChangeEvent, IDBVERSIONCHANGEEVENT_IID)
 
 } // namespace indexedDB
 } // namespace dom

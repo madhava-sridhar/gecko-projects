@@ -93,7 +93,12 @@ IDBVersionChangeEvent::Constructor(const GlobalObject& aGlobal,
                         aOptions.mNewVersion);
 }
 
-NS_IMPL_ISUPPORTS_INHERITED0(IDBVersionChangeEvent, Event)
+NS_IMPL_ADDREF_INHERITED(IDBVersionChangeEvent, Event)
+NS_IMPL_RELEASE_INHERITED(IDBVersionChangeEvent, Event)
+
+NS_INTERFACE_MAP_BEGIN(IDBVersionChangeEvent)
+  NS_INTERFACE_MAP_ENTRY(IDBVersionChangeEvent)
+NS_INTERFACE_MAP_END_INHERITING(Event)
 
 JSObject*
 IDBVersionChangeEvent::WrapObject(JSContext* aCx)

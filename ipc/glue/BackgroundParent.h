@@ -10,12 +10,12 @@
 #include "mozilla/ipc/Transport.h"
 
 template <class> struct already_AddRefed;
-class nsIDOMBlob;
 
 namespace mozilla {
 namespace dom {
 
 class ContentParent;
+class DOMFileImpl;
 class PBlobParent;
 
 } // namespace dom
@@ -32,6 +32,7 @@ class BackgroundParent MOZ_FINAL
 
   typedef base::ProcessId ProcessId;
   typedef mozilla::dom::ContentParent ContentParent;
+  typedef mozilla::dom::DOMFileImpl DOMFileImpl;
   typedef mozilla::ipc::Transport Transport;
 
 public:
@@ -54,9 +55,9 @@ public:
   GetContentParent(PBackgroundParent* aBackgroundActor);
 
   static mozilla::dom::PBlobParent*
-  GetOrCreateActorForBlob(PBackgroundParent* aBackgroundActor,
-                          nsIDOMBlob* aBlob,
-                          bool* aActorWasCreated = nullptr);
+  GetOrCreateActorForBlobImpl(PBackgroundParent* aBackgroundActor,
+                              DOMFileImpl* aBlobImpl,
+                              bool* aActorWasCreated = nullptr);
 
 private:
   // Only called by ContentParent for cross-process actors.

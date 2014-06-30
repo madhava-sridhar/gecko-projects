@@ -470,7 +470,7 @@ IDBFactory::OpenInternal(nsIPrincipal* aPrincipal,
   nsRefPtr<IDBOpenDBRequest> request;
 
   if (mWindow) {
-    if (NS_WARN_IF(!autoJS.InitUsingWin(mWindow))) {
+    if (NS_WARN_IF(!autoJS.Init(mWindow))) {
       IDB_REPORT_INTERNAL_ERR();
       aRv.Throw(NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
       return nullptr;

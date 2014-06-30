@@ -28,6 +28,7 @@ both:
 
   PBlobStream();
 
+parent:
   ResolveMystery(ResolveMysteryParams params);
 };
 

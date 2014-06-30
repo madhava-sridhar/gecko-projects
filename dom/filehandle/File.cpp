@@ -94,16 +94,16 @@ FileImpl::GetInternalStream(nsIInputStream** aStream)
   return NS_OK;
 }
 
-already_AddRefed<nsIDOMBlob>
+already_AddRefed<DOMFileImpl>
 FileImpl::CreateSlice(uint64_t aStart, uint64_t aLength,
                       const nsAString& aContentType)
 {
   NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
 
-  nsCOMPtr<nsIDOMBlob> t =
-    new DOMFile(new FileImpl(this, aStart, aLength, aContentType));
+  nsRefPtr<DOMFileImpl> impl =
+    new FileImpl(this, aStart, aLength, aContentType);
 
-  return t.forget();
+  return impl.forget();
 }
 
 nsresult
