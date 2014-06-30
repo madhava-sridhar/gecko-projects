@@ -8365,8 +8365,9 @@ class CGUnionStruct(CGThing):
                         Argument("JS::Handle<JSObject*>", "scopeObj"),
                         Argument("JS::MutableHandle<JS::Value>", "rval")
                     ],
-                    body=CGSwitch("mType", toJSValCases,
-                                  default=CGGeneric("return false;\n")).define(),
+                    body=CGWrapper(CGSwitch("mType", toJSValCases,
+                                            default=CGGeneric("return false;\n")),
+                                   post="return false;\n").define(),
                     const=True))
 
         constructors = [ctor]
