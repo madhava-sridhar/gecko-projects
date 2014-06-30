@@ -2408,6 +2408,23 @@ CreateDatabaseConnection(nsIFile* aDBFile,
   return NS_OK;
 }
 
+already_AddRefed<nsIFile>
+GetFileForPath(const nsAString& aPath)
+{
+  MOZ_ASSERT(!aPath.IsEmpty());
+
+  nsCOMPtr<nsIFile> file = do_CreateInstance(NS_LOCAL_FILE_CONTRACTID);
+  if (NS_WARN_IF(!file)) {
+    return nullptr;
+  }
+
+  if (NS_WARN_IF(NS_FAILED(file->InitWithPath(aPath)))) {
+    return nullptr;
+  }
+
+  return file.forget();
+}
+
 nsresult
 GetDatabaseConnection(const nsAString& aDatabaseFilePath,
                       PersistenceType aPersistenceType,
@@ -2425,20 +2442,14 @@ GetDatabaseConnection(const nsAString& aDatabaseFilePath,
                  "GetDatabaseConnection",
                  js::ProfileEntry::Category::STORAGE);
 
-  nsresult rv;
-  nsCOMPtr<nsIFile> dbFile =
-    do_CreateInstance(NS_LOCAL_FILE_CONTRACTID, &rv);
-  if (NS_WARN_IF(NS_FAILED(rv))) {
-    return rv;
-  }
-
-  rv = dbFile->InitWithPath(aDatabaseFilePath);
-  if (NS_WARN_IF(NS_FAILED(rv))) {
-    return rv;
+  nsCOMPtr<nsIFile> dbFile = GetFileForPath(aDatabaseFilePath);
+  if (NS_WARN_IF(!dbFile)) {
+    IDB_REPORT_INTERNAL_ERR();
+    return NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
   }
 
   bool exists;
-  rv = dbFile->Exists(&exists);
+  nsresult rv = dbFile->Exists(&exists);
   if (NS_WARN_IF(NS_FAILED(rv))) {
     return rv;
   }
@@ -2507,7 +2518,12 @@ using ::TransactionBase;
 
 namespace {
 
+class Cursor;
+struct DatabaseActorInfo;
+class OpenDatabaseOp;
+template <class> class RequestOp;
 class TransactionBase;
+class VersionChangeTransaction;
 
 class DatabaseOperationBase
   : public nsRunnable
@@ -2791,9 +2807,6 @@ private:
                                       MOZ_OVERRIDE;
 };
 
-struct DatabaseActorInfo;
-class VersionChangeTransaction;
-
 class Database MOZ_FINAL
   : public PBackgroundIDBDatabaseParent
 {
@@ -2997,9 +3010,6 @@ private:
   virtual bool
   RecvClose() MOZ_OVERRIDE;
 };
-
-class Cursor;
-template <class> class RequestOp;
 
 class TransactionBase
 {
@@ -3225,8 +3235,6 @@ private:
   bool
   VerifyRequestParams(const OptionalKeyRange& aKeyRange) const;
 };
-
-class OpenDatabaseOp;
 
 class TransactionBase::CommitOp MOZ_FINAL
   : public DatabaseOperationBase
@@ -7613,8 +7621,536 @@ Cursor::RecvContinue(const CursorRequestParams& aParams)
  * FileManager
  ******************************************************************************/
 
-// XXX Remove me!
-#include "FileManager.cpp"
+FileManager::FileManager(PersistenceType aPersistenceType,
+                         const nsACString& aGroup,
+                         const nsACString& aOrigin,
+                         StoragePrivilege aPrivilege,
+                         const nsAString& aDatabaseName)
+  : mPersistenceType(aPersistenceType)
+  , mGroup(aGroup)
+  , mOrigin(aOrigin)
+  , mPrivilege(aPrivilege)
+  , mDatabaseName(aDatabaseName)
+  , mLastFileId(0)
+  , mInvalidated(false)
+{ }
+
+FileManager::~FileManager()
+{ }
+
+nsresult
+FileManager::Init(nsIFile* aDirectory,
+                  mozIStorageConnection* aConnection)
+{
+  AssertIsOnIOThread();
+  MOZ_ASSERT(aDirectory);
+  MOZ_ASSERT(aConnection);
+
+  bool exists;
+  nsresult rv = aDirectory->Exists(&exists);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+
+  if (exists) {
+    bool isDirectory;
+    rv = aDirectory->IsDirectory(&isDirectory);
+    if (NS_WARN_IF(NS_FAILED(rv))) {
+      return rv;
+    }
+
+    if (NS_WARN_IF(!isDirectory)) {
+      return NS_ERROR_FAILURE;
+    }
+  } else {
+    rv = aDirectory->Create(nsIFile::DIRECTORY_TYPE, 0755);
+    if (NS_WARN_IF(NS_FAILED(rv))) {
+      return rv;
+    }
+  }
+
+  rv = aDirectory->GetPath(mDirectoryPath);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+
+  nsCOMPtr<nsIFile> journalDirectory;
+  rv = aDirectory->Clone(getter_AddRefs(journalDirectory));
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+
+  NS_ConvertASCIItoUTF16 dirName(NS_LITERAL_CSTRING(kJournalDirectoryName));
+  rv = journalDirectory->Append(dirName);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+
+  rv = journalDirectory->Exists(&exists);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+
+  if (exists) {
+    bool isDirectory;
+    rv = journalDirectory->IsDirectory(&isDirectory);
+    if (NS_WARN_IF(NS_FAILED(rv))) {
+      return rv;
+    }
+
+    if (NS_WARN_IF(!isDirectory)) {
+      return NS_ERROR_FAILURE;
+    }
+  }
+
+  rv = journalDirectory->GetPath(mJournalDirectoryPath);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+
+  nsCOMPtr<mozIStorageStatement> stmt;
+  rv = aConnection->CreateStatement(NS_LITERAL_CSTRING(
+    "SELECT id, refcount "
+    "FROM file"
+  ), getter_AddRefs(stmt));
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+
+  bool hasResult;
+  while (NS_SUCCEEDED((rv = stmt->ExecuteStep(&hasResult))) && hasResult) {
+    int64_t id;
+    rv = stmt->GetInt64(0, &id);
+    if (NS_WARN_IF(NS_FAILED(rv))) {
+      return rv;
+    }
+
+    int32_t refcount;
+    rv = stmt->GetInt32(1, &refcount);
+    if (NS_WARN_IF(NS_FAILED(rv))) {
+      return rv;
+    }
+
+    MOZ_ASSERT(refcount > 0);
+
+    nsRefPtr<FileInfo> fileInfo = FileInfo::Create(this, id);
+    fileInfo->mDBRefCnt = static_cast<nsrefcnt>(refcount);
+
+    mFileInfos.Put(id, fileInfo);
+
+    mLastFileId = std::max(id, mLastFileId);
+  }
+
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+
+  return NS_OK;
+}
+
+nsresult
+FileManager::Invalidate()
+{
+  class MOZ_STACK_CLASS Helper MOZ_FINAL
+  {
+  public:
+    static PLDHashOperator
+    CopyToTArray(const uint64_t& aKey, FileInfo* aValue, void* aUserArg)
+    {
+      MOZ_ASSERT(aValue);
+
+      auto* array = static_cast<FallibleTArray<FileInfo*>*>(aUserArg);
+      MOZ_ASSERT(array);
+
+      MOZ_ALWAYS_TRUE(array->AppendElement(aValue));
+
+      return PL_DHASH_NEXT;
+    }
+  };
+
+  if (IndexedDatabaseManager::IsClosed()) {
+    MOZ_ASSERT(false, "Shouldn't be called after shutdown!");
+    return NS_ERROR_UNEXPECTED;
+  }
+
+  FallibleTArray<FileInfo*> fileInfos;
+  {
+    MutexAutoLock lock(IndexedDatabaseManager::FileMutex());
+
+    MOZ_ASSERT(!mInvalidated);
+    mInvalidated = true;
+
+    if (NS_WARN_IF(!fileInfos.SetCapacity(mFileInfos.Count()))) {
+      return NS_ERROR_OUT_OF_MEMORY;
+    }
+
+    mFileInfos.EnumerateRead(Helper::CopyToTArray, &fileInfos);
+  }
+
+  for (uint32_t count = fileInfos.Length(), index = 0; index < count; index++) {
+    FileInfo* fileInfo = fileInfos[index];
+    MOZ_ASSERT(fileInfo);
+
+    fileInfo->ClearDBRefs();
+  }
+
+  return NS_OK;
+}
+
+already_AddRefed<nsIFile>
+FileManager::GetDirectory()
+{
+  return GetFileForPath(mDirectoryPath);
+}
+
+already_AddRefed<nsIFile>
+FileManager::GetJournalDirectory()
+{
+  return GetFileForPath(mJournalDirectoryPath);
+}
+
+already_AddRefed<nsIFile>
+FileManager::EnsureJournalDirectory()
+{
+  AssertIsOnIOThread();
+
+  nsCOMPtr<nsIFile> journalDirectory = GetFileForPath(mJournalDirectoryPath);
+  if (NS_WARN_IF(!journalDirectory)) {
+    return nullptr;
+  }
+
+  bool exists;
+  nsresult rv = journalDirectory->Exists(&exists);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return nullptr;
+  }
+
+  if (exists) {
+    bool isDirectory;
+    rv = journalDirectory->IsDirectory(&isDirectory);
+    if (NS_WARN_IF(NS_FAILED(rv))) {
+      return nullptr;
+    }
+
+    if (NS_WARN_IF(!isDirectory)) {
+      return nullptr;
+    }
+  } else {
+    rv = journalDirectory->Create(nsIFile::DIRECTORY_TYPE, 0755);
+    if (NS_WARN_IF(NS_FAILED(rv))) {
+      return nullptr;
+    }
+  }
+
+  return journalDirectory.forget();
+}
+
+already_AddRefed<FileInfo>
+FileManager::GetFileInfo(int64_t aId)
+{
+  if (IndexedDatabaseManager::IsClosed()) {
+    MOZ_ASSERT(false, "Shouldn't be called after shutdown!");
+    return nullptr;
+  }
+
+  FileInfo* fileInfo;
+  {
+    MutexAutoLock lock(IndexedDatabaseManager::FileMutex());
+    fileInfo = mFileInfos.Get(aId);
+  }
+
+  nsRefPtr<FileInfo> result = fileInfo;
+  return result.forget();
+}
+
+already_AddRefed<FileInfo>
+FileManager::GetNewFileInfo()
+{
+  if (IndexedDatabaseManager::IsClosed()) {
+    MOZ_ASSERT(false, "Shouldn't be called after shutdown!");
+    return nullptr;
+  }
+
+  FileInfo* fileInfo;
+  {
+    MutexAutoLock lock(IndexedDatabaseManager::FileMutex());
+
+    int64_t id = mLastFileId + 1;
+
+    fileInfo = FileInfo::Create(this, id);
+
+    mFileInfos.Put(id, fileInfo);
+
+    mLastFileId = id;
+  }
+
+  nsRefPtr<FileInfo> result = fileInfo;
+  return result.forget();
+}
+
+// static
+already_AddRefed<nsIFile>
+FileManager::GetFileForId(nsIFile* aDirectory, int64_t aId)
+{
+  MOZ_ASSERT(aDirectory);
+  MOZ_ASSERT(aId > 0);
+
+  nsAutoString id;
+  id.AppendInt(aId);
+
+  nsCOMPtr<nsIFile> file;
+  nsresult rv = aDirectory->Clone(getter_AddRefs(file));
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return nullptr;
+  }
+
+  rv = file->Append(id);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return nullptr;
+  }
+
+  return file.forget();
+}
+
+// static
+nsresult
+FileManager::InitDirectory(nsIFile* aDirectory,
+                           nsIFile* aDatabaseFile,
+                           PersistenceType aPersistenceType,
+                           const nsACString& aGroup,
+                           const nsACString& aOrigin)
+{
+  AssertIsOnIOThread();
+  MOZ_ASSERT(aDirectory);
+  MOZ_ASSERT(aDatabaseFile);
+
+  bool exists;
+  nsresult rv = aDirectory->Exists(&exists);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+
+  if (!exists) {
+    return NS_OK;
+  }
+
+  bool isDirectory;
+  rv = aDirectory->IsDirectory(&isDirectory);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+
+  if (NS_WARN_IF(!isDirectory)) {
+    return NS_ERROR_FAILURE;
+  }
+
+  nsCOMPtr<nsIFile> journalDirectory;
+  rv = aDirectory->Clone(getter_AddRefs(journalDirectory));
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+
+  NS_ConvertASCIItoUTF16 dirName(NS_LITERAL_CSTRING(kJournalDirectoryName));
+  rv = journalDirectory->Append(dirName);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+
+  rv = journalDirectory->Exists(&exists);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+
+  if (exists) {
+    rv = journalDirectory->IsDirectory(&isDirectory);
+    if (NS_WARN_IF(NS_FAILED(rv))) {
+      return rv;
+    }
+
+    if (NS_WARN_IF(!isDirectory)) {
+      return NS_ERROR_FAILURE;
+    }
+
+    nsCOMPtr<nsISimpleEnumerator> entries;
+    rv = journalDirectory->GetDirectoryEntries(getter_AddRefs(entries));
+    if (NS_WARN_IF(NS_FAILED(rv))) {
+      return rv;
+    }
+
+    bool hasElements;
+    rv = entries->HasMoreElements(&hasElements);
+    if (NS_WARN_IF(NS_FAILED(rv))) {
+      return rv;
+    }
+
+    if (hasElements) {
+      nsCOMPtr<mozIStorageConnection> connection;
+      rv = CreateDatabaseConnection(aDatabaseFile,
+                                    aDirectory,
+                                    NullString(),
+                                    aPersistenceType,
+                                    aGroup,
+                                    aOrigin,
+                                    getter_AddRefs(connection));
+      if (NS_WARN_IF(NS_FAILED(rv))) {
+        return rv;
+      }
+
+      mozStorageTransaction transaction(connection, false);
+
+      rv = connection->ExecuteSimpleSQL(NS_LITERAL_CSTRING(
+        "CREATE VIRTUAL TABLE fs USING filesystem;"
+      ));
+      if (NS_WARN_IF(NS_FAILED(rv))) {
+        return rv;
+      }
+
+      nsCOMPtr<mozIStorageStatement> stmt;
+      rv = connection->CreateStatement(NS_LITERAL_CSTRING(
+        "SELECT name, (name IN (SELECT id FROM file)) "
+        "FROM fs "
+        "WHERE path = :path"
+      ), getter_AddRefs(stmt));
+      if (NS_WARN_IF(NS_FAILED(rv))) {
+        return rv;
+      }
+
+      nsString path;
+      rv = journalDirectory->GetPath(path);
+      if (NS_WARN_IF(NS_FAILED(rv))) {
+        return rv;
+      }
+
+      rv = stmt->BindStringByName(NS_LITERAL_CSTRING("path"), path);
+      if (NS_WARN_IF(NS_FAILED(rv))) {
+        return rv;
+      }
+
+      bool hasResult;
+      while (NS_SUCCEEDED((rv = stmt->ExecuteStep(&hasResult))) && hasResult) {
+        nsString name;
+        rv = stmt->GetString(0, name);
+        if (NS_WARN_IF(NS_FAILED(rv))) {
+          return rv;
+        }
+
+        int32_t flag = stmt->AsInt32(1);
+
+        if (!flag) {
+          nsCOMPtr<nsIFile> file;
+          rv = aDirectory->Clone(getter_AddRefs(file));
+          if (NS_WARN_IF(NS_FAILED(rv))) {
+            return rv;
+          }
+
+          rv = file->Append(name);
+          if (NS_WARN_IF(NS_FAILED(rv))) {
+            return rv;
+          }
+
+          if (NS_FAILED(file->Remove(false))) {
+            NS_WARNING("Failed to remove orphaned file!");
+          }
+        }
+
+        nsCOMPtr<nsIFile> journalFile;
+        rv = journalDirectory->Clone(getter_AddRefs(journalFile));
+        if (NS_WARN_IF(NS_FAILED(rv))) {
+          return rv;
+        }
+
+        rv = journalFile->Append(name);
+        if (NS_WARN_IF(NS_FAILED(rv))) {
+          return rv;
+        }
+
+        if (NS_FAILED(journalFile->Remove(false))) {
+          NS_WARNING("Failed to remove journal file!");
+        }
+      }
+
+      if (NS_WARN_IF(NS_FAILED(rv))) {
+        return rv;
+      }
+
+      rv = connection->ExecuteSimpleSQL(NS_LITERAL_CSTRING(
+        "DROP TABLE fs;"
+      ));
+      if (NS_WARN_IF(NS_FAILED(rv))) {
+        return rv;
+      }
+
+      transaction.Commit();
+    }
+  }
+
+  return NS_OK;
+}
+
+// static
+nsresult
+FileManager::GetUsage(nsIFile* aDirectory, uint64_t* aUsage)
+{
+  AssertIsOnIOThread();
+  MOZ_ASSERT(aDirectory);
+  MOZ_ASSERT(aUsage);
+
+  bool exists;
+  nsresult rv = aDirectory->Exists(&exists);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+
+  if (!exists) {
+    *aUsage = 0;
+    return NS_OK;
+  }
+
+  nsCOMPtr<nsISimpleEnumerator> entries;
+  rv = aDirectory->GetDirectoryEntries(getter_AddRefs(entries));
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+
+  uint64_t usage = 0;
+
+  bool hasMore;
+  while (NS_SUCCEEDED((rv = entries->HasMoreElements(&hasMore))) && hasMore) {
+    nsCOMPtr<nsISupports> entry;
+    rv = entries->GetNext(getter_AddRefs(entry));
+    if (NS_WARN_IF(NS_FAILED(rv))) {
+      return rv;
+    }
+
+    nsCOMPtr<nsIFile> file = do_QueryInterface(entry);
+    MOZ_ASSERT(file);
+
+    nsString leafName;
+    rv = file->GetLeafName(leafName);
+    if (NS_WARN_IF(NS_FAILED(rv))) {
+      return rv;
+    }
+
+    if (leafName.EqualsLiteral(kJournalDirectoryName)) {
+      continue;
+    }
+
+    int64_t fileSize;
+    rv = file->GetFileSize(&fileSize);
+    if (NS_WARN_IF(NS_FAILED(rv))) {
+      return rv;
+    }
+
+    quota::IncrementUsage(&usage, uint64_t(fileSize));
+  }
+
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+
+  *aUsage = usage;
+  return NS_OK;
+}
 
 /*******************************************************************************
  * QuotaClient
@@ -10449,20 +10985,15 @@ VersionChangeOp::RunOnIOThread()
     return NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
   }
 
-  nsresult rv;
   nsCOMPtr<nsIFile> directory =
-    do_CreateInstance(NS_LOCAL_FILE_CONTRACTID, &rv);
-  if (NS_WARN_IF(NS_FAILED(rv))) {
-    return rv;
-  }
-
-  rv = directory->InitWithPath(mDeleteDatabaseOp->mDatabaseDirectoryPath);
-  if (NS_WARN_IF(NS_FAILED(rv))) {
-    return rv;
+    GetFileForPath(mDeleteDatabaseOp->mDatabaseDirectoryPath);
+  if (NS_WARN_IF(!directory)) {
+    IDB_REPORT_INTERNAL_ERR();
+    return NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
   }
 
   nsCOMPtr<nsIFile> dbFile;
-  rv = directory->Clone(getter_AddRefs(dbFile));
+  nsresult rv = directory->Clone(getter_AddRefs(dbFile));
   if (NS_WARN_IF(NS_FAILED(rv))) {
     return rv;
   }
