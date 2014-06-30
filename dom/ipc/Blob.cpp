@@ -1395,7 +1395,7 @@ BlobChild::CommonInit(const ChildBlobConstructorParams& aParams)
 
   nsRefPtr<RemoteBlob> remoteBlob;
 
-  switch (aParams.type()) {
+  switch (paramsType) {
     case ChildBlobConstructorParams::TNormalBlobConstructorParams: {
       const NormalBlobConstructorParams& params =
         aParams.get_NormalBlobConstructorParams();
