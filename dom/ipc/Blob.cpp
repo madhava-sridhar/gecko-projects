@@ -2618,6 +2618,27 @@ BlobParent::ActorDestroy(ActorDestroyReason aWhy)
   mContentManager = nullptr;
 }
 
+bool
+BlobParent::RecvGetFileId(int64_t* aFileId)
+{
+  AssertIsOnOwningThread();
+  MOZ_ASSERT_IF(mBlob, !mBlobImpl);
+  MOZ_ASSERT_IF(!mBlob, mBlobImpl);
+  MOZ_ASSERT(!mRemoteBlob);
+
+  nsRefPtr<DOMFileImpl> blobImpl;
+  if (mBlob) {
+    blobImpl = static_cast<DOMFile*>(mBlob)->Impl();
+  } else {
+    blobImpl = mBlobImpl;
+  }
+
+  MOZ_ASSERT(blobImpl);
+
+  *aFileId = blobImpl->GetFileId();
+  return true;
+}
+
 PBlobStreamParent*
 BlobParent::AllocPBlobStreamParent()
 {

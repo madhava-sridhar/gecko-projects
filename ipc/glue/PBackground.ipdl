@@ -12,7 +12,7 @@ include DOMTypes;
 namespace mozilla {
 namespace ipc {
 
-protocol PBackground
+sync protocol PBackground
 {
   manages PBackgroundIDBFactory;
   manages PBackgroundTest;

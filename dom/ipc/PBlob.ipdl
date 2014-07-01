@@ -18,10 +18,14 @@ union ResolveMysteryParams
   FileBlobConstructorParams;
 };
 
-protocol PBlob
+sync protocol PBlob
 {
   manager PBackground or PContent or PContentBridge;
   manages PBlobStream;
+
+parent:
+  sync GetFileId()
+    returns (int64_t fileId);
 
 both:
   __delete__();

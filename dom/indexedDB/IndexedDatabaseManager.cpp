@@ -17,11 +17,14 @@
 #include "mozilla/CondVar.h"
 #include "mozilla/ContentEvents.h"
 #include "mozilla/dom/ErrorEventBinding.h"
+#include "mozilla/dom/PBlobChild.h"
 #include "mozilla/dom/quota/OriginOrPatternString.h"
 #include "mozilla/dom/quota/QuotaManager.h"
 #include "mozilla/dom/quota/Utilities.h"
 #include "mozilla/dom/TabContext.h"
 #include "mozilla/EventDispatcher.h"
+#include "mozilla/ipc/BackgroundChild.h"
+#include "mozilla/ipc/PBackgroundChild.h"
 #include "mozilla/Services.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/storage.h"
@@ -55,6 +58,7 @@
 
 USING_INDEXEDDB_NAMESPACE
 using namespace mozilla;
+using namespace mozilla::ipc;
 using namespace mozilla::dom;
 USING_QUOTA_NAMESPACE
 
@@ -613,6 +617,26 @@ IndexedDatabaseManager::AsyncDeleteFile(FileManager* aFileManager,
     quotaManager->IOThread()->Dispatch(runnable, NS_DISPATCH_NORMAL);
   NS_ENSURE_SUCCESS(rv, rv);
 
+  return NS_OK;
+}
+
+nsresult
+IndexedDatabaseManager::GetFileId(nsIDOMBlob* aFile, int64_t* aFileId)
+{
+  PBackgroundChild* bgActor = BackgroundChild::GetForCurrentThread();
+  if (bgActor) {
+    PBlobChild* blobActor =
+      BackgroundChild::GetOrCreateActorForBlob(bgActor, aFile, nullptr);
+    if (blobActor) {
+      int64_t fileId;
+      if (blobActor->SendGetFileId(&fileId)) {
+        *aFileId = fileId;
+        return NS_OK;
+      }
+    }
+  }
+
+  *aFileId = -1;
   return NS_OK;
 }
 

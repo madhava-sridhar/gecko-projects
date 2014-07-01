@@ -2961,7 +2961,21 @@ nsDOMWindowUtils::GetFileId(JS::Handle<JS::Value> aFile, JSContext* aCx,
 
     nsCOMPtr<nsIDOMBlob> blob = do_QueryInterface(nativeObj);
     if (blob) {
-      *aResult = blob->GetFileId();
+      nsRefPtr<indexedDB::IndexedDatabaseManager> mgr =
+        indexedDB::IndexedDatabaseManager::Get();
+
+      if (mgr) {
+        int64_t fileId;
+        nsresult rv = mgr->GetFileId(blob, &fileId);
+        if (NS_WARN_IF(NS_FAILED(rv))) {
+          return rv;
+        }
+
+        *aResult = fileId;
+      } else {
+        *aResult = -1;
+      }
+
       return NS_OK;
     }
   }

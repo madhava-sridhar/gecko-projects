@@ -99,6 +99,9 @@ public:
   AsyncDeleteFile(FileManager* aFileManager,
                   int64_t aFileId);
 
+  nsresult
+  GetFileId(nsIDOMBlob* aFile, int64_t* aFileId);
+
   // Don't call this method in real code, it blocks the main thread!
   // It is intended to be used by mochitests to test correctness of the special
   // reference counting of stored blobs/files.
