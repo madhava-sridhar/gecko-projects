@@ -7812,7 +7812,8 @@ FileManager::GetJournalDirectory()
 already_AddRefed<nsIFile>
 FileManager::EnsureJournalDirectory()
 {
-  AssertIsOnIOThread();
+  // This can happen on the IO or on a transaction thread.
+  MOZ_ASSERT(!NS_IsMainThread());
 
   nsCOMPtr<nsIFile> journalDirectory = GetFileForPath(mJournalDirectoryPath);
   if (NS_WARN_IF(!journalDirectory)) {
