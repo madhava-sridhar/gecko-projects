@@ -71,20 +71,6 @@ IDBWrapperCache::SetScriptOwner(JSObject* aScriptOwner)
   mozilla::HoldJSObjects(this);
 }
 
-JSObject*
-IDBWrapperCache::GetParentObject()
-{
-  if (mScriptOwner) {
-    return mScriptOwner;
-  }
-
-  // Do what nsEventTargetSH::PreCreate does.
-  nsCOMPtr<nsIScriptGlobalObject> parent;
-  DOMEventTargetHelper::GetParentObject(getter_AddRefs(parent));
-
-  return parent ? parent->GetGlobalJSObject() : nullptr;
-}
-
 #ifdef DEBUG
 void
 IDBWrapperCache::AssertIsRooted() const

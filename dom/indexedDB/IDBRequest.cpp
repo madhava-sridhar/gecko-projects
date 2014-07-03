@@ -304,22 +304,26 @@ IDBRequest::SetResult(GetResultCallback aCallback, void* aUserData)
     return;
   }
 
-  JSContext* cx = GetJSContext();
-  if (NS_WARN_IF(!cx)) {
-    IDB_REPORT_INTERNAL_ERR();
-    SetError(NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
-    return;
+  AutoJSAPI autoJS;
+  Maybe<JSAutoCompartment> ac;
+
+  if (GetScriptOwner()) {
+    // If we have a script owner we want the SafeJSContext and then to enter the
+    // script owner's compartment.
+    autoJS.Init();
+    ac.construct(autoJS.cx(), GetScriptOwner());
+  } else {
+    // Otherwise our owner is a window and we use that to initialize.
+    MOZ_ASSERT(GetOwner());
+    if (!autoJS.InitWithLegacyErrorReporting(GetOwner())) {
+      IDB_WARNING("Failed to initialize AutoJSAPI!");
+      SetError(NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
+      return;
+    }
   }
 
-  Maybe<AutoPushJSContext> maybePush;
-  if (NS_IsMainThread()) {
-    maybePush.construct(cx);
-  }
+  JSContext* cx = autoJS.cx();
 
-  JS::Rooted<JSObject*> global(cx, IDBWrapperCache::GetParentObject());
-  MOZ_ASSERT(global);
-
-  JSAutoCompartment ac(cx, global);
   AssertIsRooted();
 
   JS::Rooted<JS::Value> result(cx);

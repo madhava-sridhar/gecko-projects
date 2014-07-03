@@ -109,7 +109,8 @@ class MOZ_STACK_CLASS ResultHelper MOZ_FINAL
     const nsTArray<StructuredCloneReadInfo>* mStructuredCloneArray;
     const Key* mKey;
     const nsTArray<Key>* mKeyArray;
-    const JS::Handle<JS::Value>* mJSVal;
+    const JS::Value* mJSVal;
+    const JS::Handle<JS::Value>* mJSValHandle;
   } mResult;
 
   enum
@@ -120,6 +121,7 @@ class MOZ_STACK_CLASS ResultHelper MOZ_FINAL
     ResultTypeKey,
     ResultTypeKeyArray,
     ResultTypeJSVal,
+    ResultTypeJSValHandle,
   } mResultType;
 
 public:
@@ -190,14 +192,27 @@ public:
 
   ResultHelper(IDBRequest* aRequest,
                IDBTransaction* aTransaction,
-               const JS::Handle<JS::Value>* aResult)
+               const JS::Value* aResult)
     : mRequest(aRequest)
     , mAutoTransaction(aTransaction)
     , mResultType(ResultTypeJSVal)
   {
     MOZ_ASSERT(aRequest);
+    MOZ_ASSERT(!aResult->isGCThing());
 
     mResult.mJSVal = aResult;
+  }
+
+  ResultHelper(IDBRequest* aRequest,
+               IDBTransaction* aTransaction,
+               const JS::Handle<JS::Value>* aResult)
+    : mRequest(aRequest)
+    , mAutoTransaction(aTransaction)
+    , mResultType(ResultTypeJSValHandle)
+  {
+    MOZ_ASSERT(aRequest);
+
+    mResult.mJSValHandle = aResult;
   }
 
   IDBRequest*
@@ -243,6 +258,10 @@ public:
 
       case ResultTypeJSVal:
         aResult.set(*helper->mResult.mJSVal);
+        return NS_OK;
+
+      case ResultTypeJSValHandle:
+        aResult.set(*helper->mResult.mJSValHandle);
         return NS_OK;
 
       default:
@@ -1718,18 +1737,12 @@ BackgroundRequestChild::HandleResponse(uint64_t aResponse)
 {
   AssertIsOnOwningThread();
 
-  nsRefPtr<IDBRequest> domRequest = GetDOMObject();
-  MOZ_ASSERT(domRequest);
+  JS::Value response(JS::NumberValue(aResponse));
 
-  JSContext* cx = domRequest->GetJSContext();
-  MOZ_ASSERT(cx);
+  ResultHelper helper(mRequest, mTransaction, &response);
 
-  JSAutoRequest ar(cx);
-
-  JS::Rooted<JS::Value> value(cx);
-  value.setNumber(static_cast<double>(aResponse));
-
-  return HandleResponse(value);
+  DispatchSuccessEvent(&helper);
+  return true;
 }
 
 void
