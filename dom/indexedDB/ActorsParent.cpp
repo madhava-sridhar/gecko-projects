@@ -4796,7 +4796,7 @@ public:
   }
 };
 
-#endif
+#endif // DEBUG
 
 namespace {
 
@@ -4871,7 +4871,9 @@ class QuotaClientState MOZ_FINAL
   // down until way late in shutdown when NS_IsMainThread() no longer works.
   DebugOnly<PRThread*> mOwningThread;
 
-  DebugOnly<nsAutoTArray<DEBUGStorageInfo, 10>> mOfflineStorages;
+#ifdef DEBUG
+  nsAutoTArray<DEBUGStorageInfo, 10> mOfflineStorages;
+#endif
 
 public:
   void
@@ -4891,7 +4893,7 @@ public:
     MOZ_ASSERT(mOfflineStorageCount < UINT32_MAX);
     MOZ_ASSERT_IF(mOfflineStorageCount, mBackgroundThread == aBackgroundThread);
     MOZ_ASSERT_IF(!mOfflineStorageCount, !mBackgroundThread);
-    MOZ_ASSERT(!mOfflineStorages.value.Contains(aStorage));
+    MOZ_ASSERT(!mOfflineStorages.Contains(aStorage));
     MOZ_ASSERT(!mShutDown);
 
     if (++mOfflineStorageCount == 1) {
@@ -4899,9 +4901,8 @@ public:
     }
 
 #ifdef DEBUG
-    mOfflineStorages.value.InsertElementSorted(DEBUGStorageInfo(aStorage,
-                                                                aMetadata));
-    MOZ_ASSERT(mOfflineStorages.value.Length() == mOfflineStorageCount);
+    mOfflineStorages.InsertElementSorted(DEBUGStorageInfo(aStorage, aMetadata));
+    MOZ_ASSERT(mOfflineStorages.Length() == mOfflineStorageCount);
 #endif
   }
 
@@ -4912,15 +4913,15 @@ public:
     MOZ_ASSERT(aStorage);
     MOZ_ASSERT(mBackgroundThread);
     MOZ_ASSERT(mOfflineStorageCount);
-    MOZ_ASSERT(mOfflineStorages.value.Contains(aStorage));
+    MOZ_ASSERT(mOfflineStorages.Contains(aStorage));
 
     if (--mOfflineStorageCount == 0) {
       mBackgroundThread = nullptr;
     }
 
 #ifdef DEBUG
-    mOfflineStorages.value.RemoveElementSorted(aStorage);
-    MOZ_ASSERT(mOfflineStorages.value.Length() == mOfflineStorageCount);
+    mOfflineStorages.RemoveElementSorted(aStorage);
+    MOZ_ASSERT(mOfflineStorages.Length() == mOfflineStorageCount);
 #endif
   }
 
@@ -4962,7 +4963,7 @@ private:
   {
     MOZ_ASSERT(PR_GetCurrentThread() == mOwningThread);
     MOZ_ASSERT(!mOfflineStorageCount);
-    MOZ_ASSERT(mOfflineStorages.value.IsEmpty());
+    MOZ_ASSERT(mOfflineStorages.IsEmpty());
   }
 };
 

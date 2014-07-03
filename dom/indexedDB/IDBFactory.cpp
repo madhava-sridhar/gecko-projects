@@ -180,6 +180,12 @@ IDBFactory::CreateForWindow(nsPIDOMWindow* aWindow,
     return NS_OK;
   }
 
+  IndexedDatabaseManager* mgr = IndexedDatabaseManager::GetOrCreate();
+  if (NS_WARN_IF(!mgr)) {
+    IDB_REPORT_INTERNAL_ERR();
+    return NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
+  }
+
   nsRefPtr<IDBFactory> factory = new IDBFactory();
   factory->mPrincipalInfo = Move(principalInfo);
   factory->mWindow = aWindow;
@@ -257,6 +263,12 @@ IDBFactory::CreateForJSInternal(JSContext* aCx,
   if (NS_WARN_IF(!Preferences::GetBool(kPrefIndexedDBEnabled, false))) {
     *aFactory = nullptr;
     return NS_ERROR_DOM_INDEXEDDB_NOT_ALLOWED_ERR;
+  }
+
+  IndexedDatabaseManager* mgr = IndexedDatabaseManager::GetOrCreate();
+  if (NS_WARN_IF(!mgr)) {
+    IDB_REPORT_INTERNAL_ERR();
+    return NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
   }
 
   nsRefPtr<IDBFactory> factory = new IDBFactory();
