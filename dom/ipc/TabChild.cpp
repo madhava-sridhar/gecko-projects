@@ -2339,8 +2339,9 @@ TabChild::DeallocPFilePickerChild(PFilePickerChild* actor)
   return true;
 }
 
-PIndexedDBPermissionRequestChild*
+auto
 TabChild::AllocPIndexedDBPermissionRequestChild(const Principal& aPrincipal)
+  -> PIndexedDBPermissionRequestChild*
 {
   MOZ_CRASH("PIndexedDBPermissionRequestChild actors should always be created "
             "manually!");
