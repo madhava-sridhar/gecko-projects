@@ -396,7 +396,7 @@ ArchiveZipFileImpl::Traverse(nsCycleCollectionTraversalCallback &cb)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mArchiveReader);
 }
 
-already_AddRefed<DOMFileImpl>
+already_AddRefed<mozilla::dom::DOMFileImpl>
 ArchiveZipFileImpl::CreateSlice(uint64_t aStart,
                                 uint64_t aLength,
                                 const nsAString& aContentType)

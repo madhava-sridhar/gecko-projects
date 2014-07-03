@@ -4854,7 +4854,7 @@ public:
 // This class maintains state on the main thread concerning the QuotaClient.
 class QuotaClientState MOZ_FINAL
 {
-  friend class QuotaClient;
+  friend class mozilla::dom::indexedDB::QuotaClient;
   friend class StaticAutoPtr<QuotaClientState>;
 
   class ShutdownTransactionThreadPoolRunnable;
