@@ -23,10 +23,6 @@ sync protocol PBlob
   manager PBackground or PContent or PContentBridge;
   manages PBlobStream;
 
-parent:
-  sync GetFileId()
-    returns (int64_t fileId);
-
 both:
   __delete__();
 
@@ -34,6 +30,10 @@ both:
 
 parent:
   ResolveMystery(ResolveMysteryParams params);
+
+  // Use only for testing!
+  sync GetFileId()
+    returns (int64_t fileId);
 };
 
 } // namespace dom

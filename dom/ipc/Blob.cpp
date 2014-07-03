@@ -2618,27 +2618,6 @@ BlobParent::ActorDestroy(ActorDestroyReason aWhy)
   mContentManager = nullptr;
 }
 
-bool
-BlobParent::RecvGetFileId(int64_t* aFileId)
-{
-  AssertIsOnOwningThread();
-  MOZ_ASSERT_IF(mBlob, !mBlobImpl);
-  MOZ_ASSERT_IF(!mBlob, mBlobImpl);
-  MOZ_ASSERT(!mRemoteBlob);
-
-  nsRefPtr<DOMFileImpl> blobImpl;
-  if (mBlob) {
-    blobImpl = static_cast<DOMFile*>(mBlob)->Impl();
-  } else {
-    blobImpl = mBlobImpl;
-  }
-
-  MOZ_ASSERT(blobImpl);
-
-  *aFileId = blobImpl->GetFileId();
-  return true;
-}
-
 PBlobStreamParent*
 BlobParent::AllocPBlobStreamParent()
 {
@@ -2791,6 +2770,27 @@ BlobParent::RecvResolveMystery(const ResolveMysteryParams& aParams)
   }
 
   MOZ_MAKE_COMPILER_ASSUME_IS_UNREACHABLE("Should never get here!");
+}
+
+bool
+BlobParent::RecvGetFileId(int64_t* aFileId)
+{
+  AssertIsOnOwningThread();
+  MOZ_ASSERT_IF(mBlob, !mBlobImpl);
+  MOZ_ASSERT_IF(!mBlob, mBlobImpl);
+  MOZ_ASSERT(!mRemoteBlob);
+
+  nsRefPtr<DOMFileImpl> blobImpl;
+  if (mBlob) {
+    blobImpl = static_cast<DOMFile*>(mBlob)->Impl();
+  } else {
+    blobImpl = mBlobImpl;
+  }
+
+  MOZ_ASSERT(blobImpl);
+
+  *aFileId = blobImpl->GetFileId();
+  return true;
 }
 
 bool

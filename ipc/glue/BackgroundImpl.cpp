@@ -939,6 +939,29 @@ BackgroundChild::GetOrCreateForCurrentThread(
 
 // static
 PBlobChild*
+BackgroundChild::GetActorForBlob(PBackgroundChild* aBackgroundActor,
+                                 nsIDOMBlob* aBlob)
+{
+  MOZ_ASSERT(aBackgroundActor);
+  MOZ_ASSERT(aBlob);
+  MOZ_ASSERT(GetForCurrentThread(),
+             "BackgroundChild not created on this thread yet!");
+  MOZ_ASSERT(aBackgroundActor == GetForCurrentThread(),
+             "BackgroundChild is bound to a different thread!");
+
+  const auto* domFile = static_cast<DOMFile*>(aBlob);
+  if (nsCOMPtr<nsIRemoteBlob> remoteBlob = do_QueryInterface(domFile->Impl())) {
+    BlobChild* actor = remoteBlob->GetBlobChild();
+    if (actor && actor->GetBackgroundManager() == aBackgroundActor) {
+      return actor;
+    }
+  }
+
+  return nullptr;
+}
+
+// static
+PBlobChild*
 BackgroundChild::GetOrCreateActorForBlob(PBackgroundChild* aBackgroundActor,
                                          nsIDOMBlob* aBlob,
                                          bool* aActorWasCreated)
@@ -952,15 +975,12 @@ BackgroundChild::GetOrCreateActorForBlob(PBackgroundChild* aBackgroundActor,
 
   // If the blob represents a remote blob then we can simply pass its actor back
   // here.
-  const auto* domFile = static_cast<DOMFile*>(aBlob);
-  if (nsCOMPtr<nsIRemoteBlob> remoteBlob = do_QueryInterface(domFile->Impl())) {
-    BlobChild* actor = remoteBlob->GetBlobChild();
-    if (actor && actor->GetBackgroundManager() == aBackgroundActor) {
-      if (aActorWasCreated) {
-        *aActorWasCreated = false;
-      }
-      return actor;
+  PBlobChild* blobActor = GetActorForBlob(aBackgroundActor, aBlob);
+  if (blobActor) {
+    if (aActorWasCreated) {
+      *aActorWasCreated = false;
     }
+    return blobActor;
   }
 
   {
@@ -970,9 +990,10 @@ BackgroundChild::GetOrCreateActorForBlob(PBackgroundChild* aBackgroundActor,
     MOZ_ALWAYS_TRUE(NS_SUCCEEDED(mutableBlob->SetMutable(false)));
   }
 
+  DebugOnly<const DOMFile*> domFile = static_cast<DOMFile*>(aBlob);
   // XXX This is only safe so long as all blob implementations in our tree
-  //     inherit nsDOMFileBase. If that ever changes then this will need to grow
-  //     a real interface or something.
+  //     inherit DOMFileImplBase. If that ever changes then this will need to
+  //     grow a real interface or something.
   MOZ_ASSERT(!static_cast<DOMFileImplBase*>(domFile->Impl())->IsSizeUnknown());
   MOZ_ASSERT(!static_cast<DOMFileImplBase*>(domFile->Impl())->IsDateUnknown());
 
@@ -1011,7 +1032,7 @@ BackgroundChild::GetOrCreateActorForBlob(PBackgroundChild* aBackgroundActor,
 
   params.optionalInputStreamParams() = inputStreamParams;
 
-  BlobChild* blobActor = BlobChild::Create(aBackgroundActor, aBlob);
+  blobActor = BlobChild::Create(aBackgroundActor, aBlob);
   MOZ_ASSERT(blobActor);
 
   if (NS_WARN_IF(!aBackgroundActor->SendPBlobConstructor(blobActor, params))) {

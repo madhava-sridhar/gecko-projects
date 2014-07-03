@@ -625,8 +625,7 @@ IndexedDatabaseManager::GetFileId(nsIDOMBlob* aFile, int64_t* aFileId)
 {
   PBackgroundChild* bgActor = BackgroundChild::GetForCurrentThread();
   if (bgActor) {
-    PBlobChild* blobActor =
-      BackgroundChild::GetOrCreateActorForBlob(bgActor, aFile, nullptr);
+    PBlobChild* blobActor = BackgroundChild::GetActorForBlob(bgActor, aFile);
     if (blobActor) {
       int64_t fileId;
       if (blobActor->SendGetFileId(&fileId)) {

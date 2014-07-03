@@ -191,9 +191,6 @@ private:
   virtual void
   ActorDestroy(ActorDestroyReason aWhy) MOZ_OVERRIDE;
 
-  virtual bool
-  RecvGetFileId(int64_t* aFileId) MOZ_OVERRIDE;
-
   virtual PBlobStreamParent*
   AllocPBlobStreamParent() MOZ_OVERRIDE;
 
@@ -205,6 +202,9 @@ private:
 
   virtual bool
   RecvResolveMystery(const ResolveMysteryParams& aParams) MOZ_OVERRIDE;
+
+  virtual bool
+  RecvGetFileId(int64_t* aFileId) MOZ_OVERRIDE;
 };
 
 } // namespace dom
