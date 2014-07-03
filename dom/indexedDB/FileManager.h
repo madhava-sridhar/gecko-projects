@@ -7,6 +7,7 @@
 #ifndef mozilla_dom_indexeddb_filemanager_h__
 #define mozilla_dom_indexeddb_filemanager_h__
 
+#include "mozilla/Attributes.h"
 #include "mozilla/dom/quota/PersistenceType.h"
 #include "mozilla/dom/quota/StoragePrivilege.h"
 #include "nsDataHashtable.h"
@@ -22,6 +23,7 @@ namespace indexedDB {
 
 class FileInfo;
 
+// Implemented in ActorsParent.cpp.
 class FileManager MOZ_FINAL
 {
   friend class FileInfo;

@@ -9,12 +9,14 @@
 
 #include "mozilla/Attributes.h"
 #include "mozilla/dom/quota/Client.h"
+#include "mozilla/dom/quota/PersistenceType.h"
+#include "mozilla/dom/quota/UsageInfo.h"
 #include "nsISupportsImpl.h"
+#include "nsTArrayForwardDeclare.h"
 
 class nsACString;
 class nsIFile;
 class nsIOfflineStorage;
-template <typename> class nsTArray;
 
 namespace mozilla {
 namespace dom {
@@ -29,17 +31,10 @@ class QuotaClient MOZ_FINAL
   typedef mozilla::dom::quota::UsageInfo UsageInfo;
 
 public:
-  NS_IMETHOD_(MozExternalRefCountType)
-  AddRef() MOZ_OVERRIDE;
-
-  NS_IMETHOD_(MozExternalRefCountType)
-  Release() MOZ_OVERRIDE;
+  QuotaClient();
 
   virtual mozilla::dom::quota::Client::Type
-  GetType() MOZ_OVERRIDE
-  {
-    return mozilla::dom::quota::Client::IDB;
-  }
+  GetType() MOZ_OVERRIDE;
 
   virtual nsresult
   InitOrigin(PersistenceType aPersistenceType,
@@ -62,10 +57,7 @@ public:
   ReleaseIOThreadObjects() MOZ_OVERRIDE;
 
   virtual bool
-  IsFileServiceUtilized() MOZ_OVERRIDE
-  {
-    return true;
-  }
+  IsFileServiceUtilized() MOZ_OVERRIDE;
 
   virtual bool
   IsTransactionServiceActivated() MOZ_OVERRIDE;
@@ -83,21 +75,20 @@ public:
   virtual void
   ShutdownTransactionService() MOZ_OVERRIDE;
 
+  NS_INLINE_DECL_REFCOUNTING(QuotaClient)
+
 private:
-  ~QuotaClient()
-  { }
+  ~QuotaClient();
 
   nsresult
-  GetDirectory(PersistenceType aPersistenceType, const nsACString& aOrigin,
+  GetDirectory(PersistenceType aPersistenceType,
+               const nsACString& aOrigin,
                nsIFile** aDirectory);
 
   nsresult
   GetUsageForDirectoryInternal(nsIFile* aDirectory,
                                UsageInfo* aUsageInfo,
                                bool aDatabaseFiles);
-
-  nsAutoRefCnt mRefCnt;
-  NS_DECL_OWNINGTHREAD
 };
 
 } // namespace indexedDB

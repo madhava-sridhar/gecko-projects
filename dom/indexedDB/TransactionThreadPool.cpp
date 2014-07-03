@@ -89,10 +89,12 @@ class TransactionThreadPool::CleanupRunnable MOZ_FINAL
   : public nsRunnable
 {
   nsAutoPtr<TransactionThreadPool> mThreadPool;
+  nsCOMPtr<nsIRunnable> mCallback;
 
 public:
-  CleanupRunnable(TransactionThreadPool* aThreadPool)
+  CleanupRunnable(TransactionThreadPool* aThreadPool, nsIRunnable* aCallback)
     : mThreadPool(aThreadPool)
+    , mCallback(aCallback)
   {
     MOZ_ASSERT(aThreadPool);
     aThreadPool->AssertIsOnOwningThread();
@@ -105,6 +107,13 @@ public:
 
     if (NS_FAILED(mThreadPool->Cleanup())) {
       NS_WARNING("Failed to clean up thread pool!");
+    }
+
+    if (mCallback) {
+      nsresult rv = mCallback->Run();
+      if (NS_WARN_IF(NS_FAILED(rv))) {
+        return rv;
+      }
     }
 
     return NS_OK;
@@ -296,17 +305,20 @@ TransactionThreadPool::Get()
 
 // static
 void
-TransactionThreadPool::Shutdown()
+TransactionThreadPool::Shutdown(nsIRunnable* aCallback)
 {
   AssertIsOnBackgroundThread();
 
   if (gThreadPool) {
     gThreadPool->AssertIsOnOwningThread();
 
-    nsRefPtr<CleanupRunnable> runnable = new CleanupRunnable(gThreadPool);
+    nsRefPtr<CleanupRunnable> runnable =
+      new CleanupRunnable(gThreadPool, aCallback);
     gThreadPool = nullptr;
 
     MOZ_ALWAYS_TRUE(NS_SUCCEEDED(NS_DispatchToCurrentThread(runnable)));
+  } else if (aCallback) {
+    MOZ_ALWAYS_TRUE(NS_SUCCEEDED(NS_DispatchToCurrentThread(aCallback)));
   }
 
   gUniqueTransactionId = 0;

@@ -311,7 +311,7 @@ IDBTransaction::OnRequestFinished()
 
   --mPendingRequestCount;
 
-  if (!mPendingRequestCount) {
+  if (!mPendingRequestCount && !mDatabase->IsInvalidated()) {
     mReadyState = COMMITTING;
 
     if (NS_SUCCEEDED(mAbortCode)) {
@@ -522,8 +522,15 @@ IDBTransaction::AbortInternal(nsresult aAbortCode,
     return NS_ERROR_DOM_INDEXEDDB_NOT_ALLOWED_ERR;
   }
 
-  bool isVersionChange = (VERSION_CHANGE == mMode);
-  bool needToAbort = (INITIAL == mReadyState);
+  bool isVersionChange = (mMode == VERSION_CHANGE);
+  bool needToSendAbort = (mReadyState == INITIAL);
+
+  if (mDatabase->IsInvalidated()) {
+    needToSendAbort = false;
+#ifdef DEBUG
+    mSentCommitOrAbort = true;
+#endif
+  }
 
   mAbortCode = aAbortCode;
   mReadyState = DONE;
@@ -586,7 +593,7 @@ IDBTransaction::AbortInternal(nsresult aAbortCode,
 
   // Fire the abort event if there are no outstanding requests. Otherwise the
   // abort event will be fired when all outstanding requests finish.
-  if (needToAbort) {
+  if (needToSendAbort) {
     SendAbort(aAbortCode);
   }
 

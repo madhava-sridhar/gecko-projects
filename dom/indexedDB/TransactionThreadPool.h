@@ -59,7 +59,7 @@ public:
   // returns a non-owning ref!
   static TransactionThreadPool* Get();
 
-  static void Shutdown();
+  static void Shutdown(nsIRunnable* aCallback);
 
   static uint64_t NextTransactionId();
 
