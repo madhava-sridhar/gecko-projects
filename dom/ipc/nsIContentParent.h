@@ -36,6 +36,7 @@ class BlobParent;
 class ContentParent;
 class IPCTabContext;
 class PBlobParent;
+class PBrowserParent;
 
 class nsIContentParent : public nsISupports
                        , public mozilla::dom::ipc::MessageManagerCallback
