@@ -153,7 +153,7 @@ public:
     AllocPMemoryReportRequestChild(const uint32_t& aGeneration,
                                    const bool& aAnonymize,
                                    const bool& aMinimizeMemoryUsage,
-                                   const nsString& aDMDDumpIdent) MOZ_OVERRIDE;
+                                   const FileDescriptor& aDMDFile) MOZ_OVERRIDE;
     virtual bool
     DeallocPMemoryReportRequestChild(PMemoryReportRequestChild* actor) MOZ_OVERRIDE;
 
@@ -162,7 +162,7 @@ public:
                                         const uint32_t& aGeneration,
                                         const bool& aAnonymize,
                                         const bool &aMinimizeMemoryUsage,
-                                        const nsString &aDMDDumpIdent) MOZ_OVERRIDE;
+                                        const FileDescriptor &aDMDFile) MOZ_OVERRIDE;
 
     virtual PCycleCollectWithLogsChild*
     AllocPCycleCollectWithLogsChild(const bool& aDumpAllTraces,
