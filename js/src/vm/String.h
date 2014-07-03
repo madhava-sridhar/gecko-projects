@@ -519,9 +519,6 @@ class JSString : public js::gc::BarrieredCell<JSString>
     void operator=(const JSString &other) MOZ_DELETE;
 };
 
-/* Temporary flag to enable Latin1 strings (bug 998392). */
-static const bool EnableLatin1Strings = false;
-
 class JSRope : public JSString
 {
     template <typename CharT>
@@ -1002,6 +999,9 @@ JS_STATIC_ASSERT(sizeof(JSAtom) == sizeof(JSString));
 
 namespace js {
 
+/* Temporary flag to enable Latin1 strings (bug 998392). */
+extern bool EnableLatin1Strings;
+
 /*
  * Thread safe RAII wrapper for inspecting the contents of JSStrings. The
  * thread safe operations such as |getCharsNonDestructive| require allocation
@@ -1089,6 +1089,11 @@ class MOZ_STACK_CLASS AutoStableStringChars
 
     bool isLatin1() const { return state_ == Latin1; }
     bool isTwoByte() const { return state_ == TwoByte; }
+
+    const jschar *twoByteChars() const {
+        MOZ_ASSERT(state_ == TwoByte);
+        return twoByteChars_;
+    }
 
     mozilla::Range<const Latin1Char> latin1Range() const {
         MOZ_ASSERT(state_ == Latin1);

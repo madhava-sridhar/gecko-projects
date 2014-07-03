@@ -19,6 +19,7 @@
 #include "mozilla/EventDispatcher.h"
 #include "mozilla/dom/ErrorEventBinding.h"
 #include "mozilla/dom/IDBOpenDBRequestBinding.h"
+#include "mozilla/dom/ScriptSettings.h"
 #include "mozilla/dom/UnionTypes.h"
 #include "nsCOMPtr.h"
 #include "nsContentUtils.h"
@@ -222,30 +223,6 @@ IDBRequest::GetErrorCode() const
 }
 
 #endif // DEBUG
-
-JSContext*
-IDBRequest::GetJSContext()
-{
-  AssertIsOnOwningThread();
-
-  JSContext* cx;
-
-  // XXX Fix me!
-  MOZ_ASSERT(NS_IsMainThread(), "This can't work off the main thread!");
-  if (GetScriptOwner()) {
-    return nsContentUtils::GetSafeJSContext();
-  }
-
-  nsresult rv;
-  nsIScriptContext* sc = GetContextForEventHandlers(&rv);
-  NS_ENSURE_SUCCESS(rv, nullptr);
-  NS_ENSURE_TRUE(sc, nullptr);
-
-  cx = sc->GetNativeContext();
-  NS_ASSERTION(cx, "Failed to get a context!");
-
-  return cx;
-}
 
 void
 IDBRequest::CaptureCaller()

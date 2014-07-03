@@ -115,9 +115,6 @@ public:
   DOMError*
   GetError(ErrorResult& aRv);
 
-  JSContext*
-  GetJSContext();
-
   void
   FillScriptErrorEvent(ErrorEventInit& aEventInit) const;
 

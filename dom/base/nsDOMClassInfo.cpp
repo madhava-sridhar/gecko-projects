@@ -111,8 +111,6 @@
 #include "nsIXULTemplateBuilder.h"
 #include "nsITreeColumns.h"
 #endif
-#include "nsIDOMXPathExpression.h"
-#include "nsIDOMNSXPathExpression.h"
 #include "nsIDOMXPathNSResolver.h"
 
 // Storage includes
@@ -344,8 +342,6 @@ static nsDOMClassInfoData sClassInfoData[] = {
   NS_DEFINE_CLASSINFO_DATA(XSLTProcessor, nsDOMGenericSH,
                            DOM_DEFAULT_SCRIPTABLE_FLAGS)
 
-  NS_DEFINE_CLASSINFO_DATA(XPathExpression, nsDOMGenericSH,
-                           DOM_DEFAULT_SCRIPTABLE_FLAGS)
   NS_DEFINE_CLASSINFO_DATA(XPathNSResolver, nsDOMGenericSH,
                            DOM_DEFAULT_SCRIPTABLE_FLAGS)
 
@@ -940,11 +936,6 @@ nsDOMClassInfo::Init()
   DOM_CLASSINFO_MAP_BEGIN(XSLTProcessor, nsIXSLTProcessor)
     DOM_CLASSINFO_MAP_ENTRY(nsIXSLTProcessor)
     DOM_CLASSINFO_MAP_ENTRY(nsIXSLTProcessorPrivate)
-  DOM_CLASSINFO_MAP_END
-
-  DOM_CLASSINFO_MAP_BEGIN(XPathExpression, nsIDOMXPathExpression)
-    DOM_CLASSINFO_MAP_ENTRY(nsIDOMXPathExpression)
-    DOM_CLASSINFO_MAP_ENTRY(nsIDOMNSXPathExpression)
   DOM_CLASSINFO_MAP_END
 
   DOM_CLASSINFO_MAP_BEGIN(XPathNSResolver, nsIDOMXPathNSResolver)
@@ -2637,9 +2628,12 @@ nsWindowSH::GlobalResolve(nsGlobalWindow *aWin, JSContext *cx,
   }
 
 #ifdef USE_CONTROLLERS_SHIM
+  // Note: We use |obj| rather than |aWin| to get the principal here, because
+  // this is called during Window setup when the Document isn't necessarily
+  // hooked up yet.
   if (id == XPCJSRuntime::Get()->GetStringID(XPCJSRuntime::IDX_CONTROLLERS) &&
       !xpc::IsXrayWrapper(obj) &&
-      !nsContentUtils::IsSystemPrincipal(aWin->GetPrincipal()))
+      !nsContentUtils::IsSystemPrincipal(nsContentUtils::ObjectPrincipal(obj)))
   {
     if (aWin->GetDoc()) {
       aWin->GetDoc()->WarnOnceAbout(nsIDocument::eWindow_Controllers);

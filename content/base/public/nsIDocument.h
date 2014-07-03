@@ -51,7 +51,6 @@ class nsIDOMDocumentType;
 class nsIDOMElement;
 class nsIDOMNodeFilter;
 class nsIDOMNodeList;
-class nsIDOMXPathExpression;
 class nsIDOMXPathNSResolver;
 class nsIHTMLCollection;
 class nsILayoutHistoryState;
@@ -122,6 +121,7 @@ class TouchList;
 class TreeWalker;
 class UndoManager;
 class XPathEvaluator;
+class XPathExpression;
 class XPathResult;
 template<typename> class OwningNonNull;
 template<typename> class Sequence;
@@ -1402,7 +1402,7 @@ public:
    * into a DOM window.  This corresponds to the completion of document load,
    * or to the page's presentation being restored into an existing DOM window.
    * This notification fires applicable DOM events to the content window.  See
-   * nsIDOMPageTransitionEvent.idl for a description of the |aPersisted|
+   * PageTransitionEvent.webidl for a description of the |aPersisted|
    * parameter. If aDispatchStartTarget is null, the pageshow event is
    * dispatched on the ScriptGlobalObject for this document, otherwise it's
    * dispatched on aDispatchStartTarget.
@@ -1417,7 +1417,7 @@ public:
    * into a DOM window.  This corresponds to the unloading of the document, or
    * to the document's presentation being saved but removed from an existing
    * DOM window.  This notification fires applicable DOM events to the content
-   * window.  See nsIDOMPageTransitionEvent.idl for a description of the
+   * window.  See PageTransitionEvent.webidl for a description of the
    * |aPersisted| parameter. If aDispatchStartTarget is null, the pagehide
    * event is dispatched on the ScriptGlobalObject for this document,
    * otherwise it's dispatched on aDispatchStartTarget.
@@ -2269,7 +2269,7 @@ public:
                                           const nsAString& aAttrValue);
   Element* GetBindingParent(nsINode& aNode);
   void LoadBindingDocument(const nsAString& aURI, mozilla::ErrorResult& rv);
-  already_AddRefed<nsIDOMXPathExpression>
+  mozilla::dom::XPathExpression*
     CreateExpression(const nsAString& aExpression,
                      nsIDOMXPathNSResolver* aResolver,
                      mozilla::ErrorResult& rv);

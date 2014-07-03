@@ -36,9 +36,6 @@ public:
   void
   SetScriptOwner(JSObject* aScriptOwner);
 
-  JSObject*
-  GetParentObject();
-
   void AssertIsRooted() const
 #ifdef DEBUG
   ;
