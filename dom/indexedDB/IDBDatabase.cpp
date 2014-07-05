@@ -43,28 +43,6 @@ using namespace mozilla::dom::quota;
 
 namespace {
 
-class NoRequestDatabaseHelper : public AsyncConnectionHelper
-{
-public:
-  NoRequestDatabaseHelper(IDBTransaction* aTransaction)
-  : AsyncConnectionHelper(aTransaction, nullptr)
-  {
-    NS_ASSERTION(IndexedDatabaseManager::IsMainProcess(), "Wrong process!");
-    NS_ASSERTION(aTransaction, "Null transaction!");
-  }
-
-  virtual ChildProcessSendResult
-  SendResponseToChildProcess(nsresult aResultCode) MOZ_OVERRIDE;
-
-  virtual nsresult
-  UnpackResponseFromParentProcess(const ResponseValue& aResponseValue)
-                                  MOZ_OVERRIDE;
-
-  virtual nsresult OnSuccess() MOZ_OVERRIDE;
-
-  virtual void OnError() MOZ_OVERRIDE;
-};
-
 class CreateFileHelper : public AsyncConnectionHelper
 {
 public:
@@ -783,34 +761,6 @@ JSObject*
 IDBDatabase::WrapObject(JSContext* aCx)
 {
   return IDBDatabaseBinding::Wrap(aCx, this);
-}
-
-AsyncConnectionHelper::ChildProcessSendResult
-NoRequestDatabaseHelper::SendResponseToChildProcess(nsresult aResultCode)
-{
-  NS_ASSERTION(IndexedDatabaseManager::IsMainProcess(), "Wrong process!");
-  return Success_NotSent;
-}
-
-nsresult
-NoRequestDatabaseHelper::UnpackResponseFromParentProcess(
-                                            const ResponseValue& aResponseValue)
-{
-  MOZ_CRASH("Should never get here!");
-}
-
-nsresult
-NoRequestDatabaseHelper::OnSuccess()
-{
-  NS_ASSERTION(IndexedDatabaseManager::IsMainProcess(), "Wrong process!");
-  return NS_OK;
-}
-
-void
-NoRequestDatabaseHelper::OnError()
-{
-  NS_ASSERTION(IndexedDatabaseManager::IsMainProcess(), "Wrong process!");
-  mTransaction->Abort(GetResultCode());
 }
 
 nsresult

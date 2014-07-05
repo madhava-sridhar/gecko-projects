@@ -26,7 +26,6 @@ EXPORTS.mozilla.dom.indexedDB += [
     'IndexedDatabaseManager.h',
     'Key.h',
     'KeyPath.h',
-    'QuotaClient.h',
     'SerializationHelpers.h',
 ]
 

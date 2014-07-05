@@ -5,6 +5,7 @@
 #ifndef mozilla_dom_indexeddb_actorsparent_h__
 #define mozilla_dom_indexeddb_actorsparent_h__
 
+template <class> struct already_AddRefed;
 class nsCString;
 class nsIPrincipal;
 class nsPIDOMWindow;
@@ -14,16 +15,24 @@ namespace dom {
 
 class TabParent;
 
+namespace quota {
+
+class Client;
+
+} // namespace quota
+
 namespace indexedDB {
 
+class OptionalWindowId;
 class PBackgroundIDBFactoryParent;
 class PIndexedDBPermissionRequestParent;
 
 PBackgroundIDBFactoryParent*
-AllocPBackgroundIDBFactoryParent();
+AllocPBackgroundIDBFactoryParent(const OptionalWindowId& aOptionalWindowId);
 
 bool
-RecvPBackgroundIDBFactoryConstructor(PBackgroundIDBFactoryParent* aActor);
+RecvPBackgroundIDBFactoryConstructor(PBackgroundIDBFactoryParent* aActor,
+                                     const OptionalWindowId& aOptionalWindowId);
 
 bool
 DeallocPBackgroundIDBFactoryParent(PBackgroundIDBFactoryParent* aActor);
@@ -39,6 +48,9 @@ RecvPIndexedDBPermissionRequestConstructor(
 bool
 DeallocPIndexedDBPermissionRequestParent(
                                      PIndexedDBPermissionRequestParent* aActor);
+
+already_AddRefed<mozilla::dom::quota::Client>
+CreateQuotaClient();
 
 } // namespace indexedDB
 } // namespace dom

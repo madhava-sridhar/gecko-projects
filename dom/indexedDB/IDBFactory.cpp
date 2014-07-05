@@ -148,6 +148,7 @@ IDBFactory::CreateForWindow(nsPIDOMWindow* aWindow,
 {
   MOZ_ASSERT(NS_IsMainThread());
   MOZ_ASSERT(aWindow);
+  MOZ_ASSERT(aWindow->IsInnerWindow());
   MOZ_ASSERT(aFactory);
 
   if (NS_WARN_IF(!Preferences::GetBool(kPrefIndexedDBEnabled, false))) {
@@ -553,9 +554,20 @@ IDBFactory::BackgroundActorCreated(PBackgroundChild* aBackgroundActor)
   {
     BackgroundFactoryChild* actor = new BackgroundFactoryChild(this);
 
+    MOZ_ASSERT(NS_IsMainThread(), "Fix this windowId stuff for workers!");
+
+    OptionalWindowId windowId;
+    if (mWindow) {
+      MOZ_ASSERT(mWindow->IsInnerWindow());
+      windowId = mWindow->WindowID();
+    } else {
+      windowId = void_t();
+    }
+
     mBackgroundActor =
       static_cast<BackgroundFactoryChild*>(
-        aBackgroundActor->SendPBackgroundIDBFactoryConstructor(actor));
+        aBackgroundActor->SendPBackgroundIDBFactoryConstructor(actor,
+                                                               windowId));
   }
 
   if (NS_WARN_IF(!mBackgroundActor)) {

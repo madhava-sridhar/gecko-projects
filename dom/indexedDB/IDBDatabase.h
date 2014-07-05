@@ -52,7 +52,6 @@ class IDBDatabase MOZ_FINAL
   , public nsIOfflineStorage
 {
   typedef mozilla::dom::quota::PersistenceType PersistenceType;
-  typedef mozilla::dom::quota::Client QuotaClient;
 
   // The factory must be kept alive when IndexedDB is used in multiple
   // processes. If it dies then the entire actor tree will be destroyed with it
@@ -68,7 +67,7 @@ class IDBDatabase MOZ_FINAL
 
   BackgroundDatabaseChild* mBackgroundActor;
 
-  nsRefPtr<QuotaClient> mQuotaClient;
+  nsRefPtr<mozilla::dom::quota::Client> mQuotaClient;
 
   nsTHashtable<nsPtrHashKey<IDBTransaction>> mTransactions;
 

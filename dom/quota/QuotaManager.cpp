@@ -29,7 +29,7 @@
 #include "mozilla/CondVar.h"
 #include "mozilla/dom/asmjscache/AsmJSCache.h"
 #include "mozilla/dom/FileService.h"
-#include "mozilla/dom/indexedDB/QuotaClient.h"
+#include "mozilla/dom/indexedDB/ActorsParent.h"
 #include "mozilla/Mutex.h"
 #include "mozilla/LazyIdleThread.h"
 #include "mozilla/Preferences.h"
@@ -1043,8 +1043,10 @@ QuotaManager::Init()
   NS_ASSERTION(mClients.Capacity() == Client::TYPE_MAX,
                "Should be using an auto array with correct capacity!");
 
-  // Register IndexedDB
-  mClients.AppendElement(new indexedDB::QuotaClient());
+  nsRefPtr<Client> idbClient = indexedDB::CreateQuotaClient();
+
+  // Register clients.
+  mClients.AppendElement(idbClient);
   mClients.AppendElement(asmjscache::CreateClient());
 
   return NS_OK;
@@ -1439,7 +1441,7 @@ QuotaManager::AbortCloseStoragesForWindow(nsPIDOMWindow* aWindow)
 
     nsTArray<nsIOfflineStorage*>& array = liveStorages[i];
     for (uint32_t j = 0; j < array.Length(); j++) {
-      nsIOfflineStorage*& storage = array[j];
+      nsCOMPtr<nsIOfflineStorage> storage = array[j];
 
       if (storage->IsOwned(aWindow)) {
         if (NS_FAILED(storage->Close())) {
