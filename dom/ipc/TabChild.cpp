@@ -134,9 +134,9 @@ TabChildBase::InitializeRootMetrics()
   // be keeping, as well as putting the scroll offset back to
   // the top-left of the page.
   mLastRootMetrics.mViewport = CSSRect(CSSPoint(), kDefaultViewportSize);
-  mLastRootMetrics.mCompositionBounds = ParentLayerIntRect(
-      ParentLayerIntPoint(),
-      ViewAs<ParentLayerPixel>(mInnerSize, PixelCastJustification::ScreenToParentLayerForRoot));
+  mLastRootMetrics.mCompositionBounds = ParentLayerRect(
+      ParentLayerPoint(),
+      ParentLayerSize(ViewAs<ParentLayerPixel>(mInnerSize, PixelCastJustification::ScreenToParentLayerForRoot)));
   mLastRootMetrics.SetZoom(mLastRootMetrics.CalculateIntrinsicScale());
   mLastRootMetrics.mDevPixelsPerCSSPixel = WebWidget()->GetDefaultScale();
   // We use ScreenToLayerScale(1) below in order to turn the
@@ -243,7 +243,7 @@ TabChildBase::HandlePossibleViewportChange()
   }
 
   ScreenIntSize oldScreenSize = ViewAs<ScreenPixel>(
-      mLastRootMetrics.mCompositionBounds.Size(),
+      RoundedToInt(mLastRootMetrics.mCompositionBounds).Size(),
       PixelCastJustification::ScreenToParentLayerForRoot);
   if (oldScreenSize == ScreenIntSize()) {
     oldScreenSize = mInnerSize;
@@ -251,9 +251,9 @@ TabChildBase::HandlePossibleViewportChange()
 
   FrameMetrics metrics(mLastRootMetrics);
   metrics.mViewport = CSSRect(CSSPoint(), viewport);
-  metrics.mCompositionBounds = ParentLayerIntRect(
-      ParentLayerIntPoint(),
-      ViewAs<ParentLayerPixel>(mInnerSize, PixelCastJustification::ScreenToParentLayerForRoot));
+  metrics.mCompositionBounds = ParentLayerRect(
+      ParentLayerPoint(),
+      ParentLayerSize(ViewAs<ParentLayerPixel>(mInnerSize, PixelCastJustification::ScreenToParentLayerForRoot)));
   metrics.SetRootCompositionSize(
       ScreenSize(mInnerSize) * ScreenToLayoutDeviceScale(1.0f) / metrics.mDevPixelsPerCSSPixel);
 
@@ -762,11 +762,6 @@ TabChild::Observe(nsISupports *aSubject,
         utils->SetIsFirstPaint(true);
 
         mContentDocumentIsDisplayed = true;
-
-        // Reset CSS viewport and zoom to default on new page, then
-        // calculate them properly using the actual metadata from the
-        // page.
-        SetCSSViewport(kDefaultViewportSize);
 
         // In some cases before-first-paint gets called before
         // RecvUpdateDimensions is called and therefore before we have an

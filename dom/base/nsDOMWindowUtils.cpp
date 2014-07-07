@@ -3083,11 +3083,9 @@ nsDOMWindowUtils::GetPCCountScriptSummary(int32_t script, JSContext* cx, nsAStri
   if (!text)
     return NS_ERROR_FAILURE;
 
-  nsDependentJSString str;
-  if (!str.init(cx, text))
+  if (!AssignJSString(cx, result, text))
     return NS_ERROR_FAILURE;
 
-  result = str;
   return NS_OK;
 }
 
@@ -3100,11 +3098,9 @@ nsDOMWindowUtils::GetPCCountScriptContents(int32_t script, JSContext* cx, nsAStr
   if (!text)
     return NS_ERROR_FAILURE;
 
-  nsDependentJSString str;
-  if (!str.init(cx, text))
+  if (!AssignJSString(cx, result, text))
     return NS_ERROR_FAILURE;
 
-  result = str;
   return NS_OK;
 }
 

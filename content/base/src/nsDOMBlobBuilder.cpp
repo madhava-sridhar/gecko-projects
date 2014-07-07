@@ -365,7 +365,7 @@ DOMMultipartFileImpl::InitChromeFile(JSContext* aCx,
     JSString* str = JS::ToString(aCx, JS::Handle<JS::Value>::fromMarkedLocation(&aArgv[0]));
     NS_ENSURE_TRUE(str, NS_ERROR_XPC_BAD_CONVERT_JS);
 
-    nsDependentJSString xpcomStr;
+    nsAutoJSString xpcomStr;
     if (!xpcomStr.init(aCx, str)) {
       return NS_ERROR_XPC_BAD_CONVERT_JS;
     }
@@ -433,7 +433,7 @@ DOMMultipartFileImpl::InitFile(JSContext* aCx,
   JSString* str = JS::ToString(aCx, JS::Handle<JS::Value>::fromMarkedLocation(&aArgv[1]));
   NS_ENSURE_TRUE(str, NS_ERROR_XPC_BAD_CONVERT_JS);
 
-  nsDependentJSString xpcomStr;
+  nsAutoJSString xpcomStr;
   if (!xpcomStr.init(aCx, str)) {
     return NS_ERROR_XPC_BAD_CONVERT_JS;
   }
@@ -471,7 +471,7 @@ BlobSet::AppendVoidPtr(const void* aData, uint32_t aLength)
 nsresult
 BlobSet::AppendString(JSString* aString, bool nativeEOL, JSContext* aCx)
 {
-  nsDependentJSString xpcomStr;
+  nsAutoJSString xpcomStr;
   if (!xpcomStr.init(aCx, aString)) {
     return NS_ERROR_XPC_BAD_CONVERT_JS;
   }

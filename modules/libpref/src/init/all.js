@@ -285,7 +285,8 @@ pref("media.peerconnection.enabled", true);
 pref("media.peerconnection.video.enabled", true);
 pref("media.navigator.video.max_fs", 0); // unrestricted
 pref("media.navigator.video.max_fr", 0); // unrestricted
-+pref("media.getusermedia.aec", 1);
+pref("media.peerconnection.video.h264_enabled", false);
+pref("media.getusermedia.aec", 1);
 #endif
 pref("media.peerconnection.video.min_bitrate", 200);
 pref("media.peerconnection.video.start_bitrate", 300);
@@ -344,6 +345,9 @@ pref("media.tabstreaming.time_per_frame", 40);
 // TextTrack support
 pref("media.webvtt.enabled", true);
 pref("media.webvtt.regions.enabled", false);
+
+// AudioTrack and VideoTrack support
+pref("media.track.enabled", false);
 
 // Whether to enable MediaSource support
 pref("media.mediasource.enabled", false);
@@ -3701,7 +3705,12 @@ pref("canvas.image.cache.limit", 0);
 pref("image.onload.decode.limit", 0);
 
 // WebGL prefs
+#ifdef ANDROID
+// Disable MSAA on mobile.
+pref("gl.msaa-level", 0);
+#else
 pref("gl.msaa-level", 2);
+#endif
 pref("webgl.force-enabled", false);
 pref("webgl.disabled", false);
 pref("webgl.shader_validator", true);
