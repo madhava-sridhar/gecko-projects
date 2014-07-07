@@ -13,7 +13,6 @@
 #include "mozilla/dom/quota/PersistenceType.h"
 #include "nsAutoPtr.h"
 #include "nsHashKeys.h"
-#include "nsIOfflineStorage.h"
 #include "nsString.h"
 #include "nsTHashtable.h"
 
@@ -31,12 +30,6 @@ class DOMStringList;
 struct IDBObjectStoreParameters;
 template <typename> class Sequence;
 
-namespace quota {
-
-class Client;
-
-} // namespace quota
-
 namespace indexedDB {
 
 class BackgroundDatabaseChild;
@@ -49,9 +42,11 @@ class IDBTransaction;
 
 class IDBDatabase MOZ_FINAL
   : public IDBWrapperCache
-  , public nsIOfflineStorage
 {
   typedef mozilla::dom::quota::PersistenceType PersistenceType;
+  typedef mozilla::dom::StorageType StorageType;
+
+  class WindowObserver;
 
   // The factory must be kept alive when IndexedDB is used in multiple
   // processes. If it dies then the entire actor tree will be destroyed with it
@@ -67,9 +62,9 @@ class IDBDatabase MOZ_FINAL
 
   BackgroundDatabaseChild* mBackgroundActor;
 
-  nsRefPtr<mozilla::dom::quota::Client> mQuotaClient;
-
   nsTHashtable<nsPtrHashKey<IDBTransaction>> mTransactions;
+
+  nsRefPtr<WindowObserver> mWindowObserver;
 
   bool mClosed;
   bool mInvalidated;
@@ -79,11 +74,7 @@ public:
   Create(IDBWrapperCache* aOwnerCache,
          IDBFactory* aFactory,
          BackgroundDatabaseChild* aActor,
-         DatabaseSpec* aSpec,
-         PersistenceType aPersistenceType);
-
-  static IDBDatabase*
-  FromStorage(nsIOfflineStorage* aStorage);
+         DatabaseSpec* aSpec);
 
   void
   AssertIsOnOwningThread() const
@@ -110,15 +101,34 @@ public:
   already_AddRefed<nsIDocument>
   GetOwnerDocument() const;
 
-  // Whether or not the database has been invalidated. If it has then no further
-  // transactions for this database will be allowed to run.
-  bool IsInvalidated() const
+  void
+  Close()
   {
-    return mInvalidated;
+    AssertIsOnOwningThread();
+
+    CloseInternal();
+  }
+
+  bool
+  IsClosed() const
+  {
+    AssertIsOnOwningThread();
+
+    return mClosed;
   }
 
   void
-  CloseInternal();
+  Invalidate();
+
+  // Whether or not the database has been invalidated. If it has then no further
+  // transactions for this database will be allowed to run.
+  bool
+  IsInvalidated() const
+  {
+    AssertIsOnOwningThread();
+
+    return mInvalidated;
+  }
 
   void
   EnterSetVersionTransaction(uint64_t aNewVersion);
@@ -173,15 +183,12 @@ public:
               IDBTransactionMode aMode,
               ErrorResult& aRv);
 
+  StorageType
+  Storage() const;
+
   IMPL_EVENT_HANDLER(abort)
   IMPL_EVENT_HANDLER(error)
   IMPL_EVENT_HANDLER(versionchange)
-
-  StorageType
-  Storage() const
-  {
-    return PersistenceTypeToStorage(mPersistenceType);
-  }
 
   already_AddRefed<IDBRequest>
   CreateMutableFile(const nsAString& aName,
@@ -212,7 +219,6 @@ public:
 
   NS_DECL_ISUPPORTS_INHERITED
   NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(IDBDatabase, IDBWrapperCache)
-  NS_DECL_NSIOFFLINESTORAGE
 
   // nsIDOMEventTarget
   virtual void
@@ -229,10 +235,12 @@ private:
   IDBDatabase(IDBWrapperCache* aOwnerCache,
               IDBFactory* aFactory,
               BackgroundDatabaseChild* aActor,
-              DatabaseSpec* aSpec,
-              PersistenceType aPersistenceType);
+              DatabaseSpec* aSpec);
 
   ~IDBDatabase();
+
+  void
+  CloseInternal();
 
   bool
   RunningVersionChangeTransaction() const

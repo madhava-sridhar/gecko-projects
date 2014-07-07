@@ -71,7 +71,9 @@ public:
     MOZ_ASSERT(version.IsNull());
 #endif
 
-    return mDatabase->Close();
+    mDatabase->Close();
+
+    return NS_OK;
   }
 
 private:
@@ -320,11 +322,7 @@ DataStoreDB::Delete()
   mTransaction = nullptr;
 
   if (mDatabase) {
-    rv = mDatabase->Close();
-    if (NS_WARN_IF(NS_FAILED(rv))) {
-      return rv;
-    }
-
+    mDatabase->Close();
     mDatabase = nullptr;
   }
 

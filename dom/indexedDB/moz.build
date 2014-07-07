@@ -49,7 +49,6 @@ SOURCES += [
     'IndexedDatabaseManager.cpp',
     'Key.cpp',
     'KeyPath.cpp',
-    'OpenDatabaseHelper.cpp',
     'PermissionRequestBase.cpp',
     'ReportInternalError.cpp',
     'TransactionThreadPool.cpp',

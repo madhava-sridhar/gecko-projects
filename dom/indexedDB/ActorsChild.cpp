@@ -1060,7 +1060,7 @@ BackgroundDatabaseChild::EnsureDOMObject()
   MOZ_ASSERT(factory);
 
   mTemporaryStrongDatabase =
-    IDBDatabase::Create(request, factory, this, mSpec, mPersistenceType);
+    IDBDatabase::Create(request, factory, this, mSpec);
 
   MOZ_ASSERT(mTemporaryStrongDatabase);
   mTemporaryStrongDatabase->AssertIsOnOwningThread();
@@ -1535,7 +1535,7 @@ BackgroundVersionChangeTransactionChild::RecvComplete(const nsresult& aResult)
   database->ExitSetVersionTransaction();
 
   if (NS_FAILED(aResult)) {
-    MOZ_ALWAYS_TRUE(NS_SUCCEEDED(database->Close()));
+    database->Close();
   }
 
   mTransaction->FireCompleteOrAbortEvents(aResult);

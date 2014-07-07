@@ -7,44 +7,54 @@
 #ifndef mozilla_dom_indexeddb_idbmutablefile_h__
 #define mozilla_dom_indexeddb_idbmutablefile_h__
 
-#include "IndexedDatabase.h"
-
-#include "MainThreadUtils.h"
-#include "mozilla/Assertions.h"
 #include "mozilla/Attributes.h"
-#include "mozilla/dom/indexedDB/FileInfo.h"
 #include "mozilla/dom/MutableFile.h"
+#include "mozilla/dom/quota/PersistenceType.h"
+#include "nsAutoPtr.h"
 #include "nsCycleCollectionParticipant.h"
 
-BEGIN_INDEXEDDB_NAMESPACE
+class nsIFile;
 
+namespace mozilla {
+namespace dom {
+namespace indexedDB {
+
+class FileInfo;
 class IDBDatabase;
 
-class IDBMutableFile : public MutableFile
+class IDBMutableFile MOZ_FINAL
+  : public MutableFile
 {
   typedef mozilla::dom::FileHandle FileHandle;
+  typedef mozilla::dom::quota::PersistenceType PersistenceType;
+
+  nsRefPtr<IDBDatabase> mDatabase;
+  nsRefPtr<FileInfo> mFileInfo;
+
+  const nsCString mGroup;
+  const nsCString mOrigin;
+  const PersistenceType mPersistenceType;
 
 public:
-  NS_DECL_ISUPPORTS_INHERITED
+  static already_AddRefed<IDBMutableFile>
+  Create(IDBDatabase* aDatabase,
+         const nsAString& aName,
+         const nsAString& aType,
+         already_AddRefed<FileInfo> aFileInfo);
 
+  // WebIDL
+  IDBDatabase*
+  Database() const;
+
+  // MutableFile
+  NS_DECL_ISUPPORTS_INHERITED
   NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(IDBMutableFile, MutableFile)
 
-  static already_AddRefed<IDBMutableFile>
-  Create(const nsAString& aName, const nsAString& aType,
-         IDBDatabase* aDatabase, already_AddRefed<FileInfo> aFileInfo);
-
-
   virtual int64_t
-  GetFileId() MOZ_OVERRIDE
-  {
-    return mFileInfo->Id();
-  }
+  GetFileId() MOZ_OVERRIDE;
 
   virtual FileInfo*
-  GetFileInfo() MOZ_OVERRIDE
-  {
-    return mFileInfo;
-  }
+  GetFileInfo() MOZ_OVERRIDE;
 
   virtual bool
   IsShuttingDown() MOZ_OVERRIDE;
@@ -71,26 +81,22 @@ public:
   virtual JSObject*
   WrapObject(JSContext* aCx) MOZ_OVERRIDE;
 
-  // WebIDL
-  IDBDatabase*
-  Database()
-  {
-    MOZ_ASSERT(NS_IsMainThread(), "Wrong thread!");
-
-    return mDatabase;
-  }
-
 private:
-  IDBMutableFile(IDBDatabase* aOwner);
+  IDBMutableFile(IDBDatabase* aDatabase,
+                 const nsAString& aName,
+                 const nsAString& aType,
+                 already_AddRefed<FileInfo> aFileInfo,
+                 const nsACString& aGroup,
+                 const nsACString& aOrigin,
+                 const nsACString& aStorageId,
+                 PersistenceType aPersistenceType,
+                 already_AddRefed<nsIFile> aFile);
 
-  ~IDBMutableFile()
-  {
-  }
-
-  nsRefPtr<IDBDatabase> mDatabase;
-  nsRefPtr<FileInfo> mFileInfo;
+  ~IDBMutableFile();
 };
 
-END_INDEXEDDB_NAMESPACE
+} // namespace indexedDB
+} // namespace dom
+} // namespace mozilla
 
 #endif // mozilla_dom_indexeddb_idbmutablefile_h__

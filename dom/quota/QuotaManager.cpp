@@ -1423,15 +1423,39 @@ QuotaManager::OnStorageClosed(nsIOfflineStorage* aStorage)
   }
 }
 
-void
-QuotaManager::AbortCloseStoragesForWindow(nsPIDOMWindow* aWindow)
+template <class OwnerClass>
+struct OwnerTraits;
+
+template <>
+struct OwnerTraits<nsPIDOMWindow>
 {
-  NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
-  NS_ASSERTION(aWindow, "Null pointer!");
+  static bool
+  IsOwned(nsIOfflineStorage* aStorage, nsPIDOMWindow* aOwner)
+  {
+    return aStorage->IsOwnedByWindow(aOwner);
+  }
+};
+
+template <>
+struct OwnerTraits<mozilla::dom::ContentParent>
+{
+  static bool
+  IsOwned(nsIOfflineStorage* aStorage, mozilla::dom::ContentParent* aOwner)
+  {
+    return aStorage->IsOwnedByProcess(aOwner);
+  }
+};
+
+template <class OwnerClass>
+void
+QuotaManager::AbortCloseStoragesFor(OwnerClass* aOwnerClass)
+{
+  MOZ_ASSERT(NS_IsMainThread());
+  MOZ_ASSERT(aOwnerClass);
 
   FileService* service = FileService::Get();
 
-  StorageMatcher<ArrayCluster<nsIOfflineStorage*> > liveStorages;
+  StorageMatcher<ArrayCluster<nsIOfflineStorage*>> liveStorages;
   liveStorages.Find(mLiveStorages);
 
   for (uint32_t i = 0; i < Client::TYPE_MAX; i++) {
@@ -1443,7 +1467,7 @@ QuotaManager::AbortCloseStoragesForWindow(nsPIDOMWindow* aWindow)
     for (uint32_t j = 0; j < array.Length(); j++) {
       nsCOMPtr<nsIOfflineStorage> storage = array[j];
 
-      if (storage->IsOwned(aWindow)) {
+      if (OwnerTraits<OwnerClass>::IsOwned(storage, aOwnerClass)) {
         if (NS_FAILED(storage->Close())) {
           NS_WARNING("Failed to close storage for dying window!");
         }
@@ -1458,6 +1482,18 @@ QuotaManager::AbortCloseStoragesForWindow(nsPIDOMWindow* aWindow)
       }
     }
   }
+}
+
+void
+QuotaManager::AbortCloseStoragesForWindow(nsPIDOMWindow* aWindow)
+{
+  AbortCloseStoragesFor(aWindow);
+}
+
+void
+QuotaManager::AbortCloseStoragesForProcess(ContentParent* aContentParent)
+{
+  AbortCloseStoragesFor(aContentParent);
 }
 
 bool
@@ -1485,7 +1521,7 @@ QuotaManager::HasOpenTransactions(nsPIDOMWindow* aWindow)
       for (uint32_t j = 0; j < storages.Length(); j++) {
         nsIOfflineStorage*& storage = storages[j];
 
-        if (storage->IsOwned(aWindow) &&
+        if (storage->IsOwnedByWindow(aWindow) &&
             ((utilized && service->HasFileHandlesForStorage(storage)) ||
              (activated && client->HasTransactionsForStorage(storage)))) {
           return true;

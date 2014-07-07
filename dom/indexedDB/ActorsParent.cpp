@@ -47,6 +47,7 @@
 #include "mozilla/dom/quota/StoragePrivilege.h"
 #include "mozilla/dom/quota/UsageInfo.h"
 #include "mozilla/ipc/BackgroundParent.h"
+#include "mozilla/ipc/BackgroundUtils.h"
 #include "mozilla/ipc/PBackground.h"
 #include "nsCharSeparatedTokenizer.h"
 #include "nsClassHashtable.h"
@@ -3716,7 +3717,6 @@ protected:
   State mState;
   StoragePrivilege mStoragePrivilege;
   const PersistenceType mPersistenceType;
-  const bool mActorIsFromAnotherProcess;
   const bool mDeleting;
   bool mBlockedQuotaManager;
   bool mChromeWriteAccessAllowed;
@@ -3747,7 +3747,6 @@ protected:
     , mName(aName)
     , mState(State_Initial)
     , mPersistenceType(aPersistenceType)
-    , mActorIsFromAnotherProcess(!!mContentParent)
     , mDeleting(aDeleting)
     , mBlockedQuotaManager(false)
     , mChromeWriteAccessAllowed(false)
@@ -3829,6 +3828,7 @@ class OpenDatabaseOp MOZ_FINAL
   class VersionChangeOp;
 
   const OptionalWindowId mOptionalWindowId;
+  const OptionalWindowId mOptionalContentParentId;
 
   // mOwnedMetadata is owned by this class until it is transferred to
   // gLiveDatabaseHashtable. At that point mOwnedMetadata is set to null.
@@ -3850,19 +3850,14 @@ class OpenDatabaseOp MOZ_FINAL
 public:
   OpenDatabaseOp(already_AddRefed<ContentParent> aContentParent,
                  const OptionalWindowId& aOptionalWindowId,
-                 const OpenDatabaseRequestParams& aParams)
-    : FactoryOp(Move(aContentParent),
-                aParams.principalInfo(),
-                aParams.metadata().name(),
-                aParams.metadata().persistenceType(),
-                /* aDeleting */ false)
-    , mOptionalWindowId(aOptionalWindowId)
-    , mOwnedMetadata(new FullDatabaseMetadata())
-    , mMetadata(mOwnedMetadata)
-    , mRequestedVersion(aParams.metadata().version())
-    , mWasBlocked(false)
+                 const OpenDatabaseRequestParams& aParams);
+
+  bool
+  IsOtherProcessActor() const
   {
-    mMetadata->mCommonMetadata = aParams.metadata();
+    MOZ_ASSERT(mOptionalContentParentId.type() != OptionalWindowId::T__None);
+
+    return mOptionalContentParentId.type() == OptionalWindowId::Tuint64_t;
   }
 
 private:
@@ -5058,6 +5053,7 @@ class DatabaseOfflineStorage MOZ_FINAL
   Database* mDatabase;
 
   const OptionalWindowId mOptionalWindowId;
+  const OptionalWindowId mOptionalContentParentId;
   const nsCString mOrigin;
   const nsCString mId;
   nsCOMPtr<nsIEventTarget> mOwningThread;
@@ -5069,6 +5065,7 @@ class DatabaseOfflineStorage MOZ_FINAL
 public:
   DatabaseOfflineStorage(QuotaClient* aQuotaClient,
                          const OptionalWindowId& aOptionalWindowId,
+                         const OptionalWindowId& aOptionalContentParentId,
                          const nsACString& aGroup,
                          const nsACString& aOrigin,
                          const nsACString& aId,
@@ -5313,10 +5310,18 @@ namespace dom {
 namespace indexedDB {
 
 PBackgroundIDBFactoryParent*
-AllocPBackgroundIDBFactoryParent(const OptionalWindowId& aOptionalWindowId)
+AllocPBackgroundIDBFactoryParent(PBackgroundParent* aManager,
+                                 const OptionalWindowId& aOptionalWindowId)
 {
   AssertIsOnBackgroundThread();
   MOZ_ASSERT(aOptionalWindowId.type() != OptionalWindowId::T__None);
+
+  if (BackgroundParent::IsOtherProcessActor(aManager)) {
+    if (NS_WARN_IF(aOptionalWindowId.type() != OptionalWindowId::Tvoid_t)) {
+      ASSERT_UNLESS_FUZZING();
+      return nullptr;
+    }
+  }
 
   nsRefPtr<BackgroundFactoryParent> actor =
     BackgroundFactoryParent::Create(aOptionalWindowId);
@@ -5324,7 +5329,8 @@ AllocPBackgroundIDBFactoryParent(const OptionalWindowId& aOptionalWindowId)
 }
 
 bool
-RecvPBackgroundIDBFactoryConstructor(PBackgroundIDBFactoryParent* aActor,
+RecvPBackgroundIDBFactoryConstructor(PBackgroundParent* /* aManager */,
+                                     PBackgroundIDBFactoryParent* aActor,
                                      const OptionalWindowId& aOptionalWindowId)
 {
   AssertIsOnBackgroundThread();
@@ -9171,16 +9177,18 @@ ShutdownTransactionThreadPoolRunnable::Run()
  ******************************************************************************/
 
 DatabaseOfflineStorage::DatabaseOfflineStorage(
-                                      QuotaClient* aQuotaClient,
-                                      const OptionalWindowId& aOptionalWindowId,
-                                      const nsACString& aGroup,
-                                      const nsACString& aOrigin,
-                                      const nsACString& aId,
-                                      PersistenceType aPersistenceType,
-                                      nsIEventTarget* aOwningThread)
+                               QuotaClient* aQuotaClient,
+                               const OptionalWindowId& aOptionalWindowId,
+                               const OptionalWindowId& aOptionalContentParentId,
+                               const nsACString& aGroup,
+                               const nsACString& aOrigin,
+                               const nsACString& aId,
+                               PersistenceType aPersistenceType,
+                               nsIEventTarget* aOwningThread)
   : mStrongQuotaClient(aQuotaClient)
   , mWeakQuotaClient(aQuotaClient)
   , mOptionalWindowId(aOptionalWindowId)
+  , mOptionalContentParentId(aOptionalContentParentId)
   , mDatabase(nullptr)
   , mOrigin(aOrigin)
   , mId(aId)
@@ -9191,6 +9199,12 @@ DatabaseOfflineStorage::DatabaseOfflineStorage(
 {
   MOZ_ASSERT(NS_IsMainThread());
   MOZ_ASSERT(aQuotaClient);
+  MOZ_ASSERT(aOptionalWindowId.type() != OptionalWindowId::T__None);
+  MOZ_ASSERT_IF(aOptionalWindowId.type() == OptionalWindowId::Tuint64_t,
+                aOptionalContentParentId.type() == OptionalWindowId::Tvoid_t);
+  MOZ_ASSERT(aOptionalContentParentId.type() != OptionalWindowId::T__None);
+  MOZ_ASSERT_IF(aOptionalContentParentId.type() == OptionalWindowId::Tuint64_t,
+                aOptionalWindowId.type() == OptionalWindowId::Tvoid_t);
   MOZ_ASSERT(aOwningThread);
 
   DebugOnly<bool> current;
@@ -9301,7 +9315,7 @@ DatabaseOfflineStorage::GetClient()
 }
 
 NS_IMETHODIMP_(bool)
-DatabaseOfflineStorage::IsOwned(nsPIDOMWindow* aOwner)
+DatabaseOfflineStorage::IsOwnedByWindow(nsPIDOMWindow* aOwner)
 {
   MOZ_ASSERT(NS_IsMainThread());
   MOZ_ASSERT(aOwner);
@@ -9309,6 +9323,16 @@ DatabaseOfflineStorage::IsOwned(nsPIDOMWindow* aOwner)
 
   return mOptionalWindowId.type() == OptionalWindowId::Tuint64_t &&
          mOptionalWindowId.get_uint64_t() == aOwner->WindowID();
+}
+
+NS_IMETHODIMP_(bool)
+DatabaseOfflineStorage::IsOwnedByProcess(ContentParent* aOwner)
+{
+  MOZ_ASSERT(NS_IsMainThread());
+  MOZ_ASSERT(aOwner);
+
+  return mOptionalContentParentId.type() == OptionalWindowId::Tuint64_t &&
+         mOptionalContentParentId.get_uint64_t() == aOwner->ChildID();
 }
 
 NS_IMETHODIMP_(const nsACString&)
@@ -10000,32 +10024,9 @@ FactoryOp::CheckPermission(ContentParent* aContentParent,
 
   MOZ_ASSERT(mPrincipalInfo.type() == PrincipalInfo::TContentPrincipalInfo);
 
-  nsCOMPtr<nsIPrincipal> principal;
-
-  const ContentPrincipalInfo& info =
-    mPrincipalInfo.get_ContentPrincipalInfo();
-
-  nsCOMPtr<nsIURI> uri;
-  nsresult rv = NS_NewURI(getter_AddRefs(uri), info.spec());
-  if (NS_WARN_IF(NS_FAILED(rv))) {
-    return rv;
-  }
-
-  nsCOMPtr<nsIScriptSecurityManager> secMan =
-    do_GetService(NS_SCRIPTSECURITYMANAGER_CONTRACTID, &rv);
-  if (NS_WARN_IF(NS_FAILED(rv))) {
-    return rv;
-  }
-
-  if (info.appId() == kUnknownAppId) {
-    rv = secMan->GetSimpleCodebasePrincipal(uri, getter_AddRefs(principal));
-  } else {
-    rv = secMan->GetAppCodebasePrincipal(uri,
-                                         info.appId(),
-                                         info.isInBrowserElement(),
-                                         getter_AddRefs(principal));
-  }
-
+  nsresult rv;
+  nsCOMPtr<nsIPrincipal> principal =
+    PrincipalInfoToPrincipal(mPrincipalInfo, &rv);
   if (NS_WARN_IF(NS_FAILED(rv))) {
     return rv;
   }
@@ -10106,6 +10107,9 @@ FactoryOp::CheckAtLeastOneAppHasPermission(ContentParent* aContentParent,
       return false;
     }
 
+    const nsPromiseFlatCString permissionString =
+      PromiseFlatCString(aPermissionString);
+
     for (uint32_t index = 0, count = browsers.Length();
          index < count;
          index++) {
@@ -10139,10 +10143,9 @@ FactoryOp::CheckAtLeastOneAppHasPermission(ContentParent* aContentParent,
       }
 
       uint32_t permission;
-      rv = permMan->TestExactPermissionFromPrincipal(
-                                               principal,
-                                               aPermissionString.BeginReading(),
-                                               &permission);
+      rv = permMan->TestExactPermissionFromPrincipal(principal,
+                                                     permissionString.get(),
+                                                     &permission);
       if (NS_WARN_IF(NS_FAILED(rv))) {
         return false;
       }
@@ -10164,6 +10167,7 @@ FactoryOp::FinishOpen()
   MOZ_ASSERT(!mOrigin.IsEmpty());
   MOZ_ASSERT(!mDatabaseId.IsEmpty());
   MOZ_ASSERT(!mBlockedQuotaManager);
+  MOZ_ASSERT(!mContentParent);
 
   QuotaManager* quotaManager = QuotaManager::GetOrCreate();
   if (NS_WARN_IF(!quotaManager)) {
@@ -10270,6 +10274,37 @@ FactoryOp::RecvPermissionRetry()
   return true;
 }
 
+OpenDatabaseOp::OpenDatabaseOp(already_AddRefed<ContentParent> aContentParent,
+                               const OptionalWindowId& aOptionalWindowId,
+                               const OpenDatabaseRequestParams& aParams)
+  : FactoryOp(Move(aContentParent),
+              aParams.principalInfo(),
+              aParams.metadata().name(),
+              aParams.metadata().persistenceType(),
+              /* aDeleting */ false)
+  , mOptionalWindowId(aOptionalWindowId)
+  , mOwnedMetadata(new FullDatabaseMetadata())
+  , mMetadata(mOwnedMetadata)
+  , mRequestedVersion(aParams.metadata().version())
+  , mWasBlocked(false)
+{
+  MOZ_ASSERT_IF(mContentParent,
+                mOptionalWindowId.type() == OptionalWindowId::Tvoid_t);
+
+  mMetadata->mCommonMetadata = aParams.metadata();
+
+  auto& optionalContentParentId =
+    const_cast<OptionalWindowId&>(mOptionalContentParentId);
+
+  if (mContentParent) {
+    // This is a little scary but it looks safe to call this off the main thread
+    // for now.
+    optionalContentParentId = mContentParent->ChildID();
+  } else {
+    optionalContentParentId = void_t();
+  }
+}
+
 nsresult
 OpenDatabaseOp::QuotaManagerOpen()
 {
@@ -10288,17 +10323,10 @@ OpenDatabaseOp::QuotaManagerOpen()
   QuotaManager* quotaManager = QuotaManager::Get();
   MOZ_ASSERT(quotaManager);
 
-  OptionalWindowId optionalWindowId;
-  if (mActorIsFromAnotherProcess) {
-    // Can't do anything with a window id that came from another process.
-    optionalWindowId = void_t();
-  } else {
-    optionalWindowId = mOptionalWindowId;
-  }
-
   nsRefPtr<DatabaseOfflineStorage> offlineStorage =
     new DatabaseOfflineStorage(quotaClient,
-                               optionalWindowId,
+                               mOptionalWindowId,
+                               mOptionalContentParentId,
                                mGroup,
                                mOrigin,
                                mDatabaseId,
@@ -11593,6 +11621,10 @@ DeleteDatabaseOp::QuotaManagerOpen()
 {
   MOZ_ASSERT(NS_IsMainThread());
   MOZ_ASSERT(mState == State_OpenPending);
+
+  // Swap this to the stack now to ensure that we release it on this thread.
+  nsRefPtr<ContentParent> contentParent;
+  mContentParent.swap(contentParent);
 
   nsresult rv = SendToIOThread();
   if (NS_WARN_IF(NS_FAILED(rv))) {
@@ -14858,15 +14890,15 @@ CursorOpBase::SendFailureResult(nsresult aResultCode)
   MOZ_ASSERT(NS_FAILED(aResultCode));
   MOZ_ASSERT(mCursor);
   MOZ_ASSERT(mCursor->mCurrentlyRunningOp == this);
+  MOZ_ASSERT(!mResponseSent);
 
   if (!IsActorDestroyed()) {
     mResponse = ClampResultCode(aResultCode);
 
     mCursor->SendResponseInternal(mResponse, mFiles);
-
-    mResponseSent = true;
   }
 
+  mResponseSent = true;
   return false;
 }
 

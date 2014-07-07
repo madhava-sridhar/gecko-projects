@@ -8,6 +8,7 @@
 
 #include "AsyncConnectionHelper.h"
 #include "DatabaseInfo.h"
+#include "FileInfo.h"
 #include "FileManager.h"
 #include "IDBEvents.h"
 #include "IDBFactory.h"
@@ -16,9 +17,11 @@
 #include "IDBObjectStore.h"
 #include "IDBTransaction.h"
 #include "IDBFactory.h"
+#include "IndexedDatabaseManager.h"
 #include "mozilla/ErrorResult.h"
 #include "mozilla/EventDispatcher.h"
 #include "MainThreadUtils.h"
+#include "mozilla/Services.h"
 #include "mozilla/storage.h"
 #include "mozilla/dom/BindingDeclarations.h"
 #include "mozilla/dom/DOMStringList.h"
@@ -26,10 +29,12 @@
 #include "mozilla/dom/IDBDatabaseBinding.h"
 #include "mozilla/dom/IDBObjectStoreBinding.h"
 #include "mozilla/dom/indexedDB/PBackgroundIDBSharedTypes.h"
-#include "mozilla/dom/quota/Client.h"
 #include "mozilla/dom/quota/QuotaManager.h"
 #include "nsCOMPtr.h"
 #include "nsIDocument.h"
+#include "nsIObserver.h"
+#include "nsIObserverService.h"
+#include "nsISupportsPrimitives.h"
 #include "ProfilerHelpers.h"
 #include "ReportInternalError.h"
 
@@ -40,62 +45,93 @@ using namespace mozilla;
 using namespace mozilla::dom;
 using namespace mozilla::dom::indexedDB;
 using namespace mozilla::dom::quota;
+using namespace mozilla::services;
 
 namespace {
 
-class CreateFileHelper : public AsyncConnectionHelper
+const char kObserverTopic[] = "inner-window-destroyed";
+
+class CreateFileHelper MOZ_FINAL
+  : public AsyncConnectionHelper
 {
+  const nsString mName;
+  const nsString mType;
+
+  nsRefPtr<FileInfo> mFileInfo;
+
 public:
   CreateFileHelper(IDBDatabase* aDatabase,
                    IDBRequest* aRequest,
                    const nsAString& aName,
                    const nsAString& aType)
-  : AsyncConnectionHelper(aDatabase, aRequest),
-    mName(aName), mType(aType)
+    : AsyncConnectionHelper(aDatabase, aRequest)
+    , mName(aName)
+    , mType(aType)
   { }
 
-  ~CreateFileHelper()
-  { }
+  virtual nsresult
+  DoDatabaseWork(mozIStorageConnection* aConnection) MOZ_OVERRIDE;
 
-  nsresult DoDatabaseWork(mozIStorageConnection* aConnection);
-  nsresult GetSuccessResult(JSContext* aCx,
-                            JS::MutableHandle<JS::Value> aVal);
-  void ReleaseMainThreadObjects()
-  {
-    mFileInfo = nullptr;
-    AsyncConnectionHelper::ReleaseMainThreadObjects();
-  }
+  virtual nsresult
+  GetSuccessResult(JSContext* aCx,
+                   JS::MutableHandle<JS::Value> aVal) MOZ_OVERRIDE;
 
-  virtual ChildProcessSendResult SendResponseToChildProcess(
-                                                           nsresult aResultCode)
-                                                           MOZ_OVERRIDE
-  {
-    return Success_NotSent;
-  }
+  virtual void
+  ReleaseMainThreadObjects() MOZ_OVERRIDE;
 
-  virtual nsresult UnpackResponseFromParentProcess(
-                                            const ResponseValue& aResponseValue)
-                                            MOZ_OVERRIDE
-  {
-    MOZ_CRASH("Should never get here!");
-  }
+  virtual ChildProcessSendResult
+  SendResponseToChildProcess(nsresult aResultCode) MOZ_OVERRIDE;
+
+  virtual nsresult
+  UnpackResponseFromParentProcess(const ResponseValue& aResponseValue)
+                                  MOZ_OVERRIDE;
 
 private:
-  // In-params.
-  nsString mName;
-  nsString mType;
-
-  // Out-params.
-  nsRefPtr<FileInfo> mFileInfo;
+  ~CreateFileHelper()
+  { }
 };
 
 } // anonymous namespace
 
+class IDBDatabase::WindowObserver MOZ_FINAL
+  : public nsIObserver
+{
+  IDBDatabase* mWeakDatabase;
+  const uint64_t mWindowId;
+
+public:
+  WindowObserver(IDBDatabase* aDatabase, uint64_t aWindowId)
+    : mWeakDatabase(aDatabase)
+    , mWindowId(aWindowId)
+  {
+    MOZ_ASSERT(NS_IsMainThread());
+    MOZ_ASSERT(aDatabase);
+  }
+
+  void
+  Revoke()
+  {
+    MOZ_ASSERT(NS_IsMainThread());
+
+    mWeakDatabase = nullptr;
+  }
+
+  NS_DECL_ISUPPORTS
+
+private:
+  ~WindowObserver()
+  {
+    MOZ_ASSERT(NS_IsMainThread());
+    MOZ_ASSERT(!mWeakDatabase);
+  }
+
+  NS_DECL_NSIOBSERVER
+};
+
 IDBDatabase::IDBDatabase(IDBWrapperCache* aOwnerCache,
                          IDBFactory* aFactory,
                          BackgroundDatabaseChild* aActor,
-                         DatabaseSpec* aSpec,
-                         PersistenceType aPersistenceType)
+                         DatabaseSpec* aSpec)
   : IDBWrapperCache(aOwnerCache)
   , mFactory(aFactory)
   , mSpec(aSpec)
@@ -108,9 +144,6 @@ IDBDatabase::IDBDatabase(IDBWrapperCache* aOwnerCache,
   aFactory->AssertIsOnOwningThread();
   MOZ_ASSERT(aActor);
   MOZ_ASSERT(aSpec);
-
-  // nsIOfflineStorage
-  mPersistenceType = aPersistenceType;
 
   SetIsDOMBinding();
 }
@@ -126,8 +159,7 @@ already_AddRefed<IDBDatabase>
 IDBDatabase::Create(IDBWrapperCache* aOwnerCache,
                     IDBFactory* aFactory,
                     BackgroundDatabaseChild* aActor,
-                    DatabaseSpec* aSpec,
-                    PersistenceType aPersistenceType)
+                    DatabaseSpec* aSpec)
 {
   MOZ_ASSERT(aOwnerCache);
   MOZ_ASSERT(aFactory);
@@ -136,19 +168,32 @@ IDBDatabase::Create(IDBWrapperCache* aOwnerCache,
   MOZ_ASSERT(aSpec);
 
   nsRefPtr<IDBDatabase> db =
-    new IDBDatabase(aOwnerCache, aFactory, aActor, aSpec, aPersistenceType);
+    new IDBDatabase(aOwnerCache, aFactory, aActor, aSpec);
 
   db->SetScriptOwner(aOwnerCache->GetScriptOwner());
 
-  return db.forget();
-}
+  if (NS_IsMainThread()) {
+    if (nsPIDOMWindow* window = aFactory->GetParentObject()) {
+      MOZ_ASSERT(window->IsInnerWindow());
 
-// static
-IDBDatabase*
-IDBDatabase::FromStorage(nsIOfflineStorage* aStorage)
-{
-  return aStorage->GetClient()->GetType() == Client::IDB ?
-         static_cast<IDBDatabase*>(aStorage) : nullptr;
+      uint64_t windowId = window->WindowID();
+
+      nsRefPtr<WindowObserver> observer = new WindowObserver(db, windowId);
+
+      nsCOMPtr<nsIObserverService> observerService = GetObserverService();
+      MOZ_ASSERT(observerService);
+
+      if (NS_WARN_IF(NS_FAILED(
+            observerService->AddObserver(observer, kObserverTopic, false)))) {
+        observer->Revoke();
+        return nullptr;
+      }
+
+      db->mWindowObserver.swap(observer);
+    }
+  }
+
+  return db.forget();
 }
 
 #ifdef DEBUG
@@ -170,17 +215,21 @@ IDBDatabase::CloseInternal()
   if (!mClosed) {
     mClosed = true;
 
+    if (mWindowObserver) {
+      mWindowObserver->Revoke();
+
+      nsCOMPtr<nsIObserverService> observerService = GetObserverService();
+      if (observerService) {
+        observerService->RemoveObserver(mWindowObserver, kObserverTopic);
+      }
+
+      mWindowObserver = nullptr;
+    }
+
     if (mBackgroundActor && !mInvalidated) {
       mBackgroundActor->SendClose();
     }
   }
-}
-
-NS_IMETHODIMP_(bool)
-IDBDatabase::IsClosed()
-{
-  AssertIsOnOwningThread();
-  return mClosed;
 }
 
 void
@@ -445,7 +494,7 @@ IDBDatabase::Transaction(const nsAString& aStoreName,
   return Transaction(storeNames, aMode, aRv);
 }
 
-already_AddRefed<indexedDB::IDBTransaction>
+already_AddRefed<IDBTransaction>
 IDBDatabase::Transaction(const Sequence<nsString>& aStoreNames,
                          IDBTransactionMode aMode,
                          ErrorResult& aRv)
@@ -546,19 +595,22 @@ IDBDatabase::Transaction(const Sequence<nsString>& aStoreNames,
   return transaction.forget();
 }
 
+StorageType
+IDBDatabase::Storage() const
+{
+  AssertIsOnOwningThread();
+  MOZ_ASSERT(mSpec);
+
+  return PersistenceTypeToStorage(mSpec->metadata().persistenceType());
+}
+
 already_AddRefed<IDBRequest>
 IDBDatabase::CreateMutableFile(const nsAString& aName,
                                const Optional<nsAString>& aType,
                                ErrorResult& aRv)
 {
-  NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
-
-  // XXX Fix!
-  aRv.Throw(NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
-  return nullptr;
-
-  if (!IndexedDatabaseManager::IsMainProcess()) {
-    IDB_WARNING("Not supported yet!");
+  if (!IndexedDatabaseManager::IsMainProcess() || !NS_IsMainThread()) {
+    IDB_WARNING("Not supported!");
     aRv.Throw(NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
     return nullptr;
   }
@@ -576,15 +628,19 @@ IDBDatabase::CreateMutableFile(const nsAString& aName,
 
   nsRefPtr<IDBRequest> request = IDBRequest::Create(this, nullptr);
 
+  nsString type;
+  if (aType.WasPassed()) {
+    type = aType.Value();
+  }
+
   nsRefPtr<CreateFileHelper> helper =
-    new CreateFileHelper(this, request, aName,
-                         aType.WasPassed() ? aType.Value() : EmptyString());
+    new CreateFileHelper(this, request, aName, type);
 
   QuotaManager* quotaManager = QuotaManager::Get();
-  NS_ASSERTION(quotaManager, "We should definitely have a manager here");
+  MOZ_ASSERT(quotaManager);
+  MOZ_ASSERT(quotaManager->IOThread());
 
-  nsresult rv = helper->Dispatch(quotaManager->IOThread());
-  if (NS_FAILED(rv)) {
+  if (NS_FAILED(helper->Dispatch(quotaManager->IOThread()))) {
     IDB_WARNING("Failed to dispatch!");
     aRv.Throw(NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
     return nullptr;
@@ -668,11 +724,24 @@ IDBDatabase::AbortTransactions()
   Helper::AbortTransactions(mTransactions);
 }
 
+void
+IDBDatabase::Invalidate()
+{
+  AssertIsOnOwningThread();
+
+  if (!mInvalidated) {
+    mInvalidated = true;
+
+    AbortTransactions();
+
+    CloseInternal();
+  }
+}
+
 NS_IMPL_ADDREF_INHERITED(IDBDatabase, IDBWrapperCache)
 NS_IMPL_RELEASE_INHERITED(IDBDatabase, IDBWrapperCache)
 
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION_INHERITED(IDBDatabase)
-  NS_INTERFACE_MAP_ENTRY(nsIOfflineStorage)
 NS_INTERFACE_MAP_END_INHERITING(IDBWrapperCache)
 
 NS_IMPL_CYCLE_COLLECTION_CLASS(IDBDatabase)
@@ -703,52 +772,6 @@ IDBDatabase::LastRelease()
     mBackgroundActor->SendDeleteMeInternal();
     MOZ_ASSERT(!mBackgroundActor, "SendDeleteMeInternal should have cleared!");
   }
-}
-
-NS_IMETHODIMP_(void)
-IDBDatabase::Invalidate()
-{
-  AssertIsOnOwningThread();
-  MOZ_ASSERT(!mInvalidated);
-
-  mInvalidated = true;
-
-  AbortTransactions();
-
-  CloseInternal();
-}
-
-NS_IMETHODIMP
-IDBDatabase::Close()
-{
-  AssertIsOnOwningThread();
-
-  CloseInternal();
-  return NS_OK;
-}
-
-NS_IMETHODIMP_(const nsACString&)
-IDBDatabase::Id()
-{
-  MOZ_CRASH("Remove me!");
-}
-
-NS_IMETHODIMP_(mozilla::dom::quota::Client*)
-IDBDatabase::GetClient()
-{
-  return mQuotaClient;
-}
-
-NS_IMETHODIMP_(bool)
-IDBDatabase::IsOwned(nsPIDOMWindow* aOwner)
-{
-  return GetOwner() == aOwner;
-}
-
-NS_IMETHODIMP_(const nsACString&)
-IDBDatabase::Origin()
-{
-  MOZ_CRASH("Remove me!");
 }
 
 nsresult
@@ -810,9 +833,62 @@ nsresult
 CreateFileHelper::GetSuccessResult(JSContext* aCx,
                                    JS::MutableHandle<JS::Value> aVal)
 {
+  MOZ_ASSERT(IndexedDatabaseManager::IsMainProcess());
+  MOZ_ASSERT(NS_IsMainThread());
+
   nsRefPtr<IDBMutableFile> mutableFile =
-    IDBMutableFile::Create(mName, mType, mDatabase, mFileInfo.forget());
+    IDBMutableFile::Create(mDatabase, mName, mType, mFileInfo.forget());
   IDB_ENSURE_TRUE(mutableFile, NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
 
   return WrapNative(aCx, NS_ISUPPORTS_CAST(EventTarget*, mutableFile), aVal);
+}
+
+void
+CreateFileHelper::ReleaseMainThreadObjects()
+{
+  mFileInfo = nullptr;
+  AsyncConnectionHelper::ReleaseMainThreadObjects();
+}
+
+auto
+CreateFileHelper::SendResponseToChildProcess(nsresult aResultCode)
+  -> ChildProcessSendResult
+{
+  return Success_NotSent;
+}
+
+nsresult
+CreateFileHelper::UnpackResponseFromParentProcess(
+                                            const ResponseValue& aResponseValue)
+{
+  MOZ_CRASH("Should never get here!");
+}
+
+NS_IMPL_ISUPPORTS(IDBDatabase::WindowObserver, nsIObserver)
+
+NS_IMETHODIMP
+IDBDatabase::
+WindowObserver::Observe(nsISupports* aSubject,
+                        const char* aTopic,
+                        const char16_t* aData)
+{
+  MOZ_ASSERT(NS_IsMainThread());
+  MOZ_ASSERT(!strcmp(aTopic, kObserverTopic));
+
+  if (mWeakDatabase) {
+    nsCOMPtr<nsISupportsPRUint64> supportsInt = do_QueryInterface(aSubject);
+    MOZ_ASSERT(supportsInt);
+
+    uint64_t windowId;
+    MOZ_ALWAYS_TRUE(NS_SUCCEEDED(supportsInt->GetData(&windowId)));
+
+    if (windowId == mWindowId) {
+      nsRefPtr<IDBDatabase> database = mWeakDatabase;
+      mWeakDatabase = nullptr;
+
+      database->Invalidate();
+    }
+  }
+
+  return NS_OK;
 }

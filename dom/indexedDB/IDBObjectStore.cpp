@@ -6,6 +6,7 @@
 
 #include "IDBObjectStore.h"
 
+#include "FileInfo.h"
 #include "IDBCursor.h"
 #include "IDBDatabase.h"
 #include "IDBEvents.h"
@@ -16,6 +17,7 @@
 #include "IDBTransaction.h"
 #include "IndexedDatabase.h"
 #include "IndexedDatabaseInlines.h"
+#include "IndexedDatabaseManager.h"
 #include "js/Class.h"
 #include "js/StructuredClone.h"
 #include "KeyPath.h"
@@ -511,14 +513,16 @@ public:
                            const MutableFileData& aData,
                            JS::MutableHandle<JSObject*> aResult)
   {
+    MOZ_ASSERT(IndexedDatabaseManager::IsMainProcess());
+    MOZ_ASSERT(NS_IsMainThread());
     MOZ_ASSERT(aDatabase);
 
     nsRefPtr<FileInfo>& fileInfo = aFile.mFileInfo;
 
     nsRefPtr<IDBMutableFile> mutableFile =
-      IDBMutableFile::Create(aData.name,
+      IDBMutableFile::Create(aDatabase,
+                             aData.name,
                              aData.type,
-                             aDatabase,
                              fileInfo.forget());
     MOZ_ASSERT(mutableFile);
 

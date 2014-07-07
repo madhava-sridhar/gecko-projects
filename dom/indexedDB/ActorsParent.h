@@ -11,6 +11,12 @@ class nsIPrincipal;
 class nsPIDOMWindow;
 
 namespace mozilla {
+namespace ipc {
+
+class PBackgroundParent;
+
+} // namespace ipc
+
 namespace dom {
 
 class TabParent;
@@ -28,10 +34,12 @@ class PBackgroundIDBFactoryParent;
 class PIndexedDBPermissionRequestParent;
 
 PBackgroundIDBFactoryParent*
-AllocPBackgroundIDBFactoryParent(const OptionalWindowId& aOptionalWindowId);
+AllocPBackgroundIDBFactoryParent(mozilla::ipc::PBackgroundParent* aManager,
+                                 const OptionalWindowId& aOptionalWindowId);
 
 bool
-RecvPBackgroundIDBFactoryConstructor(PBackgroundIDBFactoryParent* aActor,
+RecvPBackgroundIDBFactoryConstructor(mozilla::ipc::PBackgroundParent* aManager,
+                                     PBackgroundIDBFactoryParent* aActor,
                                      const OptionalWindowId& aOptionalWindowId);
 
 bool

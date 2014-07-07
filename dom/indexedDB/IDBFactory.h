@@ -122,6 +122,14 @@ public:
     return mTabChild;
   }
 
+  PrincipalInfo*
+  GetPrincipalInfo() const
+  {
+    AssertIsOnOwningThread();
+
+    return mPrincipalInfo;
+  }
+
   already_AddRefed<IDBOpenDBRequest>
   Open(const nsAString& aName,
        uint64_t aVersion,

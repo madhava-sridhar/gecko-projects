@@ -1,4 +1,4 @@
-<!DOCTYPE HTML>
+﻿<!DOCTYPE HTML>
 <html>
 <head>
   <meta charset="utf-8">
@@ -129,8 +129,8 @@
     testApp,
 
     // Uninstall the apps
-    function() { uninstallApp(gApps[0]); },
-    function() { uninstallApp(gApps[1]); },
+    function() { setTimeout(function() { uninstallApp(gApps[0]); }, 1000); },
+    function() { setTimeout(function() { uninstallApp(gApps[1]); }, 1000); }
   ];
 
   function runTest() {

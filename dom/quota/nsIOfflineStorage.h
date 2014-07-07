@@ -17,8 +17,13 @@ class nsPIDOMWindow;
 
 namespace mozilla {
 namespace dom {
+
+class ContentParent;
+
 namespace quota {
+
 class Client;
+
 }
 }
 }
@@ -26,6 +31,7 @@ class Client;
 class nsIOfflineStorage : public nsISupports
 {
 public:
+  typedef mozilla::dom::ContentParent ContentParent;
   typedef mozilla::dom::quota::Client Client;
   typedef mozilla::dom::quota::PersistenceType PersistenceType;
 
@@ -38,7 +44,10 @@ public:
   GetClient() = 0;
 
   NS_IMETHOD_(bool)
-  IsOwned(nsPIDOMWindow* aOwner) = 0;
+  IsOwnedByWindow(nsPIDOMWindow* aOwner) = 0;
+
+  NS_IMETHOD_(bool)
+  IsOwnedByProcess(ContentParent* aOwner) = 0;
 
   NS_IMETHOD_(PersistenceType)
   Type()
@@ -91,7 +100,10 @@ NS_DEFINE_STATIC_IID_ACCESSOR(nsIOfflineStorage, NS_OFFLINESTORAGE_IID)
   GetClient() MOZ_OVERRIDE;                                                    \
                                                                                \
   NS_IMETHOD_(bool)                                                            \
-  IsOwned(nsPIDOMWindow* aOwner) MOZ_OVERRIDE;                                 \
+  IsOwnedByWindow(nsPIDOMWindow* aOwner) MOZ_OVERRIDE;                         \
+                                                                               \
+  NS_IMETHOD_(bool)                                                            \
+  IsOwnedByProcess(ContentParent* aOwner) MOZ_OVERRIDE;                        \
                                                                                \
   NS_IMETHOD_(const nsACString&)                                               \
   Origin() MOZ_OVERRIDE;                                                       \

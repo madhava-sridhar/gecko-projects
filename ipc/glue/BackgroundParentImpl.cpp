@@ -126,7 +126,7 @@ BackgroundParentImpl::AllocPBackgroundIDBFactoryParent(
   AssertIsInMainProcess();
   AssertIsOnBackgroundThread();
 
-  return AllocPBackgroundIDBFactoryParent(aOptionalWindowId);
+  return AllocPBackgroundIDBFactoryParent(this, aOptionalWindowId);
 }
 
 bool
@@ -140,7 +140,7 @@ BackgroundParentImpl::RecvPBackgroundIDBFactoryConstructor(
   AssertIsOnBackgroundThread();
   MOZ_ASSERT(aActor);
 
-  return RecvPBackgroundIDBFactoryConstructor(aActor, aOptionalWindowId);
+  return RecvPBackgroundIDBFactoryConstructor(this, aActor, aOptionalWindowId);
 }
 
 bool

@@ -49,8 +49,8 @@ namespace {
 const char kPrefIndexedDBEnabled[] = "dom.indexedDB.enabled";
 
 nsresult
-GetPrincipalInfo(nsIPrincipal* aPrincipal,
-                 PrincipalInfo* aPrincipalInfo)
+GetPrincipalInfoFromPrincipal(nsIPrincipal* aPrincipal,
+                              PrincipalInfo* aPrincipalInfo)
 {
   MOZ_ASSERT(NS_IsMainThread());
   MOZ_ASSERT(aPrincipal);
@@ -175,7 +175,8 @@ IDBFactory::CreateForWindow(nsPIDOMWindow* aWindow,
 
   nsAutoPtr<PrincipalInfo> principalInfo(new PrincipalInfo());
 
-  if (NS_WARN_IF(NS_FAILED(GetPrincipalInfo(principal, principalInfo)))) {
+  if (NS_WARN_IF(NS_FAILED(GetPrincipalInfoFromPrincipal(principal,
+                                                         principalInfo)))) {
     // Not allowed.
     *aFactory = nullptr;
     return NS_OK;
@@ -417,8 +418,8 @@ IDBFactory::OpenInternal(nsIPrincipal* aPrincipal,
     }
     MOZ_ASSERT(nsContentUtils::IsCallerChrome());
 
-    nsresult rv = GetPrincipalInfo(aPrincipal, &principalInfo);
-    if (NS_WARN_IF(NS_FAILED(rv))) {
+    if (NS_WARN_IF(NS_FAILED(GetPrincipalInfoFromPrincipal(aPrincipal,
+                                                           &principalInfo)))) {
       IDB_REPORT_INTERNAL_ERR();
       aRv.Throw(NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
       return nullptr;
@@ -557,7 +558,7 @@ IDBFactory::BackgroundActorCreated(PBackgroundChild* aBackgroundActor)
     MOZ_ASSERT(NS_IsMainThread(), "Fix this windowId stuff for workers!");
 
     OptionalWindowId windowId;
-    if (mWindow) {
+    if (mWindow && IndexedDatabaseManager::IsMainProcess()) {
       MOZ_ASSERT(mWindow->IsInnerWindow());
       windowId = mWindow->WindowID();
     } else {

@@ -44,6 +44,7 @@
 #include "mozilla/dom/devicestorage/DeviceStorageRequestParent.h"
 #include "mozilla/dom/FileSystemRequestParent.h"
 #include "mozilla/dom/GeolocationBinding.h"
+#include "mozilla/dom/quota/QuotaManager.h"
 #include "mozilla/dom/telephony/TelephonyParent.h"
 #include "mozilla/dom/time/DateCacheCleaner.h"
 #include "SmsParent.h"
@@ -1260,6 +1261,12 @@ ContentParent::TransformPreallocatedIntoBrowser()
 void
 ContentParent::ShutDownProcess(bool aCloseWithError)
 {
+    using mozilla::dom::quota::QuotaManager;
+
+    if (QuotaManager* quotaManager = QuotaManager::Get()) {
+        //quotaManager->AbortCloseStoragesForProcess(this);
+    }
+
     // If Close() fails with an error, we'll end up back in this function, but
     // with aCloseWithError = true.  It's important that we call
     // CloseWithError() in this case; see bug 895204.
