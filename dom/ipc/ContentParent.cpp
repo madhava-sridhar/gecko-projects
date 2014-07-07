@@ -1264,7 +1264,7 @@ ContentParent::ShutDownProcess(bool aCloseWithError)
     using mozilla::dom::quota::QuotaManager;
 
     if (QuotaManager* quotaManager = QuotaManager::Get()) {
-        //quotaManager->AbortCloseStoragesForProcess(this);
+        quotaManager->AbortCloseStoragesForProcess(this);
     }
 
     // If Close() fails with an error, we'll end up back in this function, but
