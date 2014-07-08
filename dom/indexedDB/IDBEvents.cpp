@@ -85,7 +85,6 @@ IDBVersionChangeEvent::Constructor(const GlobalObject& aGlobal,
                                    ErrorResult& aRv)
 {
   nsCOMPtr<EventTarget> target = do_QueryInterface(aGlobal.GetAsSupports());
-  MOZ_ASSERT(target);
 
   return CreateInternal(target,
                         aType,

@@ -73,6 +73,7 @@
 #include "nsIScriptSecurityManager.h"
 #include "nsISupports.h"
 #include "nsISupportsImpl.h"
+#include "nsISupportsPriority.h"
 #include "nsIURI.h"
 #include "nsNetUtil.h"
 #include "nsPrintfCString.h"
@@ -156,6 +157,13 @@ enum AppId {
   kNoAppId = nsIScriptSecurityManager::NO_APP_ID,
   kUnknownAppId = nsIScriptSecurityManager::UNKNOWN_APP_ID
 };
+
+#ifdef DEBUG
+
+const int32_t kDEBUGThreadPriority = nsISupportsPriority::PRIORITY_NORMAL;
+const uint32_t kDEBUGThreadSleepMS = 0;
+
+#endif
 
 } // anonymous namespace
 
@@ -5156,6 +5164,32 @@ private:
   NS_DECL_NSIOFFLINESTORAGE
 };
 
+#ifdef DEBUG
+
+class DEBUGThreadSlower MOZ_FINAL
+  : public nsIThreadObserver
+{
+public:
+  DEBUGThreadSlower()
+  {
+    AssertIsOnBackgroundThread();
+    MOZ_ASSERT(kDEBUGThreadSleepMS);
+  }
+
+  NS_DECL_ISUPPORTS
+
+private:
+  ~DEBUGThreadSlower()
+  {
+    AssertIsOnBackgroundThread();
+    MOZ_ASSERT(kDEBUGThreadSleepMS);
+  }
+
+  NS_DECL_NSITHREADOBSERVER
+};
+
+#endif // DEBUG
+
 } // anonymous namespace
 
 /*******************************************************************************
@@ -5298,6 +5332,12 @@ typedef nsClassHashtable<nsCStringHashKey, DatabaseActorInfo>
 StaticAutoPtr<DatabaseActorHashtable> gLiveDatabaseHashtable;
 
 StaticRefPtr<nsRunnable> gStartTransactionRunnable;
+
+#ifdef DEBUG
+
+StaticRefPtr<DEBUGThreadSlower> gDEBUGThreadSlower;
+
+#endif // DEBUG
 
 } // anonymous namespace
 
@@ -5447,6 +5487,30 @@ BackgroundFactoryParent::Create(const OptionalWindowId& aOptionalWindowId)
 
     MOZ_ASSERT(!gStartTransactionRunnable);
     gStartTransactionRunnable = new nsRunnable();
+
+#ifdef DEBUG
+    if (kDEBUGThreadPriority != nsISupportsPriority::PRIORITY_NORMAL) {
+      NS_WARNING("PBackground thread debugging enabled, priority has been "
+                 "modified!");
+      nsCOMPtr<nsISupportsPriority> thread =
+        do_QueryInterface(NS_GetCurrentThread());
+      MOZ_ASSERT(thread);
+
+      MOZ_ALWAYS_TRUE(NS_SUCCEEDED(thread->SetPriority(kDEBUGThreadPriority)));
+    }
+
+    if (kDEBUGThreadSleepMS) {
+      NS_WARNING("PBackground thread debugging enabled, sleeping after every "
+                 "event!");
+      nsCOMPtr<nsIThreadInternal> thread =
+        do_QueryInterface(NS_GetCurrentThread());
+      MOZ_ASSERT(thread);
+
+      gDEBUGThreadSlower = new DEBUGThreadSlower();
+
+      MOZ_ALWAYS_TRUE(NS_SUCCEEDED(thread->AddObserver(gDEBUGThreadSlower)));
+    }
+#endif
   }
 
   nsRefPtr<BackgroundFactoryParent> actor =
@@ -5477,6 +5541,29 @@ BackgroundFactoryParent::ActorDestroy(ActorDestroyReason aWhy)
     MOZ_ASSERT(gLiveDatabaseHashtable);
     MOZ_ASSERT(!gLiveDatabaseHashtable->Count());
     gLiveDatabaseHashtable = nullptr;
+
+#ifdef DEBUG
+    if (kDEBUGThreadPriority != nsISupportsPriority::PRIORITY_NORMAL) {
+      nsCOMPtr<nsISupportsPriority> thread =
+        do_QueryInterface(NS_GetCurrentThread());
+      MOZ_ASSERT(thread);
+
+      MOZ_ALWAYS_TRUE(NS_SUCCEEDED(
+        thread->SetPriority(nsISupportsPriority::PRIORITY_NORMAL)));
+    }
+
+    if (kDEBUGThreadSleepMS) {
+      MOZ_ASSERT(gDEBUGThreadSlower);
+
+      nsCOMPtr<nsIThreadInternal> thread =
+        do_QueryInterface(NS_GetCurrentThread());
+      MOZ_ASSERT(thread);
+
+      MOZ_ALWAYS_TRUE(NS_SUCCEEDED(thread->RemoveObserver(gDEBUGThreadSlower)));
+
+      gDEBUGThreadSlower = nullptr;
+    }
+#endif
   }
 }
 
@@ -16062,3 +16149,35 @@ PermissionRequestHelper::ActorDestroy(ActorDestroyReason aWhy)
 
   mActorDestroyed = true;
 }
+
+#ifdef DEBUG
+
+NS_IMPL_ISUPPORTS(DEBUGThreadSlower, nsIThreadObserver)
+
+NS_IMETHODIMP
+DEBUGThreadSlower::OnDispatchedEvent(nsIThreadInternal* /* aThread */)
+{
+  MOZ_CRASH("Should never be called!");
+}
+
+NS_IMETHODIMP
+DEBUGThreadSlower::OnProcessNextEvent(nsIThreadInternal* /* aThread */,
+                                      bool /* aMayWait */,
+                                      uint32_t /* aRecursionDepth */)
+{
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+DEBUGThreadSlower::AfterProcessNextEvent(nsIThreadInternal* /* aThread */,
+                                         uint32_t /* aRecursionDepth */,
+                                         bool /* aEventWasProcessed */)
+{
+  MOZ_ASSERT(kDEBUGThreadSleepMS);
+
+  MOZ_ALWAYS_TRUE(PR_Sleep(PR_MillisecondsToInterval(kDEBUGThreadSleepMS)) ==
+                    PR_SUCCESS);
+  return NS_OK;
+}
+
+#endif // DEBUG

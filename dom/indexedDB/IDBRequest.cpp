@@ -231,7 +231,7 @@ IDBRequest::CaptureCaller()
 
   const char* filename = nullptr;
   uint32_t lineNo = 0;
-  if (NS_WARN_IF(!nsJSUtils::GetCallingLocation(cx, &filename, &lineNo))) {
+  if (!nsJSUtils::GetCallingLocation(cx, &filename, &lineNo)) {
     return;
   }
 
