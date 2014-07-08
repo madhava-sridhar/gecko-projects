@@ -2828,6 +2828,8 @@ class Database MOZ_FINAL
   const nsCString mGroup;
   const nsCString mOrigin;
   const nsCString mId;
+  const nsString mFilePath;
+  const PersistenceType mPersistenceType;
 
   const bool mChromeWriteAccessAllowed;
   bool mClosed;
@@ -2878,15 +2880,13 @@ public:
   PersistenceType
   Type() const
   {
-    MOZ_ASSERT(mMetadata);
-    return mMetadata->mCommonMetadata.persistenceType();
+    return mPersistenceType;
   }
 
   const nsString&
   FilePath() const
   {
-    MOZ_ASSERT(mMetadata);
-    return mMetadata->mFilePath;
+    return mFilePath;
   }
 
   FileManager*
@@ -5621,6 +5621,8 @@ Database::Database(BackgroundFactoryParent* aFactory,
   , mGroup(aGroup)
   , mOrigin(aOrigin)
   , mId(aMetadata->mDatabaseId)
+  , mFilePath(aMetadata->mFilePath)
+  , mPersistenceType(aMetadata->mCommonMetadata.persistenceType())
   , mChromeWriteAccessAllowed(aChromeWriteAccessAllowed)
   , mClosed(false)
   , mInvalidated(false)
@@ -7114,7 +7116,7 @@ NormalTransaction::RecvCommit()
 {
   AssertIsOnBackgroundThread();
 
-  if (NS_WARN_IF(!CommitOrAbort(NS_OK))) {
+  if (NS_WARN_IF(!CommitOrAbort(NS_OK) && !mDatabase->IsInvalidated())) {
     ASSERT_UNLESS_FUZZING();
     return false;
   }
@@ -7487,7 +7489,7 @@ VersionChangeTransaction::RecvCommit()
 {
   AssertIsOnBackgroundThread();
 
-  if (NS_WARN_IF(!CommitOrAbort(NS_OK))) {
+  if (NS_WARN_IF(!CommitOrAbort(NS_OK) && !mDatabase->IsInvalidated())) {
     ASSERT_UNLESS_FUZZING();
     return false;
   }
