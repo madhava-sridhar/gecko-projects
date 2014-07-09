@@ -1816,6 +1816,9 @@ public:
   NS_IMETHOD Run()
   {
     MOZ_ASSERT(NS_IsMainThread());
+    if (!mRequest->GetOwner()) {
+      return NS_OK;
+    }
     mRequest->FireError(mError);
     mRequest = nullptr;
     return NS_OK;
@@ -1906,13 +1909,18 @@ ContinueCursorEvent::Continue()
 NS_IMETHODIMP
 ContinueCursorEvent::Run()
 {
+  nsCOMPtr<nsPIDOMWindow> window = mRequest->GetOwner();
+  if (!window) {
+    return NS_OK;
+  }
+
   nsRefPtr<DeviceStorageFile> file = GetNextFile();
 
   nsDOMDeviceStorageCursor* cursor
     = static_cast<nsDOMDeviceStorageCursor*>(mRequest.get());
 
   AutoJSContext cx;
-  JS::Rooted<JS::Value> val(cx, nsIFileToJsval(cursor->GetOwner(), file));
+  JS::Rooted<JS::Value> val(cx, nsIFileToJsval(window, file));
 
   if (file) {
     cursor->mOkToCallContinue = true;
@@ -2135,6 +2143,10 @@ public:
   NS_IMETHOD Run()
   {
     MOZ_ASSERT(NS_IsMainThread());
+    nsCOMPtr<nsPIDOMWindow> window = mRequest->GetOwner();
+    if (!window) {
+      return NS_OK;
+    }
 
     nsString state = NS_LITERAL_STRING("unavailable");
     if (mFile) {
@@ -2143,7 +2155,7 @@ public:
 
     AutoJSContext cx;
     JS::Rooted<JS::Value> result(cx);
-    StringToJsval(mRequest->GetOwner(), state, &result);
+    StringToJsval(window, state, &result);
     mRequest->FireSuccess(result);
     mRequest = nullptr;
     return NS_OK;
@@ -2169,6 +2181,10 @@ public:
   NS_IMETHOD Run()
   {
     MOZ_ASSERT(NS_IsMainThread());
+    nsCOMPtr<nsPIDOMWindow> window = mRequest->GetOwner();
+    if (!window) {
+      return NS_OK;
+    }
 
     nsString state = NS_LITERAL_STRING("undefined");
     if (mFile) {
@@ -2177,7 +2193,7 @@ public:
 
     AutoJSContext cx;
     JS::Rooted<JS::Value> result(cx);
-    StringToJsval(mRequest->GetOwner(), state, &result);
+    StringToJsval(window, state, &result);
     mRequest->FireSuccess(result);
     mRequest = nullptr;
     return NS_OK;
@@ -2203,6 +2219,10 @@ public:
   NS_IMETHOD Run()
   {
     MOZ_ASSERT(NS_IsMainThread());
+    nsCOMPtr<nsPIDOMWindow> window = mRequest->GetOwner();
+    if (!window) {
+      return NS_OK;
+    }
 
     nsString state = NS_LITERAL_STRING("unavailable");
     if (mFile) {
@@ -2211,7 +2231,7 @@ public:
 
     AutoJSContext cx;
     JS::Rooted<JS::Value> result(cx);
-    StringToJsval(mRequest->GetOwner(), state, &result);
+    StringToJsval(window, state, &result);
     mRequest->FireSuccess(result);
     mRequest = nullptr;
     return NS_OK;
@@ -2237,6 +2257,10 @@ public:
   NS_IMETHOD Run()
   {
     MOZ_ASSERT(NS_IsMainThread());
+    nsCOMPtr<nsPIDOMWindow> window = mRequest->GetOwner();
+    if (!window) {
+      return NS_OK;
+    }
 
     nsString state = NS_LITERAL_STRING("unavailable");
     if (mFile) {
@@ -2245,7 +2269,7 @@ public:
 
     AutoJSContext cx;
     JS::Rooted<JS::Value> result(cx);
-    StringToJsval(mRequest->GetOwner(), state, &result);
+    StringToJsval(window, state, &result);
     mRequest->FireSuccess(result);
     mRequest = nullptr;
     return NS_OK;
@@ -2271,6 +2295,10 @@ public:
   NS_IMETHOD Run()
   {
     MOZ_ASSERT(NS_IsMainThread());
+    nsCOMPtr<nsPIDOMWindow> window = mRequest->GetOwner();
+    if (!window) {
+      return NS_OK;
+    }
 
     nsString state = NS_LITERAL_STRING("unavailable");
     if (mFile) {
@@ -2279,7 +2307,7 @@ public:
 
     AutoJSContext cx;
     JS::Rooted<JS::Value> result(cx);
-    StringToJsval(mRequest->GetOwner(), state, &result);
+    StringToJsval(window, state, &result);
     mRequest->FireSuccess(result);
     mRequest = nullptr;
     return NS_OK;
@@ -2322,10 +2350,13 @@ public:
   NS_IMETHOD Run()
   {
     MOZ_ASSERT(NS_IsMainThread());
+    nsCOMPtr<nsPIDOMWindow> window = mRequest->GetOwner();
+    if (!window) {
+      return NS_OK;
+    }
 
     AutoJSContext cx;
     JS::Rooted<JS::Value> result(cx, JSVAL_NULL);
-    nsPIDOMWindow* window = mRequest->GetOwner();
 
     if (mFile) {
       result = nsIFileToJsval(window, mFile);
@@ -4194,14 +4225,32 @@ nsDOMDeviceStorage::EnumerateInternal(const nsAString& aPath,
 
 #ifdef MOZ_WIDGET_GONK
 void
-nsDOMDeviceStorage::DispatchMountChangeEvent(nsAString& aVolumeStatus)
+nsDOMDeviceStorage::DispatchStatusChangeEvent(nsAString& aStatus)
 {
-  if (aVolumeStatus == mLastStatus) {
+  if (aStatus == mLastStatus) {
     // We've already sent this status, don't bother sending it again.
     return;
   }
-  mLastStatus = aVolumeStatus;
+  mLastStatus = aStatus;
 
+  DeviceStorageChangeEventInit init;
+  init.mBubbles = true;
+  init.mCancelable = false;
+  init.mPath = mStorageName;
+  init.mReason = aStatus;
+
+  nsRefPtr<DeviceStorageChangeEvent> event =
+    DeviceStorageChangeEvent::Constructor(this, NS_LITERAL_STRING("change"),
+                                          init);
+  event->SetTrusted(true);
+
+  bool ignore;
+  DispatchEvent(event, &ignore);
+}
+
+void
+nsDOMDeviceStorage::DispatchStorageStatusChangeEvent(nsAString& aVolumeStatus)
+{
   DeviceStorageChangeEventInit init;
   init.mBubbles = true;
   init.mCancelable = false;
@@ -4209,7 +4258,7 @@ nsDOMDeviceStorage::DispatchMountChangeEvent(nsAString& aVolumeStatus)
   init.mReason = aVolumeStatus;
 
   nsRefPtr<DeviceStorageChangeEvent> event =
-    DeviceStorageChangeEvent::Constructor(this, NS_LITERAL_STRING("change"),
+    DeviceStorageChangeEvent::Constructor(this, NS_LITERAL_STRING("storage-state-change"),
                                           init);
   event->SetTrusted(true);
 
@@ -4268,9 +4317,15 @@ nsDOMDeviceStorage::Observe(nsISupports *aSubject,
     }
 
     DeviceStorageFile dsf(mStorageType, mStorageName);
-    nsString status;
+    nsString status, storageStatus;
+
+    // Get Status (one of "available, unavailable, shared")
     dsf.GetStatus(status);
-    DispatchMountChangeEvent(status);
+    DispatchStatusChangeEvent(status);
+
+    // Get real volume status (defined in dom/system/gonk/nsIVolume.idl)
+    dsf.GetStorageStatus(storageStatus);
+    DispatchStorageStatusChangeEvent(storageStatus);
     return NS_OK;
   }
 #endif

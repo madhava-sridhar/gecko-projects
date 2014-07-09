@@ -73,35 +73,6 @@ enum State {
     INVALID
 };
 
-class ChunkPool {
-    Chunk   *emptyChunkListHead;
-    size_t  emptyCount;
-
-  public:
-    ChunkPool()
-      : emptyChunkListHead(nullptr),
-        emptyCount(0) { }
-
-    size_t getEmptyCount() const {
-        return emptyCount;
-    }
-
-    /* Must be called with the GC lock taken. */
-    inline Chunk *get(JSRuntime *rt);
-
-    /* Must be called either during the GC or with the GC lock taken. */
-    inline void put(Chunk *chunk);
-
-    /*
-     * Return the list of chunks that can be released outside the GC lock.
-     * Must be called either during the GC or with the GC lock taken.
-     */
-    Chunk *expire(JSRuntime *rt, bool releaseAll);
-
-    /* Must be called with the GC lock taken. */
-    void expireAndFree(JSRuntime *rt, bool releaseAll);
-};
-
 static inline JSGCTraceKind
 MapAllocToTraceKind(AllocKind kind)
 {
@@ -667,6 +638,10 @@ class ArenaLists
         return arenaListsToSweep[thingKind];
     }
 
+    ArenaHeader *getArenaAfterCursor(AllocKind thingKind) const {
+        return arenaLists[thingKind].arenaAfterCursor();
+    }
+
     bool arenaListsAreEmpty() const {
         for (size_t i = 0; i != FINALIZE_LIMIT; ++i) {
             /*
@@ -778,6 +753,15 @@ class ArenaLists
             return true;
         }
         return false;
+    }
+
+    /* Check if |aheader|'s arena is in use. */
+    bool arenaIsInUse(ArenaHeader *aheader, AllocKind kind) const {
+        JS_ASSERT(aheader);
+        const FreeList &freeList = freeLists[kind];
+        if (freeList.isEmpty())
+            return false;
+        return aheader == freeList.arenaHeader();
     }
 
     MOZ_ALWAYS_INLINE void *allocateFromFreeList(AllocKind thingKind, size_t thingSize) {

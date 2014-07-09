@@ -1167,8 +1167,8 @@ public:
       if (params.mLength.WasPassed()) {
         mLength = params.mLength.Value();
       } else {
-        KeyAlgorithm hashAlg(global, hashName);
-        switch (hashAlg.Mechanism()) {
+        nsRefPtr<KeyAlgorithm> hashAlg = new KeyAlgorithm(global, hashName);
+        switch (hashAlg->Mechanism()) {
           case CKM_SHA_1:
           case CKM_SHA256:
             mLength = 512;
@@ -1397,7 +1397,7 @@ private:
       default: return NS_ERROR_DOM_NOT_SUPPORTED_ERR;
     }
 
-    SECKEYPublicKey* pubKey;
+    SECKEYPublicKey* pubKey = nullptr;
     mPrivateKey = PK11_GenerateKeyPair(slot.get(), mMechanism, param, &pubKey,
                                        PR_FALSE, PR_FALSE, nullptr);
     mPublicKey = pubKey;

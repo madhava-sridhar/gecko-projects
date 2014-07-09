@@ -1803,6 +1803,18 @@ MacroAssemblerARMCompat::callIonFromAsmJS(Register callee)
 }
 
 void
+MacroAssembler::alignFrameForICArguments(AfterICSaveLive &aic)
+{
+    // Exists for MIPS compatibility.
+}
+
+void
+MacroAssembler::restoreFrameAlignmentForICArguments(AfterICSaveLive &aic)
+{
+    // Exists for MIPS compatibility.
+}
+
+void
 MacroAssemblerARMCompat::reserveStack(uint32_t amount)
 {
     if (amount)
@@ -2067,7 +2079,7 @@ MacroAssemblerARMCompat::movePtr(AsmJSImmPtr imm, Register dest)
     else
         rs = L_LDR;
 
-    enoughMemory_ &= append(AsmJSAbsoluteLink(CodeOffsetLabel(nextOffset().getOffset()), imm.kind()));
+    append(AsmJSAbsoluteLink(CodeOffsetLabel(nextOffset().getOffset()), imm.kind()));
     ma_movPatchable(Imm32(-1), dest, Always, rs);
 }
 void
