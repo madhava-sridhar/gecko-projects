@@ -1397,6 +1397,9 @@ public:
   NS_DECL_ISUPPORTS
 
 private:
+  ~CompressDataBlobsFunction()
+  { }
+
   NS_IMETHOD
   OnFunctionCall(mozIStorageValueArray* aArguments,
                  nsIVariant** aResult) MOZ_OVERRIDE
@@ -1728,6 +1731,9 @@ public:
   NS_DECL_ISUPPORTS
 
 private:
+  ~EncodeKeysFunction()
+  { }
+
   NS_IMETHOD
   OnFunctionCall(mozIStorageValueArray* aArguments,
                  nsIVariant** aResult) MOZ_OVERRIDE
