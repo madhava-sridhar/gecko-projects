@@ -195,6 +195,11 @@ function getFileId(file)
   return utils.getFileId(file);
 }
 
+function getFilePath(file)
+{
+  return utils.getFilePath(file);
+}
+
 function hasFileInfo(name, id)
 {
   return utils.getFileReferences(name, id);

@@ -205,6 +205,9 @@ private:
 
   virtual bool
   RecvGetFileId(int64_t* aFileId) MOZ_OVERRIDE;
+
+  virtual bool
+  RecvGetFilePath(nsString* aFilePath) MOZ_OVERRIDE;
 };
 
 } // namespace dom

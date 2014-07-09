@@ -621,25 +621,6 @@ IndexedDatabaseManager::AsyncDeleteFile(FileManager* aFileManager,
 }
 
 nsresult
-IndexedDatabaseManager::GetFileId(nsIDOMBlob* aFile, int64_t* aFileId)
-{
-  PBackgroundChild* bgActor = BackgroundChild::GetForCurrentThread();
-  if (bgActor) {
-    PBlobChild* blobActor = BackgroundChild::GetActorForBlob(bgActor, aFile);
-    if (blobActor) {
-      int64_t fileId;
-      if (blobActor->SendGetFileId(&fileId)) {
-        *aFileId = fileId;
-        return NS_OK;
-      }
-    }
-  }
-
-  *aFileId = -1;
-  return NS_OK;
-}
-
-nsresult
 IndexedDatabaseManager::BlockAndGetFileReferences(
                                                PersistenceType aPersistenceType,
                                                const nsACString& aOrigin,

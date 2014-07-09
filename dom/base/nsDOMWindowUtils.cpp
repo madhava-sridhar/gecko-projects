@@ -5,6 +5,9 @@
 
 #include "nsDOMWindowUtils.h"
 
+#include "mozilla/dom/PBlobChild.h"
+#include "mozilla/ipc/BackgroundChild.h"
+#include "mozilla/ipc/PBackgroundChild.h"
 #include "mozilla/layers/CompositorChild.h"
 #include "mozilla/layers/LayerTransactionChild.h"
 #include "nsPresContext.h"
@@ -95,6 +98,7 @@
 
 using namespace mozilla;
 using namespace mozilla::dom;
+using namespace mozilla::ipc;
 using namespace mozilla::layers;
 using namespace mozilla::widget;
 using namespace mozilla::gfx;
@@ -2943,44 +2947,77 @@ nsDOMWindowUtils::AreDialogsEnabled(bool* aResult)
 
 NS_IMETHODIMP
 nsDOMWindowUtils::GetFileId(JS::Handle<JS::Value> aFile, JSContext* aCx,
-                            int64_t* aResult)
+                            int64_t* _retval)
 {
   MOZ_RELEASE_ASSERT(nsContentUtils::IsCallerChrome());
 
-  if (!aFile.isPrimitive()) {
-    JSObject* obj = aFile.toObjectOrNull();
+  if (aFile.isPrimitive()) {
+    *_retval = -1;
+    return NS_OK;
+  }
 
-    MutableFile* mutableFile = nullptr;
-    if (NS_SUCCEEDED(UNWRAP_OBJECT(MutableFile, obj, mutableFile))) {
-      *aResult = mutableFile->GetFileId();
-      return NS_OK;
-    }
+  JSObject* obj = aFile.toObjectOrNull();
 
-    nsISupports* nativeObj =
-      nsContentUtils::XPConnect()->GetNativeOfWrapper(aCx, obj);
+  MutableFile* mutableFile = nullptr;
+  if (NS_SUCCEEDED(UNWRAP_OBJECT(MutableFile, obj, mutableFile))) {
+    *_retval = mutableFile->GetFileId();
+    return NS_OK;
+  }
 
-    nsCOMPtr<nsIDOMBlob> blob = do_QueryInterface(nativeObj);
-    if (blob) {
-      nsRefPtr<indexedDB::IndexedDatabaseManager> mgr =
-        indexedDB::IndexedDatabaseManager::Get();
+  nsISupports* nativeObj =
+    nsContentUtils::XPConnect()->GetNativeOfWrapper(aCx, obj);
 
-      if (mgr) {
+  nsCOMPtr<nsIDOMBlob> blob = do_QueryInterface(nativeObj);
+  if (blob) {
+    PBackgroundChild* bgActor = BackgroundChild::GetForCurrentThread();
+    if (bgActor) {
+      PBlobChild* blobActor = BackgroundChild::GetActorForBlob(bgActor, blob);
+      if (blobActor) {
         int64_t fileId;
-        nsresult rv = mgr->GetFileId(blob, &fileId);
-        if (NS_WARN_IF(NS_FAILED(rv))) {
-          return rv;
+        if (blobActor->SendGetFileId(&fileId)) {
+          *_retval = fileId;
+          return NS_OK;
         }
-
-        *aResult = fileId;
-      } else {
-        *aResult = -1;
       }
-
-      return NS_OK;
     }
   }
 
-  *aResult = -1;
+  *_retval = -1;
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsDOMWindowUtils::GetFilePath(JS::HandleValue aFile, JSContext* aCx,
+                              nsAString& _retval)
+{
+  MOZ_RELEASE_ASSERT(nsContentUtils::IsCallerChrome());
+
+  if (aFile.isPrimitive()) {
+    _retval.Truncate();
+    return NS_OK;
+  }
+
+  JSObject* obj = aFile.toObjectOrNull();
+
+  nsISupports* nativeObj =
+    nsContentUtils::XPConnect()->GetNativeOfWrapper(aCx, obj);
+
+  nsCOMPtr<nsIDOMBlob> blob = do_QueryInterface(nativeObj);
+  if (blob) {
+    PBackgroundChild* bgActor = BackgroundChild::GetForCurrentThread();
+    if (bgActor) {
+      PBlobChild* blobActor = BackgroundChild::GetActorForBlob(bgActor, blob);
+      if (blobActor) {
+        nsString filePath;
+        if (blobActor->SendGetFilePath(&filePath)) {
+          _retval = filePath;
+          return NS_OK;
+        }
+      }
+    }
+  }
+
+  _retval.Truncate();
   return NS_OK;
 }
 

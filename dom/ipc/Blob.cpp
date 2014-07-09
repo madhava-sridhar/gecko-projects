@@ -2794,6 +2794,33 @@ BlobParent::RecvGetFileId(int64_t* aFileId)
 }
 
 bool
+BlobParent::RecvGetFilePath(nsString* aFilePath)
+{
+  AssertIsOnOwningThread();
+  MOZ_ASSERT_IF(mBlob, !mBlobImpl);
+  MOZ_ASSERT_IF(!mBlob, mBlobImpl);
+  MOZ_ASSERT(!mRemoteBlob);
+
+  nsRefPtr<DOMFileImpl> blobImpl;
+  if (mBlob) {
+    blobImpl = static_cast<DOMFile*>(mBlob)->Impl();
+  } else {
+    blobImpl = mBlobImpl;
+  }
+
+  MOZ_ASSERT(blobImpl);
+
+  nsString filePath;
+  nsresult rv = blobImpl->GetMozFullPathInternal(filePath);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return false;
+  }
+
+  *aFilePath = filePath;
+  return true;
+}
+
+bool
 InputStreamChild::Recv__delete__(const InputStreamParams& aParams,
                                  const OptionalFileDescriptorSet& aFDs)
 {

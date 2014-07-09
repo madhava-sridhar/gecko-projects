@@ -1757,10 +1757,6 @@ SpecialPowersAPI.prototype = {
     return this._sendSyncMessage('SPPermissionManager', msg)[0];
   },
 
-  getMozFullPath: function(file) {
-    return file.mozFullPath;
-  },
-
   isWindowPrivate: function(win) {
     return PrivateBrowsingUtils.isWindowPrivate(win);
   },
