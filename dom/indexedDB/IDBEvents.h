@@ -75,7 +75,8 @@ public:
          const nsDependentString& aName,
          uint64_t aOldVersion)
   {
-    Nullable<uint64_t> newVersion;
+    Nullable<uint64_t> newVersion(0);
+    newVersion.SetNull();
     return CreateInternal(aOwner, aName, aOldVersion, newVersion);
   }
 

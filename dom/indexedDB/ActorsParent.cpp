@@ -8970,7 +8970,7 @@ QuotaClient::WaitForStoragesToComplete(nsTArray<nsIOfflineStorage*>& aStorages,
   for (uint32_t count = aStorages.Length(), index = 0; index < count; index++) {
     nsIOfflineStorage* storage = aStorages[index];
     MOZ_ASSERT(storage);
-    MOZ_ASSERT(storage->Type() == QuotaClient::IDB);
+    MOZ_ASSERT(storage->GetClient() == this);
 
     const nsACString& databaseId = storage->Id();
 
@@ -9282,9 +9282,9 @@ DatabaseOfflineStorage::DatabaseOfflineStorage(
                                nsIEventTarget* aOwningThread)
   : mStrongQuotaClient(aQuotaClient)
   , mWeakQuotaClient(aQuotaClient)
+  , mDatabase(nullptr)
   , mOptionalWindowId(aOptionalWindowId)
   , mOptionalContentParentId(aOptionalContentParentId)
-  , mDatabase(nullptr)
   , mOrigin(aOrigin)
   , mId(aId)
   , mOwningThread(aOwningThread)
@@ -10175,6 +10175,7 @@ FactoryOp::CheckAtLeastOneAppHasPermission(ContentParent* aContentParent,
   MOZ_ASSERT(aContentParent);
   MOZ_ASSERT(!aPermissionString.IsEmpty());
 
+#ifdef MOZ_CHILD_PERMISSIONS
   const nsTArray<PBrowserParent*>& browsers =
     aContentParent->ManagedPBrowserParent();
 
@@ -10252,6 +10253,9 @@ FactoryOp::CheckAtLeastOneAppHasPermission(ContentParent* aContentParent,
   }
 
   return false;
+#else
+  return true;
+#endif // MOZ_CHILD_PERMISSIONS
 }
 
 nsresult
@@ -13603,9 +13607,9 @@ ObjectStoreAddOrPutRequestOp::ObjectStoreAddOrPutRequestOp(
               aParams.get_ObjectStorePutParams().commonParams())
   , mMetadata(*aTransaction->GetMetadataForObjectStoreId(
                                                        mParams.objectStoreId()))
-  , mPersistenceType(aTransaction->GetDatabase()->Type())
   , mGroup(aTransaction->GetDatabase()->Group())
   , mOrigin(aTransaction->GetDatabase()->Origin())
+  , mPersistenceType(aTransaction->GetDatabase()->Type())
   , mOverwrite(aParams.type() == RequestParams::TObjectStorePutParams)
 {
   MOZ_ASSERT(aParams.type() == RequestParams::TObjectStoreAddParams ||
@@ -13680,7 +13684,7 @@ ObjectStoreAddOrPutRequestOp::Init(TransactionBase* aTransaction)
 
       MOZ_ASSERT(!indexMetadata->mDeleted);
 
-      const uint64_t indexId = indexMetadata->mCommonMetadata.id();
+      const int64_t indexId = indexMetadata->mCommonMetadata.id();
       const bool unique = indexMetadata->mCommonMetadata.unique();
 
       MOZ_ASSERT(indexId == updateInfo.indexId());
