@@ -8,11 +8,11 @@ DIRS += ['extensions']
 
 TEST_DIRS += ['unit']
 
-XPCSHELL_TESTS_MANIFESTS += ['unit/xpcshell.ini']
+XPCSHELL_TESTS_MANIFESTS += ['unit/xpcshell-child-process.ini',
+                             'unit/xpcshell-parent-process.ini']
 
 MOCHITEST_MANIFESTS += ['mochitest.ini']
 
 BROWSER_CHROME_MANIFESTS += ['browser.ini']
 
 MOCHITEST_CHROME_MANIFESTS += ['chrome.ini']
-

@@ -8,17 +8,14 @@ const { 'classes': Cc, 'interfaces': Ci, 'utils': Cu } = Components;
 const DOMException = Ci.nsIDOMDOMException;
 
 function is(a, b, msg) {
-  dump("is(" + a + ", " + b + ", \"" + msg + "\")");
   do_check_eq(a, b, Components.stack.caller);
 }
 
 function ok(cond, msg) {
-  dump("ok(" + cond + ", \"" + msg + "\")");
   do_check_true(!!cond, Components.stack.caller); 
 }
 
 function isnot(a, b, msg) {
-  dump("isnot(" + a + ", " + b + ", \"" + msg + "\")");
   do_check_neq(a, b, Components.stack.caller); 
 }
 
@@ -27,7 +24,7 @@ function executeSoon(fun) {
 }
 
 function todo(condition, name, diag) {
-  dump("TODO: ", diag);
+  todo_check_true(condition, Components.stack.caller);
 }
 
 function info(name, message) {
@@ -41,10 +38,12 @@ function run_test() {
 if (!this.runTest) {
   this.runTest = function()
   {
-    // XPCShell does not get a profile by default.
-    do_get_profile();
+    if (SpecialPowers.isMainProcess()) {
+      // XPCShell does not get a profile by default.
+      do_get_profile();
 
-    enableExperimental();
+      enableExperimental();
+    }
 
     Cu.importGlobalProperties(["indexedDB"]);
 
@@ -55,9 +54,12 @@ if (!this.runTest) {
 
 function finishTest()
 {
-  resetExperimental();
-  SpecialPowers.notifyObserversInParentProcess(null, "disk-space-watcher",
-                                               "free");
+  if (SpecialPowers.isMainProcess()) {
+    resetExperimental();
+
+    SpecialPowers.notifyObserversInParentProcess(null, "disk-space-watcher",
+                                                 "free");
+  }
 
   do_execute_soon(function(){
     testGenerator.close();
@@ -195,8 +197,8 @@ function resetExperimental()
 
 function gc()
 {
-  Components.utils.forceGC();
-  Components.utils.forceCC();
+  Cu.forceGC();
+  Cu.forceCC();
 }
 
 function scheduleGC()
