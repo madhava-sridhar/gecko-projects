@@ -10321,9 +10321,6 @@ FactoryOp::Run()
 
     case State_SendingResults:
       SendResults();
-      MOZ_ASSERT_IF(mBlockedQuotaManager,
-                    mState == State_UnblockingQuotaManager);
-      MOZ_ASSERT_IF(!mBlockedQuotaManager, mState == State_Completed);
       return NS_OK;
 
     case State_UnblockingQuotaManager:
