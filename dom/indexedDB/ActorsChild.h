@@ -38,6 +38,7 @@ class IDBOpenDBRequest;
 class IDBRequest;
 class IDBTransaction;
 class Key;
+class PBackgroundIDBFileChild;
 class PermissionRequestChild;
 class PermissionRequestParent;
 class SerializedStructuredCloneReadInfo;
@@ -261,6 +262,15 @@ private:
   // IPDL methods are only called by IPDL.
   virtual void
   ActorDestroy(ActorDestroyReason aWhy) MOZ_OVERRIDE;
+
+  virtual PBackgroundIDBDatabaseFileChild*
+  AllocPBackgroundIDBDatabaseFileChild(const InputStreamParams& aParams)
+                                       MOZ_OVERRIDE;
+
+  virtual bool
+  DeallocPBackgroundIDBDatabaseFileChild(
+                                        PBackgroundIDBDatabaseFileChild* aActor)
+                                        MOZ_OVERRIDE;
 
   virtual PBackgroundIDBTransactionChild*
   AllocPBackgroundIDBTransactionChild(

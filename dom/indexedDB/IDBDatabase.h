@@ -12,11 +12,14 @@
 #include "mozilla/dom/indexedDB/IDBWrapperCache.h"
 #include "mozilla/dom/quota/PersistenceType.h"
 #include "nsAutoPtr.h"
+#include "nsDataHashtable.h"
 #include "nsHashKeys.h"
 #include "nsString.h"
 #include "nsTHashtable.h"
 
 class nsIDocument;
+class nsIDOMBlob;
+class nsIWeakReference;
 class nsPIDOMWindow;
 
 namespace mozilla {
@@ -39,6 +42,7 @@ class IDBFactory;
 class IDBObjectStore;
 class IDBRequest;
 class IDBTransaction;
+class PBackgroundIDBDatabaseFileChild;
 
 class IDBDatabase MOZ_FINAL
   : public IDBWrapperCache
@@ -63,6 +67,9 @@ class IDBDatabase MOZ_FINAL
   BackgroundDatabaseChild* mBackgroundActor;
 
   nsTHashtable<nsPtrHashKey<IDBTransaction>> mTransactions;
+
+  nsDataHashtable<nsISupportsHashKey, PBackgroundIDBDatabaseFileChild*>
+    mFileActors;
 
   nsRefPtr<WindowObserver> mWindowObserver;
 
@@ -158,6 +165,12 @@ public:
   void
   AbortTransactions();
 
+  PBackgroundIDBDatabaseFileChild*
+  GetOrCreateFileActorForBlob(nsIDOMBlob* aBlob);
+
+  void
+  DelayedMaybeExpireFileActors();
+
   nsPIDOMWindow*
   GetParentObject() const;
 
@@ -252,6 +265,9 @@ private:
 
   void
   RefreshSpec(bool aMayDelete);
+
+  void
+  ExpireFileActors(bool aExpireAll);
 };
 
 } // namespace indexedDB

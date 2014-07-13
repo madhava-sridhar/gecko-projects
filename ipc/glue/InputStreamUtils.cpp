@@ -11,6 +11,7 @@
 #include "mozilla/dom/ipc/BlobParent.h"
 #include "nsComponentManagerUtils.h"
 #include "nsDebug.h"
+#include "nsDOMFile.h"
 #include "nsID.h"
 #include "nsIDOMFile.h"
 #include "nsIXULRuntime.h"
@@ -20,8 +21,7 @@
 #include "nsStringStream.h"
 #include "nsXULAppAPI.h"
 
-using mozilla::dom::BlobChild;
-using mozilla::dom::BlobParent;
+using namespace mozilla::dom;
 
 namespace {
 
@@ -106,20 +106,27 @@ DeserializeInputStream(const InputStreamParams& aParams,
     // When the input stream already exists in this process, all we need to do
     // is retrieve the original instead of sending any data over the wire.
     case InputStreamParams::TRemoteInputStreamParams: {
-      nsCOMPtr<nsIDOMBlob> domBlob;
       const RemoteInputStreamParams& params =
           aParams.get_RemoteInputStreamParams();
 
-      domBlob = params.remoteBlobParent() ?
-          static_cast<BlobParent*>(params.remoteBlobParent())->GetBlob() :
+      nsRefPtr<DOMFileImpl> blobImpl;
+      if (params.remoteBlobParent()) {
+        blobImpl =
+          static_cast<BlobParent*>(params.remoteBlobParent())->GetBlobImpl();
+      } else {
+        nsCOMPtr<nsIDOMBlob> blob =
           static_cast<BlobChild*>(params.remoteBlobChild())->GetBlob();
+        MOZ_ASSERT(blob);
 
-      MOZ_ASSERT(domBlob, "Invalid blob contents");
+        blobImpl = static_cast<DOMFile*>(blob.get())->Impl();
+      }
+
+      MOZ_ASSERT(blobImpl, "Invalid blob contents");
 
       // If fetching the internal stream fails, we ignore it and return a
       // null stream.
       nsCOMPtr<nsIInputStream> stream;
-      nsresult rv = domBlob->GetInternalStream(getter_AddRefs(stream));
+      nsresult rv = blobImpl->GetInternalStream(getter_AddRefs(stream));
       if (NS_FAILED(rv) || !stream) {
         NS_WARNING("Couldn't obtain a valid stream from the blob");
       }

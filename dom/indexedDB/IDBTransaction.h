@@ -12,8 +12,6 @@
 #include "mozilla/dom/indexedDB/IDBWrapperCache.h"
 #include "nsAutoPtr.h"
 #include "nsCycleCollectionParticipant.h"
-#include "nsDataHashtable.h"
-#include "nsHashKeys.h"
 #include "nsIRunnable.h"
 #include "nsString.h"
 #include "nsTArray.h"
@@ -44,6 +42,7 @@ class IDBRequest;
 class IndexMetadata;
 class ObjectStoreSpec;
 class OpenCursorParams;
+class PBackgroundIDBDatabaseFileChild;
 class RequestParams;
 
 class IDBTransaction MOZ_FINAL
@@ -75,7 +74,6 @@ private:
   nsTArray<nsString> mObjectStoreNames;
   nsTArray<nsRefPtr<IDBObjectStore>> mObjectStores;
   nsTArray<nsRefPtr<IDBObjectStore>> mDeletedObjectStores;
-  nsDataHashtable<nsISupportsHashKey, PBlobChild*> mBlobActorCache;
 
   // Tagged with mMode. If mMode is VERSION_CHANGE then mBackgroundActor will be
   // a BackgroundVersionChangeTransactionChild. Otherwise it will be a
@@ -226,23 +224,6 @@ public:
 
   void
   DeleteIndex(IDBObjectStore* aObjectStore, int64_t aIndexId);
-
-  void
-  CacheBlobActor(nsIDOMBlob* aBlob, PBlobChild* aBlobActor);
-
-  void
-  ForgetBlobActor(nsIDOMBlob* aBlob);
-
-  PBlobChild*
-  GetCachedBlobActor(nsIDOMBlob* aBlob);
-
-  void
-  ClearBlobActorCache()
-  {
-    AssertIsOnOwningThread();
-
-    mBlobActorCache.Clear();
-  }
 
   nsresult
   Abort(IDBRequest* aRequest);

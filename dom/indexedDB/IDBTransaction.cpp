@@ -247,7 +247,6 @@ IDBTransaction::StartRequest(BackgroundRequestChild* aBackgroundActor,
   }
 }
 
-
 void
 IDBTransaction::OpenCursor(BackgroundCursorChild* aBackgroundActor,
                            const OpenCursorParams& aParams)
@@ -479,36 +478,6 @@ IDBTransaction::DeleteIndex(IDBObjectStore* aObjectStore,
                     SendDeleteIndex(aObjectStore->Id(), aIndexId));
 }
 
-void
-IDBTransaction::CacheBlobActor(nsIDOMBlob* aBlob, PBlobChild* aBlobActor)
-{
-  AssertIsOnOwningThread();
-  MOZ_ASSERT(aBlob);
-  MOZ_ASSERT(aBlobActor);
-  MOZ_ASSERT(!mBlobActorCache.Contains(aBlob));
-
-  mBlobActorCache.Put(aBlob, aBlobActor);
-}
-
-void
-IDBTransaction::ForgetBlobActor(nsIDOMBlob* aBlob)
-{
-  AssertIsOnOwningThread();
-  MOZ_ASSERT(aBlob);
-  MOZ_ASSERT(mBlobActorCache.Contains(aBlob));
-
-  mBlobActorCache.Remove(aBlob);
-}
-
-PBlobChild*
-IDBTransaction::GetCachedBlobActor(nsIDOMBlob* aBlob)
-{
-  AssertIsOnOwningThread();
-  MOZ_ASSERT(aBlob);
-
-  return mBlobActorCache.Get(aBlob);
-}
-
 nsresult
 IDBTransaction::AbortInternal(nsresult aAbortCode,
                               already_AddRefed<DOMError> aError)
@@ -644,17 +613,15 @@ IDBTransaction::FireCompleteOrAbortEvents(nsresult aResult)
   AssertIsOnOwningThread();
   MOZ_ASSERT(!mFiredCompleteOrAbort);
 
-  ClearBlobActorCache();
+  IDB_PROFILER_MARK("IndexedDB Transaction %llu: Complete (rv = %lu)",
+                    "IDBTransaction[%llu] MT Complete",
+                    mTransaction->GetSerialNumber(), mAbortCode);
 
   mReadyState = DONE;
 
 #ifdef DEBUG
   mFiredCompleteOrAbort = true;
 #endif
-
-  IDB_PROFILER_MARK("IndexedDB Transaction %llu: Complete (rv = %lu)",
-                    "IDBTransaction[%llu] MT Complete",
-                    mTransaction->GetSerialNumber(), mAbortCode);
 
   nsCOMPtr<nsIDOMEvent> event;
   if (NS_SUCCEEDED(aResult)) {
@@ -678,7 +645,11 @@ IDBTransaction::FireCompleteOrAbortEvents(nsresult aResult)
   }
 
   bool dummy;
-  NS_WARN_IF(NS_FAILED(DispatchEvent(event, &dummy)));
+  if (NS_FAILED(DispatchEvent(event, &dummy))) {
+    NS_WARNING("DispatchEvent failed!");
+  }
+
+  mDatabase->DelayedMaybeExpireFileActors();
 }
 
 int64_t
@@ -830,6 +801,8 @@ NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN_INHERITED(IDBTransaction, IDBWrapperCache)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mError)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mObjectStores)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mDeletedObjectStores)
+
+  tmp->mDatabase->DelayedMaybeExpireFileActors();
 NS_IMPL_CYCLE_COLLECTION_UNLINK_END
 
 JSObject*

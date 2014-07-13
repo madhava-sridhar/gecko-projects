@@ -28,10 +28,16 @@
 #include "mozilla/dom/DOMStringListBinding.h"
 #include "mozilla/dom/IDBDatabaseBinding.h"
 #include "mozilla/dom/IDBObjectStoreBinding.h"
+#include "mozilla/dom/indexedDB/PBackgroundIDBDatabaseFileChild.h"
 #include "mozilla/dom/indexedDB/PBackgroundIDBSharedTypes.h"
 #include "mozilla/dom/quota/QuotaManager.h"
+#include "mozilla/ipc/FileDescriptor.h"
+#include "mozilla/ipc/InputStreamParams.h"
+#include "mozilla/ipc/InputStreamUtils.h"
 #include "nsCOMPtr.h"
+#include "nsDOMFile.h"
 #include "nsIDocument.h"
+#include "nsIDOMFile.h"
 #include "nsIObserver.h"
 #include "nsIObserverService.h"
 #include "nsISupportsPrimitives.h"
@@ -45,6 +51,7 @@ using namespace mozilla;
 using namespace mozilla::dom;
 using namespace mozilla::dom::indexedDB;
 using namespace mozilla::dom::quota;
+using namespace mozilla::ipc;
 using namespace mozilla::services;
 
 namespace {
@@ -89,6 +96,28 @@ public:
 private:
   ~CreateFileHelper()
   { }
+};
+
+class DatabaseFile MOZ_FINAL
+  : public PBackgroundIDBDatabaseFileChild
+{
+  IDBDatabase* mDatabase;
+
+public:
+  DatabaseFile(IDBDatabase* aDatabase)
+    : mDatabase(aDatabase)
+  {
+    MOZ_ASSERT(aDatabase);
+    aDatabase->AssertIsOnOwningThread();
+
+    MOZ_COUNT_CTOR(DatabaseFile);
+  }
+
+private:
+  ~DatabaseFile()
+  {
+    MOZ_COUNT_DTOR(DatabaseFile);
+  }
 };
 
 } // anonymous namespace
@@ -214,6 +243,8 @@ IDBDatabase::CloseInternal()
 
   if (!mClosed) {
     mClosed = true;
+
+    ExpireFileActors(/* aExpireAll */ true);
 
     if (mWindowObserver) {
       mWindowObserver->Revoke();
@@ -722,6 +753,120 @@ IDBDatabase::AbortTransactions()
   };
 
   Helper::AbortTransactions(mTransactions);
+}
+
+PBackgroundIDBDatabaseFileChild*
+IDBDatabase::GetOrCreateFileActorForBlob(nsIDOMBlob* aBlob)
+{
+  AssertIsOnOwningThread();
+  MOZ_ASSERT(aBlob);
+  MOZ_ASSERT(mBackgroundActor);
+
+  // We use the DOMFile's nsIWeakReference as the key to the table because
+  // a) it is unique per blob, b) it is reference-counted so that we can
+  // guarantee that it stays alive, and c) it doesn't hold the actual DOMFile
+  // alive. We don't ever need to actually use the nsIWeakReference.
+  nsCOMPtr<nsIWeakReference> weakRef = do_GetWeakReference(aBlob);
+  MOZ_ASSERT(weakRef);
+
+  PBackgroundIDBDatabaseFileChild* actor;
+  if (!mFileActors.Get(weakRef, &actor)) {
+    DOMFileImpl* impl = static_cast<DOMFile*>(aBlob)->Impl();
+    MOZ_ASSERT(impl);
+
+    nsCOMPtr<nsIInputStream> inputStream;
+    MOZ_ALWAYS_TRUE(NS_SUCCEEDED(
+      impl->GetInternalStream(getter_AddRefs(inputStream))));
+
+    InputStreamParams params;
+    nsTArray<FileDescriptor> fileDescriptors;
+    SerializeInputStream(inputStream, params, fileDescriptors);
+
+    MOZ_ASSERT(fileDescriptors.IsEmpty());
+
+    auto* dbFile = new DatabaseFile(this);
+
+    actor =
+      mBackgroundActor->SendPBackgroundIDBDatabaseFileConstructor(dbFile,
+                                                                  params);
+    if (NS_WARN_IF(!actor)) {
+      return nullptr;
+    }
+
+    mFileActors.Put(weakRef, actor);
+  }
+
+  MOZ_ASSERT(actor);
+
+  return actor;
+}
+
+void
+IDBDatabase::DelayedMaybeExpireFileActors()
+{
+  AssertIsOnOwningThread();
+
+  if (!mBackgroundActor || !mFileActors.Count()) {
+    return;
+  }
+
+  nsCOMPtr<nsIRunnable> runnable =
+    NS_NewRunnableMethodWithArg<bool>(this,
+                                      &IDBDatabase::ExpireFileActors,
+                                      false);
+  MOZ_ASSERT(runnable);
+
+  MOZ_ALWAYS_TRUE(NS_SUCCEEDED(NS_DispatchToCurrentThread(runnable)));
+}
+
+void
+IDBDatabase::ExpireFileActors(bool aExpireAll)
+{
+  AssertIsOnOwningThread();
+
+  class MOZ_STACK_CLASS Helper MOZ_FINAL
+  {
+  public:
+    static PLDHashOperator
+    MaybeExpire(nsISupports* aKey,
+                PBackgroundIDBDatabaseFileChild*& aValue,
+                void* aClosure)
+    {
+      MOZ_ASSERT(aKey);
+      MOZ_ASSERT(aValue);
+
+      const bool expiringAll = reinterpret_cast<bool>(aClosure);
+
+      bool shouldExpire = expiringAll;
+      if (!shouldExpire) {
+        nsCOMPtr<nsIWeakReference> weakRef = do_QueryInterface(aKey);
+        MOZ_ASSERT(weakRef);
+
+        nsCOMPtr<nsISupports> referent = do_QueryReferent(weakRef);
+        shouldExpire = !referent;
+      }
+
+      if (shouldExpire) {
+        PBackgroundIDBDatabaseFileChild::Send__delete__(aValue);
+
+        if (!expiringAll) {
+          return PL_DHASH_REMOVE;
+        }
+      }
+
+      return PL_DHASH_NEXT;
+    }
+  };
+
+  if (mBackgroundActor && mFileActors.Count()) {
+    mFileActors.Enumerate(&Helper::MaybeExpire,
+                          reinterpret_cast<void*>(aExpireAll));
+    if (aExpireAll) {
+      mFileActors.Clear();
+    }
+  } else {
+    MOZ_ASSERT(!mFileActors.Count());
+  }
 }
 
 void

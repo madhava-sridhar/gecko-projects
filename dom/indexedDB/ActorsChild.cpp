@@ -18,6 +18,7 @@
 #include "mozilla/Maybe.h"
 #include "mozilla/dom/PermissionMessageUtils.h"
 #include "mozilla/dom/TabChild.h"
+#include "mozilla/dom/indexedDB/PBackgroundIDBDatabaseFileChild.h"
 #include "mozilla/dom/indexedDB/PIndexedDBPermissionRequestChild.h"
 #include "mozilla/dom/ipc/BlobChild.h"
 #include "mozilla/ipc/BackgroundUtils.h"
@@ -1095,6 +1096,24 @@ BackgroundDatabaseChild::ActorDestroy(ActorDestroyReason aWhy)
     mDatabase = nullptr;
 #endif
   }
+}
+
+PBackgroundIDBDatabaseFileChild*
+BackgroundDatabaseChild::AllocPBackgroundIDBDatabaseFileChild(
+                                               const InputStreamParams& aParams)
+{
+  MOZ_CRASH("PBackgroundIDBFileChild actors should be manually constructed!");
+}
+
+bool
+BackgroundDatabaseChild::DeallocPBackgroundIDBDatabaseFileChild(
+                                        PBackgroundIDBDatabaseFileChild* aActor)
+{
+  AssertIsOnOwningThread();
+  MOZ_ASSERT(aActor);
+
+  delete aActor;
+  return true;
 }
 
 PBackgroundIDBTransactionChild*

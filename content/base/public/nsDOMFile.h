@@ -33,6 +33,7 @@
 #include "mozilla/dom/indexedDB/IndexedDatabaseManager.h"
 #include "nsWrapperCache.h"
 #include "nsCycleCollectionParticipant.h"
+#include "nsWeakReference.h"
 
 class nsDOMMultipartFile;
 class nsIFile;
@@ -64,6 +65,7 @@ class DOMFile MOZ_FINAL : public nsIDOMFile
                         , public nsIXHRSendable
                         , public nsIMutable
                         , public nsIJSNativeInitializer
+                        , public nsSupportsWeakReference
 {
 public:
   NS_DECL_NSIDOMBLOB

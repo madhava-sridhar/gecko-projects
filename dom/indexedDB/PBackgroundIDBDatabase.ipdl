@@ -2,10 +2,13 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+include protocol PBackgroundIDBDatabaseFile;
 include protocol PBackgroundIDBFactory;
 include protocol PBackgroundIDBTransaction;
 include protocol PBackgroundIDBVersionChangeTransaction;
+include protocol PBlob;
 
+include InputStreamParams;
 include PBackgroundIDBSharedTypes;
 
 include "mozilla/dom/indexedDB/SerializationHelpers.h";
@@ -30,6 +33,7 @@ protocol PBackgroundIDBDatabase
 {
   manager PBackgroundIDBFactory;
 
+  manages PBackgroundIDBDatabaseFile;
   manages PBackgroundIDBTransaction;
   manages PBackgroundIDBVersionChangeTransaction;
 
@@ -39,6 +43,8 @@ parent:
   Blocked();
 
   Close();
+
+  PBackgroundIDBDatabaseFile(InputStreamParams params);
 
   PBackgroundIDBTransaction(nsString[] objectStoreNames, Mode mode);
 

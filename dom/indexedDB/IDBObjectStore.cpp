@@ -37,6 +37,7 @@
 #include "mozilla/ipc/BackgroundChild.h"
 #include "nsCOMPtr.h"
 #include "nsDOMFile.h"
+#include "nsIDOMFile.h"
 #include "ProfilerHelpers.h"
 #include "ReportInternalError.h"
 
@@ -1216,42 +1217,34 @@ IDBObjectStore::AddOrPut(JSContext* aCx,
   commonParams.key() = key;
   commonParams.indexUpdateInfos().SwapElements(updateInfo);
 
-  // Convert any files into PBlobs.
-  const nsTArray<nsCOMPtr<nsIDOMBlob>>& files = cloneWriteInfo.mFiles;
+  // Convert any blobs into PBackgroundIDBDatabaseFiles.
+  const nsTArray<nsCOMPtr<nsIDOMBlob>>& blobs = cloneWriteInfo.mFiles;
 
-  if (!files.IsEmpty()) {
-    const uint32_t count = files.Length();
+  if (!blobs.IsEmpty()) {
+    const uint32_t count = blobs.Length();
 
-    nsTArray<PBlobChild*>& blobsChild = commonParams.blobsChild();
-    blobsChild.SetCapacity(count);
-
-    PBackgroundChild* backgroundActor = BackgroundChild::GetForCurrentThread();
-    MOZ_ASSERT(backgroundActor);
+    FallibleTArray<PBackgroundIDBDatabaseFileChild*> fileActors;
+    if (NS_WARN_IF(!fileActors.SetCapacity(count))) {
+      aRv = NS_ERROR_OUT_OF_MEMORY;
+      return nullptr;
+    }
 
     for (uint32_t index = 0; index < count; index++) {
-      const nsCOMPtr<nsIDOMBlob>& file = files[index];
-      MOZ_ASSERT(file);
+      const nsCOMPtr<nsIDOMBlob>& blob = blobs[index];
+      MOZ_ASSERT(blob);
 
-      PBlobChild* blobActor = mTransaction->GetCachedBlobActor(file);
-
-      if (!blobActor) {
-        bool actorWasCreated;
-        blobActor = BackgroundChild::GetOrCreateActorForBlob(backgroundActor,
-                                                             file,
-                                                             &actorWasCreated);
-        if (!blobActor) {
-          IDB_REPORT_INTERNAL_ERR();
-          aRv.Throw(NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
-          return nullptr;
-        }
-
-        if (actorWasCreated) {
-          mTransaction->CacheBlobActor(file, blobActor);
-        }
+      PBackgroundIDBDatabaseFileChild* fileActor =
+        mTransaction->Database()->GetOrCreateFileActorForBlob(blob);
+      if (NS_WARN_IF(!fileActor)) {
+        IDB_REPORT_INTERNAL_ERR();
+        aRv = NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
+        return nullptr;
       }
 
-      blobsChild.AppendElement(blobActor);
+      fileActors.AppendElement(fileActor);
     }
+
+    commonParams.filesChild().SwapElements(fileActors);
   }
 
   RequestParams params;

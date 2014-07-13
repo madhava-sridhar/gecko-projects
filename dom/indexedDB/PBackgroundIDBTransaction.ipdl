@@ -4,8 +4,8 @@
 
 include protocol PBackgroundIDBCursor;
 include protocol PBackgroundIDBDatabase;
+include protocol PBackgroundIDBDatabaseFile;
 include protocol PBackgroundIDBRequest;
-include protocol PBlob;
 
 include PBackgroundIDBSharedTypes;
 
