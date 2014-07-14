@@ -213,6 +213,7 @@ public:
    * and is used for drawing into the widget.
    */
   virtual bool IsWidgetLayerManager() { return true; }
+  virtual bool IsInactiveLayerManager() { return false; }
 
   /**
    * Start a new transaction. Nested transactions are not allowed so
@@ -1409,8 +1410,6 @@ public:
     mManager->Mutated(this);
   }
 
-  virtual int32_t GetMaxLayerSize() { return Manager()->GetMaxTextureSize(); }
-
 protected:
   Layer(LayerManager* aManager, void* aImplData);
 
@@ -2180,7 +2179,6 @@ protected:
   uint64_t mId;
 };
 
-void SetAntialiasingFlags(Layer* aLayer, gfxContext* aTarget);
 void SetAntialiasingFlags(Layer* aLayer, gfx::DrawTarget* aTarget);
 
 #ifdef MOZ_DUMP_PAINTING

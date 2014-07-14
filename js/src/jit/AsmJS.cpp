@@ -457,7 +457,7 @@ class Type
           case Void:
             return MIRType_None;
         }
-        MOZ_ASSUME_UNREACHABLE("Invalid Type");
+        MOZ_CRASH("Invalid Type");
     }
 
     const char *toChars() const {
@@ -474,7 +474,7 @@ class Type
           case Intish:      return "intish";
           case Void:        return "void";
         }
-        MOZ_ASSUME_UNREACHABLE("Invalid Type");
+        MOZ_CRASH("Invalid Type");
     }
 };
 
@@ -518,7 +518,7 @@ class RetType
           case Float: // will be converted to a Double
           case Double: return AsmJSModule::Return_Double;
         }
-        MOZ_ASSUME_UNREACHABLE("Unexpected return type");
+        MOZ_CRASH("Unexpected return type");
     }
     MIRType toMIRType() const {
         switch (which_) {
@@ -527,7 +527,7 @@ class RetType
           case Double: return MIRType_Double;
           case Float: return MIRType_Float32;
         }
-        MOZ_ASSUME_UNREACHABLE("Unexpected return type");
+        MOZ_CRASH("Unexpected return type");
     }
     bool operator==(RetType rhs) const { return which_ == rhs.which_; }
     bool operator!=(RetType rhs) const { return which_ != rhs.which_; }
@@ -592,7 +592,7 @@ class VarType
           case Double:  return MIRType_Double;
           case Float:   return MIRType_Float32;
         }
-        MOZ_ASSUME_UNREACHABLE("VarType can only be Int, Double or Float");
+        MOZ_CRASH("VarType can only be Int, Double or Float");
     }
     AsmJSCoercion toCoercion() const {
         switch(which_) {
@@ -600,7 +600,7 @@ class VarType
           case Double:  return AsmJS_ToNumber;
           case Float:   return AsmJS_FRound;
         }
-        MOZ_ASSUME_UNREACHABLE("VarType can only be Int, Double or Float");
+        MOZ_CRASH("VarType can only be Int, Double or Float");
     }
     static VarType FromCheckedType(Type type) {
         JS_ASSERT(type.isInt() || type.isMaybeDouble() || type.isFloatish());
@@ -626,7 +626,7 @@ operator<=(Type lhs, VarType rhs)
       case VarType::Double: return lhs.isDouble();
       case VarType::Float:  return lhs.isFloat();
     }
-    MOZ_ASSUME_UNREACHABLE("Unexpected rhs type");
+    MOZ_CRASH("Unexpected rhs type");
 }
 
 /*****************************************************************************/
@@ -722,23 +722,23 @@ bool operator!=(const Signature &lhs, const Signature &rhs)
 // Typed array utilities
 
 static Type
-TypedArrayLoadType(ArrayBufferView::ViewType viewType)
+TypedArrayLoadType(Scalar::Type viewType)
 {
     switch (viewType) {
-      case ArrayBufferView::TYPE_INT8:
-      case ArrayBufferView::TYPE_INT16:
-      case ArrayBufferView::TYPE_INT32:
-      case ArrayBufferView::TYPE_UINT8:
-      case ArrayBufferView::TYPE_UINT16:
-      case ArrayBufferView::TYPE_UINT32:
+      case Scalar::Int8:
+      case Scalar::Int16:
+      case Scalar::Int32:
+      case Scalar::Uint8:
+      case Scalar::Uint16:
+      case Scalar::Uint32:
         return Type::Intish;
-      case ArrayBufferView::TYPE_FLOAT32:
+      case Scalar::Float32:
         return Type::MaybeFloat;
-      case ArrayBufferView::TYPE_FLOAT64:
+      case Scalar::Float64:
         return Type::MaybeDouble;
       default:;
     }
-    MOZ_ASSUME_UNREACHABLE("Unexpected array type");
+    MOZ_CRASH("Unexpected array type");
 }
 
 enum NeedsBoundsCheck {
@@ -878,7 +878,7 @@ class MOZ_STACK_CLASS ModuleCompiler
             uint32_t funcIndex_;
             uint32_t funcPtrTableIndex_;
             uint32_t ffiIndex_;
-            ArrayBufferView::ViewType viewType_;
+            Scalar::Type viewType_;
             AsmJSMathBuiltinFunction mathBuiltinFunc_;
         } u;
 
@@ -918,7 +918,7 @@ class MOZ_STACK_CLASS ModuleCompiler
             JS_ASSERT(which_ == FFI);
             return u.ffiIndex_;
         }
-        ArrayBufferView::ViewType viewType() const {
+        Scalar::Type viewType() const {
             JS_ASSERT(which_ == ArrayView);
             return u.viewType_;
         }
@@ -1348,7 +1348,7 @@ class MOZ_STACK_CLASS ModuleCompiler
         global->u.ffiIndex_ = index;
         return globals_.putNew(varName, global);
     }
-    bool addArrayView(PropertyName *varName, ArrayBufferView::ViewType vt, PropertyName *fieldName) {
+    bool addArrayView(PropertyName *varName, Scalar::Type vt, PropertyName *fieldName) {
         Global *global = moduleLifo_.new_<Global>(Global::ArrayView);
         if (!global)
             return false;
@@ -1634,7 +1634,7 @@ class NumLit
             return VarType::Float;
           case NumLit::OutOfRangeInt:;
         }
-        MOZ_ASSUME_UNREACHABLE("Unexpected NumLit type");
+        MOZ_CRASH("Unexpected NumLit type");
     }
 };
 
@@ -1773,7 +1773,7 @@ IsLiteralInt(ModuleCompiler &m, ParseNode *pn, uint32_t *u32)
         return false;
     }
 
-    MOZ_ASSUME_UNREACHABLE("Bad literal type");
+    MOZ_CRASH("Bad literal type");
 }
 
 /*****************************************************************************/
@@ -2119,7 +2119,7 @@ class FunctionCompiler
         curBlock_->setSlot(info().localSlot(local.slot), def);
     }
 
-    MDefinition *loadHeap(ArrayBufferView::ViewType vt, MDefinition *ptr, NeedsBoundsCheck chk)
+    MDefinition *loadHeap(Scalar::Type vt, MDefinition *ptr, NeedsBoundsCheck chk)
     {
         if (inDeadCode())
             return nullptr;
@@ -2130,7 +2130,7 @@ class FunctionCompiler
         return load;
     }
 
-    void storeHeap(ArrayBufferView::ViewType vt, MDefinition *ptr, MDefinition *v, NeedsBoundsCheck chk)
+    void storeHeap(Scalar::Type vt, MDefinition *ptr, MDefinition *v, NeedsBoundsCheck chk)
     {
         if (inDeadCode())
             return;
@@ -2994,23 +2994,23 @@ CheckNewArrayView(ModuleCompiler &m, PropertyName *varName, ParseNode *newExpr)
         return m.failName(bufArg, "argument to array view constructor must be '%s'", bufferName);
 
     JSAtomState &names = m.cx()->names();
-    ArrayBufferView::ViewType type;
+    Scalar::Type type;
     if (field == names.Int8Array)
-        type = ArrayBufferView::TYPE_INT8;
+        type = Scalar::Int8;
     else if (field == names.Uint8Array)
-        type = ArrayBufferView::TYPE_UINT8;
+        type = Scalar::Uint8;
     else if (field == names.Int16Array)
-        type = ArrayBufferView::TYPE_INT16;
+        type = Scalar::Int16;
     else if (field == names.Uint16Array)
-        type = ArrayBufferView::TYPE_UINT16;
+        type = Scalar::Uint16;
     else if (field == names.Int32Array)
-        type = ArrayBufferView::TYPE_INT32;
+        type = Scalar::Int32;
     else if (field == names.Uint32Array)
-        type = ArrayBufferView::TYPE_UINT32;
+        type = Scalar::Uint32;
     else if (field == names.Float32Array)
-        type = ArrayBufferView::TYPE_FLOAT32;
+        type = Scalar::Float32;
     else if (field == names.Float64Array)
-        type = ArrayBufferView::TYPE_FLOAT64;
+        type = Scalar::Float64;
     else
         return m.fail(ctorExpr, "could not match typed array name");
 
@@ -3041,7 +3041,7 @@ CheckGlobalDotImport(ModuleCompiler &m, PropertyName *varName, ParseNode *initNo
           default:
             break;
         }
-        MOZ_ASSUME_UNREACHABLE("unexpected or uninitialized math builtin type");
+        MOZ_CRASH("unexpected or uninitialized math builtin type");
     }
 
     if (IsUseOfName(base, m.module().globalArgumentName())) {
@@ -3356,7 +3356,7 @@ FoldMaskedArrayIndex(FunctionCompiler &f, ParseNode **indexExpr, int32_t *mask,
 }
 
 static bool
-CheckArrayAccess(FunctionCompiler &f, ParseNode *elem, ArrayBufferView::ViewType *viewType,
+CheckArrayAccess(FunctionCompiler &f, ParseNode *elem, Scalar::Type *viewType,
                  MDefinition **def, NeedsBoundsCheck *needsBoundsCheck)
 {
     ParseNode *viewName = ElemBase(elem);
@@ -3461,7 +3461,7 @@ CheckArrayAccess(FunctionCompiler &f, ParseNode *elem, ArrayBufferView::ViewType
 static bool
 CheckLoadArray(FunctionCompiler &f, ParseNode *elem, MDefinition **def, Type *type)
 {
-    ArrayBufferView::ViewType viewType;
+    Scalar::Type viewType;
     MDefinition *pointerDef;
     NeedsBoundsCheck needsBoundsCheck;
     if (!CheckArrayAccess(f, elem, &viewType, &pointerDef, &needsBoundsCheck))
@@ -3475,7 +3475,7 @@ CheckLoadArray(FunctionCompiler &f, ParseNode *elem, MDefinition **def, Type *ty
 static bool
 CheckStoreArray(FunctionCompiler &f, ParseNode *lhs, ParseNode *rhs, MDefinition **def, Type *type)
 {
-    ArrayBufferView::ViewType viewType;
+    Scalar::Type viewType;
     MDefinition *pointerDef;
     NeedsBoundsCheck needsBoundsCheck;
     if (!CheckArrayAccess(f, lhs, &viewType, &pointerDef, &needsBoundsCheck))
@@ -3487,29 +3487,29 @@ CheckStoreArray(FunctionCompiler &f, ParseNode *lhs, ParseNode *rhs, MDefinition
         return false;
 
     switch (viewType) {
-      case ArrayBufferView::TYPE_INT8:
-      case ArrayBufferView::TYPE_INT16:
-      case ArrayBufferView::TYPE_INT32:
-      case ArrayBufferView::TYPE_UINT8:
-      case ArrayBufferView::TYPE_UINT16:
-      case ArrayBufferView::TYPE_UINT32:
+      case Scalar::Int8:
+      case Scalar::Int16:
+      case Scalar::Int32:
+      case Scalar::Uint8:
+      case Scalar::Uint16:
+      case Scalar::Uint32:
         if (!rhsType.isIntish())
             return f.failf(lhs, "%s is not a subtype of intish", rhsType.toChars());
         break;
-      case ArrayBufferView::TYPE_FLOAT32:
+      case Scalar::Float32:
         if (rhsType.isMaybeDouble())
             rhsDef = f.unary<MToFloat32>(rhsDef);
         else if (!rhsType.isFloatish())
             return f.failf(lhs, "%s is not a subtype of double? or floatish", rhsType.toChars());
         break;
-      case ArrayBufferView::TYPE_FLOAT64:
+      case Scalar::Float64:
         if (rhsType.isMaybeFloat())
             rhsDef = f.unary<MToDouble>(rhsDef);
         else if (!rhsType.isMaybeDouble())
             return f.failf(lhs, "%s is not a subtype of float? or double?", rhsType.toChars());
         break;
       default:
-        MOZ_ASSUME_UNREACHABLE("Unexpected view type");
+        MOZ_CRASH("Unexpected view type");
     }
 
     f.storeHeap(viewType, pointerDef, rhsDef, needsBoundsCheck);
@@ -3979,7 +3979,7 @@ CheckMathFRound(FunctionCompiler &f, ParseNode *callNode, RetType retType, MDefi
         return true;
     }
 
-    MOZ_ASSUME_UNREACHABLE("return value of fround is ignored");
+    MOZ_CRASH("return value of fround is ignored");
 }
 
 static bool
@@ -4023,7 +4023,7 @@ CheckMathBuiltinCall(FunctionCompiler &f, ParseNode *callNode, AsmJSMathBuiltinF
       case AsmJSMathBuiltin_log:    arity = 1; doubleCallee = AsmJSImm_LogD;   floatCallee = AsmJSImm_Invalid; break;
       case AsmJSMathBuiltin_pow:    arity = 2; doubleCallee = AsmJSImm_PowD;   floatCallee = AsmJSImm_Invalid; break;
       case AsmJSMathBuiltin_atan2:  arity = 2; doubleCallee = AsmJSImm_ATan2D; floatCallee = AsmJSImm_Invalid; break;
-      default: MOZ_ASSUME_UNREACHABLE("unexpected mathBuiltin function");
+      default: MOZ_CRASH("unexpected mathBuiltin function");
     }
 
     if (retType == RetType::Float && floatCallee == AsmJSImm_Invalid)
@@ -4311,7 +4311,7 @@ IsValidIntMultiplyConstant(ModuleCompiler &m, ParseNode *expr)
         return false;
     }
 
-    MOZ_ASSUME_UNREACHABLE("Bad literal");
+    MOZ_CRASH("Bad literal");
 }
 
 static bool
@@ -4527,7 +4527,7 @@ CheckBitwise(FunctionCompiler &f, ParseNode *bitwise, MDefinition **def, Type *t
       case PNK_LSH:    identityElement = 0;  onlyOnRight = true;  *type = Type::Signed;   break;
       case PNK_RSH:    identityElement = 0;  onlyOnRight = true;  *type = Type::Signed;   break;
       case PNK_URSH:   identityElement = 0;  onlyOnRight = true;  *type = Type::Unsigned; break;
-      default: MOZ_ASSUME_UNREACHABLE("not a bitwise op");
+      default: MOZ_CRASH("not a bitwise op");
     }
 
     uint32_t i;
@@ -4574,7 +4574,7 @@ CheckBitwise(FunctionCompiler &f, ParseNode *bitwise, MDefinition **def, Type *t
       case PNK_LSH:    *def = f.bitwise<MLsh>(lhsDef, rhsDef); break;
       case PNK_RSH:    *def = f.bitwise<MRsh>(lhsDef, rhsDef); break;
       case PNK_URSH:   *def = f.bitwise<MUrsh>(lhsDef, rhsDef); break;
-      default: MOZ_ASSUME_UNREACHABLE("not a bitwise op");
+      default: MOZ_CRASH("not a bitwise op");
     }
 
     return true;
@@ -6182,7 +6182,6 @@ FillArgumentArray(ModuleCompiler &m, const VarTypeVector &argTypes,
                 masm.canonicalizeDouble(ScratchDoubleReg);
                 masm.storeDouble(ScratchDoubleReg, dstAddr);
             }
-            break;
         }
     }
 }
@@ -6285,8 +6284,7 @@ GenerateFFIInterpreterExit(ModuleCompiler &m, const ModuleCompiler::ExitDescript
         masm.loadDouble(argv, ReturnDoubleReg);
         break;
       case RetType::Float:
-        MOZ_ASSUME_UNREACHABLE("Float32 shouldn't be returned from a FFI");
-        break;
+        MOZ_CRASH("Float32 shouldn't be returned from a FFI");
     }
 
     // Note: the caller is IonMonkey code which means there are no non-volatile
@@ -6510,8 +6508,7 @@ GenerateFFIIonExit(ModuleCompiler &m, const ModuleCompiler::ExitDescriptor &exit
         masm.convertValueToDouble(JSReturnOperand, ReturnDoubleReg, &oolConvert);
         break;
       case RetType::Float:
-        MOZ_ASSUME_UNREACHABLE("Float shouldn't be returned from a FFI");
-        break;
+        MOZ_CRASH("Float shouldn't be returned from a FFI");
     }
 
     Label done;
@@ -6579,7 +6576,7 @@ GenerateFFIIonExit(ModuleCompiler &m, const ModuleCompiler::ExitDescriptor &exit
             masm.loadDouble(Address(StackPointer, offsetToArgv), ReturnDoubleReg);
             break;
           default:
-            MOZ_ASSUME_UNREACHABLE("Unsupported convert type");
+            MOZ_CRASH("Unsupported convert type");
         }
 
         masm.jump(&done);
@@ -6752,7 +6749,7 @@ GenerateInterruptExit(ModuleCompiler &m, Label *throwLabel)
 
     // Pop resumePC into PC. Clobber HeapReg to make the jump and restore it
     // during jump delay slot.
-    JS_ASSERT(Imm16::isInSignedRange(AsmJSModule::heapGlobalDataOffset()));
+    JS_ASSERT(Imm16::IsInSignedRange(AsmJSModule::heapGlobalDataOffset()));
     masm.pop(HeapReg);
     masm.as_jr(HeapReg);
     masm.loadPtr(Address(GlobalReg, AsmJSModule::heapGlobalDataOffset()), HeapReg);

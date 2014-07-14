@@ -261,7 +261,7 @@ ComparePolicy::adjustInputs(TempAllocator &alloc, MInstruction *def)
             replace = MUnbox::New(alloc, in, MIRType_String, MUnbox::Infallible);
             break;
           default:
-            MOZ_ASSUME_UNREACHABLE("Unknown compare specialization");
+            MOZ_CRASH("Unknown compare specialization");
         }
 
         def->block()->insertBefore(def, replace);
@@ -746,7 +746,7 @@ StoreTypedArrayPolicy::adjustValueInput(TempAllocator &alloc, MInstruction *ins,
         value = boxAt(alloc, ins, value);
         break;
       default:
-        MOZ_ASSUME_UNREACHABLE("Unexpected type");
+        MOZ_CRASH("Unexpected type");
     }
 
     if (value != curValue) {
@@ -761,22 +761,22 @@ StoreTypedArrayPolicy::adjustValueInput(TempAllocator &alloc, MInstruction *ins,
               value->type() == MIRType_Value);
 
     switch (arrayType) {
-      case ScalarTypeDescr::TYPE_INT8:
-      case ScalarTypeDescr::TYPE_UINT8:
-      case ScalarTypeDescr::TYPE_INT16:
-      case ScalarTypeDescr::TYPE_UINT16:
-      case ScalarTypeDescr::TYPE_INT32:
-      case ScalarTypeDescr::TYPE_UINT32:
+      case Scalar::Int8:
+      case Scalar::Uint8:
+      case Scalar::Int16:
+      case Scalar::Uint16:
+      case Scalar::Int32:
+      case Scalar::Uint32:
         if (value->type() != MIRType_Int32) {
             value = MTruncateToInt32::New(alloc, value);
             ins->block()->insertBefore(ins, value->toInstruction());
         }
         break;
-      case ScalarTypeDescr::TYPE_UINT8_CLAMPED:
+      case Scalar::Uint8Clamped:
         // IonBuilder should have inserted ClampToUint8.
         JS_ASSERT(value->type() == MIRType_Int32);
         break;
-      case ScalarTypeDescr::TYPE_FLOAT32:
+      case Scalar::Float32:
         if (LIRGenerator::allowFloat32Optimizations()) {
             if (value->type() != MIRType_Float32) {
                 value = MToFloat32::New(alloc, value);
@@ -786,14 +786,14 @@ StoreTypedArrayPolicy::adjustValueInput(TempAllocator &alloc, MInstruction *ins,
         }
         // Fallthrough: if the LIRGenerator cannot directly store Float32, it will expect the
         // stored value to be a double.
-      case ScalarTypeDescr::TYPE_FLOAT64:
+      case Scalar::Float64:
         if (value->type() != MIRType_Double) {
             value = MToDouble::New(alloc, value);
             ins->block()->insertBefore(ins, value->toInstruction());
         }
         break;
       default:
-        MOZ_ASSUME_UNREACHABLE("Invalid array type");
+        MOZ_CRASH("Invalid array type");
     }
 
     if (value != curValue)

@@ -183,10 +183,6 @@ VARIABLES = {
         disabled.
         """, 'binaries'),
 
-    'EXPORT_LIBRARY': (bool, bool,
-        """Install the library to the static libraries folder.
-        """, None),
-
     'EXTRA_COMPONENTS': (StrictOrderingOnAppendList, list,
         """Additional component files to distribute.
 
@@ -415,6 +411,14 @@ VARIABLES = {
         If the configuration token ``BIN_SUFFIX`` is set, its value will be
         automatically appended to each name. If a name already ends with
         ``BIN_SUFFIX``, the name will remain unchanged.
+        """, 'binaries'),
+
+    'SONAME': (unicode, unicode,
+        """The soname of the shared object currently being linked
+
+        soname is the "logical name" of a shared object, often used to provide
+        version backwards compatibility. This variable makes sense only for
+        shared objects, and is supported only on some unix platforms.
         """, 'binaries'),
 
     'HOST_SIMPLE_PROGRAMS': (StrictOrderingOnAppendList, list,

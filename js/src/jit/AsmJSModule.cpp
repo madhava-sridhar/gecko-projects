@@ -374,7 +374,7 @@ AsmJSModule::finish(ExclusiveContext *cx, TokenStream &tokenStream, MacroAssembl
             if (!staticLinkData_.relativeLinks.append(link))
                 return false;
 
-            labelOffset = Assembler::extractCodeLabelOffset(code_ + patchAtOffset);
+            labelOffset = Assembler::ExtractCodeLabelOffset(code_ + patchAtOffset);
         }
     }
 
@@ -399,7 +399,7 @@ AsmJSModule::finish(ExclusiveContext *cx, TokenStream &tokenStream, MacroAssembl
         RelativeLink link(RelativeLink::InstructionImmediate);
         link.patchAtOffset = masm.longJump(i);
         InstImm *inst = (InstImm *)(code_ + masm.longJump(i));
-        link.targetOffset = Assembler::extractLuiOriValue(inst, inst->next()) - (uint32_t)code_;
+        link.targetOffset = Assembler::ExtractLuiOriValue(inst, inst->next()) - (uint32_t)code_;
         if (!staticLinkData_.relativeLinks.append(link))
             return false;
     }
@@ -576,8 +576,7 @@ AddressOf(AsmJSImmKind kind, ExclusiveContext *cx)
         break;
     }
 
-    MOZ_ASSUME_UNREACHABLE("Bad AsmJSImmKind");
-    return nullptr;
+    MOZ_CRASH("Bad AsmJSImmKind");
 }
 
 void
@@ -597,12 +596,12 @@ AsmJSModule::staticallyLink(ExclusiveContext *cx)
         if (link.isRawPointerPatch())
             *(uint8_t **)(patchAt) = target;
         else
-            Assembler::patchInstructionImmediate(patchAt, PatchedImmPtr(target));
+            Assembler::PatchInstructionImmediate(patchAt, PatchedImmPtr(target));
     }
 
     for (size_t i = 0; i < staticLinkData_.absoluteLinks.length(); i++) {
         AbsoluteLink link = staticLinkData_.absoluteLinks[i];
-        Assembler::patchDataWithValueCheck(CodeLocationLabel(code_ + link.patchAt.offset()),
+        Assembler::PatchDataWithValueCheck(CodeLocationLabel(code_ + link.patchAt.offset()),
                                            PatchedImmPtr(AddressOf(link.target, cx)),
                                            PatchedImmPtr((void*)-1));
     }
@@ -642,7 +641,7 @@ AsmJSModule::initHeap(Handle<ArrayBufferObject*> heap, JSContext *cx)
 #elif defined(JS_CODEGEN_ARM) || defined(JS_CODEGEN_MIPS)
     uint32_t heapLength = heap->byteLength();
     for (unsigned i = 0; i < heapAccesses_.length(); i++) {
-        jit::Assembler::updateBoundsCheck(heapLength,
+        jit::Assembler::UpdateBoundsCheck(heapLength,
                                           (jit::Instruction*)(heapAccesses_[i].offset() + code_));
     }
 #endif
@@ -652,11 +651,11 @@ void
 AsmJSModule::restoreToInitialState(ArrayBufferObject *maybePrevBuffer, ExclusiveContext *cx)
 {
 #ifdef DEBUG
-    // Put the absolute links back to -1 so patchDataWithValueCheck assertions
+    // Put the absolute links back to -1 so PatchDataWithValueCheck assertions
     // in staticallyLink are valid.
     for (size_t i = 0; i < staticLinkData_.absoluteLinks.length(); i++) {
         AbsoluteLink link = staticLinkData_.absoluteLinks[i];
-        Assembler::patchDataWithValueCheck(CodeLocationLabel(code_ + link.patchAt.offset()),
+        Assembler::PatchDataWithValueCheck(CodeLocationLabel(code_ + link.patchAt.offset()),
                                            PatchedImmPtr((void*)-1),
                                            PatchedImmPtr(AddressOf(link.target, cx)));
     }
@@ -1273,10 +1272,10 @@ AsmJSModule::protectCode(JSRuntime *rt) const
 #if defined(XP_WIN)
     DWORD oldProtect;
     if (!VirtualProtect(codeBase(), functionBytes(), PAGE_NOACCESS, &oldProtect))
-        MOZ_CRASH();
+        MOZ_CRASH("PAGE_NOACESS failed");
 #else  // assume Unix
     if (mprotect(codeBase(), functionBytes(), PROT_NONE))
-        MOZ_CRASH();
+        MOZ_CRASH("PROT_NONE");
 #endif
 }
 
@@ -1294,10 +1293,10 @@ AsmJSModule::unprotectCode(JSRuntime *rt) const
 #if defined(XP_WIN)
     DWORD oldProtect;
     if (!VirtualProtect(codeBase(), functionBytes(), PAGE_EXECUTE_READWRITE, &oldProtect))
-        MOZ_CRASH();
+        MOZ_CRASH("PAGE_EXECUTE_READWRITE failed");
 #else  // assume Unix
     if (mprotect(codeBase(), functionBytes(), PROT_READ | PROT_WRITE | PROT_EXEC))
-        MOZ_CRASH();
+        MOZ_CRASH("PROT_READ | PROT_WRITE | PROT_EXEC failed");
 #endif
 }
 

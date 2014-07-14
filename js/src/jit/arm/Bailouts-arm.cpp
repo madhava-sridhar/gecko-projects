@@ -20,9 +20,9 @@ namespace jit {
 class BailoutStack
 {
     uintptr_t frameClassId_;
-    // This is pushed in the bailout handler.  Both entry points into the handler
+    // This is pushed in the bailout handler. Both entry points into the handler
     // inserts their own value int lr, which is then placed onto the stack along
-    // with frameClassId_ above.  This should be migrated to ip.
+    // with frameClassId_ above. This should be migrated to ip.
   public:
     union {
         uintptr_t frameSize_;
@@ -84,7 +84,7 @@ IonBailoutIterator::IonBailoutIterator(const JitActivationIterator &activations,
     switch (mode_) {
       case SequentialExecution: topIonScript_ = script()->ionScript(); break;
       case ParallelExecution: topIonScript_ = script()->parallelIonScript(); break;
-      default: MOZ_ASSUME_UNREACHABLE("No such execution mode");
+      default: MOZ_CRASH("No such execution mode");
     }
 
     if (bailout->frameClass() == FrameSizeClass::None()) {

@@ -406,6 +406,7 @@ var DebuggerServer = {
     this.registerModule("devtools/server/actors/eventlooplag");
     this.registerModule("devtools/server/actors/layout");
     this.registerModule("devtools/server/actors/csscoverage");
+    this.registerModule("devtools/server/actors/monitor");
     if ("nsIProfiler" in Ci) {
       this.addActors("resource://gre/modules/devtools/server/actors/profiler.js");
     }
@@ -1119,6 +1120,12 @@ DebuggerServerConnection.prototype = {
    */
   cancelForwarding: function(aPrefix) {
     this._forwardingPrefixes.delete(aPrefix);
+  },
+
+  sendActorEvent: function (actorID, eventName, event) {
+    event.from = actorID;
+    event.type = eventName;
+    this.send(event);
   },
 
   // Transport hooks.

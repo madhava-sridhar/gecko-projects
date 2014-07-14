@@ -139,7 +139,7 @@ class MacroAssembler : public MacroAssemblerSpecific
             } else if (type_.isAnyObject()) {
                 mirType = MIRType_Object;
             } else {
-                MOZ_ASSUME_UNREACHABLE("Unknown conversion to mirtype");
+                MOZ_CRASH("Unknown conversion to mirtype");
             }
 
             if (mirType == MIRType_Double)
@@ -341,7 +341,7 @@ class MacroAssembler : public MacroAssemblerSpecific
           case MIRType_MagicIsConstructing:
           case MIRType_MagicHole: return branchTestMagic(cond, val, label);
           default:
-            MOZ_ASSUME_UNREACHABLE("Bad MIRType");
+            MOZ_CRASH("Bad MIRType");
         }
     }
 
@@ -708,35 +708,35 @@ class MacroAssembler : public MacroAssemblerSpecific
     }
 
     template<typename T>
-    void loadFromTypedArray(int arrayType, const T &src, AnyRegister dest, Register temp, Label *fail);
+    void loadFromTypedArray(Scalar::Type arrayType, const T &src, AnyRegister dest, Register temp, Label *fail);
 
     template<typename T>
-    void loadFromTypedArray(int arrayType, const T &src, const ValueOperand &dest, bool allowDouble,
+    void loadFromTypedArray(Scalar::Type arrayType, const T &src, const ValueOperand &dest, bool allowDouble,
                             Register temp, Label *fail);
 
     template<typename S, typename T>
-    void storeToTypedIntArray(int arrayType, const S &value, const T &dest) {
+    void storeToTypedIntArray(Scalar::Type arrayType, const S &value, const T &dest) {
         switch (arrayType) {
-          case ScalarTypeDescr::TYPE_INT8:
-          case ScalarTypeDescr::TYPE_UINT8:
-          case ScalarTypeDescr::TYPE_UINT8_CLAMPED:
+          case Scalar::Int8:
+          case Scalar::Uint8:
+          case Scalar::Uint8Clamped:
             store8(value, dest);
             break;
-          case ScalarTypeDescr::TYPE_INT16:
-          case ScalarTypeDescr::TYPE_UINT16:
+          case Scalar::Int16:
+          case Scalar::Uint16:
             store16(value, dest);
             break;
-          case ScalarTypeDescr::TYPE_INT32:
-          case ScalarTypeDescr::TYPE_UINT32:
+          case Scalar::Int32:
+          case Scalar::Uint32:
             store32(value, dest);
             break;
           default:
-            MOZ_ASSUME_UNREACHABLE("Invalid typed array type");
+            MOZ_CRASH("Invalid typed array type");
         }
     }
 
-    void storeToTypedFloatArray(int arrayType, FloatRegister value, const BaseIndex &dest);
-    void storeToTypedFloatArray(int arrayType, FloatRegister value, const Address &dest);
+    void storeToTypedFloatArray(Scalar::Type arrayType, FloatRegister value, const BaseIndex &dest);
+    void storeToTypedFloatArray(Scalar::Type arrayType, FloatRegister value, const Address &dest);
 
     Register extractString(const Address &address, Register scratch) {
         return extractObject(address, scratch);
@@ -902,7 +902,7 @@ class MacroAssembler : public MacroAssemblerSpecific
         // be unset if the code never needed to push its JitCode*.
         if (hasEnteredExitFrame()) {
             exitCodePatch_.fixup(this);
-            patchDataWithValueCheck(CodeLocationLabel(code, exitCodePatch_),
+            PatchDataWithValueCheck(CodeLocationLabel(code, exitCodePatch_),
                                     ImmPtr(code),
                                     ImmPtr((void*)-1));
         }
@@ -1159,7 +1159,7 @@ class MacroAssembler : public MacroAssemblerSpecific
         switch (executionMode) {
           case SequentialExecution: return &sequentialFailureLabel_;
           case ParallelExecution: return &parallelFailureLabel_;
-          default: MOZ_ASSUME_UNREACHABLE("Unexpected execution mode");
+          default: MOZ_CRASH("Unexpected execution mode");
         }
     }
 
@@ -1446,7 +1446,7 @@ JSOpToDoubleCondition(JSOp op)
       case JSOP_GE:
         return Assembler::DoubleGreaterThanOrEqual;
       default:
-        MOZ_ASSUME_UNREACHABLE("Unexpected comparison operation");
+        MOZ_CRASH("Unexpected comparison operation");
     }
 }
 
@@ -1473,7 +1473,7 @@ JSOpToCondition(JSOp op, bool isSigned)
           case JSOP_GE:
             return Assembler::GreaterThanOrEqual;
           default:
-            MOZ_ASSUME_UNREACHABLE("Unrecognized comparison operation");
+            MOZ_CRASH("Unrecognized comparison operation");
         }
     } else {
         switch (op) {
@@ -1492,7 +1492,7 @@ JSOpToCondition(JSOp op, bool isSigned)
           case JSOP_GE:
             return Assembler::AboveOrEqual;
           default:
-            MOZ_ASSUME_UNREACHABLE("Unrecognized comparison operation");
+            MOZ_CRASH("Unrecognized comparison operation");
         }
     }
 }

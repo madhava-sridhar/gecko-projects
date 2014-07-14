@@ -468,7 +468,7 @@ jit::RequestInterruptForIonCode(JSRuntime *rt, JSRuntime::InterruptMode mode)
         break;
 
       default:
-        MOZ_ASSUME_UNREACHABLE("Bad interrupt mode");
+        MOZ_CRASH("Bad interrupt mode");
     }
 }
 
@@ -1136,7 +1136,7 @@ IonScript::getSafepointIndex(uint32_t disp) const
         }
     }
 
-    MOZ_ASSUME_UNREACHABLE("displacement not found.");
+    MOZ_CRASH("displacement not found.");
 }
 
 const OsiIndex *
@@ -1150,7 +1150,7 @@ IonScript::getOsiIndex(uint32_t disp) const
             return it;
     }
 
-    MOZ_ASSUME_UNREACHABLE("Failed to find OSI point return address");
+    MOZ_CRASH("Failed to find OSI point return address");
 }
 
 const OsiIndex *
@@ -1650,7 +1650,7 @@ GenerateLIR(MIRGenerator *mir)
           }
 
           default:
-            MOZ_ASSUME_UNREACHABLE("Bad regalloc");
+            MOZ_CRASH("Bad regalloc");
         }
 
         if (mir->shouldCancel("Allocate Registers"))
@@ -2541,7 +2541,7 @@ InvalidateActivation(FreeOp *fop, uint8_t *jitTop, bool invalidateAll)
             break;
           case JitFrame_Unwound_IonJS:
           case JitFrame_Unwound_BaselineStub:
-            MOZ_ASSUME_UNREACHABLE("invalid");
+            MOZ_CRASH("invalid");
           case JitFrame_Unwound_Rectifier:
             IonSpew(IonSpew_Invalidate, "#%d unwound rectifier frame @ %p", frameno, it.fp());
             break;
@@ -2621,14 +2621,14 @@ InvalidateActivation(FreeOp *fop, uint8_t *jitTop, bool invalidateAll)
         CodeLocationLabel dataLabelToMunge(it.returnAddressToFp());
         ptrdiff_t delta = ionScript->invalidateEpilogueDataOffset() -
                           (it.returnAddressToFp() - ionCode->raw());
-        Assembler::patchWrite_Imm32(dataLabelToMunge, Imm32(delta));
+        Assembler::PatchWrite_Imm32(dataLabelToMunge, Imm32(delta));
 
         CodeLocationLabel osiPatchPoint = SafepointReader::InvalidationPatchPoint(ionScript, si);
         CodeLocationLabel invalidateEpilogue(ionCode, CodeOffsetLabel(ionScript->invalidateEpilogueOffset()));
 
         IonSpew(IonSpew_Invalidate, "   ! Invalidate ionScript %p (ref %u) -> patching osipoint %p",
                 ionScript, ionScript->refcount(), (void *) osiPatchPoint.raw());
-        Assembler::patchWrite_NearCall(osiPatchPoint, invalidateEpilogue);
+        Assembler::PatchWrite_NearCall(osiPatchPoint, invalidateEpilogue);
     }
 
     IonSpew(IonSpew_Invalidate, "END invalidating activation");
@@ -2785,7 +2785,7 @@ jit::Invalidate(JSContext *cx, JSScript *script, ExecutionMode mode, bool resetU
             return false;
         break;
       default:
-        MOZ_ASSUME_UNREACHABLE("No such execution mode");
+        MOZ_CRASH("No such execution mode");
     }
 
     Invalidate(cx, scripts, resetUses, cancelOffThread);
@@ -2838,7 +2838,7 @@ jit::FinishInvalidation(FreeOp *fop, JSScript *script)
         return;
 
       default:
-        MOZ_ASSUME_UNREACHABLE("bad execution mode");
+        MOZ_CRASH("bad execution mode");
     }
 }
 
@@ -2899,10 +2899,10 @@ jit::ForbidCompilation(JSContext *cx, JSScript *script, ExecutionMode mode)
         return;
 
       default:
-        MOZ_ASSUME_UNREACHABLE("No such execution mode");
+        MOZ_CRASH("No such execution mode");
     }
 
-    MOZ_ASSUME_UNREACHABLE("No such execution mode");
+    MOZ_CRASH("No such execution mode");
 }
 
 AutoFlushICache *
