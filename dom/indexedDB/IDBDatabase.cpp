@@ -835,7 +835,7 @@ IDBDatabase::ExpireFileActors(bool aExpireAll)
       MOZ_ASSERT(aKey);
       MOZ_ASSERT(aValue);
 
-      const bool expiringAll = reinterpret_cast<bool>(aClosure);
+      const bool expiringAll = *static_cast<bool*>(aClosure);
 
       bool shouldExpire = expiringAll;
       if (!shouldExpire) {
@@ -859,8 +859,7 @@ IDBDatabase::ExpireFileActors(bool aExpireAll)
   };
 
   if (mBackgroundActor && mFileActors.Count()) {
-    mFileActors.Enumerate(&Helper::MaybeExpire,
-                          reinterpret_cast<void*>(aExpireAll));
+    mFileActors.Enumerate(&Helper::MaybeExpire, &aExpireAll);
     if (aExpireAll) {
       mFileActors.Clear();
     }
