@@ -300,6 +300,7 @@
 @BINPATH@/components/spellchecker.xpt
 @BINPATH@/components/storage.xpt
 @BINPATH@/components/toolkit_finalizationwitness.xpt
+@BINPATH@/components/toolkit_formautofill.xpt
 @BINPATH@/components/toolkit_osfile.xpt
 @BINPATH@/components/toolkitprofile.xpt
 #ifdef MOZ_ENABLE_XREMOTE
@@ -410,6 +411,8 @@
 #endif
 @BINPATH@/components/nsUpdateTimerManager.manifest
 @BINPATH@/components/nsUpdateTimerManager.js
+@BINPATH@/components/addoncompat.manifest
+@BINPATH@/components/multiprocessShims.js
 @BINPATH@/components/pluginGlue.manifest
 @BINPATH@/browser/components/nsSessionStore.manifest
 @BINPATH@/browser/components/nsSessionStartup.js

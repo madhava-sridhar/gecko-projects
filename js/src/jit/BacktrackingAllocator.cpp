@@ -776,27 +776,26 @@ BacktrackingAllocator::tryAllocateRegister(PhysicalRegister &r, LiveInterval *in
         AllocatedRange range(interval, interval->getRange(i)), existing;
         for (size_t a = 0; a < r.reg.numAliased(); a++) {
             PhysicalRegister &rAlias = registers[r.reg.aliased(a).code()];
-            if (rAlias.allocations.contains(range, &existing)) {
-                if (existing.interval->hasVreg()) {
-                    if (IonSpewEnabled(IonSpew_RegAlloc)) {
+            if (!rAlias.allocations.contains(range, &existing))
+                continue;
+            if (existing.interval->hasVreg()) {
+                if (IonSpewEnabled(IonSpew_RegAlloc)) {
                     IonSpew(IonSpew_RegAlloc, "  %s collides with v%u[%u] %s [weight %lu]",
+                            rAlias.reg.name(), existing.interval->vreg(),
+                            existing.interval->index(),
                             existing.range->toString(),
-                                rAlias.reg.name(), existing.interval->vreg(),
-                                existing.interval->index(),
-                                existing.range->toString(),
-                                computeSpillWeight(existing.interval));
-                    }
-                    if (!*pconflicting || computeSpillWeight(existing.interval) < computeSpillWeight(*pconflicting))
-                        *pconflicting = existing.interval;
-                } else {
-                    if (IonSpewEnabled(IonSpew_RegAlloc)) {
-                    IonSpew(IonSpew_RegAlloc, "  %s collides with fixed use %s",
-                                rAlias.reg.name(), existing.range->toString());
-                    }
-                    *pfixed = true;
+                            computeSpillWeight(existing.interval));
                 }
-                return true;
+                if (!*pconflicting || computeSpillWeight(existing.interval) < computeSpillWeight(*pconflicting))
+                    *pconflicting = existing.interval;
+            } else {
+                if (IonSpewEnabled(IonSpew_RegAlloc)) {
+                    IonSpew(IonSpew_RegAlloc, "  %s collides with fixed use %s",
+                            rAlias.reg.name(), existing.range->toString());
+                }
+                *pfixed = true;
             }
+            return true;
         }
     }
 
@@ -1267,7 +1266,7 @@ BacktrackingAllocator::populateSafepoints()
                     break;
 #endif
                   default:
-                    MOZ_CRASH("Bad register type");
+                    MOZ_ASSUME_UNREACHABLE("Bad register type");
                 }
             }
         }
@@ -1506,7 +1505,7 @@ BacktrackingAllocator::computeSpillWeight(const LiveInterval *interval)
 
           default:
             // Note: RECOVERED_INPUT will not appear in UsePositionIterator.
-            MOZ_CRASH("Bad use");
+            MOZ_ASSUME_UNREACHABLE("Bad use");
         }
     }
 

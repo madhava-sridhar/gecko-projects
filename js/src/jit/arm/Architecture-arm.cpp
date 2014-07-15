@@ -14,6 +14,7 @@
 #include <unistd.h>
 
 #include "jit/arm/Assembler-arm.h"
+#include "jit/RegisterSets.h"
 
 #define HWCAP_USE_HARDFP_ABI (1 << 27)
 
@@ -352,8 +353,18 @@ VFPRegister::getRegisterDumpOffsetInBytes()
         return id() * sizeof(float);
     if (isDouble())
         return id() * sizeof(double);
-    MOZ_CRASH("Unexpected register dump offset");
+    MOZ_ASSUME_UNREACHABLE();
 }
+
+uint32_t
+FloatRegisters::ActualTotalPhys()
+{
+    if (Has32DP())
+        return 32;
+    return 16;
+}
+
 
 } // namespace jit
 } // namespace js
+

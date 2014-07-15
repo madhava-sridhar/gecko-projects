@@ -135,7 +135,9 @@ private:
       for (CERTCertListNode* n = CERT_LIST_HEAD(candidates);
            !CERT_LIST_END(n, candidates); n = CERT_LIST_NEXT(n)) {
         bool keepGoing;
-        SECStatus srv = checker.Check(n->cert->derCert, keepGoing);
+        SECStatus srv = checker.Check(n->cert->derCert,
+                                      nullptr/*additionalNameConstraints*/,
+                                      keepGoing);
         if (srv != SECSuccess) {
           return SECFailure;
         }
@@ -148,13 +150,6 @@ private:
     return SECSuccess;
   }
 
-  SECStatus VerifySignedData(const CERTSignedData& signedData,
-                             const SECItem& subjectPublicKeyInfo)
-  {
-    return ::mozilla::pkix::VerifySignedData(signedData, subjectPublicKeyInfo,
-                                             nullptr);
-  }
-
   SECStatus CheckRevocation(EndEntityOrCA, const CertID&, PRTime,
                             /*optional*/ const SECItem*,
                             /*optional*/ const SECItem*)
@@ -165,6 +160,21 @@ private:
   virtual SECStatus IsChainValid(const DERArray&)
   {
     return SECSuccess;
+  }
+
+  SECStatus VerifySignedData(const SignedDataWithSignature& signedData,
+                             const SECItem& subjectPublicKeyInfo)
+  {
+    return ::mozilla::pkix::VerifySignedData(signedData, subjectPublicKeyInfo,
+                                             nullptr);
+  }
+
+  virtual SECStatus DigestBuf(const SECItem& item, /*out*/ uint8_t *digestBuf,
+                              size_t digestBufLen)
+  {
+    ADD_FAILURE();
+    PR_SetError(SEC_ERROR_LIBRARY_FAILURE, 0);
+    return SECFailure;
   }
 
   // We hold references to CERTCertificates in the cert chain tail so that we

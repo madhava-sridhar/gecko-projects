@@ -283,7 +283,7 @@ SizeOfFramePrefix(FrameType type)
       case JitFrame_Exit:
         return IonExitFrameLayout::Size();
       default:
-        MOZ_CRASH("unknown frame type");
+        MOZ_ASSUME_UNREACHABLE("unknown frame type");
     }
 }
 
@@ -353,9 +353,19 @@ JitFrameIterator::machineState() const
 
     uint8_t *spillAlign = alignDoubleSpillWithOffset(reinterpret_cast<uint8_t *>(spill), 0);
 
-    double *floatSpill = reinterpret_cast<double *>(spillAlign);
-    for (FloatRegisterBackwardIterator iter(reader.allFloatSpills()); iter.more(); iter++)
-        machine.setRegisterLocation(*iter, --floatSpill);
+    char *floatSpill = reinterpret_cast<char *>(spillAlign);
+    FloatRegisterSet fregs = reader.allFloatSpills();
+    fregs = fregs.reduceSetForPush();
+    for (FloatRegisterBackwardIterator iter(fregs); iter.more(); iter++) {
+        floatSpill -= (*iter).size();
+        for (uint32_t a = 0; a < (*iter).numAlignedAliased(); a++) {
+            // Only say that registers that actually start here start here.
+            // e.g. d0 should not start at s1, only at s0.
+            FloatRegister ftmp;
+            (*iter).alignedAliased(a, &ftmp);
+            machine.setRegisterLocation(ftmp, (double*)floatSpill);
+        }
+    }
 
     return machine;
 }
@@ -454,7 +464,7 @@ HandleExceptionIon(JSContext *cx, const InlineFrameIterator &frame, ResumeFromEx
             break;
 
           default:
-            MOZ_CRASH("Unexpected try note");
+            MOZ_ASSUME_UNREACHABLE("Unexpected try note");
         }
     }
 }
@@ -515,7 +525,7 @@ HandleExceptionBaseline(JSContext *cx, const JitFrameIterator &frame, ResumeFrom
             return;
 
           default:
-            MOZ_CRASH("Invalid trap status");
+            MOZ_ASSUME_UNREACHABLE("Invalid trap status");
         }
     }
 
@@ -594,7 +604,7 @@ HandleExceptionBaseline(JSContext *cx, const JitFrameIterator &frame, ResumeFrom
             break;
 
           default:
-            MOZ_CRASH("Invalid try note");
+            MOZ_ASSUME_UNREACHABLE("Invalid try note");
         }
     }
 
@@ -829,7 +839,7 @@ MarkCalleeToken(JSTracer *trc, CalleeToken token)
         return CalleeToToken(script);
       }
       default:
-        MOZ_CRASH("unknown callee token type");
+        MOZ_ASSUME_UNREACHABLE("unknown callee token type");
     }
 }
 
@@ -1033,7 +1043,7 @@ JitActivationIterator::jitStackRange(uintptr_t *&min, uintptr_t *&end)
         if (exitFrame->isWrapperExit() && f->outParam == Type_Handle) {
             switch (f->outParamRootType) {
               case VMFunction::RootNone:
-                MOZ_CRASH("Handle outparam must have root type");
+                MOZ_ASSUME_UNREACHABLE("Handle outparam must have root type");
               case VMFunction::RootObject:
               case VMFunction::RootString:
               case VMFunction::RootPropertyName:
@@ -1221,7 +1231,7 @@ MarkJitExitFrame(JSTracer *trc, const JitFrameIterator &frame)
     if (f->outParam == Type_Handle) {
         switch (f->outParamRootType) {
           case VMFunction::RootNone:
-            MOZ_CRASH("Handle outparam must have root type");
+            MOZ_ASSUME_UNREACHABLE("Handle outparam must have root type");
           case VMFunction::RootObject:
             gc::MarkObjectRoot(trc, footer->outParam<JSObject *>(), "ion-vm-out");
             break;
@@ -1286,14 +1296,14 @@ MarkJitActivation(JSTracer *trc, const JitActivationIterator &activations)
             MarkIonJSFrame(trc, frames);
             break;
           case JitFrame_Unwound_IonJS:
-            MOZ_CRASH("JitFrame_Unwound_IonJS");
+            MOZ_ASSUME_UNREACHABLE("invalid");
           case JitFrame_Rectifier:
             MarkRectifierFrame(trc, frames);
             break;
           case JitFrame_Unwound_Rectifier:
             break;
           default:
-            MOZ_CRASH("unexpected frame type");
+            MOZ_ASSUME_UNREACHABLE("unexpected frame type");
         }
     }
 }
@@ -1515,7 +1525,7 @@ FromTypedPayload(JSValueType type, uintptr_t payload)
       case JSVAL_TYPE_OBJECT:
         return FromObjectPayload(payload);
       default:
-        MOZ_CRASH("unexpected type - needs payload");
+        MOZ_ASSUME_UNREACHABLE("unexpected type - needs payload");
     }
 }
 
@@ -1603,7 +1613,7 @@ SnapshotIterator::allocationValue(const RValueAllocation &alloc)
           case JSVAL_TYPE_OBJECT:
             return FromObjectPayload(fromStack(alloc.stackOffset2()));
           default:
-            MOZ_CRASH("Unexpected type");
+            MOZ_ASSUME_UNREACHABLE("Unexpected type");
         }
       }
 
@@ -1659,7 +1669,7 @@ SnapshotIterator::allocationValue(const RValueAllocation &alloc)
         return fromInstructionResult(alloc.index());
 
       default:
-        MOZ_CRASH("huh?");
+        MOZ_ASSUME_UNREACHABLE("huh?");
     }
 }
 
@@ -1770,10 +1780,10 @@ JitFrameIterator::ionScriptFromCalleeToken() const
           case ParallelExecution:
             return script()->parallelIonScript();
           default:
-            MOZ_CRASH("No such execution mode");
+            MOZ_ASSUME_UNREACHABLE("No such execution mode");
         }
       default:
-        MOZ_CRASH("unknown callee token type");
+        MOZ_ASSUME_UNREACHABLE("unknown callee token type");
     }
 }
 
@@ -1962,15 +1972,22 @@ InlineFrameIterator::isFunctionFrame() const
 
 MachineState
 MachineState::FromBailout(mozilla::Array<uintptr_t, Registers::Total> &regs,
-                          mozilla::Array<double, FloatRegisters::Total> &fpregs)
+                          mozilla::Array<double, FloatRegisters::TotalPhys> &fpregs)
 {
     MachineState machine;
 
     for (unsigned i = 0; i < Registers::Total; i++)
         machine.setRegisterLocation(Register::FromCode(i), &regs[i]);
+#ifdef JS_CODEGEN_ARM
+    float *fbase = (float*)&fpregs[0];
+    for (unsigned i = 0; i < FloatRegisters::TotalDouble; i++)
+        machine.setRegisterLocation(FloatRegister(i, FloatRegister::Double), &fpregs[i]);
+    for (unsigned i = 0; i < FloatRegisters::TotalSingle; i++)
+        machine.setRegisterLocation(FloatRegister(i, FloatRegister::Single), (double*)&fbase[i]);
+#else
     for (unsigned i = 0; i < FloatRegisters::Total; i++)
         machine.setRegisterLocation(FloatRegister::FromCode(i), &fpregs[i]);
-
+#endif
     return machine;
 }
 

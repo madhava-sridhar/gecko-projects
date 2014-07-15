@@ -9,6 +9,7 @@
 
 #include "jsobj.h"
 
+#include "builtin/TypedObject.h"
 #include "vm/ArrayObject.h"
 #include "vm/DateObject.h"
 #include "vm/NumberObject.h"
@@ -1019,7 +1020,7 @@ ObjectClassIs(HandleObject obj, ESClassValue classValue, JSContext *cx)
         return obj->is<ArrayBufferObject>() || obj->is<SharedArrayBufferObject>();
       case ESClass_Date: return obj->is<DateObject>();
     }
-    MOZ_ASSUME_UNREACHABLE("bad classValue");
+    MOZ_CRASH("bad classValue");
 }
 
 inline bool

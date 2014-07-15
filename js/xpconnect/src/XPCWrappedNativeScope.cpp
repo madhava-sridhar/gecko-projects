@@ -13,6 +13,7 @@
 #include "nsPrincipal.h"
 #include "mozilla/MemoryReporting.h"
 #include "mozilla/Preferences.h"
+#include "nsIAddonInterposition.h"
 
 #include "mozilla/dom/BindingUtils.h"
 
@@ -24,6 +25,7 @@ using namespace JS;
 
 XPCWrappedNativeScope* XPCWrappedNativeScope::gScopes = nullptr;
 XPCWrappedNativeScope* XPCWrappedNativeScope::gDyingScopes = nullptr;
+XPCWrappedNativeScope::InterpositionMap* XPCWrappedNativeScope::gInterpositionMap = nullptr;
 
 static bool
 RemoteXULForbidsXBLScope(nsIPrincipal *aPrincipal, HandleObject aGlobal)
@@ -106,6 +108,14 @@ XPCWrappedNativeScope::XPCWrappedNativeScope(JSContext *cx,
     }
     if (mUseContentXBLScope) {
       mUseContentXBLScope = principal && !nsContentUtils::IsSystemPrincipal(principal);
+    }
+
+    JSAddonId *addonId = JS::AddonIdOfObject(aGlobal);
+    if (gInterpositionMap) {
+        if (InterpositionMap::Ptr p = gInterpositionMap->lookup(addonId)) {
+            MOZ_RELEASE_ASSERT(nsContentUtils::IsSystemPrincipal(principal));
+            mInterposition = p->value();
+        }
     }
 }
 
@@ -214,12 +224,15 @@ XPCWrappedNativeScope::EnsureContentXBLScope(JSContext *cx)
     // sandboxPrototype so that the XBL scope can access all the DOM objects
     // it's accustomed to accessing.
     //
-    // NB: One would think that wantXrays wouldn't make a difference here.
-    // However, wantXrays lives a secret double life, and one of its other
-    // hobbies is to waive Xray on the returned sandbox when set to false.
-    // So make sure to keep this set to true, here.
+    // In general wantXrays shouldn't matter much here, but there are weird
+    // cases when adopting bound content between same-origin globals where a
+    // <destructor> in one content XBL scope sees anonymous content in another
+    // content XBL scope. When that happens, we hit LookupBindingMember for an
+    // anonymous element that lives in a content XBL scope, which isn't a tested
+    // or audited codepath. So let's avoid hitting that case by opting out of
+    // same-origin Xrays.
     SandboxOptions options;
-    options.wantXrays = true;
+    options.wantXrays = false;
     options.wantComponents = true;
     options.proto = global;
     options.sameZoneAs = global;
@@ -663,6 +676,9 @@ XPCWrappedNativeScope::SystemIsBeingShutDown()
 
     // Now it is safe to kill all the scopes.
     KillDyingScopes();
+
+    if (gInterpositionMap)
+        delete gInterpositionMap;
 }
 
 
@@ -687,6 +703,28 @@ XPCWrappedNativeScope::SetExpandoChain(JSContext *cx, HandleObject target,
     if (!mXrayExpandos.initialized() && !mXrayExpandos.init(cx))
         return false;
     return mXrayExpandos.put(cx, target, chain);
+}
+
+/* static */ bool
+XPCWrappedNativeScope::SetAddonInterposition(JSAddonId *addonId,
+                                             nsIAddonInterposition *interp)
+{
+    if (!gInterpositionMap) {
+        gInterpositionMap = new InterpositionMap();
+        gInterpositionMap->init();
+    }
+    if (interp) {
+        return gInterpositionMap->put(addonId, interp);
+    } else {
+        gInterpositionMap->remove(addonId);
+        return true;
+    }
+}
+
+nsCOMPtr<nsIAddonInterposition>
+XPCWrappedNativeScope::GetInterposition()
+{
+    return mInterposition;
 }
 
 /***************************************************************************/

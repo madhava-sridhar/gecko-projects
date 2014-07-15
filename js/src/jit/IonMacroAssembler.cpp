@@ -297,7 +297,7 @@ StoreToTypedFloatArray(MacroAssembler &masm, int arrayType, const S &value, cons
         masm.storeDouble(value, dest);
         break;
       default:
-        MOZ_CRASH("Invalid typed array type");
+        MOZ_ASSUME_UNREACHABLE("Invalid typed array type");
     }
 }
 
@@ -363,7 +363,7 @@ MacroAssembler::loadFromTypedArray(Scalar::Type arrayType, const T &src, AnyRegi
         canonicalizeDouble(dest.fpu());
         break;
       default:
-        MOZ_CRASH("Invalid typed array type");
+        MOZ_ASSUME_UNREACHABLE("Invalid typed array type");
     }
 }
 
@@ -424,7 +424,7 @@ MacroAssembler::loadFromTypedArray(Scalar::Type arrayType, const T &src, const V
         boxDouble(ScratchDoubleReg, dest);
         break;
       default:
-        MOZ_CRASH("Invalid typed array type");
+        MOZ_ASSUME_UNREACHABLE("Invalid typed array type");
     }
 }
 
@@ -504,21 +504,36 @@ MacroAssembler::nurseryAllocate(Register result, Register slots, gc::AllocKind a
 #endif // JSGC_GENERATIONAL
 }
 
-// Inlined version of FreeSpan::allocate.
+// Inlined version of FreeList::allocate.
 void
-MacroAssembler::freeSpanAllocate(Register result, Register temp, gc::AllocKind allocKind, Label *fail)
+MacroAssembler::freeListAllocate(Register result, Register temp, gc::AllocKind allocKind, Label *fail)
 {
     CompileZone *zone = GetIonContext()->compartment->zone();
     int thingSize = int(gc::Arena::thingSize(allocKind));
 
-    // Load FreeList::first of |zone|'s freeLists for |allocKind|. If there is
-    // no room remaining in the span, we bail to finish the allocation. The
-    // interpreter will call |refillFreeLists|, setting up a new FreeSpan so
-    // that we can continue allocating in the jit.
+    Label fallback;
+    Label success;
+
+    // Load FreeList::head::first of |zone|'s freeLists for |allocKind|. If
+    // there is no room remaining in the span, fall back to get the next one.
     loadPtr(AbsoluteAddress(zone->addressOfFreeListFirst(allocKind)), result);
-    branchPtr(Assembler::BelowOrEqual, AbsoluteAddress(zone->addressOfFreeListLast(allocKind)), result, fail);
+    branchPtr(Assembler::BelowOrEqual, AbsoluteAddress(zone->addressOfFreeListLast(allocKind)), result, &fallback);
     computeEffectiveAddress(Address(result, thingSize), temp);
     storePtr(temp, AbsoluteAddress(zone->addressOfFreeListFirst(allocKind)));
+    jump(&success);
+
+    bind(&fallback);
+    // If there are no FreeSpans left, we bail to finish the allocation. The
+    // interpreter will call |refillFreeLists|, setting up a new FreeList so
+    // that we can continue allocating in the jit.
+    branchPtr(Assembler::Equal, result, ImmPtr(0), fail);
+    // Point the free list head at the subsequent span (which may be empty).
+    loadPtr(Address(result, js::gc::FreeSpan::offsetOfFirst()), temp);
+    storePtr(temp, AbsoluteAddress(zone->addressOfFreeListFirst(allocKind)));
+    loadPtr(Address(result, js::gc::FreeSpan::offsetOfLast()), temp);
+    storePtr(temp, AbsoluteAddress(zone->addressOfFreeListLast(allocKind)));
+
+    bind(&success);
 }
 
 void
@@ -566,7 +581,7 @@ MacroAssembler::allocateObject(Register result, Register slots, gc::AllocKind al
         return nurseryAllocate(result, slots, allocKind, nDynamicSlots, initialHeap, fail);
 
     if (!nDynamicSlots)
-        return freeSpanAllocate(result, slots, allocKind, fail);
+        return freeListAllocate(result, slots, allocKind, fail);
 
     callMallocStub(nDynamicSlots * sizeof(HeapValue), slots, fail);
 
@@ -574,7 +589,7 @@ MacroAssembler::allocateObject(Register result, Register slots, gc::AllocKind al
     Label success;
 
     push(slots);
-    freeSpanAllocate(result, slots, allocKind, &failAlloc);
+    freeListAllocate(result, slots, allocKind, &failAlloc);
     pop(slots);
     jump(&success);
 
@@ -621,7 +636,7 @@ void
 MacroAssembler::allocateNonObject(Register result, Register temp, gc::AllocKind allocKind, Label *fail)
 {
     checkAllocatorState(fail);
-    freeSpanAllocate(result, temp, allocKind, fail);
+    freeListAllocate(result, temp, allocKind, fail);
 }
 
 void
@@ -978,7 +993,7 @@ MacroAssembler::checkInterruptFlagPar(Register tempReg, Label *fail)
     movePtr(ImmPtr(GetIonContext()->runtime->addressOfInterruptPar()), tempReg);
     branch32(Assembler::NonZero, Address(tempReg, 0), Imm32(0), fail);
 #else
-    MOZ_CRASH("JSRuntime::interruptPar doesn't exist on non-threadsafe builds.");
+    MOZ_ASSUME_UNREACHABLE("JSRuntime::interruptPar doesn't exist on non-threadsafe builds.");
 #endif
 }
 
@@ -1236,7 +1251,7 @@ MacroAssembler::loadContext(Register cxReg, Register scratch, ExecutionMode exec
         loadForkJoinContext(cxReg, scratch);
         break;
       default:
-        MOZ_CRASH("No such execution mode");
+        MOZ_ASSUME_UNREACHABLE("No such execution mode");
     }
 }
 
@@ -1279,7 +1294,7 @@ MacroAssembler::enterExitFrameAndLoadContext(const VMFunction *f, Register cxReg
         enterParallelExitFrameAndLoadContext(f, cxReg, scratch);
         break;
       default:
-        MOZ_CRASH("No such execution mode");
+        MOZ_ASSUME_UNREACHABLE("No such execution mode");
     }
 }
 
@@ -1297,7 +1312,7 @@ MacroAssembler::enterFakeExitFrame(Register cxReg, Register scratch,
         enterFakeParallelExitFrame(cxReg, scratch, codeVal);
         break;
       default:
-        MOZ_CRASH("No such execution mode");
+        MOZ_ASSUME_UNREACHABLE("No such execution mode");
     }
 }
 
@@ -1319,7 +1334,7 @@ MacroAssembler::handleFailure(ExecutionMode executionMode)
         handler = JS_FUNC_TO_DATA_PTR(void *, jit::HandleParallelFailure);
         break;
       default:
-        MOZ_CRASH("No such execution mode");
+        MOZ_ASSUME_UNREACHABLE("No such execution mode");
     }
     MacroAssemblerSpecific::handleFailureWithHandler(handler);
 
@@ -1563,9 +1578,14 @@ MacroAssembler::convertValueToFloatingPoint(ValueOperand value, FloatRegister ou
     jump(&done);
 
     bind(&isDouble);
-    unboxDouble(value, output);
+    FloatRegister tmp = output;
+    if (outputType == MIRType_Float32 && hasMultiAlias())
+        tmp = ScratchDoubleReg;
+
+    unboxDouble(value, tmp);
     if (outputType == MIRType_Float32)
-        convertDoubleToFloat32(output, output);
+        convertDoubleToFloat32(tmp, output);
+
     bind(&done);
 }
 
@@ -1612,7 +1632,7 @@ MacroAssembler::PushEmptyRooted(VMFunction::RootType rootType)
 {
     switch (rootType) {
       case VMFunction::RootNone:
-        MOZ_CRASH("Handle must have root type");
+        MOZ_ASSUME_UNREACHABLE("Handle must have root type");
       case VMFunction::RootObject:
       case VMFunction::RootString:
       case VMFunction::RootPropertyName:
@@ -1632,7 +1652,7 @@ MacroAssembler::popRooted(VMFunction::RootType rootType, Register cellReg,
 {
     switch (rootType) {
       case VMFunction::RootNone:
-        MOZ_CRASH("Handle must have root type");
+        MOZ_ASSUME_UNREACHABLE("Handle must have root type");
       case VMFunction::RootObject:
       case VMFunction::RootString:
       case VMFunction::RootPropertyName:
@@ -1703,7 +1723,7 @@ MacroAssembler::convertTypedOrValueToFloatingPoint(TypedOrValueRegister src, Flo
         loadConstantFloatingPoint(GenericNaN(), float(GenericNaN()), output, outputType);
         break;
       default:
-        MOZ_CRASH("Bad MIRType");
+        MOZ_ASSUME_UNREACHABLE("Bad MIRType");
     }
 }
 
@@ -1918,7 +1938,7 @@ MacroAssembler::convertTypedOrValueToInt(TypedOrValueRegister src, FloatRegister
         jump(fail);
         break;
       default:
-        MOZ_CRASH("Bad MIRType");
+        MOZ_ASSUME_UNREACHABLE("Bad MIRType");
     }
 }
 
@@ -2004,7 +2024,7 @@ MacroAssembler::branchEqualTypeIfNeeded(MIRType type, MDefinition *maybeDef, Reg
             branchTestObject(Equal, tag, label);
             break;
           default:
-            MOZ_CRASH("Unsupported type");
+            MOZ_ASSUME_UNREACHABLE("Unsupported type");
         }
     }
 }

@@ -113,7 +113,9 @@ AppTrustDomain::FindIssuer(const SECItem& encodedIssuerName,
     for (CERTCertListNode* n = CERT_LIST_HEAD(candidates);
          !CERT_LIST_END(n, candidates); n = CERT_LIST_NEXT(n)) {
       bool keepGoing;
-      SECStatus srv = checker.Check(n->cert->derCert, keepGoing);
+      SECStatus srv = checker.Check(n->cert->derCert,
+                                    nullptr/*additionalNameConstraints*/,
+                                    keepGoing);
       if (srv != SECSuccess) {
         return SECFailure;
       }
@@ -187,11 +189,18 @@ AppTrustDomain::GetCertTrust(EndEntityOrCA endEntityOrCA,
 }
 
 SECStatus
-AppTrustDomain::VerifySignedData(const CERTSignedData& signedData,
+AppTrustDomain::VerifySignedData(const SignedDataWithSignature& signedData,
                                  const SECItem& subjectPublicKeyInfo)
 {
   return ::mozilla::pkix::VerifySignedData(signedData, subjectPublicKeyInfo,
                                            mPinArg);
+}
+
+SECStatus
+AppTrustDomain::DigestBuf(const SECItem& item, /*out*/ uint8_t* digestBuf,
+                          size_t digestBufLen)
+{
+  return ::mozilla::pkix::DigestBuf(item, digestBuf, digestBufLen);
 }
 
 SECStatus

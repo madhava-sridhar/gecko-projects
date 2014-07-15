@@ -324,6 +324,8 @@ public:
      */
     bool IsDestroyed() const { return mIsDestroyed; }
 
+    already_AddRefed<nsIWidget> GetWidget() const;
+
 protected:
     bool ReceiveMessage(const nsString& aMessage,
                         bool aSync,
@@ -382,7 +384,6 @@ protected:
 
 private:
     already_AddRefed<nsFrameLoader> GetFrameLoader() const;
-    already_AddRefed<nsIWidget> GetWidget() const;
     layout::RenderFrameParent* GetRenderFrame();
     nsRefPtr<nsIContentParent> mManager;
     void TryCacheDPIAndScale();

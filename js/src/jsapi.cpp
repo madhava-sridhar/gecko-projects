@@ -270,19 +270,11 @@ JS_ConvertArgumentsVA(JSContext *cx, const CallArgs &args, const char *format, v
             *va_arg(ap, double *) = ToInteger(d);
             break;
           case 'S':
-          case 'W':
             str = ToString<CanGC>(cx, arg);
             if (!str)
                 return false;
             arg.setString(str);
-            if (c == 'W') {
-                JSFlatString *flat = str->ensureFlat(cx);
-                if (!flat)
-                    return false;
-                *va_arg(ap, const jschar **) = flat->chars();
-            } else {
-                *va_arg(ap, JSString **) = str;
-            }
+            *va_arg(ap, JSString **) = str;
             break;
           case 'o':
             if (arg.isNullOrUndefined()) {
@@ -1019,12 +1011,6 @@ JS_PUBLIC_API(JSAddonId *)
 JS::NewAddonId(JSContext *cx, HandleString str)
 {
     return static_cast<JSAddonId *>(JS_InternJSString(cx, str));
-}
-
-JS_PUBLIC_API(const jschar *)
-JS::CharsZOfAddonId(JSAddonId *id)
-{
-    return id->charsZ();
 }
 
 JS_PUBLIC_API(JSString *)
@@ -3224,16 +3210,6 @@ JS_DefineUCProperty(JSContext *cx, HandleObject obj, const jschar *name, size_t 
                             getter, setter, attrs, 0);
 }
 
-JS_PUBLIC_API(bool)
-JS_DefineOwnProperty(JSContext *cx, HandleObject obj, HandleId id, HandleValue descriptor, bool *bp)
-{
-    AssertHeapIsIdle(cx);
-    CHECK_REQUEST(cx);
-    assertSameCompartment(cx, obj, id, descriptor);
-
-    return DefineOwnProperty(cx, obj, id, descriptor, bp);
-}
-
 JS_PUBLIC_API(JSObject *)
 JS_DefineObject(JSContext *cx, HandleObject obj, const char *name, const JSClass *jsclasp,
                 HandleObject proto, unsigned attrs)
@@ -3321,6 +3297,19 @@ JS_DefineProperties(JSContext *cx, HandleObject obj, const JSPropertySpec *ps)
             break;
     }
     return ok;
+}
+
+JS_PUBLIC_API(bool)
+JS::ParsePropertyDescriptorObject(JSContext *cx,
+                                  HandleObject obj,
+                                  HandleValue descObj,
+                                  MutableHandle<JSPropertyDescriptor> desc)
+{
+    Rooted<PropDesc> d(cx);
+    if (!d.initialize(cx, descObj))
+        return false;
+    d.populatePropertyDescriptor(obj, desc);
+    return true;
 }
 
 static bool
@@ -4607,7 +4596,7 @@ JS::FinishOffThreadScript(JSContext *maybecx, JSRuntime *rt, void *token)
         return HelperThreadState().finishParseTask(maybecx, rt, token);
     }
 #else
-    MOZ_ASSUME_UNREACHABLE("Off thread compilation is not available.");
+    MOZ_CRASH("Off thread compilation is not available.");
 #endif
 }
 
@@ -4733,7 +4722,7 @@ JS::CompileFunction(JSContext *cx, HandleObject obj, const ReadOnlyCompileOption
     else
         chars = InflateString(cx, bytes, &length);
     if (!chars)
-        return nullptr;
+        return false;
 
     return CompileFunction(cx, obj, options, name, nargs, argnames, chars, length, fun);
 }
@@ -5321,47 +5310,15 @@ JS_GetStringLength(JSString *str)
 }
 
 JS_PUBLIC_API(bool)
+JS_StringIsFlat(JSString *str)
+{
+    return str->isFlat();
+}
+
+JS_PUBLIC_API(bool)
 JS_StringHasLatin1Chars(JSString *str)
 {
     return str->hasLatin1Chars();
-}
-
-JS_PUBLIC_API(const jschar *)
-JS_GetStringCharsZ(JSContext *cx, JSString *str)
-{
-    size_t dummy;
-    return JS_GetStringCharsZAndLength(cx, str, &dummy);
-}
-
-JS_PUBLIC_API(const jschar *)
-JS_GetStringCharsZAndLength(JSContext *cx, JSString *str, size_t *plength)
-{
-    /*
-     * Don't require |cx->compartment()| to be |str|'s compartment. We don't need
-     * it, and it's annoying for callers.
-     */
-    JS_ASSERT(plength);
-    AssertHeapIsIdleOrStringIsFlat(cx, str);
-    CHECK_REQUEST(cx);
-    JSFlatString *flat = str->ensureFlat(cx);
-    if (!flat)
-        return nullptr;
-    *plength = flat->length();
-    return flat->chars();
-}
-
-JS_PUBLIC_API(const jschar *)
-JS_GetStringCharsAndLength(JSContext *cx, JSString *str, size_t *plength)
-{
-    JS_ASSERT(plength);
-    AssertHeapIsIdleOrStringIsFlat(cx, str);
-    CHECK_REQUEST(cx);
-    assertSameCompartment(cx, str);
-    JSLinearString *linear = str->ensureLinear(cx);
-    if (!linear)
-        return nullptr;
-    *plength = linear->length();
-    return linear->chars();
 }
 
 JS_PUBLIC_API(const JS::Latin1Char *)
@@ -5437,26 +5394,24 @@ JS_CopyStringChars(JSContext *cx, mozilla::Range<jschar> dest, JSString *str)
     return true;
 }
 
-JS_PUBLIC_API(const jschar *)
-JS_GetInternedStringChars(JSString *str)
+JS_PUBLIC_API(const Latin1Char *)
+JS_Latin1InternedStringChars(const JS::AutoCheckCannotGC &nogc, JSString *str)
 {
     JS_ASSERT(str->isAtom());
     JSFlatString *flat = str->ensureFlat(nullptr);
     if (!flat)
         return nullptr;
-    return flat->chars();
+    return flat->latin1Chars(nogc);
 }
 
 JS_PUBLIC_API(const jschar *)
-JS_GetInternedStringCharsAndLength(JSString *str, size_t *plength)
+JS_GetTwoByteInternedStringChars(const JS::AutoCheckCannotGC &nogc, JSString *str)
 {
     JS_ASSERT(str->isAtom());
-    JS_ASSERT(plength);
     JSFlatString *flat = str->ensureFlat(nullptr);
     if (!flat)
         return nullptr;
-    *plength = flat->length();
-    return flat->chars();
+    return flat->twoByteChars(nogc);
 }
 
 extern JS_PUBLIC_API(JSFlatString *)
@@ -5471,10 +5426,16 @@ JS_FlattenString(JSContext *cx, JSString *str)
     return flat;
 }
 
-extern JS_PUBLIC_API(const jschar *)
-JS_GetFlatStringChars(JSFlatString *str)
+extern JS_PUBLIC_API(const Latin1Char *)
+JS_GetLatin1FlatStringChars(const JS::AutoCheckCannotGC &nogc, JSFlatString *str)
 {
-    return str->chars();
+    return str->latin1Chars(nogc);
+}
+
+extern JS_PUBLIC_API(const jschar *)
+JS_GetTwoByteFlatStringChars(const JS::AutoCheckCannotGC &nogc, JSFlatString *str)
+{
+    return str->twoByteChars(nogc);
 }
 
 JS_PUBLIC_API(bool)
@@ -5722,13 +5683,17 @@ JS_Stringify(JSContext *cx, MutableHandleValue vp, HandleObject replacer,
 }
 
 JS_PUBLIC_API(bool)
-JS_ParseJSON(JSContext *cx, const jschar *chars, uint32_t len, JS::MutableHandleValue vp)
+JS_ParseJSON(JSContext *cx, const jschar *chars, uint32_t len, MutableHandleValue vp)
 {
     AssertHeapIsIdle(cx);
     CHECK_REQUEST(cx);
+    return ParseJSONWithReviver(cx, mozilla::Range<const jschar>(chars, len), NullHandleValue, vp);
+}
 
-    RootedValue reviver(cx, NullValue());
-    return ParseJSONWithReviver(cx, mozilla::Range<const jschar>(chars, len), reviver, vp);
+JS_PUBLIC_API(bool)
+JS_ParseJSON(JSContext *cx, HandleString str, MutableHandleValue vp)
+{
+    return JS_ParseJSONWithReviver(cx, str, NullHandleValue, vp);
 }
 
 JS_PUBLIC_API(bool)
@@ -5737,6 +5702,22 @@ JS_ParseJSONWithReviver(JSContext *cx, const jschar *chars, uint32_t len, Handle
     AssertHeapIsIdle(cx);
     CHECK_REQUEST(cx);
     return ParseJSONWithReviver(cx, mozilla::Range<const jschar>(chars, len), reviver, vp);
+}
+
+JS_PUBLIC_API(bool)
+JS_ParseJSONWithReviver(JSContext *cx, HandleString str, HandleValue reviver, MutableHandleValue vp)
+{
+    AssertHeapIsIdle(cx);
+    CHECK_REQUEST(cx);
+    assertSameCompartment(cx, str);
+
+    AutoStableStringChars stableChars(cx);
+    if (!stableChars.init(cx, str))
+        return false;
+
+    return stableChars.isLatin1()
+           ? ParseJSONWithReviver(cx, stableChars.latin1Range(), reviver, vp)
+           : ParseJSONWithReviver(cx, stableChars.twoByteRange(), reviver, vp);
 }
 
 /************************************************************************/

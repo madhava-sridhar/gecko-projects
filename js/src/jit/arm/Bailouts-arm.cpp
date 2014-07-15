@@ -30,7 +30,7 @@ class BailoutStack
     };
 
   protected: // Silence Clang warning about unused private fields.
-    mozilla::Array<double, FloatRegisters::Total> fpregs_;
+    mozilla::Array<double, FloatRegisters::TotalPhys> fpregs_;
     mozilla::Array<uintptr_t, Registers::Total> regs_;
 
     uintptr_t snapshotOffset_;
@@ -84,7 +84,7 @@ IonBailoutIterator::IonBailoutIterator(const JitActivationIterator &activations,
     switch (mode_) {
       case SequentialExecution: topIonScript_ = script()->ionScript(); break;
       case ParallelExecution: topIonScript_ = script()->parallelIonScript(); break;
-      default: MOZ_CRASH("No such execution mode");
+      default: MOZ_ASSUME_UNREACHABLE("No such execution mode");
     }
 
     if (bailout->frameClass() == FrameSizeClass::None()) {
