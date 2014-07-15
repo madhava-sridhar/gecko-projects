@@ -2994,8 +2994,9 @@ private:
   ActorDestroy(ActorDestroyReason aWhy) MOZ_OVERRIDE;
 
   virtual PBackgroundIDBDatabaseFileParent*
-  AllocPBackgroundIDBDatabaseFileParent(const InputStreamParams& aParams)
-                                        MOZ_OVERRIDE;
+  AllocPBackgroundIDBDatabaseFileParent(
+                                    const BlobOrInputStream& aBlobOrInputStream)
+                                    MOZ_OVERRIDE;
 
   virtual bool
   DeallocPBackgroundIDBDatabaseFileParent(
@@ -5966,15 +5967,56 @@ Database::ActorDestroy(ActorDestroyReason aWhy)
 
 PBackgroundIDBDatabaseFileParent*
 Database::AllocPBackgroundIDBDatabaseFileParent(
-                                               const InputStreamParams& aParams)
+                                    const BlobOrInputStream& aBlobOrInputStream)
 {
   AssertIsOnBackgroundThread();
-  MOZ_ASSERT(aParams.type() != InputStreamParams::T__None);
+  MOZ_ASSERT(aBlobOrInputStream.type() != BlobOrInputStream::T__None);
 
-  nsRefPtr<FileInfo> fileInfo = mFileManager->GetNewFileInfo();
-  MOZ_ASSERT(fileInfo);
+  nsRefPtr<DatabaseFile> actor;
 
-  nsRefPtr<DatabaseFile> actor = new DatabaseFile(aParams, fileInfo);
+  switch (aBlobOrInputStream.type()) {
+    case BlobOrInputStream::TInputStreamParams: {
+      const InputStreamParams& inputStreamParams =
+        aBlobOrInputStream.get_InputStreamParams();
+      MOZ_ASSERT(inputStreamParams.type() != InputStreamParams::T__None);
+
+      nsRefPtr<FileInfo> fileInfo = mFileManager->GetNewFileInfo();
+      MOZ_ASSERT(fileInfo);
+
+      actor = new DatabaseFile(inputStreamParams, fileInfo);
+      break;
+    }
+
+    case BlobOrInputStream::TPBlobParent: {
+      auto* blobParent =
+        static_cast<BlobParent*>(aBlobOrInputStream.get_PBlobParent());
+      if (NS_WARN_IF(!blobParent)) {
+        ASSERT_UNLESS_FUZZING();
+        return nullptr;
+      }
+
+      nsRefPtr<DOMFileImpl> blobImpl = blobParent->GetBlobImpl();
+      MOZ_ASSERT(blobImpl);
+
+      nsRefPtr<FileInfo> fileInfo = blobImpl->GetFileInfo(mFileManager);
+      MOZ_ASSERT(fileInfo);
+
+      actor = new DatabaseFile(fileInfo);
+      break;
+    }
+
+    case BlobOrInputStream::TPBlobChild: {
+      ASSERT_UNLESS_FUZZING();
+      return nullptr;
+    }
+
+    default:
+      ASSERT_UNLESS_FUZZING();
+      return nullptr;
+  }
+
+  MOZ_ASSERT(actor);
+
   return actor.forget().take();
 }
 

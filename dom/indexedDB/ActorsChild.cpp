@@ -459,7 +459,8 @@ protected:
 };
 
 void
-ConvertActorsToBlobs(const nsTArray<PBlobChild*>& aActors,
+ConvertActorsToBlobs(IDBDatabase* aDatabase,
+                     const nsTArray<PBlobChild*>& aActors,
                      nsTArray<StructuredCloneFile>& aFiles)
 {
   MOZ_ASSERT(aFiles.IsEmpty());
@@ -471,8 +472,15 @@ ConvertActorsToBlobs(const nsTArray<PBlobChild*>& aActors,
     for (uint32_t index = 0; index < count; index++) {
       BlobChild* actor = static_cast<BlobChild*>(aActors[index]);
 
+      nsCOMPtr<nsIDOMBlob> blob = actor->GetBlob();
+      MOZ_ASSERT(blob);
+
+      aDatabase->NoteReceivedBlob(blob);
+
       StructuredCloneFile* file = aFiles.AppendElement();
-      file->mFile = actor->GetBlob();
+      MOZ_ASSERT(file);
+
+      file->mFile.swap(blob);
     }
   }
 }
@@ -1100,7 +1108,7 @@ BackgroundDatabaseChild::ActorDestroy(ActorDestroyReason aWhy)
 
 PBackgroundIDBDatabaseFileChild*
 BackgroundDatabaseChild::AllocPBackgroundIDBDatabaseFileChild(
-                                               const InputStreamParams& aParams)
+                                    const BlobOrInputStream& aBlobOrInputStream)
 {
   MOZ_CRASH("PBackgroundIDBFileChild actors should be manually constructed!");
 }
@@ -1697,7 +1705,9 @@ BackgroundRequestChild::HandleResponse(
   StructuredCloneReadInfo cloneReadInfo(Move(serializedCloneInfo));
   cloneReadInfo.mDatabase = mTransaction->Database();
 
-  ConvertActorsToBlobs(aResponse.blobsChild(), cloneReadInfo.mFiles);
+  ConvertActorsToBlobs(mTransaction->Database(),
+                       aResponse.blobsChild(),
+                       cloneReadInfo.mFiles);
 
   ResultHelper helper(mRequest, mTransaction, &cloneReadInfo);
 
@@ -1718,6 +1728,8 @@ BackgroundRequestChild::HandleResponse(
 
     cloneReadInfos.SetCapacity(count);
 
+    IDBDatabase* database = mTransaction->Database();
+
     for (uint32_t index = 0; index < count; index++) {
       // XXX Fix this somehow...
       auto& serializedCloneInfo =
@@ -1729,7 +1741,8 @@ BackgroundRequestChild::HandleResponse(
 
       cloneReadInfo->mDatabase = mTransaction->Database();
 
-      ConvertActorsToBlobs(serializedCloneInfo.blobsChild(),
+      ConvertActorsToBlobs(database,
+                           serializedCloneInfo.blobsChild(),
                            cloneReadInfo->mFiles);
     }
   }
@@ -2028,7 +2041,9 @@ BackgroundCursorChild::HandleResponse(
 
   StructuredCloneReadInfo cloneReadInfo(Move(response.cloneInfo()));
 
-  ConvertActorsToBlobs(response.cloneInfo().blobsChild(), cloneReadInfo.mFiles);
+  ConvertActorsToBlobs(mTransaction->Database(),
+                       response.cloneInfo().blobsChild(),
+                       cloneReadInfo.mFiles);
 
   Maybe<nsRefPtr<IDBCursor>> newCursor;
 
@@ -2094,7 +2109,8 @@ BackgroundCursorChild::HandleResponse(const IndexCursorResponse& aResponse)
 
   StructuredCloneReadInfo cloneReadInfo(Move(response.cloneInfo()));
 
-  ConvertActorsToBlobs(aResponse.cloneInfo().blobsChild(),
+  ConvertActorsToBlobs(mTransaction->Database(),
+                       aResponse.cloneInfo().blobsChild(),
                        cloneReadInfo.mFiles);
 
   Maybe<nsRefPtr<IDBCursor>> newCursor;

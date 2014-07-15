@@ -28,8 +28,6 @@ namespace dom {
 
 class DOMStringList;
 class nsIContentParent;
-class PBlobChild;
-class PBlobParent;
 template <typename> class Sequence;
 
 namespace indexedDB {
@@ -93,18 +91,6 @@ public:
   DeserializeIndexValue(JSContext* aCx,
                         StructuredCloneReadInfo& aCloneReadInfo,
                         JS::MutableHandle<JS::Value> aValue);
-
-  // Called only in the main process.
-  static nsresult
-  ConvertBlobsToActors(nsIContentParent* aContentParent,
-                       FileManager* aFileManager,
-                       const nsTArray<StructuredCloneFile>& aFiles,
-                       nsTArray<PBlobParent*>& aActors);
-
-  // Called only in the child process.
-  static void
-  ConvertActorsToBlobs(const nsTArray<PBlobChild*>& aActors,
-                       nsTArray<StructuredCloneFile>& aFiles);
 
   static const JSClass*
   DummyPropClass()

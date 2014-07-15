@@ -71,6 +71,8 @@ class IDBDatabase MOZ_FINAL
   nsDataHashtable<nsISupportsHashKey, PBackgroundIDBDatabaseFileChild*>
     mFileActors;
 
+  nsTHashtable<nsISupportsHashKey> mReceivedBlobs;
+
   nsRefPtr<WindowObserver> mWindowObserver;
 
   bool mClosed;
@@ -167,6 +169,9 @@ public:
 
   PBackgroundIDBDatabaseFileChild*
   GetOrCreateFileActorForBlob(nsIDOMBlob* aBlob);
+
+  void
+  NoteReceivedBlob(nsIDOMBlob* aBlob);
 
   void
   DelayedMaybeExpireFileActors();

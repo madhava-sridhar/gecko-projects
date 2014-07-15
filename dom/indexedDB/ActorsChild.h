@@ -264,8 +264,9 @@ private:
   ActorDestroy(ActorDestroyReason aWhy) MOZ_OVERRIDE;
 
   virtual PBackgroundIDBDatabaseFileChild*
-  AllocPBackgroundIDBDatabaseFileChild(const InputStreamParams& aParams)
-                                       MOZ_OVERRIDE;
+  AllocPBackgroundIDBDatabaseFileChild(
+                                    const BlobOrInputStream& aBlobOrInputStream)
+                                    MOZ_OVERRIDE;
 
   virtual bool
   DeallocPBackgroundIDBDatabaseFileChild(
@@ -274,9 +275,9 @@ private:
 
   virtual PBackgroundIDBTransactionChild*
   AllocPBackgroundIDBTransactionChild(
-                                     const nsTArray<nsString>& aObjectStoreNames,
-                                     const Mode& aMode)
-                                     MOZ_OVERRIDE;
+                                    const nsTArray<nsString>& aObjectStoreNames,
+                                    const Mode& aMode)
+                                    MOZ_OVERRIDE;
 
   virtual bool
   DeallocPBackgroundIDBTransactionChild(PBackgroundIDBTransactionChild* aActor)

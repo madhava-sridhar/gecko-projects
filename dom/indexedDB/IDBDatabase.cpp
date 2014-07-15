@@ -30,6 +30,8 @@
 #include "mozilla/dom/IDBObjectStoreBinding.h"
 #include "mozilla/dom/indexedDB/PBackgroundIDBDatabaseFileChild.h"
 #include "mozilla/dom/indexedDB/PBackgroundIDBSharedTypes.h"
+#include "mozilla/dom/ipc/BlobChild.h"
+#include "mozilla/dom/ipc/nsIRemoteBlob.h"
 #include "mozilla/dom/quota/QuotaManager.h"
 #include "mozilla/ipc/FileDescriptor.h"
 #include "mozilla/ipc/InputStreamParams.h"
@@ -769,29 +771,61 @@ IDBDatabase::GetOrCreateFileActorForBlob(nsIDOMBlob* aBlob)
   nsCOMPtr<nsIWeakReference> weakRef = do_GetWeakReference(aBlob);
   MOZ_ASSERT(weakRef);
 
-  PBackgroundIDBDatabaseFileChild* actor;
+  PBackgroundIDBDatabaseFileChild* actor = nullptr;
+
   if (!mFileActors.Get(weakRef, &actor)) {
-    DOMFileImpl* impl = static_cast<DOMFile*>(aBlob)->Impl();
-    MOZ_ASSERT(impl);
+    DOMFileImpl* blobImpl = static_cast<DOMFile*>(aBlob)->Impl();
+    MOZ_ASSERT(blobImpl);
 
-    nsCOMPtr<nsIInputStream> inputStream;
-    MOZ_ALWAYS_TRUE(NS_SUCCEEDED(
-      impl->GetInternalStream(getter_AddRefs(inputStream))));
+    if (mReceivedBlobs.GetEntry(weakRef)) {
+      // This blob was previously retrieved from the database.
+      nsCOMPtr<nsIRemoteBlob> remoteBlob = do_QueryObject(blobImpl);
+      MOZ_ASSERT(remoteBlob);
 
-    InputStreamParams params;
-    nsTArray<FileDescriptor> fileDescriptors;
-    SerializeInputStream(inputStream, params, fileDescriptors);
+      BlobChild* blobChild = remoteBlob->GetBlobChild();
+      MOZ_ASSERT(blobChild);
 
-    MOZ_ASSERT(fileDescriptors.IsEmpty());
+#ifdef DEBUG
+      {
+        PBackgroundChild* backgroundManager = blobChild->GetBackgroundManager();
+        MOZ_ASSERT(backgroundManager);
 
-    auto* dbFile = new DatabaseFile(this);
+        PBackgroundChild* thisManager = mBackgroundActor->Manager()->Manager();
+        MOZ_ASSERT(thisManager);
 
-    actor =
-      mBackgroundActor->SendPBackgroundIDBDatabaseFileConstructor(dbFile,
-                                                                  params);
-    if (NS_WARN_IF(!actor)) {
-      return nullptr;
+        MOZ_ASSERT(thisManager == backgroundManager);
+      }
+#endif
+      auto* dbFile = new DatabaseFile(this);
+
+      actor =
+        mBackgroundActor->SendPBackgroundIDBDatabaseFileConstructor(dbFile,
+                                                                    blobChild);
+      if (NS_WARN_IF(!actor)) {
+        return nullptr;
+      }
+    } else {
+      nsCOMPtr<nsIInputStream> inputStream;
+      MOZ_ALWAYS_TRUE(NS_SUCCEEDED(
+        blobImpl->GetInternalStream(getter_AddRefs(inputStream))));
+
+      InputStreamParams params;
+      nsTArray<FileDescriptor> fileDescriptors;
+      SerializeInputStream(inputStream, params, fileDescriptors);
+
+      MOZ_ASSERT(fileDescriptors.IsEmpty());
+
+      auto* dbFile = new DatabaseFile(this);
+
+      actor =
+        mBackgroundActor->SendPBackgroundIDBDatabaseFileConstructor(dbFile,
+                                                                    params);
+      if (NS_WARN_IF(!actor)) {
+        return nullptr;
+      }
     }
+
+    MOZ_ASSERT(actor);
 
     mFileActors.Put(weakRef, actor);
   }
@@ -799,6 +833,41 @@ IDBDatabase::GetOrCreateFileActorForBlob(nsIDOMBlob* aBlob)
   MOZ_ASSERT(actor);
 
   return actor;
+}
+
+void
+IDBDatabase::NoteReceivedBlob(nsIDOMBlob* aBlob)
+{
+  AssertIsOnOwningThread();
+  MOZ_ASSERT(aBlob);
+  MOZ_ASSERT(mBackgroundActor);
+
+#ifdef DEBUG
+  {
+    nsRefPtr<DOMFileImpl> blobImpl = static_cast<DOMFile*>(aBlob)->Impl();
+    MOZ_ASSERT(blobImpl);
+
+    nsCOMPtr<nsIRemoteBlob> remoteBlob = do_QueryObject(blobImpl);
+    MOZ_ASSERT(remoteBlob);
+
+    BlobChild* blobChild = remoteBlob->GetBlobChild();
+    MOZ_ASSERT(blobChild);
+
+    PBackgroundChild* backgroundManager = blobChild->GetBackgroundManager();
+    MOZ_ASSERT(backgroundManager);
+
+    PBackgroundChild* thisManager = mBackgroundActor->Manager()->Manager();
+    MOZ_ASSERT(thisManager);
+
+    MOZ_ASSERT(thisManager == backgroundManager);
+  }
+#endif
+
+  nsCOMPtr<nsIWeakReference> weakRef = do_GetWeakReference(aBlob);
+  MOZ_ASSERT(weakRef);
+
+  // It's ok if this entry already exists in the table.
+  mReceivedBlobs.PutEntry(weakRef);
 }
 
 void
@@ -828,12 +897,13 @@ IDBDatabase::ExpireFileActors(bool aExpireAll)
   {
   public:
     static PLDHashOperator
-    MaybeExpire(nsISupports* aKey,
-                PBackgroundIDBDatabaseFileChild*& aValue,
-                void* aClosure)
+    MaybeExpireFileActors(nsISupports* aKey,
+                          PBackgroundIDBDatabaseFileChild*& aValue,
+                          void* aClosure)
     {
       MOZ_ASSERT(aKey);
       MOZ_ASSERT(aValue);
+      MOZ_ASSERT(aClosure);
 
       const bool expiringAll = *static_cast<bool*>(aClosure);
 
@@ -856,15 +926,45 @@ IDBDatabase::ExpireFileActors(bool aExpireAll)
 
       return PL_DHASH_NEXT;
     }
+
+    static PLDHashOperator
+    MaybeExpireReceivedBlobs(nsISupportsHashKey* aKey,
+                             void* aClosure)
+    {
+      MOZ_ASSERT(aKey);
+      MOZ_ASSERT(!aClosure);
+
+      nsISupports* key = aKey->GetKey();
+      MOZ_ASSERT(key);
+
+      nsCOMPtr<nsIWeakReference> weakRef = do_QueryInterface(key);
+      MOZ_ASSERT(weakRef);
+
+      nsCOMPtr<nsISupports> referent = do_QueryReferent(weakRef);
+      if (!referent) {
+        return PL_DHASH_REMOVE;
+      }
+
+      return PL_DHASH_NEXT;
+    }
   };
 
   if (mBackgroundActor && mFileActors.Count()) {
-    mFileActors.Enumerate(&Helper::MaybeExpire, &aExpireAll);
+    mFileActors.Enumerate(&Helper::MaybeExpireFileActors, &aExpireAll);
     if (aExpireAll) {
       mFileActors.Clear();
     }
   } else {
     MOZ_ASSERT(!mFileActors.Count());
+  }
+
+  if (mReceivedBlobs.Count()) {
+    if (aExpireAll) {
+      mReceivedBlobs.Clear();
+    } else {
+      mReceivedBlobs.EnumerateEntries(&Helper::MaybeExpireReceivedBlobs,
+                                      nullptr);
+    }
   }
 }
 
