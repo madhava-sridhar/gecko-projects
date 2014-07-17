@@ -550,6 +550,8 @@ nsFileInputStream::Serialize(InputStreamParams& aParams,
     } else {
         NS_WARNING("This file has not been opened (or could not be opened). "
                    "Sending an invalid file descriptor to the other process!");
+
+        params.fileDescriptorIndex() = UINT32_MAX;
     }
 
     int32_t behaviorFlags = mBehaviorFlags;

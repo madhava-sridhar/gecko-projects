@@ -76,6 +76,7 @@ already_AddRefed<nsIInputStream>
 DeserializeInputStream(const InputStreamParams& aParams,
                        const nsTArray<FileDescriptor>& aFileDescriptors)
 {
+  nsCOMPtr<nsIInputStream> stream;
   nsCOMPtr<nsIIPCSerializableInputStream> serializable;
 
   switch (aParams.type()) {
@@ -133,6 +134,19 @@ DeserializeInputStream(const InputStreamParams& aParams,
       return stream.forget();
     }
 
+    case InputStreamParams::TSameProcessInputStreamParams: {
+      MOZ_ASSERT(aFileDescriptors.IsEmpty());
+
+      const SameProcessInputStreamParams& params =
+        aParams.get_SameProcessInputStreamParams();
+
+      stream = dont_AddRef(
+        reinterpret_cast<nsIInputStream*>(params.addRefedInputStream()));
+      MOZ_ASSERT(stream);
+
+      return stream.forget();
+    }
+
     default:
       MOZ_ASSERT(false, "Unknown params!");
       return nullptr;
@@ -145,7 +159,7 @@ DeserializeInputStream(const InputStreamParams& aParams,
     return nullptr;
   }
 
-  nsCOMPtr<nsIInputStream> stream = do_QueryInterface(serializable);
+  stream = do_QueryInterface(serializable);
   MOZ_ASSERT(stream);
 
   return stream.forget();

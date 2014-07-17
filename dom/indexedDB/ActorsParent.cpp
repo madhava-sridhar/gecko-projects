@@ -2377,7 +2377,7 @@ CreateDatabaseConnection(nsIFile* aDBFile,
     } else  {
       // This logic needs to change next time we change the schema!
       static_assert(kSQLiteSchemaVersion == int32_t((16 << 4) + 0),
-                    "Need upgrade code from schema version increase.");
+                    "Upgrade function needed due to schema version increase.");
 
       while (schemaVersion != kSQLiteSchemaVersion) {
         if (schemaVersion == 4) {
@@ -2408,8 +2408,10 @@ CreateDatabaseConnection(nsIFile* aDBFile,
         } else {
           NS_WARNING("Unable to open IndexedDB database, no upgrade path is "
                      "available!");
+          IDB_REPORT_INTERNAL_ERR();
           return NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
         }
+
         if (NS_WARN_IF(NS_FAILED(rv))) {
           return rv;
         }
@@ -3284,7 +3286,7 @@ protected:
   CommitOrAbort(nsresult aResultCode);
 
   PBackgroundIDBRequestParent*
-  AllocRequest(const RequestParams& aParams);
+  AllocRequest(const RequestParams& aParams, bool aTrustParams);
 
   bool
   StartRequest(PBackgroundIDBRequestParent* aActor);
@@ -3293,7 +3295,7 @@ protected:
   DeallocRequest(PBackgroundIDBRequestParent* aActor);
 
   PBackgroundIDBCursorParent*
-  AllocCursor(const OpenCursorParams& aParams);
+  AllocCursor(const OpenCursorParams& aParams, bool aTrustParams);
 
   bool
   StartCursor(PBackgroundIDBCursorParent* aActor,
@@ -3597,6 +3599,9 @@ private:
   ~NormalTransaction()
   { }
 
+  bool
+  IsSameProcessActor();
+
   // Only called by TransactionBase.
   virtual bool
   SendCompleteNotification(nsresult aResult) MOZ_OVERRIDE;
@@ -3656,6 +3661,9 @@ private:
 
   // Reference counted.
   ~VersionChangeTransaction();
+
+  bool
+  IsSameProcessActor();
 
   // Only called by OpenDatabaseOp.
   bool
@@ -4349,7 +4357,7 @@ class ObjectStoreAddOrPutRequestOp MOZ_FINAL
 
   typedef mozilla::dom::quota::PersistenceType PersistenceType;
 
-  struct PendingFileCopyInfo;
+  struct StoredFileInfo;
 
   const ObjectStoreAddPutParams mParams;
   Maybe<UniqueIndexTable> mUniqueIndexTable;
@@ -4358,7 +4366,7 @@ class ObjectStoreAddOrPutRequestOp MOZ_FINAL
   // if we are modifying an autoIncrement objectStore.
   FullObjectStoreMetadata& mMetadata;
 
-  FallibleTArray<PendingFileCopyInfo> mFileCopyInfos;
+  FallibleTArray<StoredFileInfo> mStoredFileInfos;
 
   nsRefPtr<FileManager> mFileManager;
 
@@ -4387,28 +4395,31 @@ private:
 
   virtual void
   GetResponse(RequestResponse& aResponse) MOZ_OVERRIDE;
+
+  virtual void
+  Cleanup() MOZ_OVERRIDE;
 };
 
-struct ObjectStoreAddOrPutRequestOp::PendingFileCopyInfo MOZ_FINAL
+struct ObjectStoreAddOrPutRequestOp::StoredFileInfo MOZ_FINAL
 {
   nsRefPtr<DatabaseFile> mFileActor;
   nsRefPtr<FileInfo> mFileInfo;
   nsCOMPtr<nsIInputStream> mInputStream;
   bool mCopiedSuccessfully;
 
-  PendingFileCopyInfo()
+  StoredFileInfo()
     : mCopiedSuccessfully(false)
   {
     AssertIsOnBackgroundThread();
 
-    MOZ_COUNT_CTOR(ObjectStoreAddOrPutRequestOp::PendingFileCopyInfo);
+    MOZ_COUNT_CTOR(ObjectStoreAddOrPutRequestOp::StoredFileInfo);
   }
 
-  ~PendingFileCopyInfo()
+  ~StoredFileInfo()
   {
     AssertIsOnBackgroundThread();
 
-    MOZ_COUNT_DTOR(ObjectStoreAddOrPutRequestOp::PendingFileCopyInfo);
+    MOZ_COUNT_DTOR(ObjectStoreAddOrPutRequestOp::StoredFileInfo);
   }
 };
 
@@ -5334,12 +5345,14 @@ nsresult
 ConvertBlobsToActors(PBackgroundParent* aBackgroundActor,
                      FileManager* aFileManager,
                      const nsTArray<StructuredCloneFile>& aFiles,
-                     FallibleTArray<PBlobParent*>& aActors)
+                     FallibleTArray<PBlobParent*>& aActors,
+                     FallibleTArray<intptr_t>& aFileInfos)
 {
   AssertIsOnBackgroundThread();
   MOZ_ASSERT(aBackgroundActor);
   MOZ_ASSERT(aFileManager);
   MOZ_ASSERT(aActors.IsEmpty());
+  MOZ_ASSERT(aFileInfos.IsEmpty());
 
   if (aFiles.IsEmpty()) {
     return NS_OK;
@@ -5365,12 +5378,21 @@ ConvertBlobsToActors(PBackgroundParent* aBackgroundActor,
     return NS_ERROR_OUT_OF_MEMORY;
   }
 
+  const bool collectFileInfos =
+    !BackgroundParent::IsOtherProcessActor(aBackgroundActor);
+
+  if (collectFileInfos && NS_WARN_IF(!aFileInfos.SetCapacity(count))) {
+    return NS_ERROR_OUT_OF_MEMORY;
+  }
+
   for (uint32_t index = 0; index < count; index++) {
     const StructuredCloneFile& file = aFiles[index];
-    MOZ_ASSERT(file.mFileInfo);
+
+    const int64_t fileId = file.mFileInfo->Id();
+    MOZ_ASSERT(fileId > 0);
 
     nsCOMPtr<nsIFile> nativeFile =
-      aFileManager->GetFileForId(directory, file.mFileInfo->Id());
+      aFileManager->GetFileForId(directory, fileId);
     if (NS_WARN_IF(!nativeFile)) {
       IDB_REPORT_INTERNAL_ERR();
       return NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
@@ -5395,6 +5417,15 @@ ConvertBlobsToActors(PBackgroundParent* aBackgroundActor,
     }
 
     MOZ_ALWAYS_TRUE(aActors.AppendElement(actor));
+
+    if (collectFileInfos) {
+      nsRefPtr<FileInfo> fileInfo = file.mFileInfo;
+
+      // Transfer a reference to the receiver.
+      auto transferedFileInfo =
+        reinterpret_cast<intptr_t>(fileInfo.forget().take());
+      MOZ_ALWAYS_TRUE(aFileInfos.AppendElement(transferedFileInfo));
+    }
   }
 
   return NS_OK;
@@ -6932,13 +6963,35 @@ TransactionBase::VerifyRequestParams(const ObjectStoreAddPutParams& aParams)
     }
   }
 
-  const nsTArray<PBackgroundIDBDatabaseFileParent*>& files =
-    aParams.filesParent();
+  const nsTArray<DatabaseFileOrMutableFileId>& files = aParams.files();
 
   for (uint32_t index = 0; index < files.Length(); index++) {
-    if (NS_WARN_IF(!files[index])) {
-      ASSERT_UNLESS_FUZZING();
-      return false;
+    const DatabaseFileOrMutableFileId& fileOrFileId = files[index];
+
+    MOZ_ASSERT(fileOrFileId.type() != DatabaseFileOrMutableFileId::T__None);
+
+    switch (fileOrFileId.type()) {
+      case DatabaseFileOrMutableFileId::TPBackgroundIDBDatabaseFileChild:
+        ASSERT_UNLESS_FUZZING();
+        return false;
+
+      case DatabaseFileOrMutableFileId::TPBackgroundIDBDatabaseFileParent:
+        if (NS_WARN_IF(!fileOrFileId.get_PBackgroundIDBDatabaseFileParent())) {
+          ASSERT_UNLESS_FUZZING();
+          return false;
+        }
+        break;
+
+      case DatabaseFileOrMutableFileId::Tint64_t:
+        if (NS_WARN_IF(fileOrFileId.get_int64_t() <= 0)) {
+          ASSERT_UNLESS_FUZZING();
+          return false;
+        }
+        break;
+
+      default:
+          ASSERT_UNLESS_FUZZING();
+          return false;
     }
   }
 
@@ -7058,12 +7111,17 @@ TransactionBase::RollbackSavepoint()
 }
 
 PBackgroundIDBRequestParent*
-TransactionBase::AllocRequest(const RequestParams& aParams)
+TransactionBase::AllocRequest(const RequestParams& aParams, bool aTrustParams)
 {
   AssertIsOnBackgroundThread();
   MOZ_ASSERT(aParams.type() != RequestParams::T__None);
 
-  if (NS_WARN_IF(!VerifyRequestParams(aParams))) {
+#ifdef DEBUG
+  // Always verify parameters in DEBUG builds!
+  aTrustParams = false;
+#endif
+
+  if (!aTrustParams && NS_WARN_IF(!VerifyRequestParams(aParams))) {
     ASSERT_UNLESS_FUZZING();
     return nullptr;
   }
@@ -7174,11 +7232,16 @@ TransactionBase::DeallocRequest(PBackgroundIDBRequestParent* aActor)
 }
 
 PBackgroundIDBCursorParent*
-TransactionBase::AllocCursor(const OpenCursorParams& aParams)
+TransactionBase::AllocCursor(const OpenCursorParams& aParams, bool aTrustParams)
 {
   AssertIsOnBackgroundThread();
 
-  if (NS_WARN_IF(!VerifyRequestParams(aParams))) {
+#ifdef DEBUG
+  // Always verify parameters in DEBUG builds!
+  aTrustParams = false;
+#endif
+
+  if (!aTrustParams && NS_WARN_IF(!VerifyRequestParams(aParams))) {
     ASSERT_UNLESS_FUZZING();
     return nullptr;
   }
@@ -7336,6 +7399,17 @@ NormalTransaction::NormalTransaction(
 }
 
 bool
+NormalTransaction::IsSameProcessActor()
+{
+  AssertIsOnBackgroundThread();
+
+  PBackgroundParent* actor = Manager()->Manager()->Manager();
+  MOZ_ASSERT(actor);
+
+  return !BackgroundParent::IsOtherProcessActor(actor);
+}
+
+bool
 NormalTransaction::SendCompleteNotification(nsresult aResult)
 {
   AssertIsOnBackgroundThread();
@@ -7406,7 +7480,7 @@ NormalTransaction::AllocPBackgroundIDBRequestParent(
   AssertIsOnBackgroundThread();
   MOZ_ASSERT(aParams.type() != RequestParams::T__None);
 
-  return AllocRequest(aParams);
+  return AllocRequest(aParams, IsSameProcessActor());
 }
 
 bool
@@ -7437,7 +7511,7 @@ NormalTransaction::AllocPBackgroundIDBCursorParent(
 {
   AssertIsOnBackgroundThread();
 
-  return AllocCursor(aParams);
+  return AllocCursor(aParams, IsSameProcessActor());
 }
 
 bool
@@ -7485,6 +7559,17 @@ VersionChangeTransaction::~VersionChangeTransaction()
     mActorDestroyed = true;
   }
 #endif
+}
+
+bool
+VersionChangeTransaction::IsSameProcessActor()
+{
+  AssertIsOnBackgroundThread();
+
+  PBackgroundParent* actor = Manager()->Manager()->Manager();
+  MOZ_ASSERT(actor);
+
+  return !BackgroundParent::IsOtherProcessActor(actor);
 }
 
 void
@@ -8000,7 +8085,7 @@ VersionChangeTransaction::AllocPBackgroundIDBRequestParent(
   AssertIsOnBackgroundThread();
   MOZ_ASSERT(aParams.type() != RequestParams::T__None);
 
-  return AllocRequest(aParams);
+  return AllocRequest(aParams, IsSameProcessActor());
 }
 
 bool
@@ -8031,7 +8116,7 @@ VersionChangeTransaction::AllocPBackgroundIDBCursorParent(
 {
   AssertIsOnBackgroundThread();
 
-  return AllocCursor(aParams);
+  return AllocCursor(aParams, IsSameProcessActor());
 }
 
 bool
@@ -8174,35 +8259,36 @@ Cursor::SendResponseInternal(CursorResponse& aResponse,
     MOZ_ASSERT(mBackgroundParent);
 
     FallibleTArray<PBlobParent*> actors;
+    FallibleTArray<intptr_t> fileInfos;
     nsresult rv = ConvertBlobsToActors(mBackgroundParent,
                                        mFileManager,
                                        aFiles,
-                                       actors);
+                                       actors,
+                                       fileInfos);
     if (NS_WARN_IF(NS_FAILED(rv))) {
       aResponse = ClampResultCode(rv);
     } else {
+      SerializedStructuredCloneReadInfo* serializedInfo = nullptr;
       switch (aResponse.type()) {
-        case CursorResponse::TObjectStoreCursorResponse: {
-          nsTArray<PBlobParent*>& responseActors =
-            aResponse.get_ObjectStoreCursorResponse().cloneInfo().blobsParent();
-          MOZ_ASSERT(responseActors.IsEmpty());
-
-          responseActors.SwapElements(actors);
+        case CursorResponse::TObjectStoreCursorResponse:
+          serializedInfo =
+            &aResponse.get_ObjectStoreCursorResponse().cloneInfo();
           break;
-        }
 
-        case CursorResponse::TIndexCursorResponse: {
-          nsTArray<PBlobParent*>& responseActors =
-            aResponse.get_IndexCursorResponse().cloneInfo().blobsParent();
-          MOZ_ASSERT(responseActors.IsEmpty());
-
-          responseActors.SwapElements(actors);
+        case CursorResponse::TIndexCursorResponse:
+          serializedInfo = &aResponse.get_IndexCursorResponse().cloneInfo();
           break;
-        }
 
         default:
           MOZ_CRASH("Should never get here!");
       }
+
+      MOZ_ASSERT(serializedInfo);
+      MOZ_ASSERT(serializedInfo->blobsParent().IsEmpty());
+      MOZ_ASSERT(serializedInfo->fileInfos().IsEmpty());
+
+      serializedInfo->blobsParent().SwapElements(actors);
+      serializedInfo->fileInfos().SwapElements(fileInfos);
     }
   }
 
@@ -9760,10 +9846,10 @@ DatabaseOperationBase::GetStructuredCloneReadInfoFromStatement(
       return rv;
     }
 
-    for (uint32_t i = 0; i < array.Length(); i++) {
-      const int64_t& id = array[i];
+    for (uint32_t count = array.Length(), index = 0; index < count; index++) {
+      MOZ_ASSERT(array[index] > 0);
 
-      nsRefPtr<FileInfo> fileInfo = aFileManager->GetFileInfo(id);
+      nsRefPtr<FileInfo> fileInfo = aFileManager->GetFileInfo(array[index]);
       MOZ_ASSERT(fileInfo);
 
       StructuredCloneFile* file = aInfo->mFiles.AppendElement();
@@ -13866,33 +13952,57 @@ ObjectStoreAddOrPutRequestOp::Init(TransactionBase* aTransaction)
 #endif
   }
 
-  const nsTArray<PBackgroundIDBDatabaseFileParent*>& files =
-    mParams.filesParent();
+  const nsTArray<DatabaseFileOrMutableFileId>& files = mParams.files();
 
-  if (files.IsEmpty()) {
-    return true;
-  }
+  if (!files.IsEmpty()) {
+    const uint32_t count = files.Length();
 
-  const uint32_t fileCount = files.Length();
+    if (NS_WARN_IF(!mStoredFileInfos.SetCapacity(count))) {
+      return false;
+    }
 
-  if (NS_WARN_IF(!mFileCopyInfos.SetCapacity(fileCount))) {
-    return false;
-  }
+    nsRefPtr<FileManager> fileManager =
+      aTransaction->GetDatabase()->GetFileManager();
+    MOZ_ASSERT(fileManager);
 
-  for (uint32_t index = 0; index < fileCount; index++) {
-    auto* fileActor = static_cast<DatabaseFile*>(files[index]);
-    MOZ_ASSERT(fileActor);
+    for (uint32_t index = 0; index < count; index++) {
+      const DatabaseFileOrMutableFileId& fileOrFileId = files[index];
+      MOZ_ASSERT(fileOrFileId.type() ==
+                   DatabaseFileOrMutableFileId::
+                     TPBackgroundIDBDatabaseFileParent ||
+                 fileOrFileId.type() == DatabaseFileOrMutableFileId::Tint64_t);
 
-    PendingFileCopyInfo* copyInfo = mFileCopyInfos.AppendElement();
-    MOZ_ASSERT(copyInfo);
+      StoredFileInfo* storedFileInfo = mStoredFileInfos.AppendElement();
+      MOZ_ASSERT(storedFileInfo);
 
-    copyInfo->mFileActor = fileActor;
-    copyInfo->mFileInfo = fileActor->GetFileInfo();
-    copyInfo->mInputStream = fileActor->GetInputStream();
+      switch (fileOrFileId.type()) {
+        case DatabaseFileOrMutableFileId::TPBackgroundIDBDatabaseFileParent: {
+          storedFileInfo->mFileActor =
+            static_cast<DatabaseFile*>(
+              fileOrFileId.get_PBackgroundIDBDatabaseFileParent());
+          MOZ_ASSERT(storedFileInfo->mFileActor);
 
-    if (copyInfo->mInputStream && !mFileManager) {
-      mFileManager = aTransaction->GetDatabase()->GetFileManager();
-      MOZ_ASSERT(mFileManager);
+          storedFileInfo->mFileInfo = storedFileInfo->mFileActor->GetFileInfo();
+          MOZ_ASSERT(storedFileInfo->mFileInfo);
+
+          storedFileInfo->mInputStream =
+            storedFileInfo->mFileActor->GetInputStream();
+          if (storedFileInfo->mInputStream && !mFileManager) {
+            mFileManager = fileManager;
+          }
+          break;
+        }
+
+        case DatabaseFileOrMutableFileId::Tint64_t:
+          storedFileInfo->mFileInfo =
+            fileManager->GetFileInfo(fileOrFileId.get_int64_t());
+          MOZ_ASSERT(storedFileInfo->mFileInfo);
+          break;
+
+        case DatabaseFileOrMutableFileId::TPBackgroundIDBDatabaseFileChild:
+        default:
+          MOZ_CRASH("Should never get here!");
+      }
     }
   }
 
@@ -13904,7 +14014,7 @@ ObjectStoreAddOrPutRequestOp::DoDatabaseWork(TransactionBase* aTransaction)
 {
   MOZ_ASSERT(aTransaction);
   aTransaction->AssertIsOnTransactionThread();
-  MOZ_ASSERT_IF(mFileManager, !mFileCopyInfos.IsEmpty());
+  MOZ_ASSERT_IF(mFileManager, !mStoredFileInfos.IsEmpty());
 
   PROFILER_LABEL("IndexedDB",
                  "ObjectStoreAddOrPutRequestOp::DoDatabaseWork",
@@ -14062,19 +14172,19 @@ ObjectStoreAddOrPutRequestOp::DoDatabaseWork(TransactionBase* aTransaction)
     MOZ_ASSERT(isDirectory);
   }
 
-  if (!mFileCopyInfos.IsEmpty()) {
+  if (!mStoredFileInfos.IsEmpty()) {
     nsAutoString fileIds;
 
-    for (uint32_t count = mFileCopyInfos.Length(), index = 0;
+    for (uint32_t count = mStoredFileInfos.Length(), index = 0;
          index < count;
          index++) {
-      PendingFileCopyInfo& fileCopyInfo = mFileCopyInfos[index];
-      MOZ_ASSERT(fileCopyInfo.mFileInfo);
+      StoredFileInfo& storedFileInfo = mStoredFileInfos[index];
+      MOZ_ASSERT(storedFileInfo.mFileInfo);
 
-      int64_t id = fileCopyInfo.mFileInfo->Id();
+      const int64_t id = storedFileInfo.mFileInfo->Id();
 
       nsCOMPtr<nsIInputStream> inputStream;
-      fileCopyInfo.mInputStream.swap(inputStream);
+      storedFileInfo.mInputStream.swap(inputStream);
 
       if (inputStream) {
         MOZ_ASSERT(fileDirectory);
@@ -14170,7 +14280,7 @@ ObjectStoreAddOrPutRequestOp::DoDatabaseWork(TransactionBase* aTransaction)
             return rv;
           }
 
-          fileCopyInfo.mCopiedSuccessfully = true;
+          storedFileInfo.mCopiedSuccessfully = true;
         }
       }
 
@@ -14181,12 +14291,14 @@ ObjectStoreAddOrPutRequestOp::DoDatabaseWork(TransactionBase* aTransaction)
     }
 
     rv = stmt->BindStringByName(NS_LITERAL_CSTRING("file_ids"), fileIds);
+    if (NS_WARN_IF(NS_FAILED(rv))) {
+      return rv;
+    }
   } else {
     rv = stmt->BindNullByName(NS_LITERAL_CSTRING("file_ids"));
-  }
-
-  if (NS_WARN_IF(NS_FAILED(rv))) {
-    return rv;
+    if (NS_WARN_IF(NS_FAILED(rv))) {
+      return rv;
+    }
   }
 
   rv = stmt->Execute();
@@ -14238,21 +14350,37 @@ ObjectStoreAddOrPutRequestOp::GetResponse(RequestResponse& aResponse)
 {
   AssertIsOnOwningThread();
 
-  for (uint32_t count = mFileCopyInfos.Length(), index = 0;
-       index < count;
-       index++) {
-    const PendingFileCopyInfo& fileCopyInfo = mFileCopyInfos[index];
-
-    if (fileCopyInfo.mCopiedSuccessfully) {
-      fileCopyInfo.mFileActor->ClearInputStreamParams();
-    }
-  }
-
   if (mOverwrite) {
     aResponse = ObjectStorePutResponse(mResponse);
   } else {
     aResponse = ObjectStoreAddResponse(mResponse);
   }
+}
+
+void
+ObjectStoreAddOrPutRequestOp::Cleanup()
+{
+  AssertIsOnOwningThread();
+
+  for (uint32_t count = mStoredFileInfos.Length(), index = 0;
+       index < count;
+       index++) {
+    StoredFileInfo& storedFileInfo = mStoredFileInfos[index];
+    nsRefPtr<DatabaseFile>& fileActor = storedFileInfo.mFileActor;
+
+    if (fileActor) {
+      if (storedFileInfo.mCopiedSuccessfully) {
+        fileActor->ClearInputStreamParams();
+      }
+      fileActor = nullptr;
+    } else {
+      MOZ_ASSERT(!storedFileInfo.mCopiedSuccessfully);
+    }
+
+    storedFileInfo.mFileInfo = nullptr;
+  }
+
+  NormalTransactionOp::Cleanup();
 }
 
 ObjectStoreGetRequestOp::ObjectStoreGetRequestOp(TransactionBase* aTransaction,
@@ -14388,17 +14516,22 @@ ObjectStoreGetRequestOp::GetResponse(RequestResponse& aResponse)
         info.mData.SwapElements(serializedInfo.data());
 
         FallibleTArray<PBlobParent*> blobs;
-
+        FallibleTArray<intptr_t> fileInfos;
         nsresult rv = ConvertBlobsToActors(mBackgroundParent,
                                            mFileManager,
                                            info.mFiles,
-                                           blobs);
+                                           blobs,
+                                           fileInfos);
         if (NS_WARN_IF(NS_FAILED(rv))) {
           aResponse = rv;
           return;
         }
 
+        MOZ_ASSERT(serializedInfo.blobsParent().IsEmpty());
+        MOZ_ASSERT(serializedInfo.fileInfos().IsEmpty());
+
         serializedInfo.blobsParent().SwapElements(blobs);
+        serializedInfo.fileInfos().SwapElements(fileInfos);
       }
 
       nsTArray<SerializedStructuredCloneReadInfo>& cloneInfos =
@@ -14421,15 +14554,23 @@ ObjectStoreGetRequestOp::GetResponse(RequestResponse& aResponse)
     info.mData.SwapElements(serializedInfo.data());
 
     FallibleTArray<PBlobParent*> blobs;
-
+    FallibleTArray<intptr_t> fileInfos;
     nsresult rv =
-      ConvertBlobsToActors(mBackgroundParent, mFileManager, info.mFiles, blobs);
+      ConvertBlobsToActors(mBackgroundParent,
+                           mFileManager,
+                           info.mFiles,
+                           blobs,
+                           fileInfos);
     if (NS_WARN_IF(NS_FAILED(rv))) {
       aResponse = rv;
       return;
     }
 
+    MOZ_ASSERT(serializedInfo.blobsParent().IsEmpty());
+    MOZ_ASSERT(serializedInfo.fileInfos().IsEmpty());
+
     serializedInfo.blobsParent().SwapElements(blobs);
+    serializedInfo.fileInfos().SwapElements(fileInfos);
   }
 }
 
@@ -14902,17 +15043,22 @@ IndexGetRequestOp::GetResponse(RequestResponse& aResponse)
         info.mData.SwapElements(serializedInfo.data());
 
         FallibleTArray<PBlobParent*> blobs;
-
+        FallibleTArray<intptr_t> fileInfos;
         nsresult rv = ConvertBlobsToActors(mBackgroundParent,
                                            mFileManager,
                                            info.mFiles,
-                                           blobs);
+                                           blobs,
+                                           fileInfos);
         if (NS_WARN_IF(NS_FAILED(rv))) {
           aResponse = rv;
           return;
         }
 
+        MOZ_ASSERT(serializedInfo.blobsParent().IsEmpty());
+        MOZ_ASSERT(serializedInfo.fileInfos().IsEmpty());
+
         serializedInfo.blobsParent().SwapElements(blobs);
+        serializedInfo.fileInfos().SwapElements(fileInfos);
       }
 
       nsTArray<SerializedStructuredCloneReadInfo>& cloneInfos =
@@ -14935,15 +15081,23 @@ IndexGetRequestOp::GetResponse(RequestResponse& aResponse)
     info.mData.SwapElements(serializedInfo.data());
 
     FallibleTArray<PBlobParent*> blobs;
-
+    FallibleTArray<intptr_t> fileInfos;
     nsresult rv =
-      ConvertBlobsToActors(mBackgroundParent, mFileManager, info.mFiles, blobs);
+      ConvertBlobsToActors(mBackgroundParent,
+                           mFileManager,
+                           info.mFiles,
+                           blobs,
+                           fileInfos);
     if (NS_WARN_IF(NS_FAILED(rv))) {
       aResponse = rv;
       return;
     }
 
+    MOZ_ASSERT(serializedInfo.blobsParent().IsEmpty());
+    MOZ_ASSERT(serializedInfo.fileInfos().IsEmpty());
+
     serializedInfo.blobsParent().SwapElements(blobs);
+    serializedInfo.fileInfos().SwapElements(fileInfos);
   }
 }
 

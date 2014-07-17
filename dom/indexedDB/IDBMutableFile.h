@@ -8,6 +8,7 @@
 #define mozilla_dom_indexeddb_idbmutablefile_h__
 
 #include "js/TypeDecls.h"
+#include "mozilla/Atomics.h"
 #include "mozilla/Attributes.h"
 #include "mozilla/dom/FileModeBinding.h"
 #include "mozilla/DOMEventTargetHelper.h"
@@ -27,6 +28,7 @@ class ErrorResult;
 namespace dom {
 
 class DOMRequest;
+class MetadataParameters;
 
 namespace indexedDB {
 
@@ -38,6 +40,7 @@ class IDBMutableFile MOZ_FINAL
   : public DOMEventTargetHelper
   , public MutableFileBase
 {
+  typedef mozilla::dom::MetadataParameters MetadataParameters;
   typedef mozilla::dom::quota::PersistenceType PersistenceType;
 
   nsString mName;
@@ -49,6 +52,8 @@ class IDBMutableFile MOZ_FINAL
   const nsCString mGroup;
   const nsCString mOrigin;
   const PersistenceType mPersistenceType;
+
+  Atomic<bool> mInvalidated;
 
 public:
   static already_AddRefed<IDBMutableFile>
@@ -70,8 +75,6 @@ public:
   }
 
   int64_t
-
-  int64_t
   GetFileId() const;
 
   FileInfo*
@@ -81,9 +84,12 @@ public:
   }
 
   already_AddRefed<nsIDOMFile>
-  CreateFileObject(IDBFileHandle* aFileHandle, uint32_t aFileSize);
+  CreateFileObject(IDBFileHandle* aFileHandle,
+                   MetadataParameters* aMetadataParams);
 
-  // MutableFile
+  void
+  Invalidate();
+
   NS_DECL_ISUPPORTS_INHERITED
   NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(IDBMutableFile, DOMEventTargetHelper)
 
@@ -124,19 +130,6 @@ public:
   {
     aType = mType;
   }
-
-  {
-    return GetOwner();
-  }
-
-  void
-  GetName(nsString& aName) const
-    aName = mName;
-  }
-  void
-  GetType(nsString& aType) const
-  {
-    aType = mType;
 
   IDBDatabase*
   Database() const;

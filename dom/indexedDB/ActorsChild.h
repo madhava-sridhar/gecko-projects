@@ -16,7 +16,7 @@
 #include "mozilla/dom/indexedDB/PBackgroundIDBVersionChangeTransactionChild.h"
 #include "nsAutoPtr.h"
 #include "nsCOMPtr.h"
-#include "nsTArrayForwardDeclare.h"
+#include "nsTArray.h"
 
 class nsIEventTarget;
 struct PRThread;
@@ -31,9 +31,11 @@ class BackgroundChildImpl;
 namespace dom {
 namespace indexedDB {
 
+class FileInfo;
 class IDBCursor;
 class IDBDatabase;
 class IDBFactory;
+class IDBMutableFile;
 class IDBOpenDBRequest;
 class IDBRequest;
 class IDBTransaction;
@@ -473,28 +475,21 @@ private:
   SendDeleteMe() MOZ_DELETE;
 };
 
-class BackgroundTransactionRequestChildBase
-  : public BackgroundRequestChildBase
-{
-protected:
-  nsRefPtr<IDBTransaction> mTransaction;
-
-protected:
-  BackgroundTransactionRequestChildBase(IDBRequest* aRequest);
-
-  virtual
-  ~BackgroundTransactionRequestChildBase();
-};
-
 class BackgroundRequestChild MOZ_FINAL
-  : public BackgroundTransactionRequestChildBase
+  : public BackgroundRequestChildBase
   , public PBackgroundIDBRequestChild
 {
   friend class BackgroundTransactionChild;
   friend class BackgroundVersionChangeTransactionChild;
 
+  nsRefPtr<IDBTransaction> mTransaction;
+  nsTArray<nsRefPtr<FileInfo>> mFileInfos;
+
 public:
   BackgroundRequestChild(IDBRequest* aRequest);
+
+  void
+  HoldFileInfosUntilComplete(nsTArray<nsRefPtr<FileInfo>>& aFileInfos);
 
 private:
   // Only destroyed by BackgroundTransactionChild or
@@ -617,6 +612,13 @@ private:
   bool
   SendDeleteMe() MOZ_DELETE;
 };
+
+// XXX This doesn't belong here. However, we're not yet porting MutableFile
+//     stuff to PBackground so this is necessary for the time being.
+void
+DispatchMutableFileResult(IDBRequest* aRequest,
+                          nsresult aResultCode,
+                          IDBMutableFile* aMutableFile);
 
 } // namespace indexedDB
 } // namespace dom

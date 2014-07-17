@@ -6,8 +6,6 @@
 
 #include "IDBDatabase.h"
 
-#include "AsyncConnectionHelper.h"
-#include "DatabaseInfo.h"
 #include "FileInfo.h"
 #include "FileManager.h"
 #include "IDBEvents.h"
@@ -15,6 +13,7 @@
 #include "IDBIndex.h"
 #include "IDBMutableFile.h"
 #include "IDBObjectStore.h"
+#include "IDBRequest.h"
 #include "IDBTransaction.h"
 #include "IDBFactory.h"
 #include "IndexedDatabaseManager.h"
@@ -30,6 +29,7 @@
 #include "mozilla/dom/IDBObjectStoreBinding.h"
 #include "mozilla/dom/indexedDB/PBackgroundIDBDatabaseFileChild.h"
 #include "mozilla/dom/indexedDB/PBackgroundIDBSharedTypes.h"
+#include "mozilla/ipc/BackgroundUtils.h"
 #include "mozilla/dom/ipc/BlobChild.h"
 #include "mozilla/dom/ipc/nsIRemoteBlob.h"
 #include "mozilla/dom/quota/QuotaManager.h"
@@ -43,6 +43,7 @@
 #include "nsIObserver.h"
 #include "nsIObserverService.h"
 #include "nsISupportsPrimitives.h"
+#include "nsThreadUtils.h"
 #include "ProfilerHelpers.h"
 #include "ReportInternalError.h"
 
@@ -60,44 +61,51 @@ namespace {
 
 const char kObserverTopic[] = "inner-window-destroyed";
 
+// XXX This should either be ported to PBackground or removed someday.
 class CreateFileHelper MOZ_FINAL
-  : public AsyncConnectionHelper
+  : public nsRunnable
 {
-  const nsString mName;
-  const nsString mType;
-
+  nsRefPtr<IDBDatabase> mDatabase;
+  nsRefPtr<IDBRequest> mRequest;
   nsRefPtr<FileInfo> mFileInfo;
 
+  const nsString mName;
+  const nsString mType;
+  const nsString mDatabaseName;
+  const nsCString mOrigin;
+
+  const PersistenceType mPersistenceType;
+
+  nsresult mResultCode;
+
 public:
+  static nsresult
+  CreateAndDispatch(IDBDatabase* aDatabase,
+                    IDBRequest* aRequest,
+                    const nsAString& aName,
+                    const nsAString& aType);
+
+  NS_DECL_ISUPPORTS_INHERITED
+
+private:
   CreateFileHelper(IDBDatabase* aDatabase,
                    IDBRequest* aRequest,
                    const nsAString& aName,
-                   const nsAString& aType)
-    : AsyncConnectionHelper(aDatabase, aRequest)
-    , mName(aName)
-    , mType(aType)
-  { }
+                   const nsAString& aType,
+                   const nsACString& aOrigin);
 
-  virtual nsresult
-  DoDatabaseWork(mozIStorageConnection* aConnection) MOZ_OVERRIDE;
-
-  virtual nsresult
-  GetSuccessResult(JSContext* aCx,
-                   JS::MutableHandle<JS::Value> aVal) MOZ_OVERRIDE;
-
-  virtual void
-  ReleaseMainThreadObjects() MOZ_OVERRIDE;
-
-  virtual ChildProcessSendResult
-  SendResponseToChildProcess(nsresult aResultCode) MOZ_OVERRIDE;
-
-  virtual nsresult
-  UnpackResponseFromParentProcess(const ResponseValue& aResponseValue)
-                                  MOZ_OVERRIDE;
-
-private:
   ~CreateFileHelper()
-  { }
+  {
+    MOZ_ASSERT(IndexedDatabaseManager::IsMainProcess());
+  }
+
+  nsresult
+  DoDatabaseWork();
+
+  void
+  DoMainThreadWork(nsresult aResultCode);
+
+  NS_DECL_NSIRUNNABLE
 };
 
 class DatabaseFile MOZ_FINAL
@@ -666,16 +674,8 @@ IDBDatabase::CreateMutableFile(const nsAString& aName,
     type = aType.Value();
   }
 
-  nsRefPtr<CreateFileHelper> helper =
-    new CreateFileHelper(this, request, aName, type);
-
-  QuotaManager* quotaManager = QuotaManager::Get();
-  MOZ_ASSERT(quotaManager);
-  MOZ_ASSERT(quotaManager->IOThread());
-
-  if (NS_FAILED(helper->Dispatch(quotaManager->IOThread()))) {
-    IDB_WARNING("Failed to dispatch!");
-    aRv.Throw(NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
+  aRv = CreateFileHelper::CreateAndDispatch(this, request, aName, type);
+  if (NS_WARN_IF(aRv.Failed())) {
     return nullptr;
   }
 
@@ -888,6 +888,58 @@ IDBDatabase::DelayedMaybeExpireFileActors()
   MOZ_ALWAYS_TRUE(NS_SUCCEEDED(NS_DispatchToCurrentThread(runnable)));
 }
 
+nsresult
+IDBDatabase::GetQuotaInfo(nsACString& aOrigin,
+                          PersistenceType* aPersistenceType)
+{
+  using mozilla::dom::quota::QuotaManager;
+
+  MOZ_ASSERT(IndexedDatabaseManager::IsMainProcess());
+  MOZ_ASSERT(NS_IsMainThread());
+
+  if (aPersistenceType) {
+    *aPersistenceType = mSpec->metadata().persistenceType();
+    MOZ_ASSERT(*aPersistenceType != PERSISTENCE_TYPE_INVALID);
+  }
+
+  PrincipalInfo* principalInfo = mFactory->GetPrincipalInfo();
+  MOZ_ASSERT(principalInfo);
+
+  switch (principalInfo->type()) {
+    case PrincipalInfo::TNullPrincipalInfo:
+      MOZ_CRASH("Is this needed?!");
+
+    case PrincipalInfo::TSystemPrincipalInfo:
+      QuotaManager::GetInfoForChrome(nullptr, &aOrigin, nullptr, nullptr);
+      return NS_OK;
+
+    case PrincipalInfo::TContentPrincipalInfo: {
+      nsresult rv;
+      nsCOMPtr<nsIPrincipal> principal =
+        PrincipalInfoToPrincipal(*principalInfo, &rv);
+      if (NS_WARN_IF(NS_FAILED(rv))) {
+        return rv;
+      }
+
+      rv = QuotaManager::GetInfoFromPrincipal(principal,
+                                              nullptr,
+                                              &aOrigin,
+                                              nullptr,
+                                              nullptr);
+      if (NS_WARN_IF(NS_FAILED(rv))) {
+        return rv;
+      }
+
+      return NS_OK;
+    }
+
+    default:
+      MOZ_CRASH("Unknown PrincipalInfo type!");
+  }
+
+  MOZ_CRASH("Should never get here!");
+}
+
 void
 IDBDatabase::ExpireFileActors(bool aExpireAll)
 {
@@ -969,6 +1021,49 @@ IDBDatabase::ExpireFileActors(bool aExpireAll)
 }
 
 void
+IDBDatabase::NoteLiveMutableFile(IDBMutableFile* aMutableFile)
+{
+  MOZ_ASSERT(IndexedDatabaseManager::IsMainProcess());
+  MOZ_ASSERT(NS_IsMainThread());
+  MOZ_ASSERT(aMutableFile);
+  MOZ_ASSERT(!mLiveMutableFiles.Contains(aMutableFile));
+
+  mLiveMutableFiles.AppendElement(aMutableFile);
+}
+
+void
+IDBDatabase::NoteFinishedMutableFile(IDBMutableFile* aMutableFile)
+{
+  // This should always happen in the main process but occasionally it is called
+  // after the IndexedDatabaseManager has already shut down.
+  //   MOZ_ASSERT(IndexedDatabaseManager::IsMainProcess());
+  MOZ_ASSERT(NS_IsMainThread());
+  MOZ_ASSERT(aMutableFile);
+
+  // It's ok if this is called more than once, so don't assert that aMutableFile
+  // is in the list already.
+
+  mLiveMutableFiles.RemoveElement(aMutableFile);
+}
+
+void
+IDBDatabase::InvalidateMutableFiles()
+{
+  MOZ_ASSERT(IndexedDatabaseManager::IsMainProcess());
+  MOZ_ASSERT(NS_IsMainThread());
+
+  if (!mLiveMutableFiles.IsEmpty()) {
+    for (uint32_t count = mLiveMutableFiles.Length(), index = 0;
+         index < count;
+         index++) {
+      mLiveMutableFiles[index]->Invalidate();
+    }
+
+    mLiveMutableFiles.Clear();
+  }
+}
+
+void
 IDBDatabase::Invalidate()
 {
   AssertIsOnOwningThread();
@@ -976,6 +1071,7 @@ IDBDatabase::Invalidate()
   if (!mInvalidated) {
     mInvalidated = true;
 
+    InvalidateMutableFiles();
     AbortTransactions();
 
     CloseInternal();
@@ -1030,82 +1126,186 @@ IDBDatabase::WrapObject(JSContext* aCx)
   return IDBDatabaseBinding::Wrap(aCx, this);
 }
 
+CreateFileHelper::CreateFileHelper(IDBDatabase* aDatabase,
+                                   IDBRequest* aRequest,
+                                   const nsAString& aName,
+                                   const nsAString& aType,
+                                   const nsACString& aOrigin)
+  : mDatabase(aDatabase)
+  , mRequest(aRequest)
+  , mName(aName)
+  , mType(aType)
+  , mDatabaseName(aDatabase->Name())
+  , mOrigin(aOrigin)
+  , mPersistenceType(aDatabase->Spec()->metadata().persistenceType())
+  , mResultCode(NS_OK)
+{
+  MOZ_ASSERT(IndexedDatabaseManager::IsMainProcess());
+  MOZ_ASSERT(NS_IsMainThread());
+  MOZ_ASSERT(aDatabase);
+  MOZ_ASSERT(aRequest);
+  MOZ_ASSERT(mPersistenceType != PERSISTENCE_TYPE_INVALID);
+}
+
+// static
 nsresult
-CreateFileHelper::DoDatabaseWork(mozIStorageConnection* aConnection)
+CreateFileHelper::CreateAndDispatch(IDBDatabase* aDatabase,
+                                    IDBRequest* aRequest,
+                                    const nsAString& aName,
+                                    const nsAString& aType)
+{
+  MOZ_ASSERT(IndexedDatabaseManager::IsMainProcess());
+  MOZ_ASSERT(NS_IsMainThread());
+  MOZ_ASSERT(aDatabase);
+  aDatabase->AssertIsOnOwningThread();
+  MOZ_ASSERT(aDatabase->Factory());
+  MOZ_ASSERT(aRequest);
+  MOZ_ASSERT(!QuotaManager::IsShuttingDown());
+
+  nsCString origin;
+  nsresult rv = aDatabase->GetQuotaInfo(origin, nullptr);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+
+  MOZ_ASSERT(!origin.IsEmpty());
+
+  nsRefPtr<CreateFileHelper> helper =
+    new CreateFileHelper(aDatabase, aRequest, aName, aType, origin);
+
+  QuotaManager* quotaManager = QuotaManager::Get();
+  MOZ_ASSERT(quotaManager);
+
+  nsCOMPtr<nsIEventTarget> ioThread = quotaManager->IOThread();
+  MOZ_ASSERT(ioThread);
+
+  if (NS_WARN_IF(NS_FAILED(ioThread->Dispatch(helper, NS_DISPATCH_NORMAL)))) {
+    IDB_REPORT_INTERNAL_ERR();
+    return NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
+  }
+
+  return NS_OK;
+}
+
+nsresult
+CreateFileHelper::DoDatabaseWork()
 {
   AssertIsOnIOThread();
-  NS_ASSERTION(IndexedDatabaseManager::IsMainProcess(), "Wrong process!");
+  MOZ_ASSERT(IndexedDatabaseManager::IsMainProcess());
+  MOZ_ASSERT(!mFileInfo);
 
-  PROFILER_LABEL("CreateFileHelper", "DoDatabaseWork",
-    js::ProfileEntry::Category::STORAGE);
+  PROFILER_LABEL("IndexedDB",
+                 "CreateFileHelper::DoDatabaseWork",
+                 js::ProfileEntry::Category::STORAGE);
 
   if (IndexedDatabaseManager::InLowDiskSpaceMode()) {
     NS_WARNING("Refusing to create file because disk space is low!");
     return NS_ERROR_DOM_INDEXEDDB_QUOTA_ERR;
   }
 
-  MOZ_CRASH("Move me!");/*
-  FileManager* fileManager = mDatabase->Manager();
+  IndexedDatabaseManager* idbManager = IndexedDatabaseManager::Get();
+  MOZ_ASSERT(idbManager);
 
-  mFileInfo = fileManager->GetNewFileInfo();
-  IDB_ENSURE_TRUE(mFileInfo, NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
+  nsRefPtr<FileManager> fileManager =
+    idbManager->GetFileManager(mPersistenceType, mOrigin, mDatabaseName);
+  MOZ_ASSERT(fileManager);
 
-  const int64_t& fileId = mFileInfo->Id();
+  nsRefPtr<FileInfo> fileInfo = fileManager->GetNewFileInfo();
+  if (NS_WARN_IF(!fileInfo)) {
+    IDB_REPORT_INTERNAL_ERR();
+    return NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
+  }
 
-  nsCOMPtr<nsIFile> directory = fileManager->EnsureJournalDirectory();
-  NS_ENSURE_TRUE(directory, NS_ERROR_FAILURE);
+  const int64_t fileId = fileInfo->Id();
 
-  nsCOMPtr<nsIFile> file = fileManager->GetFileForId(directory, fileId);
-  NS_ENSURE_TRUE(file, NS_ERROR_FAILURE);
+  nsCOMPtr<nsIFile> journalDirectory = fileManager->EnsureJournalDirectory();
+  if (NS_WARN_IF(!journalDirectory)) {
+    IDB_REPORT_INTERNAL_ERR();
+    return NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
+  }
 
-  nsresult rv = file->Create(nsIFile::NORMAL_FILE_TYPE, 0644);
-  NS_ENSURE_SUCCESS(rv, rv);
+  nsCOMPtr<nsIFile> journalFile =
+    fileManager->GetFileForId(journalDirectory, fileId);
+  if (NS_WARN_IF(!journalFile)) {
+    IDB_REPORT_INTERNAL_ERR();
+    return NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
+  }
 
-  directory = fileManager->GetDirectory();
-  IDB_ENSURE_TRUE(directory, NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
+  nsresult rv = journalFile->Create(nsIFile::NORMAL_FILE_TYPE, 0644);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
 
-  file = fileManager->GetFileForId(directory, fileId);
-  IDB_ENSURE_TRUE(file, NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
+  nsCOMPtr<nsIFile> fileDirectory = fileManager->GetDirectory();
+  if (NS_WARN_IF(!fileDirectory)) {
+    IDB_REPORT_INTERNAL_ERR();
+    return NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
+  }
+
+  nsCOMPtr<nsIFile> file = fileManager->GetFileForId(fileDirectory, fileId);
+  if (NS_WARN_IF(!file)) {
+    IDB_REPORT_INTERNAL_ERR();
+    return NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
+  }
 
   rv = file->Create(nsIFile::NORMAL_FILE_TYPE, 0644);
-  IDB_ENSURE_SUCCESS(rv, NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
-  */
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+
+  mFileInfo.swap(fileInfo);
   return NS_OK;
 }
 
-nsresult
-CreateFileHelper::GetSuccessResult(JSContext* aCx,
-                                   JS::MutableHandle<JS::Value> aVal)
+void
+CreateFileHelper::DoMainThreadWork(nsresult aResultCode)
 {
   MOZ_ASSERT(IndexedDatabaseManager::IsMainProcess());
   MOZ_ASSERT(NS_IsMainThread());
 
-  nsRefPtr<IDBMutableFile> mutableFile =
-    IDBMutableFile::Create(mDatabase, mName, mType, mFileInfo.forget());
-  IDB_ENSURE_TRUE(mutableFile, NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
+  if (mDatabase->IsInvalidated()) {
+    IDB_REPORT_INTERNAL_ERR();
+    aResultCode = NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
+  }
 
-  return WrapNative(aCx, NS_ISUPPORTS_CAST(EventTarget*, mutableFile), aVal);
+  nsRefPtr<IDBMutableFile> mutableFile;
+  if (NS_SUCCEEDED(aResultCode)) {
+    mutableFile =
+      IDBMutableFile::Create(mDatabase, mName, mType, mFileInfo.forget());
+    MOZ_ASSERT(mutableFile);
+  }
+
+  DispatchMutableFileResult(mRequest, aResultCode, mutableFile);
 }
 
-void
-CreateFileHelper::ReleaseMainThreadObjects()
-{
-  mFileInfo = nullptr;
-  AsyncConnectionHelper::ReleaseMainThreadObjects();
-}
+NS_IMPL_ISUPPORTS_INHERITED0(CreateFileHelper, nsRunnable)
 
-auto
-CreateFileHelper::SendResponseToChildProcess(nsresult aResultCode)
-  -> ChildProcessSendResult
+NS_IMETHODIMP
+CreateFileHelper::Run()
 {
-  return Success_NotSent;
-}
+  MOZ_ASSERT(IndexedDatabaseManager::IsMainProcess());
 
-nsresult
-CreateFileHelper::UnpackResponseFromParentProcess(
-                                            const ResponseValue& aResponseValue)
-{
-  MOZ_CRASH("Should never get here!");
+  if (NS_IsMainThread()) {
+    DoMainThreadWork(mResultCode);
+
+    mDatabase = nullptr;
+    mRequest = nullptr;
+    mFileInfo = nullptr;
+
+    return NS_OK;
+  }
+
+  AssertIsOnIOThread();
+  MOZ_ASSERT(NS_SUCCEEDED(mResultCode));
+
+  nsresult rv = DoDatabaseWork();
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    mResultCode = rv;
+  }
+
+  MOZ_ALWAYS_TRUE(NS_SUCCEEDED(NS_DispatchToMainThread(this)));
+
+  return NS_OK;
 }
 
 NS_IMPL_ISUPPORTS(IDBDatabase::WindowObserver, nsIObserver)

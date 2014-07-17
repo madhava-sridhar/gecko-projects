@@ -22,25 +22,29 @@ namespace indexedDB {
 
 inline
 StructuredCloneFile::StructuredCloneFile()
-{ }
+{
+  MOZ_COUNT_CTOR(StructuredCloneFile);
+}
 
 inline
 StructuredCloneFile::~StructuredCloneFile()
-{ }
+{
+  MOZ_COUNT_DTOR(StructuredCloneFile);
+}
 
 inline
 bool
 StructuredCloneFile::operator==(const StructuredCloneFile& aOther) const
 {
   return this->mFile == aOther.mFile &&
-          this->mFileInfo == aOther.mFileInfo &&
-          this->mInputStream == aOther.mInputStream;
+         this->mFileInfo == aOther.mFileInfo;
 }
 
 inline
 StructuredCloneReadInfo::StructuredCloneReadInfo()
   : mDatabase(nullptr)
 {
+  MOZ_COUNT_CTOR(StructuredCloneReadInfo);
 }
 
 inline
@@ -48,7 +52,15 @@ StructuredCloneReadInfo::StructuredCloneReadInfo(
                              SerializedStructuredCloneReadInfo&& aCloneReadInfo)
   : mData(Move(aCloneReadInfo.data()))
   , mDatabase(nullptr)
-{ }
+{
+  MOZ_COUNT_CTOR(StructuredCloneReadInfo);
+}
+
+inline
+StructuredCloneReadInfo::~StructuredCloneReadInfo()
+{
+  MOZ_COUNT_DTOR(StructuredCloneReadInfo);
+}
 
 inline StructuredCloneReadInfo&
 StructuredCloneReadInfo::operator=(StructuredCloneReadInfo&& aCloneReadInfo)

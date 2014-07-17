@@ -131,6 +131,25 @@ FileInfo::UpdateReferences(ThreadSafeAutoRefCnt& aRefCount,
                            int32_t aDelta,
                            bool aClear)
 {
+  // XXX This can go away once DOM objects no longer hold FileInfo objects...
+  //     Looking at you, IDBMutableFile...
+  if (IndexedDatabaseManager::IsClosed()) {
+    MOZ_ASSERT(&aRefCount == &mRefCnt);
+    MOZ_ASSERT(aDelta == 1 || aDelta == -1);
+    MOZ_ASSERT(!aClear);
+
+    if (aDelta > 0) {
+      ++aRefCount;
+    } else {
+      nsrefcnt count = --aRefCount;
+      if (!count) {
+        mRefCnt = 1;
+        delete this;
+      }
+    }
+    return;
+  }
+
   MOZ_ASSERT(!IndexedDatabaseManager::IsClosed());
 
   bool needsCleanup;

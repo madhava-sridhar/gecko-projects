@@ -5,11 +5,13 @@
 #include "ActorsChild.h"
 
 #include "BackgroundChildImpl.h"
+#include "FileManager.h"
 #include "IDBDatabase.h"
 #include "IDBEvents.h"
 #include "IDBFactory.h"
 #include "IDBIndex.h"
 #include "IDBObjectStore.h"
+#include "IDBMutableFile.h"
 #include "IDBRequest.h"
 #include "IDBTransaction.h"
 #include "IndexedDatabase.h"
@@ -34,6 +36,10 @@
 #include "PermissionRequestBase.h"
 #include "ProfilerHelpers.h"
 #include "ReportInternalError.h"
+
+#ifdef DEBUG
+#include "IndexedDatabaseManager.h"
+#endif
 
 using namespace mozilla;
 using namespace mozilla::dom;
@@ -460,20 +466,36 @@ protected:
 
 void
 ConvertActorsToBlobs(IDBDatabase* aDatabase,
-                     const nsTArray<PBlobChild*>& aActors,
+                     const SerializedStructuredCloneReadInfo& aCloneReadInfo,
                      nsTArray<StructuredCloneFile>& aFiles)
 {
   MOZ_ASSERT(aFiles.IsEmpty());
 
-  if (!aActors.IsEmpty()) {
-    const uint32_t count = aActors.Length();
+  const nsTArray<PBlobChild*>& blobs = aCloneReadInfo.blobsChild();
+  const nsTArray<intptr_t>& fileInfos = aCloneReadInfo.fileInfos();
+
+  MOZ_ASSERT_IF(IndexedDatabaseManager::IsMainProcess(),
+                blobs.Length() == fileInfos.Length());
+
+  if (!blobs.IsEmpty()) {
+    const uint32_t count = blobs.Length();
     aFiles.SetCapacity(count);
 
     for (uint32_t index = 0; index < count; index++) {
-      BlobChild* actor = static_cast<BlobChild*>(aActors[index]);
+      BlobChild* actor = static_cast<BlobChild*>(blobs[index]);
+
+      MOZ_ASSERT_IF(IndexedDatabaseManager::IsMainProcess(), fileInfos[index]);
 
       nsCOMPtr<nsIDOMBlob> blob = actor->GetBlob();
       MOZ_ASSERT(blob);
+
+      nsRefPtr<FileInfo> fileInfo =
+        dont_AddRef(reinterpret_cast<FileInfo*>(fileInfos[index]));
+
+      if (fileInfo) {
+        MOZ_ASSERT(fileInfo->Id() > 0);
+        blob->AddFileInfo(fileInfo);
+      }
 
       aDatabase->NoteReceivedBlob(blob);
 
@@ -481,6 +503,7 @@ ConvertActorsToBlobs(IDBDatabase* aDatabase,
       MOZ_ASSERT(file);
 
       file->mFile.swap(blob);
+      file->mFileInfo.swap(fileInfo);
     }
   }
 }
@@ -1595,33 +1618,15 @@ BackgroundVersionChangeTransactionChild::DeallocPBackgroundIDBCursorChild(
 }
 
 /*******************************************************************************
- * BackgroundTransactionRequestChildBase
+ * BackgroundRequestChild
  ******************************************************************************/
 
-BackgroundTransactionRequestChildBase::BackgroundTransactionRequestChildBase(
-                                                           IDBRequest* aRequest)
+BackgroundRequestChild::BackgroundRequestChild(IDBRequest* aRequest)
   : BackgroundRequestChildBase(aRequest)
   , mTransaction(aRequest->GetTransaction())
 {
   MOZ_ASSERT(mTransaction);
   mTransaction->AssertIsOnOwningThread();
-
-  MOZ_COUNT_CTOR(indexedDB::BackgroundTransactionRequestChildBase);
-}
-
-BackgroundTransactionRequestChildBase::~BackgroundTransactionRequestChildBase()
-{
-  MOZ_COUNT_DTOR(indexedDB::BackgroundTransactionRequestChildBase);
-}
-
-/*******************************************************************************
- * BackgroundRequestChild
- ******************************************************************************/
-
-BackgroundRequestChild::BackgroundRequestChild(IDBRequest* aRequest)
-  : BackgroundTransactionRequestChildBase(aRequest)
-{
-  MOZ_ASSERT(mTransaction);
 
   MOZ_COUNT_CTOR(indexedDB::BackgroundRequestChild);
 
@@ -1639,6 +1644,16 @@ BackgroundRequestChild::~BackgroundRequestChild()
     mTransaction->AssertIsOnOwningThread();
     mTransaction->OnRequestFinished();
   }
+}
+
+void
+BackgroundRequestChild::HoldFileInfosUntilComplete(
+                                       nsTArray<nsRefPtr<FileInfo>>& aFileInfos)
+{
+  AssertIsOnOwningThread();
+  MOZ_ASSERT(mFileInfos.IsEmpty());
+
+  mFileInfos.SwapElements(aFileInfos);
 }
 
 bool
@@ -1689,7 +1704,7 @@ BackgroundRequestChild::HandleResponse(
   cloneReadInfo.mDatabase = mTransaction->Database();
 
   ConvertActorsToBlobs(mTransaction->Database(),
-                       aResponse.blobsChild(),
+                       aResponse,
                        cloneReadInfo.mFiles);
 
   ResultHelper helper(mRequest, mTransaction, &cloneReadInfo);
@@ -1725,7 +1740,7 @@ BackgroundRequestChild::HandleResponse(
       cloneReadInfo->mDatabase = mTransaction->Database();
 
       ConvertActorsToBlobs(database,
-                           serializedCloneInfo.blobsChild(),
+                           serializedCloneInfo,
                            cloneReadInfo->mFiles);
     }
   }
@@ -2025,7 +2040,7 @@ BackgroundCursorChild::HandleResponse(
   StructuredCloneReadInfo cloneReadInfo(Move(response.cloneInfo()));
 
   ConvertActorsToBlobs(mTransaction->Database(),
-                       response.cloneInfo().blobsChild(),
+                       response.cloneInfo(),
                        cloneReadInfo.mFiles);
 
   Maybe<nsRefPtr<IDBCursor>> newCursor;
@@ -2093,7 +2108,7 @@ BackgroundCursorChild::HandleResponse(const IndexCursorResponse& aResponse)
   StructuredCloneReadInfo cloneReadInfo(Move(response.cloneInfo()));
 
   ConvertActorsToBlobs(mTransaction->Database(),
-                       aResponse.cloneInfo().blobsChild(),
+                       aResponse.cloneInfo(),
                        cloneReadInfo.mFiles);
 
   Maybe<nsRefPtr<IDBCursor>> newCursor;
@@ -2219,6 +2234,34 @@ BackgroundCursorChild::RecvResponse(const CursorResponse& aResponse)
 
   return true;
 }
+
+namespace mozilla {
+namespace dom {
+namespace indexedDB {
+
+// XXX This doesn't belong here. However, we're not yet porting MutableFile
+//     stuff to PBackground so this is necessary for the time being.
+void
+DispatchMutableFileResult(IDBRequest* aRequest,
+                          nsresult aResultCode,
+                          IDBMutableFile* aMutableFile)
+{
+  MOZ_ASSERT(IndexedDatabaseManager::IsMainProcess());
+  MOZ_ASSERT(NS_IsMainThread());
+  MOZ_ASSERT(aRequest);
+  MOZ_ASSERT_IF(NS_SUCCEEDED(aResultCode), aMutableFile);
+
+  if (NS_SUCCEEDED(aResultCode)) {
+    ResultHelper helper(aRequest, nullptr, aMutableFile);
+    DispatchSuccessEvent(&helper);
+  } else {
+    DispatchErrorEvent(aRequest, aResultCode);
+  }
+}
+
+} // namespace indexedDB
+} // namespace dom
+} // namespace mozilla
 
 NS_IMPL_ISUPPORTS(BackgroundCursorChild::DelayedDeleteRunnable,
                   nsIRunnable)

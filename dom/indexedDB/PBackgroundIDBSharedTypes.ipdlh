@@ -39,6 +39,9 @@ struct SerializedStructuredCloneReadInfo
 {
   uint8_t[] data;
   PBlob[] blobs;
+
+  // This will only be valid for parent process actors.
+  intptr_t[] fileInfos;
 };
 
 struct SerializedStructuredCloneWriteInfo
@@ -133,13 +136,20 @@ union OpenCursorParams
   IndexOpenKeyCursorParams;
 };
 
+// XXX Remove this once MutableFile has been ported to PBackground.
+union DatabaseFileOrMutableFileId
+{
+  PBackgroundIDBDatabaseFile;
+  int64_t;
+};
+
 struct ObjectStoreAddPutParams
 {
   int64_t objectStoreId;
   SerializedStructuredCloneWriteInfo cloneInfo;
   Key key;
   IndexUpdateInfo[] indexUpdateInfos;
-  PBackgroundIDBDatabaseFile[] files;
+  DatabaseFileOrMutableFileId[] files;
 };
 
 struct ObjectStoreAddParams

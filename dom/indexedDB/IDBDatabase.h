@@ -9,6 +9,7 @@
 
 #include "mozilla/Attributes.h"
 #include "mozilla/dom/IDBTransactionBinding.h"
+#include "mozilla/dom/StorageTypeBinding.h"
 #include "mozilla/dom/indexedDB/IDBWrapperCache.h"
 #include "mozilla/dom/quota/PersistenceType.h"
 #include "nsAutoPtr.h"
@@ -39,6 +40,7 @@ class BackgroundDatabaseChild;
 class DatabaseSpec;
 class FileManager;
 class IDBFactory;
+class IDBMutableFile;
 class IDBObjectStore;
 class IDBRequest;
 class IDBTransaction;
@@ -47,8 +49,8 @@ class PBackgroundIDBDatabaseFileChild;
 class IDBDatabase MOZ_FINAL
   : public IDBWrapperCache
 {
-  typedef mozilla::dom::quota::PersistenceType PersistenceType;
   typedef mozilla::dom::StorageType StorageType;
+  typedef mozilla::dom::quota::PersistenceType PersistenceType;
 
   class WindowObserver;
 
@@ -74,6 +76,9 @@ class IDBDatabase MOZ_FINAL
   nsTHashtable<nsISupportsHashKey> mReceivedBlobs;
 
   nsRefPtr<WindowObserver> mWindowObserver;
+
+  // Weak refs, IDBMutableFile strongly owns this IDBDatabase object.
+  nsTArray<IDBMutableFile*> mLiveMutableFiles;
 
   bool mClosed;
   bool mInvalidated;
@@ -176,6 +181,17 @@ public:
   void
   DelayedMaybeExpireFileActors();
 
+  // XXX This doesn't really belong here... It's only needed for IDBMutableFile
+  //     serialization and should be removed someday.
+  nsresult
+  GetQuotaInfo(nsACString& aOrigin, PersistenceType* aPersistenceType);
+
+  void
+  NoteLiveMutableFile(IDBMutableFile* aMutableFile);
+
+  void
+  NoteFinishedMutableFile(IDBMutableFile* aMutableFile);
+
   nsPIDOMWindow*
   GetParentObject() const;
 
@@ -273,6 +289,9 @@ private:
 
   void
   ExpireFileActors(bool aExpireAll);
+
+  void
+  InvalidateMutableFiles();
 };
 
 } // namespace indexedDB

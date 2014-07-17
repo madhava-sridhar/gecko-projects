@@ -40,7 +40,6 @@ struct StructuredCloneFile
 {
   nsCOMPtr<nsIDOMBlob> mFile;
   nsRefPtr<FileInfo> mFileInfo;
-  nsCOMPtr<nsIInputStream> mInputStream;
 
   // In IndexedDatabaseInlines.h
   inline
@@ -67,6 +66,10 @@ struct StructuredCloneReadInfo
   // In IndexedDatabaseInlines.h
   inline
   StructuredCloneReadInfo();
+
+  // In IndexedDatabaseInlines.h
+  inline
+  ~StructuredCloneReadInfo();
 
   // In IndexedDatabaseInlines.h
   inline StructuredCloneReadInfo&

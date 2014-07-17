@@ -10,6 +10,7 @@
 #include "IDBCursor.h"
 #include "IDBDatabase.h"
 #include "IDBEvents.h"
+#include "IDBFactory.h"
 #include "IDBIndex.h"
 #include "IDBKeyRange.h"
 #include "IDBMutableFile.h"
@@ -24,6 +25,7 @@
 #include "mozilla/Endian.h"
 #include "mozilla/ErrorResult.h"
 #include "mozilla/Move.h"
+#include "mozilla/dom/BindingUtils.h"
 #include "mozilla/dom/ContentChild.h"
 #include "mozilla/dom/ContentParent.h"
 #include "mozilla/dom/DOMStringList.h"
@@ -35,6 +37,7 @@
 #include "mozilla/dom/ipc/BlobParent.h"
 #include "mozilla/dom/ipc/nsIRemoteBlob.h"
 #include "mozilla/ipc/BackgroundChild.h"
+#include "mozilla/ipc/PBackgroundSharedTypes.h"
 #include "nsCOMPtr.h"
 #include "nsDOMFile.h"
 #include "nsIDOMFile.h"
@@ -52,23 +55,42 @@ using namespace mozilla::ipc;
 
 struct IDBObjectStore::StructuredCloneWriteInfo
 {
+  struct BlobOrFileInfo
+  {
+    nsCOMPtr<nsIDOMBlob> mBlob;
+    nsRefPtr<FileInfo> mFileInfo;
+
+    bool
+    operator==(const BlobOrFileInfo& aOther) const
+    {
+      return this->mBlob == aOther.mBlob && this->mFileInfo == aOther.mFileInfo;
+    }
+  };
+
   JSAutoStructuredCloneBuffer mCloneBuffer;
-  nsTArray<nsCOMPtr<nsIDOMBlob>> mFiles;
+  nsTArray<BlobOrFileInfo> mBlobOrFileInfos;
+  IDBDatabase* mDatabase;
   uint64_t mOffsetToKeyProp;
 
-  StructuredCloneWriteInfo()
-    : mOffsetToKeyProp(0)
+  StructuredCloneWriteInfo(IDBDatabase* aDatabase)
+    : mDatabase(aDatabase)
+    , mOffsetToKeyProp(0)
   {
+    MOZ_ASSERT(aDatabase);
+
     MOZ_COUNT_CTOR(StructuredCloneWriteInfo);
   }
 
   StructuredCloneWriteInfo(StructuredCloneWriteInfo&& aCloneWriteInfo)
     : mCloneBuffer(Move(aCloneWriteInfo.mCloneBuffer))
+    , mDatabase(aCloneWriteInfo.mDatabase)
     , mOffsetToKeyProp(aCloneWriteInfo.mOffsetToKeyProp)
   {
+    MOZ_ASSERT(mDatabase);
+
     MOZ_COUNT_CTOR(StructuredCloneWriteInfo);
 
-    mFiles.SwapElements(aCloneWriteInfo.mFiles);
+    mBlobOrFileInfos.SwapElements(aCloneWriteInfo.mBlobOrFileInfos);
     aCloneWriteInfo.mOffsetToKeyProp = 0;
   }
 
@@ -82,7 +104,8 @@ struct IDBObjectStore::StructuredCloneWriteInfo
   {
     return this->mCloneBuffer.nbytes() == aOther.mCloneBuffer.nbytes() &&
            this->mCloneBuffer.data() == aOther.mCloneBuffer.data() &&
-           this->mFiles == aOther.mFiles &&
+           this->mBlobOrFileInfos == aOther.mBlobOrFileInfos &&
+           this->mDatabase == aOther.mDatabase &&
            this->mOffsetToKeyProp == aOther.mOffsetToKeyProp;
   }
 
@@ -100,7 +123,8 @@ struct IDBObjectStore::StructuredCloneWriteInfo
       }
     }
 
-    mFiles.Clear();
+    mBlobOrFileInfos.Clear();
+
     mOffsetToKeyProp = aOther.offsetToKeyProp();
     return true;
   }
@@ -108,7 +132,7 @@ struct IDBObjectStore::StructuredCloneWriteInfo
 
 namespace {
 
-struct MOZ_STACK_CLASS MutableFileData
+struct MOZ_STACK_CLASS MutableFileData MOZ_FINAL
 {
   nsString type;
   nsString name;
@@ -124,7 +148,7 @@ struct MOZ_STACK_CLASS MutableFileData
   }
 };
 
-struct MOZ_STACK_CLASS BlobOrFileData
+struct MOZ_STACK_CLASS BlobOrFileData MOZ_FINAL
 {
   uint32_t tag;
   uint64_t size;
@@ -146,7 +170,7 @@ struct MOZ_STACK_CLASS BlobOrFileData
   }
 };
 
-struct MOZ_STACK_CLASS GetAddInfoClosure
+struct MOZ_STACK_CLASS GetAddInfoClosure MOZ_FINAL
 {
   IDBObjectStore::StructuredCloneWriteInfo& mCloneWriteInfo;
   JS::Handle<JS::Value> mValue;
@@ -190,7 +214,7 @@ StructuredCloneWriteCallback(JSContext* aCx,
   MOZ_ASSERT(aWriter);
   MOZ_ASSERT(aClosure);
 
-  auto cloneWriteInfo =
+  auto* cloneWriteInfo =
     static_cast<IDBObjectStore::StructuredCloneWriteInfo*>(aClosure);
 
   if (JS_GetClass(aObj) == IDBObjectStore::DummyPropClass()) {
@@ -202,20 +226,49 @@ StructuredCloneWriteCallback(JSContext* aCx,
     return JS_WriteBytes(aWriter, &value, sizeof(value));
   }
 
-  // XXX Fix filehandle!
-  /*
-  IDBTransaction* transaction = cloneWriteInfo->mTransaction;
-  FileManager* fileManager = transaction->Database()->Manager();
-
-  IDBMutableFile* mutableFile = nullptr;
+  IDBMutableFile* mutableFile;
   if (NS_SUCCEEDED(UNWRAP_OBJECT(IDBMutableFile, aObj, mutableFile))) {
+    IDBDatabase* database = mutableFile->Database();
+    MOZ_ASSERT(database);
+
+    // Throw when trying to store IDBMutableFile objects that live in a
+    // different database.
+    if (database != cloneWriteInfo->mDatabase) {
+      MOZ_ASSERT(!SameCOMIdentity(database, cloneWriteInfo->mDatabase));
+
+      if (database->Name() != cloneWriteInfo->mDatabase->Name()) {
+        return false;
+      }
+
+      nsCString fileOrigin, databaseOrigin;
+      PersistenceType filePersistenceType, databasePersistenceType;
+
+      if (NS_WARN_IF(NS_FAILED(database->GetQuotaInfo(fileOrigin,
+                                                      &filePersistenceType)))) {
+        return false;
+      }
+
+      if (NS_WARN_IF(NS_FAILED(cloneWriteInfo->mDatabase->GetQuotaInfo(
+                                                  databaseOrigin,
+                                                  &databasePersistenceType)))) {
+        return false;
+      }
+
+      if (filePersistenceType != databasePersistenceType ||
+          fileOrigin != databaseOrigin) {
+        return false;
+      }
+    }
+
     nsRefPtr<FileInfo> fileInfo = mutableFile->GetFileInfo();
     MOZ_ASSERT(fileInfo);
 
-    // Throw when trying to store mutable files across databases.
-    if (fileInfo->Manager() != fileManager) {
+    if (cloneWriteInfo->mBlobOrFileInfos.Length() > size_t(UINT32_MAX)) {
+      MOZ_ASSERT(false, "Fix the structured clone data to use a bigger type!");
       return false;
     }
+
+    const uint32_t index = uint32_t(cloneWriteInfo->mBlobOrFileInfos.Length());
 
     NS_ConvertUTF16toUTF8 convType(mutableFile->Type());
     uint32_t convTypeLength =
@@ -225,8 +278,7 @@ StructuredCloneWriteCallback(JSContext* aCx,
     uint32_t convNameLength =
       NativeEndian::swapToLittleEndian(convName.Length());
 
-    if (!JS_WriteUint32Pair(aWriter, SCTAG_DOM_MUTABLEFILE,
-                            cloneWriteInfo->mFiles.Length()) ||
+    if (!JS_WriteUint32Pair(aWriter, SCTAG_DOM_MUTABLEFILE, uint32_t(index)) ||
         !JS_WriteBytes(aWriter, &convTypeLength, sizeof(uint32_t)) ||
         !JS_WriteBytes(aWriter, convType.get(), convType.Length()) ||
         !JS_WriteBytes(aWriter, &convNameLength, sizeof(uint32_t)) ||
@@ -234,12 +286,13 @@ StructuredCloneWriteCallback(JSContext* aCx,
       return false;
     }
 
-    StructuredCloneFile* file = cloneWriteInfo->mFiles.AppendElement();
-    file->mFileInfo = fileInfo.forget();
+    IDBObjectStore::StructuredCloneWriteInfo::BlobOrFileInfo*
+      newBlobOrFileInfo =
+        cloneWriteInfo->mBlobOrFileInfos.AppendElement();
+    newBlobOrFileInfo->mFileInfo.swap(fileInfo);
 
     return true;
   }
-  */
 
   MOZ_ASSERT(NS_IsMainThread(), "This can't work off the main thread!");
 
@@ -266,8 +319,18 @@ StructuredCloneWriteCallback(JSContext* aCx,
 
       nsCOMPtr<nsIDOMFile> file = do_QueryInterface(blob);
 
-      if (!JS_WriteUint32Pair(aWriter, file ? SCTAG_DOM_FILE : SCTAG_DOM_BLOB,
-                              cloneWriteInfo->mFiles.Length()) ||
+      if (cloneWriteInfo->mBlobOrFileInfos.Length() > size_t(UINT32_MAX)) {
+        MOZ_ASSERT(false,
+                   "Fix the structured clone data to use a bigger type!");
+        return false;
+      }
+
+      const uint32_t index =
+        uint32_t(cloneWriteInfo->mBlobOrFileInfos.Length());
+
+      if (!JS_WriteUint32Pair(aWriter,
+                              file ? SCTAG_DOM_FILE : SCTAG_DOM_BLOB,
+                              index) ||
           !JS_WriteBytes(aWriter, &size, sizeof(size)) ||
           !JS_WriteBytes(aWriter, &convTypeLength, sizeof(convTypeLength)) ||
           !JS_WriteBytes(aWriter, convType.get(), convType.Length())) {
@@ -295,8 +358,11 @@ StructuredCloneWriteCallback(JSContext* aCx,
         }
       }
 
-      nsCOMPtr<nsIDOMBlob>* fileEntry = cloneWriteInfo->mFiles.AppendElement();
-      fileEntry->swap(blob);
+      IDBObjectStore::StructuredCloneWriteInfo::BlobOrFileInfo*
+        newBlobOrFileInfo =
+          cloneWriteInfo->mBlobOrFileInfos.AppendElement();
+      newBlobOrFileInfo->mBlob.swap(blob);
+
       return true;
     }
   }
@@ -517,14 +583,13 @@ public:
     MOZ_ASSERT(IndexedDatabaseManager::IsMainProcess());
     MOZ_ASSERT(NS_IsMainThread());
     MOZ_ASSERT(aDatabase);
-
-    nsRefPtr<FileInfo>& fileInfo = aFile.mFileInfo;
+    MOZ_ASSERT(aFile.mFileInfo);
 
     nsRefPtr<IDBMutableFile> mutableFile =
       IDBMutableFile::Create(aDatabase,
                              aData.name,
                              aData.type,
-                             fileInfo.forget());
+                             aFile.mFileInfo.forget());
     MOZ_ASSERT(mutableFile);
 
     JS::Rooted<JSObject*> result(aCx, mutableFile->WrapObject(aCx));
@@ -712,11 +777,10 @@ CommonStructuredCloneReadCallback(JSContext* aCx,
                 "everyone's IndexedDB data.  I hope you are happy.");
 
   if (aTag == SCTAG_DOM_FILE_WITHOUT_LASTMODIFIEDDATE ||
-      aTag == SCTAG_DOM_MUTABLEFILE ||
       aTag == SCTAG_DOM_BLOB ||
-      aTag == SCTAG_DOM_FILE) {
-    StructuredCloneReadInfo* cloneReadInfo =
-      reinterpret_cast<StructuredCloneReadInfo*>(aClosure);
+      aTag == SCTAG_DOM_FILE ||
+      aTag == SCTAG_DOM_MUTABLEFILE) {
+    auto* cloneReadInfo = static_cast<StructuredCloneReadInfo*>(aClosure);
 
     if (aData >= cloneReadInfo->mFiles.Length()) {
       MOZ_ASSERT(false, "Bad index value!");
@@ -944,11 +1008,8 @@ IDBObjectStore::DeserializeValue(JSContext* aCx,
     return true;
   }
 
+  auto* data = reinterpret_cast<uint64_t*>(aCloneReadInfo.mData.Elements());
   size_t dataLen = aCloneReadInfo.mData.Length();
-
-  uint64_t* data =
-    const_cast<uint64_t*>(reinterpret_cast<uint64_t*>(
-      aCloneReadInfo.mData.Elements()));
 
   MOZ_ASSERT(!(dataLen % sizeof(*data)));
 
@@ -1113,7 +1174,7 @@ IDBObjectStore::AddOrPut(JSContext* aCx,
 
   JS::Rooted<JS::Value> value(aCx, aValue);
   Key key;
-  StructuredCloneWriteInfo cloneWriteInfo;
+  StructuredCloneWriteInfo cloneWriteInfo(mTransaction->Database());
   nsTArray<IndexUpdateInfo> updateInfo;
 
   aRv = GetAddInfo(aCx, value, aKey, cloneWriteInfo, key, updateInfo);
@@ -1140,34 +1201,56 @@ IDBObjectStore::AddOrPut(JSContext* aCx,
   commonParams.key() = key;
   commonParams.indexUpdateInfos().SwapElements(updateInfo);
 
-  // Convert any blobs into PBackgroundIDBDatabaseFiles.
-  const nsTArray<nsCOMPtr<nsIDOMBlob>>& blobs = cloneWriteInfo.mFiles;
+  // Convert any blobs or fileIds into DatabaseFileOrMutableFileId.
+  nsTArray<StructuredCloneWriteInfo::BlobOrFileInfo>& blobOrFileInfos =
+    cloneWriteInfo.mBlobOrFileInfos;
 
-  if (!blobs.IsEmpty()) {
-    const uint32_t count = blobs.Length();
+  FallibleTArray<nsRefPtr<FileInfo>> fileInfosToKeepAlive;
 
-    FallibleTArray<PBackgroundIDBDatabaseFileChild*> fileActors;
-    if (NS_WARN_IF(!fileActors.SetCapacity(count))) {
+  if (!blobOrFileInfos.IsEmpty()) {
+    const uint32_t count = blobOrFileInfos.Length();
+
+    FallibleTArray<DatabaseFileOrMutableFileId> fileActorOrMutableFileIds;
+    if (NS_WARN_IF(!fileActorOrMutableFileIds.SetCapacity(count))) {
       aRv = NS_ERROR_OUT_OF_MEMORY;
       return nullptr;
     }
 
+    IDBDatabase* database = mTransaction->Database();
+
     for (uint32_t index = 0; index < count; index++) {
-      const nsCOMPtr<nsIDOMBlob>& blob = blobs[index];
-      MOZ_ASSERT(blob);
+      StructuredCloneWriteInfo::BlobOrFileInfo& blobOrFileInfo =
+        blobOrFileInfos[index];
+      MOZ_ASSERT((blobOrFileInfo.mBlob && !blobOrFileInfo.mFileInfo) ||
+                 (!blobOrFileInfo.mBlob && blobOrFileInfo.mFileInfo));
 
-      PBackgroundIDBDatabaseFileChild* fileActor =
-        mTransaction->Database()->GetOrCreateFileActorForBlob(blob);
-      if (NS_WARN_IF(!fileActor)) {
-        IDB_REPORT_INTERNAL_ERR();
-        aRv = NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
-        return nullptr;
+      if (blobOrFileInfo.mBlob) {
+        PBackgroundIDBDatabaseFileChild* fileActor =
+          database->GetOrCreateFileActorForBlob(blobOrFileInfo.mBlob);
+        if (NS_WARN_IF(!fileActor)) {
+          IDB_REPORT_INTERNAL_ERR();
+          aRv = NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
+          return nullptr;
+        }
+
+        MOZ_ALWAYS_TRUE(fileActorOrMutableFileIds.AppendElement(fileActor));
+      } else {
+        const int64_t fileId = blobOrFileInfo.mFileInfo->Id();
+        MOZ_ASSERT(fileId > 0);
+
+        MOZ_ALWAYS_TRUE(fileActorOrMutableFileIds.AppendElement(fileId));
+
+        nsRefPtr<FileInfo>* newFileInfo = fileInfosToKeepAlive.AppendElement();
+        if (NS_WARN_IF(!newFileInfo)) {
+          aRv = NS_ERROR_OUT_OF_MEMORY;
+          return nullptr;
+        }
+
+        newFileInfo->swap(blobOrFileInfo.mFileInfo);
       }
-
-      fileActors.AppendElement(fileActor);
     }
 
-    commonParams.filesChild().SwapElements(fileActors);
+    commonParams.files().SwapElements(fileActorOrMutableFileIds);
   }
 
   RequestParams params;
@@ -1184,6 +1267,14 @@ IDBObjectStore::AddOrPut(JSContext* aCx,
 
   mTransaction->StartRequest(actor, params);
 
+  if (!fileInfosToKeepAlive.IsEmpty()) {
+    nsTArray<nsRefPtr<FileInfo>> fileInfos;
+    fileInfosToKeepAlive.SwapElements(fileInfos);
+
+    actor->HoldFileInfosUntilComplete(fileInfos);
+    MOZ_ASSERT(fileInfos.IsEmpty());
+  }
+
 #ifdef IDB_PROFILER_USE_MARKS
   if (aOverwrite) {
     IDB_PROFILER_MARK("IndexedDB Request %llu: "
@@ -1194,8 +1285,7 @@ IDBObjectStore::AddOrPut(JSContext* aCx,
                       IDB_PROFILER_STRING(Transaction()),
                       IDB_PROFILER_STRING(this),
                       key.IsUnset() ? "" : IDB_PROFILER_STRING(key));
-  }
-  else {
+  } else {
     IDB_PROFILER_MARK("IndexedDB Request %llu: "
                       "database(%s).transaction(%s).objectStore(%s).add(%s)",
                       "IDBRequest[%llu] MT IDBObjectStore.add()",

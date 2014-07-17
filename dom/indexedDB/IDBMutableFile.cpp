@@ -57,33 +57,6 @@ public:
   ReleaseObjects() MOZ_OVERRIDE
   {
     mMutableFile = nullptr;
-using namespace mozilla::dom;
-using namespace mozilla::dom::indexedDB;
-using namespace mozilla::dom::quota;
-using namespace mozilla::ipc;
-
-namespace {
-
-class GetFileHelper : public MetadataHelper
-{
-public:
-  GetFileHelper(FileHandleBase* aFileHandle,
-                FileRequestBase* aFileRequest,
-                MetadataParameters* aParams,
-                IDBMutableFile* aMutableFile)
-  : MetadataHelper(aFileHandle, aFileRequest, aParams),
-    mMutableFile(aMutableFile)
-  { }
-
-  virtual nsresult
-  GetSuccessResult(JSContext* aCx,
-                   JS::MutableHandle<JS::Value> aVal) MOZ_OVERRIDE;
-
-  virtual void
-  ReleaseObjects() MOZ_OVERRIDE
-  {
-    mMutableFile = nullptr;
-
     MetadataHelper::ReleaseObjects();
   }
 
@@ -93,7 +66,6 @@ private:
 
 already_AddRefed<nsIFile>
 GetFileFor(FileInfo* aFileInfo)
-
 {
   MOZ_ASSERT(IndexedDatabaseManager::IsMainProcess());
   MOZ_ASSERT(NS_IsMainThread());
@@ -133,6 +105,7 @@ IDBMutableFile::IDBMutableFile(IDBDatabase* aDatabase,
   , mGroup(aGroup)
   , mOrigin(aOrigin)
   , mPersistenceType(aPersistenceType)
+  , mInvalidated(false)
 {
   MOZ_ASSERT(IndexedDatabaseManager::IsMainProcess());
   MOZ_ASSERT(NS_IsMainThread());
@@ -146,12 +119,20 @@ IDBMutableFile::IDBMutableFile(IDBDatabase* aDatabase,
   mFileName.AppendInt(mFileInfo->Id());
 
   MOZ_ASSERT(mFile);
+
+  mDatabase->NoteLiveMutableFile(this);
 }
 
 IDBMutableFile::~IDBMutableFile()
 {
-  MOZ_ASSERT(IndexedDatabaseManager::IsMainProcess());
+  // XXX This is always in the main process but it sometimes happens too late in
+  //     shutdown and the IndexedDatabaseManager has already been torn down.
+  // MOZ_ASSERT(IndexedDatabaseManager::IsMainProcess());
   MOZ_ASSERT(NS_IsMainThread());
+
+  if (mDatabase) {
+    mDatabase->NoteFinishedMutableFile(this);
+  }
 }
 
 // static
@@ -194,7 +175,7 @@ IDBMutableFile::Create(IDBDatabase* aDatabase,
   QuotaManager::GetStorageId(persistenceType,
                              origin,
                              Client::IDB,
-                             aName,
+                             aDatabase->Name(),
                              storageId);
 
   nsCOMPtr<nsIFile> file = GetFileFor(fileInfo);
@@ -216,40 +197,40 @@ IDBMutableFile::Create(IDBDatabase* aDatabase,
   return newFile.forget();
 }
 
-int64_t
-IDBMutableFile::GetFileId() const
+void
+IDBMutableFile::Invalidate()
 {
-  return mFileInfo->Id();
-}
-
-already_AddRefed<nsIDOMFile>
-IDBMutableFile::CreateFileObject(IDBFileHandle* aFileHandle, uint32_t aFileSize)
-{
-  MOZ_ASSERT(IndexedDatabaseManager::IsMainProcess());
   MOZ_ASSERT(NS_IsMainThread());
+  MOZ_ASSERT(!mInvalidated);
 
-  nsRefPtr<FileImplSnapshot> impl =
-    new FileImplSnapshot(mName, mType, aFileSize, mFile, aFileHandle,
-                         mFileInfo);
-
-  nsCOMPtr<nsIDOMFile> file = new DOMFile(impl);
-
-  return file.forget();
+  mInvalidated = true;
 }
-
-NS_IMPL_CYCLE_COLLECTION_INHERITED(IDBMutableFile, DOMEventTargetHelper,
-                                   mDatabase)
-
-NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION_INHERITED(IDBMutableFile)
-NS_INTERFACE_MAP_END_INHERITING(DOMEventTargetHelper)
 
 NS_IMPL_ADDREF_INHERITED(IDBMutableFile, DOMEventTargetHelper)
 NS_IMPL_RELEASE_INHERITED(IDBMutableFile, DOMEventTargetHelper)
 
+NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION_INHERITED(IDBMutableFile)
+NS_INTERFACE_MAP_END_INHERITING(DOMEventTargetHelper)
+
+NS_IMPL_CYCLE_COLLECTION_CLASS(IDBMutableFile)
+
+NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(IDBMutableFile,
+                                                  DOMEventTargetHelper)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mDatabase)
+NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
+
+NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN_INHERITED(IDBMutableFile,
+                                                DOMEventTargetHelper)
+  MOZ_ASSERT(tmp->mDatabase);
+  tmp->mDatabase->NoteFinishedMutableFile(tmp);
+
+  NS_IMPL_CYCLE_COLLECTION_UNLINK(mDatabase)
+NS_IMPL_CYCLE_COLLECTION_UNLINK_END
+
 bool
 IDBMutableFile::IsInvalid()
 {
-  return mDatabase->IsInvalidated();
+  return mInvalidated;
 }
 
 nsIOfflineStorage*
@@ -298,7 +279,6 @@ void
 IDBMutableFile::SetThreadLocals()
 {
   MOZ_ASSERT(IndexedDatabaseManager::IsMainProcess());
-  MOZ_ASSERT(NS_IsMainThread());
   MOZ_ASSERT(mDatabase->GetOwner(), "Should have owner!");
 
   QuotaManager::SetCurrentWindow(mDatabase->GetOwner());
@@ -308,7 +288,6 @@ void
 IDBMutableFile::UnsetThreadLocals()
 {
   MOZ_ASSERT(IndexedDatabaseManager::IsMainProcess());
-  MOZ_ASSERT(NS_IsMainThread());
 
   QuotaManager::SetCurrentWindow(nullptr);
 }
@@ -350,39 +329,29 @@ IDBMutableFile::Open(FileMode aMode, ErrorResult& aError)
   return fileHandle.forget();
 }
 
-already_AddRefed<DOMRequest>
-IDBMutableFile::GetFile(ErrorResult& aError)
-{
-
-  return IDBMutableFileBinding::Wrap(aCx, this);
-}
-
-IDBDatabase*
-IDBMutableFile::Database() const
+int64_t
+IDBMutableFile::GetFileId() const
 {
   MOZ_ASSERT(NS_IsMainThread());
+  MOZ_ASSERT(mFileInfo);
 
-  return mDatabase;
+  return mFileInfo->Id();
 }
 
-already_AddRefed<IDBFileHandle>
-IDBMutableFile::Open(FileMode aMode, ErrorResult& aError)
+already_AddRefed<nsIDOMFile>
+IDBMutableFile::CreateFileObject(IDBFileHandle* aFileHandle,
+                                 MetadataParameters* aMetadataParams)
 {
-  MOZ_ASSERT(NS_IsMainThread());
+  nsRefPtr<DOMFileImpl> impl =
+    new FileImplSnapshot(mName,
+                         mType,
+                         aMetadataParams,
+                         mFile,
+                         aFileHandle,
+                         mFileInfo);
 
-  if (QuotaManager::IsShuttingDown() || FileService::IsShuttingDown()) {
-    aError.Throw(NS_ERROR_DOM_FILEHANDLE_UNKNOWN_ERR);
-    return nullptr;
-  }
-
-  nsRefPtr<IDBFileHandle> fileHandle =
-    IDBFileHandle::Create(aMode, FileHandleBase::NORMAL, this);
-  if (!fileHandle) {
-    aError.Throw(NS_ERROR_DOM_FILEHANDLE_UNKNOWN_ERR);
-    return nullptr;
-  }
-
-  return fileHandle.forget();
+  nsCOMPtr<nsIDOMFile> fileSnapshot = new DOMFile(impl);
+  return fileSnapshot.forget();
 }
 
 already_AddRefed<DOMRequest>
@@ -399,10 +368,11 @@ IDBMutableFile::GetFile(ErrorResult& aError)
     IDBFileHandle::Create(FileMode::Readonly, FileHandleBase::PARALLEL, this);
 
   nsRefPtr<IDBFileRequest> request = 
-    IDBFileRequest::Create(GetOwner(), fileHandle, /* aWrapAsDOMRequest */
-                           true);
+    IDBFileRequest::Create(GetOwner(),
+                           fileHandle,
+                           /* aWrapAsDOMRequest */ true);
 
-  nsRefPtr<MetadataParameters> params = new MetadataParameters(true, false);
+  nsRefPtr<MetadataParameters> params = new MetadataParameters(true, true);
 
   nsRefPtr<GetFileHelper> helper =
     new GetFileHelper(fileHandle, request, params, this);
@@ -425,7 +395,7 @@ GetFileHelper::GetSuccessResult(JSContext* aCx,
   auto fileHandle = static_cast<IDBFileHandle*>(mFileHandle.get());
 
   nsCOMPtr<nsIDOMFile> domFile =
-    mMutableFile->CreateFileObject(fileHandle, mParams->Size());
+    mMutableFile->CreateFileObject(fileHandle, mParams);
 
   nsresult rv =
     nsContentUtils::WrapNative(aCx, domFile, &NS_GET_IID(nsIDOMFile), aVal);
