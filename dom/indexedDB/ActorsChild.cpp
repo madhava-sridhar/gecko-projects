@@ -1233,35 +1233,18 @@ BackgroundDatabaseChild::RecvVersionChange(const uint64_t& aOldVersion,
 
   nsRefPtr<IDBDatabase> kungFuDeathGrip = mDatabase;
 
-  // First check if the document the IDBDatabase is part of is bfcached.
-  nsCOMPtr<nsIDocument> ownerDoc = mDatabase->GetOwnerDocument();
-  nsIBFCacheEntry* bfCacheEntry;
-  if (ownerDoc && (bfCacheEntry = ownerDoc->GetBFCacheEntry())) {
-    bfCacheEntry->RemoveFromBFCacheSync();
-    MOZ_ASSERT(mDatabase->IsClosed(),
-               "Kicking doc out of bfcache should have closed database");
-    return true;
-  }
-
-  // Next check if it's in the process of being bfcached.
+  // Check if the document the IDBDatabase is part of is bfcached or if it's in
+  // the process of being bfcached.
   nsPIDOMWindow* owner = mDatabase->GetOwner();
-  if (owner && owner->IsFrozen()) {
-    // We can't kick the document out of the bfcache because it's not yet fully
-    // in the bfcache. Instead we'll abort everything for the window and mark it
-    // as not-bfcacheable.
-
-    // XXX Fix me!
-    /*
-    QuotaManager* quotaManager = QuotaManager::Get();
-    NS_ASSERTION(quotaManager, "Huh?");
-    quotaManager->AbortCloseStoragesForWindow(owner);
-    */
-
-    MOZ_ASSERT(mDatabase->IsClosed(),
-               "AbortCloseStoragesForWindow should have closed database");
-
-    ownerDoc->DisallowBFCaching();
-    return true;
+  if (owner) {
+    nsCOMPtr<nsIDocument> ownerDoc = owner->GetExtantDoc();
+    if ((ownerDoc && ownerDoc->GetBFCacheEntry()) || owner->IsFrozen()) {
+      // Invalidate() doesn't close the database in the parent, so we have
+      // to call Close() and AbortTransactions() manually.
+      mDatabase->Close();
+      mDatabase->AbortTransactions();
+      return true;
+    }
   }
 
   // Otherwise fire a versionchange event.
