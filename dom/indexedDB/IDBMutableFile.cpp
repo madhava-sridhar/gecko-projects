@@ -58,6 +58,30 @@ public:
   {
     mMutableFile = nullptr;
 
+using namespace mozilla::dom;
+
+namespace {
+
+class GetFileHelper : public MetadataHelper
+{
+public:
+  GetFileHelper(FileHandleBase* aFileHandle,
+                FileRequestBase* aFileRequest,
+                MetadataParameters* aParams,
+                IDBMutableFile* aMutableFile)
+  : MetadataHelper(aFileHandle, aFileRequest, aParams),
+    mMutableFile(aMutableFile)
+  { }
+
+  virtual nsresult
+  GetSuccessResult(JSContext* aCx,
+                   JS::MutableHandle<JS::Value> aVal) MOZ_OVERRIDE;
+
+  virtual void
+  ReleaseObjects() MOZ_OVERRIDE
+  {
+    mMutableFile = nullptr;
+
     MetadataHelper::ReleaseObjects();
   }
 
@@ -327,6 +351,43 @@ IDBMutableFile::Open(FileMode aMode, ErrorResult& aError)
 already_AddRefed<DOMRequest>
 IDBMutableFile::GetFile(ErrorResult& aError)
 {
+  nsCOMPtr<nsIDOMFile> fileSnapshot = new DOMFile(
+    new FileImplSnapshot(mName, mType, aFileSize, mFile, aFileHandle,
+                         mFileInfo));
+
+  return fileSnapshot.forget();
+}
+
+// virtual
+JSObject*
+IDBMutableFile::WrapObject(JSContext* aCx)
+{
+  return IDBMutableFileBinding::Wrap(aCx, this);
+}
+
+already_AddRefed<IDBFileHandle>
+IDBMutableFile::Open(FileMode aMode, ErrorResult& aError)
+{
+  MOZ_ASSERT(NS_IsMainThread());
+
+  if (QuotaManager::IsShuttingDown() || FileService::IsShuttingDown()) {
+    aError.Throw(NS_ERROR_DOM_FILEHANDLE_UNKNOWN_ERR);
+    return nullptr;
+  }
+
+  nsRefPtr<IDBFileHandle> fileHandle =
+    IDBFileHandle::Create(aMode, FileHandleBase::NORMAL, this);
+  if (!fileHandle) {
+    aError.Throw(NS_ERROR_DOM_FILEHANDLE_UNKNOWN_ERR);
+    return nullptr;
+  }
+
+  return fileHandle.forget();
+}
+
+already_AddRefed<DOMRequest>
+IDBMutableFile::GetFile(ErrorResult& aError)
+{
   MOZ_ASSERT(NS_IsMainThread());
 
   // Do nothing if the window is closed
@@ -354,6 +415,10 @@ IDBMutableFile::GetFile(ErrorResult& aError)
 
   return request.forget();
 }
+
+} // namespace indexedDB
+} // namespace dom
+} // namespace mozilla
 
 nsresult
 GetFileHelper::GetSuccessResult(JSContext* aCx,

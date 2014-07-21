@@ -113,7 +113,7 @@ loop.panel = (function(_, mozL10n) {
         "privacy_notice_url": "www.mozilla.org/privacy/"
       });
 
-      if (!this.state.seenToS) {
+      if (this.state.seenToS == "unseen") {
         navigator.mozLoop.setLoopCharPref('seenToS', 'seen');
         return <p className="terms-service"
                   dangerouslySetInnerHTML={{__html: tosHTML}}></p>;
@@ -167,6 +167,11 @@ loop.panel = (function(_, mozL10n) {
     },
 
     _onCallUrlReceived: function(err, callUrlData) {
+      // XXX this initializer is a bug, as it will cause
+      // setState to set the callUrl to false if one is not returned.
+      // Should decide on an implement correct behavior and state
+      // (eg set widget as disabled, state.callUrl == '')
+      //
       var callUrl = false;
 
       this.props.notifier.clear();

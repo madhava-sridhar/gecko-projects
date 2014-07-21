@@ -35,7 +35,7 @@ import android.util.Log;
 final class BrowserDatabaseHelper extends SQLiteOpenHelper {
 
     private static final String LOGTAG = "GeckoBrowserDBHelper";
-    public static final int DATABASE_VERSION = 20;
+    public static final int DATABASE_VERSION = 21;
     public static final String DATABASE_NAME = "browser.db";
 
     final protected Context mContext;
@@ -74,14 +74,6 @@ final class BrowserDatabaseHelper extends SQLiteOpenHelper {
     private void createBookmarksTable(SQLiteDatabase db) {
         debug("Creating " + TABLE_BOOKMARKS + " table");
 
-        // Android versions older than Froyo ship with an sqlite
-        // that doesn't support foreign keys.
-        String foreignKeyOnParent = null;
-        if (Build.VERSION.SDK_INT >= 8) {
-            foreignKeyOnParent = ", FOREIGN KEY (" + Bookmarks.PARENT +
-                ") REFERENCES " + TABLE_BOOKMARKS + "(" + Bookmarks._ID + ")";
-        }
-
         db.execSQL("CREATE TABLE " + TABLE_BOOKMARKS + "(" +
                 Bookmarks._ID + " INTEGER PRIMARY KEY AUTOINCREMENT," +
                 Bookmarks.TITLE + " TEXT," +
@@ -95,8 +87,9 @@ final class BrowserDatabaseHelper extends SQLiteOpenHelper {
                 Bookmarks.DATE_CREATED + " INTEGER," +
                 Bookmarks.DATE_MODIFIED + " INTEGER," +
                 Bookmarks.GUID + " TEXT NOT NULL," +
-                Bookmarks.IS_DELETED + " INTEGER NOT NULL DEFAULT 0" +
-                (foreignKeyOnParent != null ? foreignKeyOnParent : "") +
+                Bookmarks.IS_DELETED + " INTEGER NOT NULL DEFAULT 0, " +
+                "FOREIGN KEY (" + Bookmarks.PARENT + ") REFERENCES " +
+                TABLE_BOOKMARKS + "(" + Bookmarks._ID + ")" +
                 ");");
 
         db.execSQL("CREATE INDEX bookmarks_url_index ON " + TABLE_BOOKMARKS + "("
@@ -112,14 +105,6 @@ final class BrowserDatabaseHelper extends SQLiteOpenHelper {
     private void createBookmarksTableOn13(SQLiteDatabase db) {
         debug("Creating " + TABLE_BOOKMARKS + " table");
 
-        // Android versions older than Froyo ship with an sqlite
-        // that doesn't support foreign keys.
-        String foreignKeyOnParent = null;
-        if (Build.VERSION.SDK_INT >= 8) {
-            foreignKeyOnParent = ", FOREIGN KEY (" + Bookmarks.PARENT +
-                ") REFERENCES " + TABLE_BOOKMARKS + "(" + Bookmarks._ID + ")";
-        }
-
         db.execSQL("CREATE TABLE " + TABLE_BOOKMARKS + "(" +
                 Bookmarks._ID + " INTEGER PRIMARY KEY AUTOINCREMENT," +
                 Bookmarks.TITLE + " TEXT," +
@@ -134,8 +119,9 @@ final class BrowserDatabaseHelper extends SQLiteOpenHelper {
                 Bookmarks.DATE_CREATED + " INTEGER," +
                 Bookmarks.DATE_MODIFIED + " INTEGER," +
                 Bookmarks.GUID + " TEXT NOT NULL," +
-                Bookmarks.IS_DELETED + " INTEGER NOT NULL DEFAULT 0" +
-                (foreignKeyOnParent != null ? foreignKeyOnParent : "") +
+                Bookmarks.IS_DELETED + " INTEGER NOT NULL DEFAULT 0, " +
+                "FOREIGN KEY (" + Bookmarks.PARENT + ") REFERENCES " +
+                TABLE_BOOKMARKS + "(" + Bookmarks._ID + ")" +
                 ");");
 
         db.execSQL("CREATE INDEX bookmarks_url_index ON " + TABLE_BOOKMARKS + "("
@@ -744,6 +730,10 @@ final class BrowserDatabaseHelper extends SQLiteOpenHelper {
     @Override
     public void onCreate(SQLiteDatabase db) {
         debug("Creating browser.db: " + db.getPath());
+
+        for (Table table : BrowserProvider.sTables) {
+            table.onCreate(db);
+        }
 
         createBookmarksTableOn13(db);
         createHistoryTableOn13(db);
@@ -1511,6 +1501,10 @@ final class BrowserDatabaseHelper extends SQLiteOpenHelper {
                     upgradeDatabaseFrom19to20(db);
                     break;
             }
+        }
+
+        for (Table table : BrowserProvider.sTables) {
+            table.onUpgrade(db, oldVersion, newVersion);
         }
 
         // If an upgrade after 12->13 fails, the entire upgrade is rolled

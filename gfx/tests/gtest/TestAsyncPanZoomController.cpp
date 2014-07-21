@@ -137,7 +137,12 @@ public:
     mFrameMetrics = metrics;
   }
 
-  FrameMetrics GetFrameMetrics() {
+  FrameMetrics& GetFrameMetrics() {
+    ReentrantMonitorAutoEnter lock(mMonitor);
+    return mFrameMetrics;
+  }
+
+  const FrameMetrics& GetFrameMetrics() const {
     ReentrantMonitorAutoEnter lock(mMonitor);
     return mFrameMetrics;
   }
@@ -193,18 +198,22 @@ protected:
     tm = new TestAPZCTreeManager();
     apzc = new TestAsyncPanZoomController(0, mcc, tm, mGestureBehavior);
     apzc->SetFrameMetrics(TestFrameMetrics());
+
+    // Since most tests pass inputs directly to the APZC instead of going through
+    // the tree manager, we need to build the overscroll handoff chain explicitly
+    // for panning and animation-cancelling to work correctly.
+    tm->BuildOverscrollHandoffChain(apzc);
   }
 
   virtual void TearDown()
   {
+    tm->ClearOverscrollHandoffChain();
     apzc->Destroy();
   }
 
-  void UseTouchListenerMetrics()
+  void SetMayHaveTouchListeners()
   {
-    FrameMetrics frameMetrics(TestFrameMetrics());
-    frameMetrics.mMayHaveTouchListeners = true;
-    apzc->SetFrameMetrics(frameMetrics);
+    apzc->GetFrameMetrics().mMayHaveTouchListeners = true;
   }
 
   void MakeApzcZoomable()
@@ -248,27 +257,32 @@ ApzcUp(AsyncPanZoomController* apzc, int aX, int aY, int& aTime)
   return apzc->ReceiveInputEvent(mti);
 }
 
-static nsEventStatus
-ApzcTap(AsyncPanZoomController* apzc, int aX, int aY, int& aTime,
-        int aTapLength, MockContentControllerDelayed* mcc = nullptr)
+static void
+ApzcTap(AsyncPanZoomController* aApzc, int aX, int aY, int& aTime, int aTapLength,
+        nsEventStatus (*aOutEventStatuses)[2] = nullptr)
 {
-  nsEventStatus status = ApzcDown(apzc, aX, aY, aTime);
-  if (mcc != nullptr) {
-    // There will be delayed tasks posted for the long-tap and MAX_TAP timeouts, but
-    // if we were provided a non-null mcc we want to clear them.
-    mcc->CheckHasDelayedTask();
-    mcc->ClearDelayedTask();
-    mcc->CheckHasDelayedTask();
-    mcc->ClearDelayedTask();
+  nsEventStatus status = ApzcDown(aApzc, aX, aY, aTime);
+  if (aOutEventStatuses) {
+    (*aOutEventStatuses)[0] = status;
   }
-  EXPECT_EQ(nsEventStatus_eConsumeNoDefault, status);
   aTime += aTapLength;
-  return ApzcUp(apzc, aX, aY, aTime);
+  status = ApzcUp(aApzc, aX, aY, aTime);
+  if (aOutEventStatuses) {
+    (*aOutEventStatuses)[1] = status;
+  }
+}
+
+static void
+ApzcTapAndCheckStatus(AsyncPanZoomController* aApzc, int aX, int aY, int& aTime, int aTapLength)
+{
+  nsEventStatus statuses[2];
+  ApzcTap(aApzc, aX, aY, aTime, aTapLength, &statuses);
+  EXPECT_EQ(nsEventStatus_eConsumeNoDefault, statuses[0]);
+  EXPECT_EQ(nsEventStatus_eIgnore, statuses[1]);
 }
 
 static void
 ApzcPan(AsyncPanZoomController* aApzc,
-        TestAPZCTreeManager* aTreeManager,
         int& aTime,
         int aTouchStartY,
         int aTouchEndY,
@@ -278,11 +292,6 @@ ApzcPan(AsyncPanZoomController* aApzc,
 {
   const int TIME_BETWEEN_TOUCH_EVENT = 100;
   const int OVERCOME_TOUCH_TOLERANCE = 100;
-
-  // Since we're passing inputs directly to the APZC instead of going through
-  // the tree manager, we need to build the overscroll handoff chain explicitly
-  // for panning to work correctly.
-  aTreeManager->BuildOverscrollHandoffChain(aApzc);
 
   // Make sure the move is large enough to not be handled as a tap
   nsEventStatus status = ApzcDown(aApzc, 10, aTouchStartY + OVERCOME_TOUCH_TOLERANCE, aTime);
@@ -325,10 +334,6 @@ ApzcPan(AsyncPanZoomController* aApzc,
   }
 
   aTime += TIME_BETWEEN_TOUCH_EVENT;
-
-  // Since we've explicitly built the overscroll handoff chain before
-  // touch-start, we need to explicitly clear it after touch-end.
-  aTreeManager->ClearOverscrollHandoffChain();
 }
 
 /*
@@ -337,7 +342,6 @@ ApzcPan(AsyncPanZoomController* aApzc,
  */
 static void
 ApzcPanAndCheckStatus(AsyncPanZoomController* aApzc,
-                      TestAPZCTreeManager* aTreeManager,
                       int& aTime,
                       int aTouchStartY,
                       int aTouchEndY,
@@ -346,13 +350,13 @@ ApzcPanAndCheckStatus(AsyncPanZoomController* aApzc,
                       nsTArray<uint32_t>* aAllowedTouchBehaviors)
 {
   nsEventStatus statuses[4]; // down, move, move, up
-  ApzcPan(aApzc, aTreeManager, aTime, aTouchStartY, aTouchEndY, false, aAllowedTouchBehaviors, &statuses);
+  ApzcPan(aApzc, aTime, aTouchStartY, aTouchEndY, false, aAllowedTouchBehaviors, &statuses);
 
   nsEventStatus touchStartStatus;
-  if (hasTouchListeners) {
+  if (hasTouchListeners || gfxPrefs::TouchActionEnabled()) {
     // APZC shouldn't consume the start event now, instead queueing it up
-    // waiting for content's response.
-    touchStartStatus = nsEventStatus_eIgnore;
+    // waiting for content's response and/or allowed behavior.
+    touchStartStatus = nsEventStatus_eConsumeDoDefault;
   } else {
     // APZC should go into the touching state and therefore consume the event.
     touchStartStatus = nsEventStatus_eConsumeNoDefault;
@@ -360,7 +364,10 @@ ApzcPanAndCheckStatus(AsyncPanZoomController* aApzc,
   EXPECT_EQ(touchStartStatus, statuses[0]);
 
   nsEventStatus touchMoveStatus;
-  if (expectIgnoredPan) {
+  if (hasTouchListeners) {
+    // APZC will queue up this event while waiting for content's response.
+    touchMoveStatus = nsEventStatus_eConsumeDoDefault;
+  } else if (expectIgnoredPan) {
     // APZC should ignore panning, be in TOUCHING state and therefore return eIgnore.
     // The same applies to all consequent touch move events.
     touchMoveStatus = nsEventStatus_eIgnore;
@@ -370,6 +377,16 @@ ApzcPanAndCheckStatus(AsyncPanZoomController* aApzc,
   }
   EXPECT_EQ(touchMoveStatus, statuses[1]);
   EXPECT_EQ(touchMoveStatus, statuses[2]);
+}
+
+static void
+ApzcPanNoFling(AsyncPanZoomController* aApzc,
+               int& aTime,
+               int aTouchStartY,
+               int aTouchEndY)
+{
+  ApzcPan(aApzc, aTime, aTouchStartY, aTouchEndY);
+  aApzc->CancelAnimation();
 }
 
 static void
@@ -492,8 +509,7 @@ public:
   }
 
 protected:
-  void DoPinchTest(bool aShouldTriggerPinch,
-                   nsTArray<uint32_t> *aAllowedTouchBehaviors = nullptr)
+  FrameMetrics GetPinchableFrameMetrics()
   {
     FrameMetrics fm;
     fm.mViewport = CSSRect(0, 0, 980, 480);
@@ -501,9 +517,14 @@ protected:
     fm.mScrollableRect = CSSRect(0, 0, 980, 1000);
     fm.SetScrollOffset(CSSPoint(300, 300));
     fm.SetZoom(CSSToScreenScale(2.0));
-    apzc->SetFrameMetrics(fm);
     // the visible area of the document in CSS pixels is x=300 y=300 w=50 h=100
+    return fm;
+  }
 
+  void DoPinchTest(bool aShouldTriggerPinch,
+                   nsTArray<uint32_t> *aAllowedTouchBehaviors = nullptr)
+  {
+    apzc->SetFrameMetrics(GetPinchableFrameMetrics());
     MakeApzcZoomable();
 
     if (aShouldTriggerPinch) {
@@ -521,7 +542,7 @@ protected:
       ApzcPinchWithPinchInputAndCheckStatus(apzc, 250, 300, 1.25, aShouldTriggerPinch);
     }
 
-    fm = apzc->GetFrameMetrics();
+    FrameMetrics fm = apzc->GetFrameMetrics();
 
     if (aShouldTriggerPinch) {
       // the visible area of the document in CSS pixels is now x=305 y=310 w=40 h=80
@@ -602,6 +623,32 @@ TEST_F(APZCPinchGestureDetectorTester, Pinch_UseGestureDetector_TouchActionNotAl
   behaviors.AppendElement(mozilla::layers::AllowedTouchBehavior::VERTICAL_PAN);
   behaviors.AppendElement(mozilla::layers::AllowedTouchBehavior::PINCH_ZOOM);
   DoPinchTest(false, &behaviors);
+}
+
+TEST_F(APZCPinchGestureDetectorTester, Pinch_PreventDefault) {
+  FrameMetrics originalMetrics = GetPinchableFrameMetrics();
+  apzc->SetFrameMetrics(originalMetrics);
+
+  SetMayHaveTouchListeners();
+  MakeApzcZoomable();
+
+  int touchInputId = 0;
+  ApzcPinchWithTouchInput(apzc, 250, 300, 1.25, touchInputId);
+
+  // Send the prevent-default notification for the touch block
+  apzc->ContentReceivedTouch(true);
+
+  // Run all pending tasks (this should include at least the
+  // prevent-default timer).
+  EXPECT_LE(1, mcc->RunThroughDelayedTasks());
+
+  // verify the metrics didn't change (i.e. the pinch was ignored)
+  FrameMetrics fm = apzc->GetFrameMetrics();
+  EXPECT_EQ(originalMetrics.GetZoom().scale, fm.GetZoom().scale);
+  EXPECT_EQ(originalMetrics.GetScrollOffset().x, fm.GetScrollOffset().x);
+  EXPECT_EQ(originalMetrics.GetScrollOffset().y, fm.GetScrollOffset().y);
+
+  apzc->AssertStateIsReset();
 }
 
 TEST_F(APZCBasicTester, Overzoom) {
@@ -760,7 +807,7 @@ protected:
     allowedTouchBehaviors.AppendElement(aBehavior);
 
     // Pan down
-    ApzcPanAndCheckStatus(apzc, tm, time, touchStart, touchEnd, !aShouldTriggerScroll, false, &allowedTouchBehaviors);
+    ApzcPanAndCheckStatus(apzc, time, touchStart, touchEnd, !aShouldTriggerScroll, false, &allowedTouchBehaviors);
     apzc->SampleContentTransformForFrame(testStartTime, &viewTransformOut, pointOut);
 
     if (aShouldTriggerScroll) {
@@ -771,12 +818,45 @@ protected:
       EXPECT_EQ(ViewTransform(), viewTransformOut);
     }
 
+    // Clear the fling from the previous pan, or stopping it will
+    // consume the next touchstart
+    apzc->CancelAnimation();
+
     // Pan back
-    ApzcPanAndCheckStatus(apzc, tm, time, touchEnd, touchStart, !aShouldTriggerScroll, false, &allowedTouchBehaviors);
+    ApzcPanAndCheckStatus(apzc, time, touchEnd, touchStart, !aShouldTriggerScroll, false, &allowedTouchBehaviors);
     apzc->SampleContentTransformForFrame(testStartTime, &viewTransformOut, pointOut);
 
     EXPECT_EQ(ScreenPoint(), pointOut);
     EXPECT_EQ(ViewTransform(), viewTransformOut);
+  }
+
+  void DoPanWithPreventDefaultTest()
+  {
+    SetMayHaveTouchListeners();
+
+    int time = 0;
+    int touchStart = 50;
+    int touchEnd = 10;
+    ScreenPoint pointOut;
+    ViewTransform viewTransformOut;
+
+    // Pan down
+    nsTArray<uint32_t> allowedTouchBehaviors;
+    allowedTouchBehaviors.AppendElement(mozilla::layers::AllowedTouchBehavior::VERTICAL_PAN);
+    ApzcPanAndCheckStatus(apzc, time, touchStart, touchEnd, true, true, &allowedTouchBehaviors);
+
+    // Send the signal that content has handled and preventDefaulted the touch
+    // events. This flushes the event queue.
+    apzc->ContentReceivedTouch(true);
+    // Run all pending tasks (this should include at least the
+    // prevent-default timer).
+    EXPECT_LE(1, mcc->RunThroughDelayedTasks());
+
+    apzc->SampleContentTransformForFrame(testStartTime, &viewTransformOut, pointOut);
+    EXPECT_EQ(ScreenPoint(), pointOut);
+    EXPECT_EQ(ViewTransform(), viewTransformOut);
+
+    apzc->AssertStateIsReset();
   }
 };
 
@@ -810,28 +890,14 @@ TEST_F(APZCPanningTester, PanWithTouchActionPanY) {
   DoPanTest(true, mozilla::layers::AllowedTouchBehavior::VERTICAL_PAN);
 }
 
-TEST_F(APZCBasicTester, PanWithPreventDefault) {
+TEST_F(APZCPanningTester, PanWithPreventDefaultAndTouchAction) {
   SCOPED_GFX_PREF(TouchActionEnabled, bool, true);
-  UseTouchListenerMetrics();
+  DoPanWithPreventDefaultTest();
+}
 
-  int time = 0;
-  int touchStart = 50;
-  int touchEnd = 10;
-  ScreenPoint pointOut;
-  ViewTransform viewTransformOut;
-
-  // Pan down
-  nsTArray<uint32_t> allowedTouchBehaviors;
-  allowedTouchBehaviors.AppendElement(mozilla::layers::AllowedTouchBehavior::VERTICAL_PAN);
-  ApzcPanAndCheckStatus(apzc, tm, time, touchStart, touchEnd, true, true, &allowedTouchBehaviors);
-
-  // Send the signal that content has handled and preventDefaulted the touch
-  // events. This flushes the event queue.
-  apzc->ContentReceivedTouch(true);
-
-  apzc->SampleContentTransformForFrame(testStartTime, &viewTransformOut, pointOut);
-  EXPECT_EQ(ScreenPoint(), pointOut);
-  EXPECT_EQ(ViewTransform(), viewTransformOut);
+TEST_F(APZCPanningTester, PanWithPreventDefault) {
+  SCOPED_GFX_PREF(TouchActionEnabled, bool, false);
+  DoPanWithPreventDefaultTest();
 }
 
 TEST_F(APZCBasicTester, Fling) {
@@ -845,7 +911,7 @@ TEST_F(APZCBasicTester, Fling) {
   ViewTransform viewTransformOut;
 
   // Fling down. Each step scroll further down
-  ApzcPan(apzc, tm, time, touchStart, touchEnd);
+  ApzcPan(apzc, time, touchStart, touchEnd);
   ScreenPoint lastPoint;
   for (int i = 1; i < 50; i+=1) {
     apzc->SampleContentTransformForFrame(testStartTime+TimeDuration::FromMilliseconds(i), &viewTransformOut, pointOut);
@@ -868,16 +934,15 @@ protected:
     int touchEnd = 10;
 
     // Start the fling down.
-    ApzcPan(apzc, tm, time, touchStart, touchEnd);
+    ApzcPan(apzc, time, touchStart, touchEnd);
     // The touchstart from the pan will leave some cancelled tasks in the queue, clear them out
-    EXPECT_EQ(2, mcc->RunThroughDelayedTasks());
+    while (mcc->RunThroughDelayedTasks());
 
     // If we want to tap while the fling is fast, let the fling advance for 10ms only. If we want
     // the fling to slow down more, advance to 2000ms. These numbers may need adjusting if our
     // friction and threshold values change, but they should be deterministic at least.
     int timeDelta = aSlow ? 2000 : 10;
     int tapCallsExpected = aSlow ? 1 : 0;
-    int delayedTasksExpected = aSlow ? 3 : 2;
 
     // Advance the fling animation by timeDelta milliseconds.
     ScreenPoint pointOut;
@@ -887,14 +952,58 @@ protected:
     // Deliver a tap to abort the fling. Ensure that we get a HandleSingleTap
     // call out of it if and only if the fling is slow.
     EXPECT_CALL(*mcc, HandleSingleTap(_, 0, apzc->GetGuid())).Times(tapCallsExpected);
-    ApzcTap(apzc, 10, 10, time, 0, nullptr);
-    EXPECT_EQ(delayedTasksExpected, mcc->RunThroughDelayedTasks());
+    ApzcTap(apzc, 10, 10, time, 0);
+    while (mcc->RunThroughDelayedTasks());
 
     // Verify that we didn't advance any further after the fling was aborted, in either case.
     ScreenPoint finalPointOut;
     apzc->SampleContentTransformForFrame(testStartTime + TimeDuration::FromMilliseconds(timeDelta + 1000), &viewTransformOut, finalPointOut);
     EXPECT_EQ(pointOut.x, finalPointOut.x);
     EXPECT_EQ(pointOut.y, finalPointOut.y);
+
+    apzc->AssertStateIsReset();
+  }
+
+  void DoFlingStopWithSlowListener(bool aPreventDefault) {
+    SetMayHaveTouchListeners();
+
+    int time = 0;
+    int touchStart = 50;
+    int touchEnd = 10;
+
+    // Start the fling down.
+    ApzcPan(apzc, time, touchStart, touchEnd);
+    apzc->ContentReceivedTouch(false);
+    while (mcc->RunThroughDelayedTasks());
+
+    // Sample the fling a couple of times to ensure it's going.
+    ScreenPoint point, finalPoint;
+    ViewTransform viewTransform;
+    apzc->SampleContentTransformForFrame(testStartTime + TimeDuration::FromMilliseconds(10), &viewTransform, point);
+    apzc->SampleContentTransformForFrame(testStartTime + TimeDuration::FromMilliseconds(20), &viewTransform, finalPoint);
+    EXPECT_GT(finalPoint.y, point.y);
+
+    // Now we put our finger down to stop the fling
+    ApzcDown(apzc, 10, 10, time);
+
+    // Re-sample to make sure it hasn't moved
+    apzc->SampleContentTransformForFrame(testStartTime + TimeDuration::FromMilliseconds(30), &viewTransform, point);
+    EXPECT_EQ(finalPoint.x, point.x);
+    EXPECT_EQ(finalPoint.y, point.y);
+
+    // respond to the touchdown that stopped the fling.
+    // even if we do a prevent-default on it, the animation should remain stopped.
+    apzc->ContentReceivedTouch(aPreventDefault);
+    while (mcc->RunThroughDelayedTasks());
+
+    // Verify the page hasn't moved
+    apzc->SampleContentTransformForFrame(testStartTime + TimeDuration::FromMilliseconds(100), &viewTransform, point);
+    EXPECT_EQ(finalPoint.x, point.x);
+    EXPECT_EQ(finalPoint.y, point.y);
+
+    // clean up
+    ApzcUp(apzc, 10, 10, time);
+    while (mcc->RunThroughDelayedTasks());
 
     apzc->AssertStateIsReset();
   }
@@ -908,6 +1017,14 @@ TEST_F(APZCFlingStopTester, FlingStopTap) {
   DoFlingStopTest(true);
 }
 
+TEST_F(APZCFlingStopTester, FlingStopSlowListener) {
+  DoFlingStopWithSlowListener(false);
+}
+
+TEST_F(APZCFlingStopTester, FlingStopPreventDefault) {
+  DoFlingStopWithSlowListener(true);
+}
+
 TEST_F(APZCBasicTester, OverScrollPanning) {
   SCOPED_GFX_PREF(APZOverscrollEnabled, bool, true);
 
@@ -915,7 +1032,7 @@ TEST_F(APZCBasicTester, OverScrollPanning) {
   int time = 0;
   int touchStart = 500;
   int touchEnd = 10;
-  ApzcPan(apzc, tm, time, touchStart, touchEnd);
+  ApzcPan(apzc, time, touchStart, touchEnd);
   EXPECT_TRUE(apzc->IsOverscrolled());
 
   // Note that in the calls to SampleContentTransformForFrame below, the time
@@ -955,7 +1072,7 @@ TEST_F(APZCBasicTester, OverScrollAbort) {
   int time = 0;
   int touchStart = 500;
   int touchEnd = 10;
-  ApzcPan(apzc, tm, time, touchStart, touchEnd);
+  ApzcPan(apzc, time, touchStart, touchEnd);
   EXPECT_TRUE(apzc->IsOverscrolled());
 
   ScreenPoint pointOut;
@@ -982,7 +1099,7 @@ TEST_F(APZCBasicTester, OverScrollPanningAbort) {
   int time = 0;
   int touchStart = 500;
   int touchEnd = 10;
-  ApzcPan(apzc, tm, time, touchStart, touchEnd,
+  ApzcPan(apzc, time, touchStart, touchEnd,
           true);                   // keep finger down
   EXPECT_TRUE(apzc->IsOverscrolled());
 
@@ -998,8 +1115,11 @@ TEST_F(APZCGestureDetectorTester, ShortPress) {
   MakeApzcUnzoomable();
 
   int time = 0;
-  nsEventStatus status = ApzcTap(apzc, 10, 10, time, 100, mcc.get());
-  EXPECT_EQ(nsEventStatus_eIgnore, status);
+  ApzcTapAndCheckStatus(apzc, 10, 10, time, 100);
+  // There will be delayed tasks posted for the long-tap and MAX_TAP timeouts, but
+  // we want to clear those.
+  mcc->ClearDelayedTask();
+  mcc->ClearDelayedTask();
 
   // This verifies that the single tap notification is sent after the
   // touchdown is fully processed. The ordering here is important.
@@ -1015,8 +1135,11 @@ TEST_F(APZCGestureDetectorTester, MediumPress) {
   MakeApzcUnzoomable();
 
   int time = 0;
-  nsEventStatus status = ApzcTap(apzc, 10, 10, time, 400, mcc.get());
-  EXPECT_EQ(nsEventStatus_eIgnore, status);
+  ApzcTapAndCheckStatus(apzc, 10, 10, time, 400);
+  // There will be delayed tasks posted for the long-tap and MAX_TAP timeouts, but
+  // we want to clear those.
+  mcc->ClearDelayedTask();
+  mcc->ClearDelayedTask();
 
   // This verifies that the single tap notification is sent after the
   // touchdown is fully processed. The ordering here is important.
@@ -1036,12 +1159,23 @@ protected:
     int time = 0;
 
     nsEventStatus status = ApzcDown(apzc, 10, 10, time);
-    EXPECT_EQ(nsEventStatus_eConsumeNoDefault, status);
+    if (gfxPrefs::TouchActionEnabled()) {
+      // If touch-action is enabled, then the event is queued until the
+      // allowed touch behavior is set.
+      EXPECT_EQ(nsEventStatus_eConsumeDoDefault, status);
+    } else {
+      // Otherwise, it is processed immediately.
+      EXPECT_EQ(nsEventStatus_eConsumeNoDefault, status);
+    }
 
-    // SetAllowedTouchBehavior() must be called after sending touch-start.
-    nsTArray<uint32_t> allowedTouchBehaviors;
-    allowedTouchBehaviors.AppendElement(aBehavior);
-    apzc->SetAllowedTouchBehavior(allowedTouchBehaviors);
+    if (gfxPrefs::TouchActionEnabled()) {
+      // SetAllowedTouchBehavior() must be called after sending touch-start.
+      nsTArray<uint32_t> allowedTouchBehaviors;
+      allowedTouchBehaviors.AppendElement(aBehavior);
+      apzc->SetAllowedTouchBehavior(allowedTouchBehaviors);
+    }
+    // Have content "respond" to the touchstart
+    apzc->ContentReceivedTouch(false);
 
     MockFunction<void(std::string checkPointName)> check;
 
@@ -1057,6 +1191,7 @@ protected:
       EXPECT_CALL(check, Call("postHandleLongTapUp"));
     }
 
+    // There is a longpress event scheduled on a timeout
     mcc->CheckHasDelayedTask();
 
     // Manually invoke the longpress while the touch is currently down.
@@ -1066,24 +1201,23 @@ protected:
 
     // Destroy pending MAX_TAP timeout task
     mcc->DestroyOldestTask();
-    // There should be a TimeoutContentResponse task in the queue still
-    // Clear the waiting-for-content timeout task, then send the signal that
-    // content has handled this long tap. This takes the place of the
-    // "contextmenu" event.
+
+    // Dispatching the longpress event starts a new touch block, which
+    // needs a new content response and also has a pending timeout task
+    // in the queue. Deal with those here. We do the content response first
+    // with preventDefault=false, and then we run the timeout task which
+    // "loses the race" and does nothing.
+    apzc->ContentReceivedTouch(false);
     mcc->CheckHasDelayedTask();
-    mcc->ClearDelayedTask();
-    apzc->ContentReceivedTouch(true);
+    mcc->RunDelayedTask();
 
     time += 1000;
 
+    // Finally, simulate lifting the finger. Since the long-press wasn't
+    // prevent-defaulted, we should get a long-tap-up event.
+    check.Call("preHandleLongTapUp");
     status = ApzcUp(apzc, 10, 10, time);
     EXPECT_EQ(nsEventStatus_eIgnore, status);
-
-    // To get a LongTapUp event, we must kick APZC to flush its event queue. This
-    // would normally happen if we had a (Tab|RenderFrame)(Parent|Child)
-    // mechanism.
-    check.Call("preHandleLongTapUp");
-    apzc->ContentReceivedTouch(false);
     check.Call("postHandleLongTapUp");
 
     apzc->AssertStateIsReset();
@@ -1101,12 +1235,23 @@ protected:
 
     int time = 0;
     nsEventStatus status = ApzcDown(apzc, touchX, touchStartY, time);
-    EXPECT_EQ(nsEventStatus_eConsumeNoDefault, status);
+    if (gfxPrefs::TouchActionEnabled()) {
+      // If touch-action is enabled, then the event is queued until the
+      // allowed touch behavior is set.
+      EXPECT_EQ(nsEventStatus_eConsumeDoDefault, status);
+    } else {
+      // Otherwise, it is processed immediately.
+      EXPECT_EQ(nsEventStatus_eConsumeNoDefault, status);
+    }
 
-    // SetAllowedTouchBehavior() must be called after sending touch-start.
-    nsTArray<uint32_t> allowedTouchBehaviors;
-    allowedTouchBehaviors.AppendElement(aBehavior);
-    apzc->SetAllowedTouchBehavior(allowedTouchBehaviors);
+    if (gfxPrefs::TouchActionEnabled()) {
+      // SetAllowedTouchBehavior() must be called after sending touch-start.
+      nsTArray<uint32_t> allowedTouchBehaviors;
+      allowedTouchBehaviors.AppendElement(aBehavior);
+      apzc->SetAllowedTouchBehavior(allowedTouchBehaviors);
+    }
+    // Have content "respond" to the touchstart
+    apzc->ContentReceivedTouch(false);
 
     MockFunction<void(std::string checkPointName)> check;
 
@@ -1127,11 +1272,15 @@ protected:
 
     // Destroy pending MAX_TAP timeout task
     mcc->DestroyOldestTask();
-    // Clear the waiting-for-content timeout task, then send the signal that
-    // content has handled this long tap. This takes the place of the
-    // "contextmenu" event.
-    mcc->ClearDelayedTask();
+
+    // There should be a TimeoutContentResponse task in the queue still,
+    // waiting for the response from the longtap event dispatched above.
+    // Send the signal that content has handled the long-tap, and then run
+    // the timeout task (it will be a no-op because the content "wins" the
+    // race. This takes the place of the "contextmenu" event.
     apzc->ContentReceivedTouch(true);
+    mcc->CheckHasDelayedTask();
+    mcc->RunDelayedTask();
 
     time += 1000;
 
@@ -1143,11 +1292,6 @@ protected:
     EXPECT_CALL(*mcc, HandleLongTapUp(CSSPoint(touchX, touchEndY), 0, apzc->GetGuid())).Times(0);
     status = ApzcUp(apzc, touchX, touchEndY, time);
     EXPECT_EQ(nsEventStatus_eIgnore, status);
-
-    // Flush the event queue. Once the "contextmenu" event is handled, any touch
-    // events that come from the same series of start->n*move->end events should
-    // be discarded, even if only the "contextmenu" event is preventDefaulted.
-    apzc->ContentReceivedTouch(false);
 
     ScreenPoint pointOut;
     ViewTransform viewTransformOut;
@@ -1180,6 +1324,118 @@ TEST_F(APZCLongPressTester, LongPressPreventDefaultWithTouchAction) {
   DoLongPressPreventDefaultTest(mozilla::layers::AllowedTouchBehavior::HORIZONTAL_PAN
                                 | mozilla::layers::AllowedTouchBehavior::VERTICAL_PAN
                                 | mozilla::layers::AllowedTouchBehavior::PINCH_ZOOM);
+}
+
+static void
+ApzcDoubleTap(AsyncPanZoomController* aApzc, int aX, int aY, int& aTime,
+              nsEventStatus (*aOutEventStatuses)[4] = nullptr)
+{
+  nsEventStatus status = ApzcDown(aApzc, aX, aY, aTime);
+  if (aOutEventStatuses) {
+    (*aOutEventStatuses)[0] = status;
+  }
+  aTime += 10;
+  status = ApzcUp(aApzc, aX, aY, aTime);
+  if (aOutEventStatuses) {
+    (*aOutEventStatuses)[1] = status;
+  }
+  aTime += 10;
+  status = ApzcDown(aApzc, aX, aY, aTime);
+  if (aOutEventStatuses) {
+    (*aOutEventStatuses)[2] = status;
+  }
+  aTime += 10;
+  status = ApzcUp(aApzc, aX, aY, aTime);
+  if (aOutEventStatuses) {
+    (*aOutEventStatuses)[3] = status;
+  }
+}
+
+static void
+ApzcDoubleTapAndCheckStatus(AsyncPanZoomController* aApzc, int aX, int aY, int& aTime)
+{
+  nsEventStatus statuses[4];
+  ApzcDoubleTap(aApzc, aX, aY, aTime, &statuses);
+  EXPECT_EQ(nsEventStatus_eConsumeDoDefault, statuses[0]);
+  EXPECT_EQ(nsEventStatus_eConsumeDoDefault, statuses[1]);
+  EXPECT_EQ(nsEventStatus_eConsumeDoDefault, statuses[2]);
+  EXPECT_EQ(nsEventStatus_eConsumeDoDefault, statuses[3]);
+}
+
+TEST_F(APZCGestureDetectorTester, DoubleTap) {
+  SetMayHaveTouchListeners();
+  MakeApzcZoomable();
+
+  EXPECT_CALL(*mcc, HandleSingleTap(CSSPoint(10, 10), 0, apzc->GetGuid())).Times(0);
+  EXPECT_CALL(*mcc, HandleDoubleTap(CSSPoint(10, 10), 0, apzc->GetGuid())).Times(1);
+
+  int time = 0;
+  ApzcDoubleTapAndCheckStatus(apzc, 10, 10, time);
+
+  // responses to the two touchstarts
+  apzc->ContentReceivedTouch(false);
+  apzc->ContentReceivedTouch(false);
+
+  while (mcc->RunThroughDelayedTasks());
+
+  apzc->AssertStateIsReset();
+}
+
+TEST_F(APZCGestureDetectorTester, DoubleTapNotZoomable) {
+  SetMayHaveTouchListeners();
+  MakeApzcUnzoomable();
+
+  EXPECT_CALL(*mcc, HandleSingleTap(CSSPoint(10, 10), 0, apzc->GetGuid())).Times(2);
+  EXPECT_CALL(*mcc, HandleDoubleTap(CSSPoint(10, 10), 0, apzc->GetGuid())).Times(0);
+
+  int time = 0;
+  ApzcDoubleTapAndCheckStatus(apzc, 10, 10, time);
+
+  // responses to the two touchstarts
+  apzc->ContentReceivedTouch(false);
+  apzc->ContentReceivedTouch(false);
+
+  while (mcc->RunThroughDelayedTasks());
+
+  apzc->AssertStateIsReset();
+}
+
+TEST_F(APZCGestureDetectorTester, DoubleTapPreventDefaultFirstOnly) {
+  SetMayHaveTouchListeners();
+  MakeApzcZoomable();
+
+  EXPECT_CALL(*mcc, HandleSingleTap(CSSPoint(10, 10), 0, apzc->GetGuid())).Times(1);
+  EXPECT_CALL(*mcc, HandleDoubleTap(CSSPoint(10, 10), 0, apzc->GetGuid())).Times(0);
+
+  int time = 0;
+  ApzcDoubleTapAndCheckStatus(apzc, 10, 10, time);
+
+  // responses to the two touchstarts
+  apzc->ContentReceivedTouch(true);
+  apzc->ContentReceivedTouch(false);
+
+  while (mcc->RunThroughDelayedTasks());
+
+  apzc->AssertStateIsReset();
+}
+
+TEST_F(APZCGestureDetectorTester, DoubleTapPreventDefaultBoth) {
+  SetMayHaveTouchListeners();
+  MakeApzcZoomable();
+
+  EXPECT_CALL(*mcc, HandleSingleTap(CSSPoint(10, 10), 0, apzc->GetGuid())).Times(0);
+  EXPECT_CALL(*mcc, HandleDoubleTap(CSSPoint(10, 10), 0, apzc->GetGuid())).Times(0);
+
+  int time = 0;
+  ApzcDoubleTapAndCheckStatus(apzc, 10, 10, time);
+
+  // responses to the two touchstarts
+  apzc->ContentReceivedTouch(true);
+  apzc->ContentReceivedTouch(true);
+
+  while (mcc->RunThroughDelayedTasks());
+
+  apzc->AssertStateIsReset();
 }
 
 // Layer tree for HitTesting1
@@ -1417,7 +1673,9 @@ TEST_F(APZCTreeManagerTester, HitTesting2) {
   // This first pan will move the APZC by 50 pixels, and dispatch a paint request.
   // Since this paint request is in the queue to Gecko, transformToGecko will
   // take it into account.
-  ApzcPan(apzcroot, manager, time, 100, 50);
+  manager->BuildOverscrollHandoffChain(apzcroot);
+  ApzcPanNoFling(apzcroot, time, 100, 50);
+  manager->ClearOverscrollHandoffChain();
 
   // Hit where layers[3] used to be. It should now hit the root.
   hit = GetTargetAPZC(manager, ScreenPoint(75, 75), transformToApzc, transformToGecko);
@@ -1443,7 +1701,9 @@ TEST_F(APZCTreeManagerTester, HitTesting2) {
   // request dispatched above has not "completed", we will not dispatch another
   // one yet. Now we have an async transform on top of the pending paint request
   // transform.
-  ApzcPan(apzcroot, manager, time, 100, 50);
+  manager->BuildOverscrollHandoffChain(apzcroot);
+  ApzcPanNoFling(apzcroot, time, 100, 50);
+  manager->ClearOverscrollHandoffChain();
 
   // Hit where layers[3] used to be. It should now hit the root.
   hit = GetTargetAPZC(manager, ScreenPoint(75, 75), transformToApzc, transformToGecko);

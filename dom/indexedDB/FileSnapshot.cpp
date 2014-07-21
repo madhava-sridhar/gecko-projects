@@ -84,7 +84,8 @@ FileImplSnapshot::GetInternalStream(nsIInputStream** aStream)
 }
 
 already_AddRefed<DOMFileImpl>
-FileImplSnapshot::CreateSlice(uint64_t aStart, uint64_t aLength,
+FileImplSnapshot::CreateSlice(uint64_t aStart,
+                              uint64_t aLength,
                               const nsAString& aContentType)
 {
   NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");

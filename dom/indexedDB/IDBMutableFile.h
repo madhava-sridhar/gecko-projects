@@ -9,6 +9,7 @@
 
 #include "js/TypeDecls.h"
 #include "mozilla/Attributes.h"
+#include "mozilla/dom/FileModeBinding.h"
 #include "mozilla/DOMEventTargetHelper.h"
 #include "mozilla/dom/FileModeBinding.h"
 #include "mozilla/dom/MutableFile.h"
@@ -41,7 +42,6 @@ class IDBMutableFile MOZ_FINAL
 
   nsString mName;
   nsString mType;
-
   nsRefPtr<IDBDatabase> mDatabase;
   nsRefPtr<FileInfo> mFileInfo;
 
@@ -69,6 +69,11 @@ public:
   }
 
   int64_t
+  GetFileId() const
+  {
+  }
+
+  int64_t
   GetFileId() const;
 
   FileInfo*
@@ -83,8 +88,6 @@ public:
   // MutableFile
   NS_DECL_ISUPPORTS_INHERITED
   NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(IDBMutableFile, DOMEventTargetHelper)
-
-  virtual bool
   IsInvalid() MOZ_OVERRIDE;
 
   virtual nsIOfflineStorage*
@@ -106,6 +109,22 @@ public:
   // WebIDL
   nsPIDOMWindow*
   GetParentObject() const
+  {
+    return GetOwner();
+  }
+
+  void
+  GetName(nsString& aName) const
+  {
+    aName = mName;
+  }
+
+  void
+  GetType(nsString& aType) const
+  {
+    aType = mType;
+  }
+
   {
     return GetOwner();
   }

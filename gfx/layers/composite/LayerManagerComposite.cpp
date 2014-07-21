@@ -144,6 +144,13 @@ LayerManagerComposite::UpdateRenderBounds(const nsIntRect& aRect)
   mRenderBounds = aRect;
 }
 
+bool
+LayerManagerComposite::AreComponentAlphaLayersEnabled()
+{
+  return Compositor::GetBackend() != LayersBackend::LAYERS_BASIC &&
+         LayerManager::AreComponentAlphaLayersEnabled();
+}
+
 void
 LayerManagerComposite::BeginTransaction()
 {
@@ -484,6 +491,7 @@ LayerManagerComposite::Render()
                                                                actualBounds.height));
 
   // Render our layers.
+  RootLayer()->Prepare(clipRect);
   RootLayer()->RenderLayer(clipRect);
 
   if (!mRegionToClear.IsEmpty()) {

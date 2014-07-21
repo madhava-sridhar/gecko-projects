@@ -188,12 +188,12 @@ private:
 
   void Root();
 
-  already_AddRefed<Promise> StartStopDiscovery(bool aStart, ErrorResult& aRv);
   already_AddRefed<mozilla::dom::DOMRequest>
     PairUnpair(bool aPair, const nsAString& aDeviceAddress, ErrorResult& aRv);
 
   bool IsAdapterAttributeChanged(BluetoothAdapterAttribute aType,
                                  const BluetoothValue& aValue);
+  void HandleAdapterStateChanged();
   void HandlePropertyChanged(const BluetoothValue& aValue);
   void DispatchAttributeEvent(const nsTArray<nsString>& aTypes);
   BluetoothAdapterAttribute

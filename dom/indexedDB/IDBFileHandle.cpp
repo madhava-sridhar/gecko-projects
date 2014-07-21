@@ -158,10 +158,10 @@ IDBFileHandle::OnCompleteOrAbort(bool aAborted)
 {
   nsCOMPtr<nsIDOMEvent> event;
   if (aAborted) {
-    event = CreateGenericEvent(this, nsDependentString(kAbortEventType),
+    event = CreateGenericEvent(this, NS_LITERAL_STRING(ABORT_EVT_STR),
                                eDoesBubble, eNotCancelable);
   } else {
-    event = CreateGenericEvent(this, nsDependentString(kCompleteEventType),
+    event = CreateGenericEvent(this, NS_LITERAL_STRING(COMPLETE_EVT_STR),
                                eDoesNotBubble, eNotCancelable);
   }
   if (NS_WARN_IF(!event)) {
