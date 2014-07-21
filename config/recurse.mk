@@ -6,6 +6,10 @@ ifndef INCLUDED_RULES_MK
 include $(topsrcdir)/config/rules.mk
 endif
 
+# Make sure that anything that needs to be defined in moz.build wasn't
+# overwritten after including rules.mk.
+_eval_for_side_effects := $(CHECK_MOZBUILD_VARIABLES)
+
 # The traditional model of directory traversal with make is as follows:
 #   make -C foo
 #     Entering foo
@@ -91,7 +95,7 @@ GARBAGE_DIRS += subtiers
 # root.mk defines subtier_of_* variables, that map a normalized subdir path to
 # a subtier name (e.g. subtier_of_memory_jemalloc = base)
 $(addsuffix /$(CURRENT_TIER),$(CURRENT_DIRS)): %/$(CURRENT_TIER):
-	+@$(MAKE) -C $* $(if $(filter $*,$(tier_$(subtier_of_$(subst /,_,$*))_staticdirs)),,$(CURRENT_TIER))
+	$(call SUBMAKE,$(if $(filter $*,$(tier_$(subtier_of_$(subst /,_,$*))_staticdirs)),,$(CURRENT_TIER)),$*)
 # Ensure existing stamps are up-to-date, but don't create one if submake didn't create one.
 	$(if $(wildcard $@),@$(STAMP_TOUCH))
 

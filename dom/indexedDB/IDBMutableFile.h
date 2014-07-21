@@ -7,26 +7,40 @@
 #ifndef mozilla_dom_indexeddb_idbmutablefile_h__
 #define mozilla_dom_indexeddb_idbmutablefile_h__
 
+#include "js/TypeDecls.h"
 #include "mozilla/Attributes.h"
+#include "mozilla/DOMEventTargetHelper.h"
+#include "mozilla/dom/FileModeBinding.h"
 #include "mozilla/dom/MutableFile.h"
 #include "mozilla/dom/quota/PersistenceType.h"
 #include "nsAutoPtr.h"
 #include "nsCycleCollectionParticipant.h"
 
-class nsIFile;
+class nsIDOMFile;
+class nsPIDOMWindow;
 
 namespace mozilla {
+
+class ErrorResult;
+
 namespace dom {
+
+class DOMRequest;
+
 namespace indexedDB {
 
 class FileInfo;
 class IDBDatabase;
+class IDBFileHandle;
 
 class IDBMutableFile MOZ_FINAL
-  : public MutableFile
+  : public DOMEventTargetHelper
+  , public MutableFileBase
 {
-  typedef mozilla::dom::FileHandle FileHandle;
   typedef mozilla::dom::quota::PersistenceType PersistenceType;
+
+  nsString mName;
+  nsString mType;
 
   nsRefPtr<IDBDatabase> mDatabase;
   nsRefPtr<FileInfo> mFileInfo;
@@ -42,22 +56,33 @@ public:
          const nsAString& aType,
          already_AddRefed<FileInfo> aFileInfo);
 
-  // WebIDL
-  IDBDatabase*
-  Database() const;
+  const nsAString&
+  Name() const
+  {
+    return mName;
+  }
+
+  const nsAString&
+  Type() const
+  {
+    return mType;
+  }
+
+  int64_t
+  GetFileId() const;
+
+  FileInfo*
+  GetFileInfo() const
+  {
+    return mFileInfo;
+  }
+
+  already_AddRefed<nsIDOMFile>
+  CreateFileObject(IDBFileHandle* aFileHandle, uint32_t aFileSize);
 
   // MutableFile
   NS_DECL_ISUPPORTS_INHERITED
-  NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(IDBMutableFile, MutableFile)
-
-  virtual int64_t
-  GetFileId() MOZ_OVERRIDE;
-
-  virtual FileInfo*
-  GetFileInfo() MOZ_OVERRIDE;
-
-  virtual bool
-  IsShuttingDown() MOZ_OVERRIDE;
+  NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(IDBMutableFile, DOMEventTargetHelper)
 
   virtual bool
   IsInvalid() MOZ_OVERRIDE;
@@ -66,7 +91,7 @@ public:
   Storage() MOZ_OVERRIDE;
 
   virtual already_AddRefed<nsISupports>
-  CreateStream(nsIFile* aFile, bool aReadOnly) MOZ_OVERRIDE;
+  CreateStream(bool aReadOnly) MOZ_OVERRIDE;
 
   virtual void
   SetThreadLocals() MOZ_OVERRIDE;
@@ -74,12 +99,40 @@ public:
   virtual void
   UnsetThreadLocals() MOZ_OVERRIDE;
 
-  virtual already_AddRefed<nsIDOMFile>
-  CreateFileObject(FileHandle* aFileHandle, uint32_t aFileSize) MOZ_OVERRIDE;
-
   // nsWrapperCache
   virtual JSObject*
   WrapObject(JSContext* aCx) MOZ_OVERRIDE;
+
+  // WebIDL
+  nsPIDOMWindow*
+  GetParentObject() const
+  {
+    return GetOwner();
+  }
+
+  void
+  GetName(nsString& aName) const
+  {
+    aName = mName;
+  }
+
+  void
+  GetType(nsString& aType) const
+  {
+    aType = mType;
+  }
+
+  IDBDatabase*
+  Database() const;
+
+  already_AddRefed<IDBFileHandle>
+  Open(FileMode aMode, ErrorResult& aError);
+
+  already_AddRefed<DOMRequest>
+  GetFile(ErrorResult& aError);
+
+  IMPL_EVENT_HANDLER(abort)
+  IMPL_EVENT_HANDLER(error)
 
 private:
   IDBMutableFile(IDBDatabase* aDatabase,

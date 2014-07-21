@@ -1462,11 +1462,13 @@ public:
     MOZ_COUNT_CTOR(SelectorCacheKeyDeleter);
   }
 
+protected:
   ~SelectorCacheKeyDeleter()
   {
     MOZ_COUNT_DTOR(SelectorCacheKeyDeleter);
   }
 
+public:
   NS_IMETHOD Run()
   {
     return NS_OK;
@@ -5971,6 +5973,34 @@ nsDocument::GetElementsByTagName(const nsAString& aTagname,
   return NS_OK;
 }
 
+long
+nsDocument::BlockedTrackingNodeCount() const
+{
+  return mBlockedTrackingNodes.Length();
+}
+
+already_AddRefed<nsSimpleContentList>
+nsDocument::BlockedTrackingNodes() const
+{
+  nsRefPtr<nsSimpleContentList> list = new nsSimpleContentList(nullptr);
+
+  nsTArray<nsWeakPtr> blockedTrackingNodes;
+  blockedTrackingNodes = mBlockedTrackingNodes;
+
+  for (unsigned long i = 0; i < blockedTrackingNodes.Length(); i++) {
+    nsWeakPtr weakNode = blockedTrackingNodes[i];
+    nsCOMPtr<nsIContent> node = do_QueryReferent(weakNode);
+    // Consider only nodes to which we have managed to get strong references.
+    // Coping with nullptrs since it's expected for nodes to disappear when
+    // nobody else is referring to them.
+    if (node) {
+      list->AppendElement(node);
+    }
+  }
+
+  return list.forget();
+}
+
 already_AddRefed<nsContentList>
 nsIDocument::GetElementsByTagNameNS(const nsAString& aNamespaceURI,
                                     const nsAString& aLocalName,
@@ -9811,13 +9841,19 @@ static const char* kWarnings[] = {
 };
 #undef DEPRECATED_OPERATION
 
+bool
+nsIDocument::HasWarnedAbout(DeprecatedOperations aOperation)
+{
+  static_assert(eDeprecatedOperationCount <= 64,
+                "Too many deprecated operations");
+  return mWarnedAbout & (1ull << aOperation);
+}
+
 void
 nsIDocument::WarnOnceAbout(DeprecatedOperations aOperation,
                            bool asError /* = false */)
 {
-  static_assert(eDeprecatedOperationCount <= 64,
-                "Too many deprecated operations");
-  if (mWarnedAbout & (1ull << aOperation)) {
+  if (HasWarnedAbout(aOperation)) {
     return;
   }
   mWarnedAbout |= (1ull << aOperation);

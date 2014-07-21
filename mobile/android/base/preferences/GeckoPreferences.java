@@ -6,8 +6,10 @@
 package org.mozilla.gecko.preferences;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 
 import org.json.JSONObject;
 import org.mozilla.gecko.AppConstants;
@@ -92,7 +94,7 @@ OnSharedPreferenceChangeListener
     // devices.
     private static final boolean NO_TRANSITIONS = HardwareUtils.IS_KINDLE_DEVICE;
 
-    private static final String NON_PREF_PREFIX = "android.not_a_preference.";
+    public static final String NON_PREF_PREFIX = "android.not_a_preference.";
     public static final String INTENT_EXTRA_RESOURCES = "resource";
     public static String PREFS_HEALTHREPORT_UPLOAD_ENABLED = NON_PREF_PREFIX + "healthreport.uploadEnabled";
 
@@ -262,6 +264,8 @@ OnSharedPreferenceChangeListener
             setResult(RESULT_CODE_LOCALE_DID_CHANGE);
             return;
         }
+
+        refreshSuggestedSites();
 
         // Cause the current fragment to redisplay, the hard way.
         // This avoids nonsense with trying to reach inside fragments and force them
@@ -725,6 +729,9 @@ OnSharedPreferenceChangeListener
                             return true;
                         }
                     });
+                } else if (handlers.containsKey(key)) {
+                    PrefHandler handler = handlers.get(key);
+                    handler.setupPref(this, pref);
                 }
 
                 // Some Preference UI elements are not actually preferences,
@@ -947,6 +954,14 @@ OnSharedPreferenceChangeListener
         return true;
     }
 
+    private void refreshSuggestedSites() {
+        final ContentResolver cr = getApplicationContext().getContentResolver();
+
+        // This will force all active suggested sites cursors
+        // to request a refresh (e.g. cursor loaders).
+        cr.notifyChange(SuggestedSites.CONTENT_URI, null);
+    }
+
     @Override
     public void onConfigurationChanged(Configuration newConfig) {
         super.onConfigurationChanged(newConfig);
@@ -982,17 +997,24 @@ OnSharedPreferenceChangeListener
             onLocaleSelected(BrowserLocaleManager.getLanguageTag(lastLocale),
                              sharedPreferences.getString(key, null));
         } else if (PREFS_SUGGESTED_SITES.equals(key)) {
-            final ContentResolver cr = getApplicationContext().getContentResolver();
-
-            // This will force all active suggested sites cursors
-            // to request a refresh (e.g. cursor loaders).
-            cr.notifyChange(SuggestedSites.CONTENT_URI, null);
+            refreshSuggestedSites();
         }
     }
+
+    public interface PrefHandler {
+        public void setupPref(Context context, Preference pref);
+        public void onChange(Context context, Preference pref, Object newValue);
+    }
+
+    @SuppressWarnings("serial")
+    private Map<String, PrefHandler> handlers = new HashMap<String, PrefHandler>() {{
+        put(ClearOnShutdownPref.PREF, new ClearOnShutdownPref());
+    }};
 
     @Override
     public boolean onPreferenceChange(Preference preference, Object newValue) {
         final String prefName = preference.getKey();
+        Log.i(LOGTAG, "Changed " + prefName + " = " + newValue);
         if (PREFS_MP_ENABLED.equals(prefName)) {
             showDialog((Boolean) newValue ? DIALOG_CREATE_MASTER_PASSWORD : DIALOG_REMOVE_MASTER_PASSWORD);
 
@@ -1024,6 +1046,9 @@ OnSharedPreferenceChangeListener
         } else if (PREFS_GEO_REPORTING.equals(prefName)) {
             // Translate boolean value to int for geo reporting pref.
             newValue = ((Boolean) newValue) ? 1 : 0;
+        } else if (handlers.containsKey(prefName)) {
+            PrefHandler handler = handlers.get(prefName);
+            handler.onChange(this, preference, newValue);
         }
 
         // Send Gecko-side pref changes to Gecko

@@ -6,19 +6,28 @@
 
 #include "IDBMutableFile.h"
 
+#include "FileSnapshot.h"
 #include "FileInfo.h"
 #include "IDBDatabase.h"
 #include "IDBFactory.h"
+#include "IDBFileHandle.h"
+#include "IDBFileRequest.h"
 #include "IndexedDatabaseManager.h"
 #include "MainThreadUtils.h"
 #include "mozilla/Assertions.h"
-#include "mozilla/dom/File.h"
+#include "mozilla/ErrorResult.h"
+#include "mozilla/dom/FileService.h"
 #include "mozilla/dom/IDBMutableFileBinding.h"
+#include "mozilla/dom/MetadataHelper.h"
 #include "mozilla/dom/indexedDB/PBackgroundIDBSharedTypes.h"
 #include "mozilla/dom/quota/FileStreams.h"
 #include "mozilla/dom/quota/QuotaManager.h"
 #include "mozilla/ipc/BackgroundUtils.h"
 #include "mozilla/ipc/PBackgroundSharedTypes.h"
+#include "nsContentUtils.h"
+#include "nsDebug.h"
+#include "nsError.h"
+#include "nsIDOMFile.h"
 #include "nsIPrincipal.h"
 
 using namespace mozilla;
@@ -28,6 +37,33 @@ using namespace mozilla::dom::quota;
 using namespace mozilla::ipc;
 
 namespace {
+
+class GetFileHelper : public MetadataHelper
+{
+public:
+  GetFileHelper(FileHandleBase* aFileHandle,
+                FileRequestBase* aFileRequest,
+                MetadataParameters* aParams,
+                IDBMutableFile* aMutableFile)
+  : MetadataHelper(aFileHandle, aFileRequest, aParams),
+    mMutableFile(aMutableFile)
+  { }
+
+  virtual nsresult
+  GetSuccessResult(JSContext* aCx,
+                   JS::MutableHandle<JS::Value> aVal) MOZ_OVERRIDE;
+
+  virtual void
+  ReleaseObjects() MOZ_OVERRIDE
+  {
+    mMutableFile = nullptr;
+
+    MetadataHelper::ReleaseObjects();
+  }
+
+private:
+  nsRefPtr<IDBMutableFile> mMutableFile;
+};
 
 already_AddRefed<nsIFile>
 GetFileFor(FileInfo* aFileInfo)
@@ -65,7 +101,7 @@ IDBMutableFile::IDBMutableFile(IDBDatabase* aDatabase,
                                const nsACString& aStorageId,
                                PersistenceType aPersistenceType,
                                already_AddRefed<nsIFile> aFile)
-  : MutableFile(aDatabase)
+  : DOMEventTargetHelper(aDatabase)
   , mDatabase(aDatabase)
   , mFileInfo(aFileInfo)
   , mGroup(aGroup)
@@ -154,39 +190,35 @@ IDBMutableFile::Create(IDBDatabase* aDatabase,
   return newFile.forget();
 }
 
-IDBDatabase*
-IDBMutableFile::Database() const
-{
-  MOZ_ASSERT(NS_IsMainThread());
-
-  return mDatabase;
-}
-
-NS_IMPL_CYCLE_COLLECTION_INHERITED(IDBMutableFile, MutableFile, mDatabase)
-
-NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION_INHERITED(IDBMutableFile)
-NS_INTERFACE_MAP_END_INHERITING(MutableFile)
-
-NS_IMPL_ADDREF_INHERITED(IDBMutableFile, MutableFile)
-NS_IMPL_RELEASE_INHERITED(IDBMutableFile, MutableFile)
-
 int64_t
-IDBMutableFile::GetFileId()
+IDBMutableFile::GetFileId() const
 {
   return mFileInfo->Id();
 }
 
-FileInfo*
-IDBMutableFile::GetFileInfo()
+already_AddRefed<nsIDOMFile>
+IDBMutableFile::CreateFileObject(IDBFileHandle* aFileHandle, uint32_t aFileSize)
 {
-  return mFileInfo;
+  MOZ_ASSERT(IndexedDatabaseManager::IsMainProcess());
+  MOZ_ASSERT(NS_IsMainThread());
+
+  nsRefPtr<FileImplSnapshot> impl =
+    new FileImplSnapshot(mName, mType, aFileSize, mFile, aFileHandle,
+                         mFileInfo);
+
+  nsCOMPtr<nsIDOMFile> file = new DOMFile(impl);
+
+  return file.forget();
 }
 
-bool
-IDBMutableFile::IsShuttingDown()
-{
-  return QuotaManager::IsShuttingDown() || MutableFile::IsShuttingDown();
-}
+NS_IMPL_CYCLE_COLLECTION_INHERITED(IDBMutableFile, DOMEventTargetHelper,
+                                   mDatabase)
+
+NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION_INHERITED(IDBMutableFile)
+NS_INTERFACE_MAP_END_INHERITING(DOMEventTargetHelper)
+
+NS_IMPL_ADDREF_INHERITED(IDBMutableFile, DOMEventTargetHelper)
+NS_IMPL_RELEASE_INHERITED(IDBMutableFile, DOMEventTargetHelper)
 
 bool
 IDBMutableFile::IsInvalid()
@@ -201,7 +233,7 @@ IDBMutableFile::Storage()
 }
 
 already_AddRefed<nsISupports>
-IDBMutableFile::CreateStream(nsIFile* aFile, bool aReadOnly)
+IDBMutableFile::CreateStream(bool aReadOnly)
 {
   MOZ_ASSERT(IndexedDatabaseManager::IsMainProcess());
 
@@ -212,7 +244,7 @@ IDBMutableFile::CreateStream(nsIFile* aFile, bool aReadOnly)
       FileInputStream::Create(mPersistenceType,
                               mGroup,
                               mOrigin,
-                              aFile,
+                              mFile,
                               -1,
                               -1,
                               nsIFileInputStream::DEFER_OPEN);
@@ -222,7 +254,7 @@ IDBMutableFile::CreateStream(nsIFile* aFile, bool aReadOnly)
       FileStream::Create(mPersistenceType,
                          mGroup,
                          mOrigin,
-                         aFile,
+                         mFile,
                          -1,
                          -1,
                          nsIFileStream::DEFER_OPEN);
@@ -255,20 +287,6 @@ IDBMutableFile::UnsetThreadLocals()
   QuotaManager::SetCurrentWindow(nullptr);
 }
 
-already_AddRefed<nsIDOMFile>
-IDBMutableFile::CreateFileObject(FileHandle* aFileHandle, uint32_t aFileSize)
-{
-  MOZ_ASSERT(IndexedDatabaseManager::IsMainProcess());
-  MOZ_ASSERT(NS_IsMainThread());
-
-  nsRefPtr<FileImpl> impl =
-    new FileImpl(mName, mType, aFileSize, mFile, aFileHandle, mFileInfo);
-
-  nsCOMPtr<nsIDOMFile> file = new DOMFile(impl);
-
-  return file.forget();
-}
-
 JSObject*
 IDBMutableFile::WrapObject(JSContext* aCx)
 {
@@ -276,4 +294,83 @@ IDBMutableFile::WrapObject(JSContext* aCx)
   MOZ_ASSERT(NS_IsMainThread());
 
   return IDBMutableFileBinding::Wrap(aCx, this);
+}
+
+IDBDatabase*
+IDBMutableFile::Database() const
+{
+  MOZ_ASSERT(NS_IsMainThread());
+
+  return mDatabase;
+}
+
+already_AddRefed<IDBFileHandle>
+IDBMutableFile::Open(FileMode aMode, ErrorResult& aError)
+{
+  MOZ_ASSERT(NS_IsMainThread());
+
+  if (QuotaManager::IsShuttingDown() || FileService::IsShuttingDown()) {
+    aError.Throw(NS_ERROR_DOM_FILEHANDLE_UNKNOWN_ERR);
+    return nullptr;
+  }
+
+  nsRefPtr<IDBFileHandle> fileHandle =
+    IDBFileHandle::Create(aMode, FileHandleBase::NORMAL, this);
+  if (!fileHandle) {
+    aError.Throw(NS_ERROR_DOM_FILEHANDLE_UNKNOWN_ERR);
+    return nullptr;
+  }
+
+  return fileHandle.forget();
+}
+
+already_AddRefed<DOMRequest>
+IDBMutableFile::GetFile(ErrorResult& aError)
+{
+  MOZ_ASSERT(NS_IsMainThread());
+
+  // Do nothing if the window is closed
+  if (!GetOwner()) {
+    return nullptr;
+  }
+
+  nsRefPtr<IDBFileHandle> fileHandle =
+    IDBFileHandle::Create(FileMode::Readonly, FileHandleBase::PARALLEL, this);
+
+  nsRefPtr<IDBFileRequest> request = 
+    IDBFileRequest::Create(GetOwner(), fileHandle, /* aWrapAsDOMRequest */
+                           true);
+
+  nsRefPtr<MetadataParameters> params = new MetadataParameters(true, false);
+
+  nsRefPtr<GetFileHelper> helper =
+    new GetFileHelper(fileHandle, request, params, this);
+
+  nsresult rv = helper->Enqueue();
+  if (NS_FAILED(rv)) {
+    aError.Throw(NS_ERROR_DOM_FILEHANDLE_UNKNOWN_ERR);
+    return nullptr;
+  }
+
+  return request.forget();
+}
+
+nsresult
+GetFileHelper::GetSuccessResult(JSContext* aCx,
+                                JS::MutableHandle<JS::Value> aVal)
+{
+  MOZ_ASSERT(NS_IsMainThread());
+
+  auto fileHandle = static_cast<IDBFileHandle*>(mFileHandle.get());
+
+  nsCOMPtr<nsIDOMFile> domFile =
+    mMutableFile->CreateFileObject(fileHandle, mParams->Size());
+
+  nsresult rv =
+    nsContentUtils::WrapNative(aCx, domFile, &NS_GET_IID(nsIDOMFile), aVal);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return NS_ERROR_DOM_FILEHANDLE_UNKNOWN_ERR;
+  }
+
+  return NS_OK;
 }
