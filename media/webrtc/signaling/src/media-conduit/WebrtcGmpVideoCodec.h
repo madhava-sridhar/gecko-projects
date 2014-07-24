@@ -33,8 +33,6 @@
 #include "GMPVideoDecoderProxy.h"
 #include "GMPVideoEncoderProxy.h"
 
-#include "WebrtcGmpVideoCodec.h"
-
 namespace mozilla {
 
 class WebrtcGmpVideoEncoder : public WebrtcVideoEncoder,
@@ -45,6 +43,11 @@ public:
   virtual ~WebrtcGmpVideoEncoder() {}
 
   // Implement VideoEncoder interface.
+  virtual const uint64_t PluginID() MOZ_OVERRIDE
+  {
+    return mGMP ? mGMP->ParentID() : 0;
+  }
+
   virtual int32_t InitEncode(const webrtc::VideoCodec* aCodecSettings,
                              int32_t aNumberOfCores,
                              uint32_t aMaxPayloadSize);
@@ -68,6 +71,8 @@ public:
   virtual void Encoded(GMPVideoEncodedFrame* aEncodedFrame,
                        const nsTArray<uint8_t>& aCodecSpecificInfo) MOZ_OVERRIDE;
 
+  virtual void Error(GMPErr aError) MOZ_OVERRIDE {
+  }
 
 private:
   virtual int32_t InitEncode_g(const webrtc::VideoCodec* aCodecSettings,
@@ -97,6 +102,11 @@ public:
   virtual ~WebrtcGmpVideoDecoder() {}
 
   // Implement VideoDecoder interface.
+  virtual const uint64_t PluginID() MOZ_OVERRIDE
+  {
+    return mGMP ? mGMP->ParentID() : 0;
+  }
+
   virtual int32_t InitDecode(const webrtc::VideoCodec* aCodecSettings,
                              int32_t aNumberOfCores);
   virtual int32_t Decode(const webrtc::EncodedImage& aInputImage,
@@ -130,6 +140,9 @@ public:
 
   virtual void ResetComplete() MOZ_OVERRIDE {
     MOZ_CRASH();
+  }
+
+  virtual void Error(GMPErr aError) MOZ_OVERRIDE {
   }
 
 private:

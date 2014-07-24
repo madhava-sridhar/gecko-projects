@@ -78,7 +78,7 @@ FAIL_ON_WARNINGS = False
 
 include('/ipc/chromium/chromium-config.mozbuild')
 
-FINAL_LIBRARY = 'gklayout'
+FINAL_LIBRARY = 'xul'
 LOCAL_INCLUDES += [
     '/caps/include',
     '/content/base/src',

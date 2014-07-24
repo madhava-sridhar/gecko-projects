@@ -649,9 +649,6 @@ class JSLinearString : public JSString
         JS::AutoCheckCannotGC nogc;
         return hasLatin1Chars() ? latin1Chars(nogc)[index] : twoByteChars(nogc)[index];
     }
-
-    /* Temporary, unsafe helper function for bug 998392. Don't use for anything else. */
-    void debugUnsafeConvertToLatin1();
 };
 
 JS_STATIC_ASSERT(sizeof(JSLinearString) == sizeof(JSString));
@@ -964,9 +961,6 @@ JS_STATIC_ASSERT(sizeof(JSAtom) == sizeof(JSString));
 
 namespace js {
 
-/* Temporary flag to enable Latin1 strings (bug 998392). */
-extern bool EnableLatin1Strings;
-
 /*
  * Thread safe RAII wrapper for inspecting the contents of JSStrings. The
  * thread safe operations such as |getCharsNonDestructive| require allocation
@@ -1176,6 +1170,51 @@ class AutoNameVector : public AutoVectorRooter<PropertyName *>
 template <typename CharT>
 void
 CopyChars(CharT *dest, const JSLinearString &str);
+
+/* GC-allocate a string descriptor for the given malloc-allocated chars. */
+template <js::AllowGC allowGC, typename CharT>
+extern JSFlatString *
+NewString(js::ThreadSafeContext *cx, CharT *chars, size_t length);
+
+/* Like NewString, but doesn't try to deflate to Latin1. */
+template <js::AllowGC allowGC, typename CharT>
+extern JSFlatString *
+NewStringDontDeflate(js::ThreadSafeContext *cx, CharT *chars, size_t length);
+
+extern JSLinearString *
+NewDependentString(JSContext *cx, JSString *base, size_t start, size_t length);
+
+/* Copy a counted string and GC-allocate a descriptor for it. */
+template <js::AllowGC allowGC, typename CharT>
+extern JSFlatString *
+NewStringCopyN(js::ThreadSafeContext *cx, const CharT *s, size_t n);
+
+template <js::AllowGC allowGC>
+inline JSFlatString *
+NewStringCopyN(ThreadSafeContext *cx, const char *s, size_t n)
+{
+    return NewStringCopyN<allowGC>(cx, reinterpret_cast<const Latin1Char *>(s), n);
+}
+
+/* Like NewStringCopyN, but doesn't try to deflate to Latin1. */
+template <js::AllowGC allowGC, typename CharT>
+extern JSFlatString *
+NewStringCopyNDontDeflate(js::ThreadSafeContext *cx, const CharT *s, size_t n);
+
+/* Copy a C string and GC-allocate a descriptor for it. */
+template <js::AllowGC allowGC>
+inline JSFlatString *
+NewStringCopyZ(js::ExclusiveContext *cx, const jschar *s)
+{
+    return NewStringCopyN<allowGC>(cx, s, js_strlen(s));
+}
+
+template <js::AllowGC allowGC>
+inline JSFlatString *
+NewStringCopyZ(js::ThreadSafeContext *cx, const char *s)
+{
+    return NewStringCopyN<allowGC>(cx, s, strlen(s));
+}
 
 } /* namespace js */
 

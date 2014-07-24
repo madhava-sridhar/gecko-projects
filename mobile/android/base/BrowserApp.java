@@ -748,7 +748,7 @@ public class BrowserApp extends GeckoApp
                     String title = tab.getDisplayTitle();
                     Bitmap favicon = tab.getFavicon();
                     if (url != null && title != null) {
-                        GeckoAppShell.createShortcut(title, url, url, favicon, "");
+                        GeckoAppShell.createShortcut(title, url, favicon);
                     }
                 }
             }
@@ -1065,12 +1065,13 @@ public class BrowserApp extends GeckoApp
         }
 
         final View toolbarLayout = mViewFlipper;
+        final ToolbarProgressView progressView = mProgressView;
         final int marginTop = Math.round(aMetrics.marginTop);
         ThreadUtils.postToUiThread(new Runnable() {
             public void run() {
                 final float translationY = marginTop - toolbarLayout.getHeight();
                 ViewHelper.setTranslationY(toolbarLayout, translationY);
-                ViewHelper.setTranslationY(mProgressView, translationY);
+                ViewHelper.setTranslationY(progressView, translationY);
 
                 if (mDoorHangerPopup.isShowing()) {
                     mDoorHangerPopup.updatePopup();

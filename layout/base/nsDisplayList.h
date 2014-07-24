@@ -202,28 +202,7 @@ public:
    * establishes the coordinate system for the child display items.
    */
   const nsIFrame* FindReferenceFrameFor(const nsIFrame *aFrame,
-                                        nsPoint* aOffset = nullptr)
-  {
-    if (aFrame == mCurrentFrame) {
-      if (aOffset) {
-        *aOffset = mCurrentOffsetToReferenceFrame;
-      }
-      return mCurrentReferenceFrame;
-    }
-    for (const nsIFrame* f = aFrame; f; f = nsLayoutUtils::GetCrossDocParentFrame(f))
-    {
-      if (f == mReferenceFrame || f->IsTransformed()) {
-        if (aOffset) {
-          *aOffset = aFrame->GetOffsetToCrossDoc(f);
-        }
-        return f;
-      }
-    }
-    if (aOffset) {
-      *aOffset = aFrame->GetOffsetToCrossDoc(mReferenceFrame);
-    }
-    return mReferenceFrame;
-  }
+                                        nsPoint* aOffset = nullptr);
   
   /**
    * @return the root of the display list's frame (sub)tree, whose origin
@@ -320,6 +299,7 @@ public:
   const nsRect& GetDirtyRect() { return mDirtyRect; }
   const nsIFrame* GetCurrentFrame() { return mCurrentFrame; }
   const nsIFrame* GetCurrentReferenceFrame() { return mCurrentReferenceFrame; }
+  const nsPoint& GetCurrentFrameOffsetToReferenceFrame() { return mCurrentOffsetToReferenceFrame; }
 
   /**
    * Returns true if merging and flattening of display lists should be
@@ -823,18 +803,7 @@ public:
 
   // This is never instantiated directly (it has pure virtual methods), so no
   // need to count constructors and destructors.
-  nsDisplayItem(nsDisplayListBuilder* aBuilder, nsIFrame* aFrame)
-    : mFrame(aFrame)
-    , mClip(aBuilder->ClipState().GetCurrentCombinedClip(aBuilder))
-#ifdef MOZ_DUMP_PAINTING
-    , mPainted(false)
-#endif
-  {
-    mReferenceFrame = aBuilder->FindReferenceFrameFor(aFrame, &mToReferenceFrame);
-    NS_ASSERTION(aBuilder->GetDirtyRect().width >= 0 ||
-                 !aBuilder->IsForPainting(), "dirty rect not set");
-    mVisibleRect = aBuilder->GetDirtyRect() + mToReferenceFrame;
-  }
+  nsDisplayItem(nsDisplayListBuilder* aBuilder, nsIFrame* aFrame);
   /**
    * This constructor is only used in rare cases when we need to construct
    * temporary items.
@@ -2362,6 +2331,11 @@ public:
     return true;
   }
 
+  virtual nsDisplayItemGeometry* AllocateGeometry(nsDisplayListBuilder* aBuilder) MOZ_OVERRIDE
+  {
+    return new nsDisplayBoxShadowOuterGeometry(this, aBuilder, mOpacity);
+  }
+
   nsRect GetBoundsInternal();
 
 private:
@@ -2537,7 +2511,7 @@ public:
   nsDisplayWrapList(nsDisplayListBuilder* aBuilder, nsIFrame* aFrame,
                     nsDisplayItem* aItem);
   nsDisplayWrapList(nsDisplayListBuilder* aBuilder, nsIFrame* aFrame)
-    : nsDisplayItem(aBuilder, aFrame), mOverrideZIndex(0)
+    : nsDisplayItem(aBuilder, aFrame), mOverrideZIndex(0), mHasZIndexOverride(false)
   {
     MOZ_COUNT_CTOR(nsDisplayWrapList);
   }
@@ -2600,11 +2574,12 @@ public:
 
   virtual int32_t ZIndex() const MOZ_OVERRIDE
   {
-    return (mOverrideZIndex > 0) ? mOverrideZIndex : nsDisplayItem::ZIndex();
+    return (mHasZIndexOverride) ? mOverrideZIndex : nsDisplayItem::ZIndex();
   }
 
   void SetOverrideZIndex(int32_t aZIndex)
   {
+    mHasZIndexOverride = true;
     mOverrideZIndex = aZIndex;
   }
 
@@ -2637,8 +2612,8 @@ protected:
   // this item's own frame.
   nsTArray<nsIFrame*> mMergedFrames;
   nsRect mBounds;
-  // Overrides the ZIndex of our frame if > 0.
   int32_t mOverrideZIndex;
+  bool mHasZIndexOverride;
 };
 
 /**
