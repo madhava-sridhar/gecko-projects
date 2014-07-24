@@ -13795,13 +13795,15 @@ ObjectStoreAddOrPutRequestOp::CopyFileData(nsIInputStream* aInputStream,
 
     uint32_t numWrite;
     rv = aOutputStream->Write(copyBuffer, numRead, &numWrite);
+    if (rv == NS_ERROR_FILE_NO_DEVICE_SPACE) {
+      rv = NS_ERROR_DOM_INDEXEDDB_QUOTA_ERR;
+    }
     if (NS_WARN_IF(NS_FAILED(rv))) {
       break;
     }
 
-    if (numWrite < numRead) {
-      // Must have hit the quota limit.
-      rv = NS_ERROR_DOM_INDEXEDDB_QUOTA_ERR;
+    if (NS_WARN_IF(numWrite != numRead)) {
+      rv = NS_ERROR_FAILURE;
       break;
     }
   } while (true);
@@ -13816,7 +13818,7 @@ ObjectStoreAddOrPutRequestOp::CopyFileData(nsIInputStream* aInputStream,
     return NS_SUCCEEDED(rv) ? rv2 : rv;
   }
 
-  return NS_OK;
+  return rv;
 }
 
 bool
@@ -14155,6 +14157,11 @@ ObjectStoreAddOrPutRequestOp::DoDatabaseWork(TransactionBase* aTransaction)
           }
 
           rv = CopyFileData(inputStream, outputStream);
+          if (NS_FAILED(rv) &&
+              NS_ERROR_GET_MODULE(rv) != NS_ERROR_MODULE_DOM_INDEXEDDB) {
+            IDB_REPORT_INTERNAL_ERR();
+            rv = NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
+          }
           if (NS_WARN_IF(NS_FAILED(rv))) {
             // Try to remove the file if the copy failed.
             if (NS_FAILED(diskFile->Remove(false))) {
