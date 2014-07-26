@@ -2128,8 +2128,8 @@ QuotaManager::GetInfoFromPrincipal(nsIPrincipal* aPrincipal,
   MOZ_ASSERT(NS_IsMainThread());
   MOZ_ASSERT(aPrincipal);
 
-  if (aGroup && aASCIIOrigin) {
-    nsresult rv = TryGetInfoForAboutURI(aPrincipal, *aGroup, *aASCIIOrigin,
+  if (aGroup && aOrigin) {
+    nsresult rv = TryGetInfoForAboutURI(aPrincipal, *aGroup, *aOrigin,
                                         aPrivilege, aDefaultPersistenceType);
     if (NS_SUCCEEDED(rv)) {
       return NS_OK;

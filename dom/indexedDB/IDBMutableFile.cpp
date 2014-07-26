@@ -57,8 +57,10 @@ public:
   ReleaseObjects() MOZ_OVERRIDE
   {
     mMutableFile = nullptr;
-
 using namespace mozilla::dom;
+using namespace mozilla::dom::indexedDB;
+using namespace mozilla::dom::quota;
+using namespace mozilla::ipc;
 
 namespace {
 
@@ -351,18 +353,16 @@ IDBMutableFile::Open(FileMode aMode, ErrorResult& aError)
 already_AddRefed<DOMRequest>
 IDBMutableFile::GetFile(ErrorResult& aError)
 {
-  nsCOMPtr<nsIDOMFile> fileSnapshot = new DOMFile(
-    new FileImplSnapshot(mName, mType, aFileSize, mFile, aFileHandle,
-                         mFileInfo));
 
-  return fileSnapshot.forget();
+  return IDBMutableFileBinding::Wrap(aCx, this);
 }
 
-// virtual
-JSObject*
-IDBMutableFile::WrapObject(JSContext* aCx)
+IDBDatabase*
+IDBMutableFile::Database() const
 {
-  return IDBMutableFileBinding::Wrap(aCx, this);
+  MOZ_ASSERT(NS_IsMainThread());
+
+  return mDatabase;
 }
 
 already_AddRefed<IDBFileHandle>
@@ -415,10 +415,6 @@ IDBMutableFile::GetFile(ErrorResult& aError)
 
   return request.forget();
 }
-
-} // namespace indexedDB
-} // namespace dom
-} // namespace mozilla
 
 nsresult
 GetFileHelper::GetSuccessResult(JSContext* aCx,
