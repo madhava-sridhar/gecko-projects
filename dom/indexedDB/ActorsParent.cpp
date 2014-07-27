@@ -9579,16 +9579,18 @@ DatabaseOfflineStorage::CloseOnMainThread()
 
   mInvalidated = true;
 
-  QuotaManager* quotaManager = QuotaManager::Get();
-  MOZ_ASSERT(quotaManager);
+  if (mStrongQuotaClient) {
+    QuotaManager* quotaManager = QuotaManager::Get();
+    MOZ_ASSERT(quotaManager);
 
-  quotaManager->OnStorageClosed(this);
-  quotaManager->UnregisterStorage(this);
+    quotaManager->OnStorageClosed(this);
+    quotaManager->UnregisterStorage(this);
 
-  NoteUnregisteredWithQuotaManager();
+    NoteUnregisteredWithQuotaManager();
 
-  mStrongQuotaClient->NoteFinishedStorage(this);
-  mStrongQuotaClient = nullptr;
+    mStrongQuotaClient->NoteFinishedStorage(this);
+    mStrongQuotaClient = nullptr;
+  }
 }
 
 void
