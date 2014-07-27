@@ -10312,14 +10312,13 @@ FactoryOp::CheckPermission(ContentParent* aContentParent,
       NS_NAMED_LITERAL_CSTRING(readSuffix, kPermissionStringChromeReadSuffix);
       NS_NAMED_LITERAL_CSTRING(writeSuffix, kPermissionStringChromeWriteSuffix);
 
-      const nsCSubstringTuple permissionStringWrite =
+      const nsAutoCString permissionStringWrite =
         permissionStringBase + databaseName + writeSuffix;
+      const nsAutoCString permissionStringRead =
+        permissionStringBase + databaseName + readSuffix;
 
       bool canWrite =
         CheckAtLeastOneAppHasPermission(aContentParent, permissionStringWrite);
-
-      const nsCSubstringTuple permissionStringRead =
-        permissionStringBase + databaseName + readSuffix;
 
       bool canRead;
       if (canWrite) {
