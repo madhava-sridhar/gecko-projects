@@ -12494,21 +12494,20 @@ CommonDatabaseOperationBase::Run()
     if (NS_WARN_IF(mActorDestroyed)) {
       // The child must have crashed so there's no reason to attempt any
       // database operations.
-      return NS_OK;
-    }
-
-    nsresult rv = mTransaction->EnsureConnection();
-    if (NS_WARN_IF(NS_FAILED(rv))) {
-      mResultCode = rv;
     } else {
-      AutoSetProgressHandler autoProgress;
-      rv = autoProgress.Register(this, mTransaction->Connection());
+      nsresult rv = mTransaction->EnsureConnection();
       if (NS_WARN_IF(NS_FAILED(rv))) {
         mResultCode = rv;
       } else {
-        rv = DoDatabaseWork(mTransaction);
-        if (NS_FAILED(rv)) {
+        AutoSetProgressHandler autoProgress;
+        rv = autoProgress.Register(this, mTransaction->Connection());
+        if (NS_WARN_IF(NS_FAILED(rv))) {
           mResultCode = rv;
+        } else {
+          rv = DoDatabaseWork(mTransaction);
+          if (NS_FAILED(rv)) {
+            mResultCode = rv;
+          }
         }
       }
     }
@@ -12525,16 +12524,24 @@ CommonDatabaseOperationBase::Run()
 
   AssertIsOnOwningThread();
 
-  if (NS_SUCCEEDED(mResultCode)) {
-    // This may release the IPDL reference.
-    mResultCode = SendSuccessResult();
-  }
+  if (NS_WARN_IF(mActorDestroyed)) {
+    // Don't send any notifications if the actor was destroyed already.
+    if (NS_SUCCEEDED(mResultCode)) {
+      IDB_REPORT_INTERNAL_ERR();
+      mResultCode = NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
+    }
+  } else {
+    if (NS_SUCCEEDED(mResultCode)) {
+      // This may release the IPDL reference.
+      mResultCode = SendSuccessResult();
+    }
 
-  if (NS_FAILED(mResultCode)) {
-    // This should definitely release the IPDL reference.
-    if (!SendFailureResult(mResultCode)) {
-      // Abort the transaction.
-      mTransaction->Abort(mResultCode);
+    if (NS_FAILED(mResultCode)) {
+      // This should definitely release the IPDL reference.
+      if (!SendFailureResult(mResultCode)) {
+        // Abort the transaction.
+        mTransaction->Abort(mResultCode);
+      }
     }
   }
 
