@@ -14363,22 +14363,21 @@ ObjectStoreAddOrPutRequestOp::Cleanup()
 {
   AssertIsOnOwningThread();
 
-  for (uint32_t count = mStoredFileInfos.Length(), index = 0;
-       index < count;
-       index++) {
-    StoredFileInfo& storedFileInfo = mStoredFileInfos[index];
-    nsRefPtr<DatabaseFile>& fileActor = storedFileInfo.mFileActor;
+  if (!mStoredFileInfos.IsEmpty()) {
+    for (uint32_t count = mStoredFileInfos.Length(), index = 0;
+         index < count;
+         index++) {
+      StoredFileInfo& storedFileInfo = mStoredFileInfos[index];
+      nsRefPtr<DatabaseFile>& fileActor = storedFileInfo.mFileActor;
 
-    if (fileActor) {
-      if (storedFileInfo.mCopiedSuccessfully) {
+      MOZ_ASSERT_IF(!fileActor, !storedFileInfo.mCopiedSuccessfully);
+
+      if (fileActor && storedFileInfo.mCopiedSuccessfully) {
         fileActor->ClearInputStreamParams();
       }
-      fileActor = nullptr;
-    } else {
-      MOZ_ASSERT(!storedFileInfo.mCopiedSuccessfully);
     }
 
-    storedFileInfo.mFileInfo = nullptr;
+    mStoredFileInfos.Clear();
   }
 
   NormalTransactionOp::Cleanup();
