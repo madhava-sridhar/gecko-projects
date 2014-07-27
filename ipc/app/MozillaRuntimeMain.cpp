@@ -82,7 +82,7 @@ void StartSandboxCallback()
 
 int
 main(int argc, char* argv[])
-{//MessageBoxW(nullptr, L"Hi", L"Hi", MB_OK);
+{
     bool isNuwa = false;
     for (int i = 1; i < argc; i++) {
         isNuwa |= strcmp(argv[i], "-nuwa") == 0;

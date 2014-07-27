@@ -1049,10 +1049,11 @@ IDBDatabase::NoteFinishedMutableFile(IDBMutableFile* aMutableFile)
 void
 IDBDatabase::InvalidateMutableFiles()
 {
-  MOZ_ASSERT(IndexedDatabaseManager::IsMainProcess());
   MOZ_ASSERT(NS_IsMainThread());
 
   if (!mLiveMutableFiles.IsEmpty()) {
+    MOZ_ASSERT(IndexedDatabaseManager::IsMainProcess());
+
     for (uint32_t count = mLiveMutableFiles.Length(), index = 0;
          index < count;
          index++) {
