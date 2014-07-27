@@ -9575,11 +9575,10 @@ void
 DatabaseOfflineStorage::CloseOnMainThread()
 {
   MOZ_ASSERT(NS_IsMainThread());
-  MOZ_ASSERT(mStrongQuotaClient);
-
-  mInvalidated = true;
 
   if (mStrongQuotaClient) {
+    mInvalidated = true;
+
     QuotaManager* quotaManager = QuotaManager::Get();
     MOZ_ASSERT(quotaManager);
 
