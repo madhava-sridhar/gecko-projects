@@ -52,7 +52,8 @@ class IDBDatabase MOZ_FINAL
   typedef mozilla::dom::StorageType StorageType;
   typedef mozilla::dom::quota::PersistenceType PersistenceType;
 
-  class WindowObserver;
+  class Observer;
+  friend class Observer;
 
   // The factory must be kept alive when IndexedDB is used in multiple
   // processes. If it dies then the entire actor tree will be destroyed with it
@@ -75,7 +76,7 @@ class IDBDatabase MOZ_FINAL
 
   nsTHashtable<nsISupportsHashKey> mReceivedBlobs;
 
-  nsRefPtr<WindowObserver> mWindowObserver;
+  nsRefPtr<Observer> mObserver;
 
   // Weak refs, IDBMutableFile strongly owns this IDBDatabase object.
   nsTArray<IDBMutableFile*> mLiveMutableFiles;

@@ -2077,7 +2077,11 @@ TryGetInfoForAboutURI(nsIPrincipal* aPrincipal,
 
   bool isAbout;
   rv = uri->SchemeIs("about", &isAbout);
-  NS_ENSURE_TRUE(NS_SUCCEEDED(rv) && isAbout, NS_ERROR_FAILURE);
+  NS_ENSURE_SUCCESS(rv, rv);
+
+  if (!isAbout) {
+    return NS_ERROR_FAILURE;
+  }
 
   nsCOMPtr<nsIAboutModule> module;
   rv = NS_GetAboutModule(uri, getter_AddRefs(module));

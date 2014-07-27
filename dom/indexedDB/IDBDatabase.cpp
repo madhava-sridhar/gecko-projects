@@ -59,7 +59,9 @@ using namespace mozilla::services;
 
 namespace {
 
-const char kObserverTopic[] = "inner-window-destroyed";
+const char kCycleCollectionObserverTopic[] = "cycle-collector-end";
+const char kMemoryPressureObserverTopic[] = "memory-pressure";
+const char kWindowObserverTopic[] = "inner-window-destroyed";
 
 // XXX This should either be ported to PBackground or removed someday.
 class CreateFileHelper MOZ_FINAL
@@ -132,14 +134,14 @@ private:
 
 } // anonymous namespace
 
-class IDBDatabase::WindowObserver MOZ_FINAL
+class IDBDatabase::Observer MOZ_FINAL
   : public nsIObserver
 {
   IDBDatabase* mWeakDatabase;
   const uint64_t mWindowId;
 
 public:
-  WindowObserver(IDBDatabase* aDatabase, uint64_t aWindowId)
+  Observer(IDBDatabase* aDatabase, uint64_t aWindowId)
     : mWeakDatabase(aDatabase)
     , mWindowId(aWindowId)
   {
@@ -158,7 +160,7 @@ public:
   NS_DECL_ISUPPORTS
 
 private:
-  ~WindowObserver()
+  ~Observer()
   {
     MOZ_ASSERT(NS_IsMainThread());
     MOZ_ASSERT(!mWeakDatabase);
@@ -217,18 +219,29 @@ IDBDatabase::Create(IDBWrapperCache* aOwnerCache,
 
       uint64_t windowId = window->WindowID();
 
-      nsRefPtr<WindowObserver> observer = new WindowObserver(db, windowId);
+      nsRefPtr<Observer> observer = new Observer(db, windowId);
 
-      nsCOMPtr<nsIObserverService> observerService = GetObserverService();
-      MOZ_ASSERT(observerService);
+      nsCOMPtr<nsIObserverService> obsSvc = GetObserverService();
+      MOZ_ASSERT(obsSvc);
 
+      // This topic must be successfully registered.
       if (NS_WARN_IF(NS_FAILED(
-            observerService->AddObserver(observer, kObserverTopic, false)))) {
+            obsSvc->AddObserver(observer, kWindowObserverTopic, false)))) {
         observer->Revoke();
         return nullptr;
       }
 
-      db->mWindowObserver.swap(observer);
+      // These topics are not crucial.
+      if (NS_FAILED(obsSvc->AddObserver(observer,
+                                        kCycleCollectionObserverTopic,
+                                        false)) ||
+          NS_FAILED(obsSvc->AddObserver(observer,
+                                        kMemoryPressureObserverTopic,
+                                        false))) {
+        NS_WARNING("Failed to add additional memory observers!");
+      }
+
+      db->mObserver.swap(observer);
     }
   }
 
@@ -256,15 +269,20 @@ IDBDatabase::CloseInternal()
 
     ExpireFileActors(/* aExpireAll */ true);
 
-    if (mWindowObserver) {
-      mWindowObserver->Revoke();
+    if (mObserver) {
+      mObserver->Revoke();
 
-      nsCOMPtr<nsIObserverService> observerService = GetObserverService();
-      if (observerService) {
-        observerService->RemoveObserver(mWindowObserver, kObserverTopic);
+      nsCOMPtr<nsIObserverService> obsSvc = GetObserverService();
+      if (obsSvc) {
+        // These might not have been registered.
+        obsSvc->RemoveObserver(mObserver, kCycleCollectionObserverTopic);
+        obsSvc->RemoveObserver(mObserver, kMemoryPressureObserverTopic);
+
+        MOZ_ALWAYS_TRUE(NS_SUCCEEDED(
+          obsSvc->RemoveObserver(mObserver, kWindowObserverTopic)));
       }
 
-      mWindowObserver = nullptr;
+      mObserver = nullptr;
     }
 
     if (mBackgroundActor && !mInvalidated) {
@@ -882,7 +900,7 @@ IDBDatabase::DelayedMaybeExpireFileActors()
   nsCOMPtr<nsIRunnable> runnable =
     NS_NewRunnableMethodWithArg<bool>(this,
                                       &IDBDatabase::ExpireFileActors,
-                                      false);
+                                      /* aExpireAll */ false);
   MOZ_ASSERT(runnable);
 
   MOZ_ALWAYS_TRUE(NS_SUCCEEDED(NS_DispatchToCurrentThread(runnable)));
@@ -1309,31 +1327,47 @@ CreateFileHelper::Run()
   return NS_OK;
 }
 
-NS_IMPL_ISUPPORTS(IDBDatabase::WindowObserver, nsIObserver)
+NS_IMPL_ISUPPORTS(IDBDatabase::Observer, nsIObserver)
 
 NS_IMETHODIMP
 IDBDatabase::
-WindowObserver::Observe(nsISupports* aSubject,
-                        const char* aTopic,
-                        const char16_t* aData)
+Observer::Observe(nsISupports* aSubject,
+                  const char* aTopic,
+                  const char16_t* aData)
 {
   MOZ_ASSERT(NS_IsMainThread());
-  MOZ_ASSERT(!strcmp(aTopic, kObserverTopic));
+  MOZ_ASSERT(aTopic);
 
-  if (mWeakDatabase) {
-    nsCOMPtr<nsISupportsPRUint64> supportsInt = do_QueryInterface(aSubject);
-    MOZ_ASSERT(supportsInt);
+  if (!strcmp(aTopic, kWindowObserverTopic)) {
+    if (mWeakDatabase) {
+      nsCOMPtr<nsISupportsPRUint64> supportsInt = do_QueryInterface(aSubject);
+      MOZ_ASSERT(supportsInt);
 
-    uint64_t windowId;
-    MOZ_ALWAYS_TRUE(NS_SUCCEEDED(supportsInt->GetData(&windowId)));
+      uint64_t windowId;
+      MOZ_ALWAYS_TRUE(NS_SUCCEEDED(supportsInt->GetData(&windowId)));
 
-    if (windowId == mWindowId) {
-      nsRefPtr<IDBDatabase> database = mWeakDatabase;
-      mWeakDatabase = nullptr;
+      if (windowId == mWindowId) {
+        nsRefPtr<IDBDatabase> database = mWeakDatabase;
+        mWeakDatabase = nullptr;
 
-      database->Invalidate();
+        database->Invalidate();
+      }
     }
+
+    return NS_OK;
   }
 
+  if (!strcmp(aTopic, kCycleCollectionObserverTopic) ||
+      !strcmp(aTopic, kMemoryPressureObserverTopic)) {
+    if (mWeakDatabase) {
+      nsRefPtr<IDBDatabase> database = mWeakDatabase;
+
+      database->ExpireFileActors(/* aExpireAll */ false);
+    }
+
+    return NS_OK;
+  }
+
+  NS_WARNING("Unknown observer topic!");
   return NS_OK;
 }
