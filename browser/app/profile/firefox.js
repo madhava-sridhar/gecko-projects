@@ -256,6 +256,7 @@ pref("browser.uitour.themeOrigin", "https://addons.mozilla.org/%LOCALE%/firefox/
 pref("browser.uitour.pinnedTabUrl", "https://support.mozilla.org/%LOCALE%/kb/pinned-tabs-keep-favorite-websites-open");
 pref("browser.uitour.url", "https://www.mozilla.org/%LOCALE%/firefox/%VERSION%/tour/");
 pref("browser.uitour.whitelist.add.260", "www.mozilla.org,support.mozilla.org");
+pref("browser.uitour.whitelist.add.340", "about:home");
 
 pref("browser.customizemode.tip0.shown", false);
 pref("browser.customizemode.tip0.learnMoreUrl", "https://support.mozilla.org/1/firefox/%VERSION%/%OS%/%LOCALE%/customize");
@@ -313,8 +314,14 @@ pref("browser.urlbar.doubleClickSelectsAll", true);
 #else
 pref("browser.urlbar.doubleClickSelectsAll", false);
 #endif
+
+// Control autoFill behavior
 pref("browser.urlbar.autoFill", true);
 pref("browser.urlbar.autoFill.typed", true);
+
+// Use the new unifiedComplete component
+pref("browser.urlbar.unifiedcomplete", true);
+
 // 0: Match anywhere (e.g., middle of words)
 // 1: Match on word boundaries and then try matching anywhere
 // 2: Match only on word boundaries (e.g., after / or .)
@@ -814,26 +821,26 @@ pref("plugin.state.f5 sam inspection host plugin", 2);
 pref("plugin.state.nprobloxproxy", 2);
 #endif
 #ifdef XP_MACOSX
-pref("plugins.state.nproblox", 2);
+pref("plugin.state.nproblox", 2);
 #endif
 
 // Box Edit, bug 1029654
 #ifdef XP_WIN
-pref("plugins.state.npboxedit", 2);
+pref("plugin.state.npboxedit", 2);
 #endif
 #ifdef XP_MACOSX
-pref("plugins.state.box edit", 2);
+pref("plugin.state.box edit", 2);
 #endif
 
 // Nexus Personal, bug 1024965
 #ifdef XP_WIN
-pref("plugins.state.np_prsnl", 2);
+pref("plugin.state.np_prsnl", 2);
 #endif
 #ifdef XP_MACOSX
-pref("plugins.state.personalplugin", 2);
+pref("plugin.state.personalplugin", 2);
 #endif
 #ifdef UNIX_BUT_NOT_MAC
-pref("plugins.state.libplugins", 2);
+pref("plugin.state.libplugins", 2);
 #endif
 
 // display door hanger if flash not installed
@@ -1285,6 +1292,7 @@ pref("devtools.toolbox.selectedTool", "webconsole");
 pref("devtools.toolbox.toolbarSpec", '["splitconsole", "paintflashing toggle","tilt toggle","scratchpad","resize toggle","eyedropper","screenshot --fullpage"]');
 pref("devtools.toolbox.sideEnabled", true);
 pref("devtools.toolbox.zoomValue", "1");
+pref("devtools.toolbox.splitconsoleEnabled", false);
 
 // Toolbox Button preferences
 pref("devtools.command-button-pick.enabled", true);

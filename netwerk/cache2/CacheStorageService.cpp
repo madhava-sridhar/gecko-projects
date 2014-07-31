@@ -963,7 +963,7 @@ CacheStorageService::RemoveEntry(CacheEntry* aEntry, bool aOnlyUnreferenced)
       return false;
     }
 
-    if (!aEntry->IsUsingDisk() && IsForcedValidEntry(entryKey)) {
+    if (!aEntry->IsUsingDisk() && IsForcedValidEntryInternal(entryKey)) {
       LOG(("  forced valid, not removing"));
       return false;
     }
@@ -1034,13 +1034,20 @@ CacheStorageService::RecordMemoryOnlyEntry(CacheEntry* aEntry,
   }
 }
 
-// Checks if a cache entry is forced valid (will be loaded directly from cache
-// without further validation) - see nsICacheEntry.idl for further details
+// Acquires the mutex lock for CacheStorageService and calls through to
+// IsForcedValidInternal (bug 1044233)
 bool CacheStorageService::IsForcedValidEntry(nsACString &aCacheEntryKey)
 {
-  TimeStamp validUntil;
-
   mozilla::MutexAutoLock lock(mLock);
+
+  return IsForcedValidEntryInternal(aCacheEntryKey);
+}
+
+// Checks if a cache entry is forced valid (will be loaded directly from cache
+// without further validation) - see nsICacheEntry.idl for further details
+bool CacheStorageService::IsForcedValidEntryInternal(nsACString &aCacheEntryKey)
+{
+  TimeStamp validUntil;
 
   if (!mForcedValidEntries.Get(aCacheEntryKey, &validUntil)) {
     return false;
@@ -1067,40 +1074,11 @@ void CacheStorageService::ForceEntryValidFor(nsACString &aCacheEntryKey,
 {
   mozilla::MutexAutoLock lock(mLock);
 
-  TimeStamp now = TimeStamp::NowLoRes();
-  ForcedValidEntriesPrune(now);
-
   // This will be the timeout
-  TimeStamp validUntil = now + TimeDuration::FromSeconds(aSecondsToTheFuture);
+  TimeStamp validUntil = TimeStamp::NowLoRes() +
+    TimeDuration::FromSeconds(aSecondsToTheFuture);
 
   mForcedValidEntries.Put(aCacheEntryKey, validUntil);
-}
-
-namespace { // anon
-
-PLDHashOperator PruneForcedValidEntries(
-  const nsACString& aKey, TimeStamp& aTimeStamp, void* aClosure)
-{
-  TimeStamp* now = static_cast<TimeStamp*>(aClosure);
-  if (aTimeStamp < *now) {
-    return PL_DHASH_REMOVE;
-  }
-
-  return PL_DHASH_NEXT;
-}
-
-} // anon
-
-// Cleans out the old entries in mForcedValidEntries
-void CacheStorageService::ForcedValidEntriesPrune(TimeStamp &now)
-{
-  static TimeDuration const oneMinute = TimeDuration::FromSeconds(60);
-  static TimeStamp dontPruneUntil = now + oneMinute;
-  if (now < dontPruneUntil)
-    return;
-
-  mForcedValidEntries.Enumerate(PruneForcedValidEntries, &now);
-  dontPruneUntil = now + oneMinute;
 }
 
 void

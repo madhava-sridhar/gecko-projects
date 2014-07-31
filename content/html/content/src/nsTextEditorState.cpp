@@ -676,7 +676,9 @@ protected:
    */
   virtual ~nsTextInputListener();
 
-  nsresult  UpdateTextInputCommands(const nsAString& commandsToUpdate);
+  nsresult  UpdateTextInputCommands(const nsAString& commandsToUpdate,
+                                    nsISelection* sel = nullptr,
+                                    int16_t reason = 0);
 
 protected:
 
@@ -780,16 +782,18 @@ nsTextInputListener::NotifySelectionChanged(nsIDOMDocument* aDoc, nsISelection* 
     }
   }
 
+  UpdateTextInputCommands(NS_LITERAL_STRING("selectionchange"), aSel, aReason);
+
   // if the collapsed state did not change, don't fire notifications
   if (collapsed == mSelectionWasCollapsed)
     return NS_OK;
-  
+
   mSelectionWasCollapsed = collapsed;
 
   if (!weakFrame.IsAlive() || !nsContentUtils::IsFocusedContent(mFrame->GetContent()))
     return NS_OK;
 
-  return UpdateTextInputCommands(NS_LITERAL_STRING("select"));
+  return UpdateTextInputCommands(NS_LITERAL_STRING("select"), aSel, aReason);
 }
 
 // END nsIDOMSelectionListener
@@ -926,11 +930,25 @@ nsTextInputListener::EditAction()
   return NS_OK;
 }
 
+NS_IMETHODIMP
+nsTextInputListener::BeforeEditAction()
+{
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsTextInputListener::CancelEditAction()
+{
+  return NS_OK;
+}
+
 // END nsIEditorObserver
 
 
 nsresult
-nsTextInputListener::UpdateTextInputCommands(const nsAString& commandsToUpdate)
+nsTextInputListener::UpdateTextInputCommands(const nsAString& commandsToUpdate,
+                                             nsISelection* sel,
+                                             int16_t reason)
 {
   nsIContent* content = mFrame->GetContent();
   NS_ENSURE_TRUE(content, NS_ERROR_FAILURE);
@@ -941,7 +959,7 @@ nsTextInputListener::UpdateTextInputCommands(const nsAString& commandsToUpdate)
   nsPIDOMWindow *domWindow = doc->GetWindow();
   NS_ENSURE_TRUE(domWindow, NS_ERROR_FAILURE);
 
-  return domWindow->UpdateCommands(commandsToUpdate);
+  return domWindow->UpdateCommands(commandsToUpdate, sel, reason);
 }
 
 // END nsTextInputListener
@@ -1036,7 +1054,7 @@ public:
   PrepareEditorEvent(nsTextEditorState &aState,
                      nsIContent *aOwnerContent,
                      const nsAString &aCurrentValue)
-    : mState(aState.asWeakPtr())
+    : mState(&aState)
     , mOwnerContent(aOwnerContent)
     , mCurrentValue(aCurrentValue)
   {

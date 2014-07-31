@@ -71,7 +71,6 @@ UNIFIED_SOURCES += [
     'testStructuredClone.cpp',
     'testSymbol.cpp',
     'testToIntWidth.cpp',
-    'testTrap.cpp',
     'testTypedArrays.cpp',
     'testUncaughtError.cpp',
     'testUTF8.cpp',
@@ -81,6 +80,7 @@ UNIFIED_SOURCES += [
 
 if CONFIG['ENABLE_ION']:
     UNIFIED_SOURCES += [
+        'testJitDCEinGVN.cpp',
         'testJitFoldsTo.cpp',
         'testJitMoveEmitterCycles.cpp',
         'testJitRValueAlloc.cpp',

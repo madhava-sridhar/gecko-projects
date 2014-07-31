@@ -91,6 +91,9 @@ public:
   already_AddRefed<nsIEventTarget> Thread() const;
   mozilla::Mutex& Lock() { return mLock; }
 
+  // Tracks entries that may be forced valid.
+  nsDataHashtable<nsCStringHashKey, TimeStamp> mForcedValidEntries;
+
   // Helper thread-safe interface to pass entry info, only difference from
   // nsICacheStorageVisitor is that instead of nsIURI only the uri spec is
   // passed.
@@ -158,13 +161,19 @@ private:
   friend class CacheIndex;
 
   /**
+   * Gets the mutex lock for CacheStorageService then calls through to
+   * IsForcedValidEntryInternal. See below for details.
+   */
+  bool IsForcedValidEntry(nsACString &aCacheEntryKey);
+
+  /**
    * Retrieves the status of the cache entry to see if it has been forced valid
    * (so it will loaded directly from cache without further validation)
    * CacheIndex uses this to prevent a cache entry from being prememptively
    * thrown away when forced valid
    * See nsICacheEntry.idl for more details
    */
-  bool IsForcedValidEntry(nsACString &aCacheEntryKey);
+  bool IsForcedValidEntryInternal(nsACString &aCacheEntryKey);
 
 private:
   // These are helpers for telemetry monitorying of the memory pools.
@@ -280,14 +289,9 @@ private:
                            bool aReplace,
                            CacheEntryHandle** aResult);
 
-  void ForcedValidEntriesPrune(TimeStamp &now);
-
   static CacheStorageService* sSelf;
 
   mozilla::Mutex mLock;
-
-  // Tracks entries that may be forced valid.
-  nsDataHashtable<nsCStringHashKey, TimeStamp> mForcedValidEntries;
 
   bool mShutdown;
 

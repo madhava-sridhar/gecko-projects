@@ -1515,7 +1515,7 @@ struct nsIDocument::FrameRequest
   int32_t mHandle;
 };
 
-static already_AddRefed<mozilla::dom::NodeInfo> nullNodeInfo(nullptr);
+static already_AddRefed<mozilla::dom::NodeInfo> nullNodeInfo;
 
 // ==================================================================
 // =
@@ -2642,8 +2642,9 @@ nsDocument::SendToConsole(nsCOMArray<nsISecurityConsoleMessage>& aMessages)
 }
 
 static nsresult
-AppendCSPFromHeader(nsIContentSecurityPolicy* csp, const nsAString& aHeaderValue,
-                    nsIURI* aSelfURI, bool aReportOnly)
+AppendCSPFromHeader(nsIContentSecurityPolicy* csp,
+                    const nsAString& aHeaderValue,
+                    bool aReportOnly)
 {
   // Need to tokenize the header value since multiple headers could be
   // concatenated into one comma-separated list of policies.
@@ -2652,7 +2653,7 @@ AppendCSPFromHeader(nsIContentSecurityPolicy* csp, const nsAString& aHeaderValue
   nsCharSeparatedTokenizer tokenizer(aHeaderValue, ',');
   while (tokenizer.hasMoreTokens()) {
       const nsSubstring& policy = tokenizer.nextToken();
-      rv = csp->AppendPolicy(policy, aSelfURI, aReportOnly);
+      rv = csp->AppendPolicy(policy, aReportOnly);
       NS_ENSURE_SUCCESS(rv, rv);
 #ifdef PR_LOGGING
       {
@@ -2763,17 +2764,7 @@ nsDocument::InitCSP(nsIChannel* aChannel)
     }
   }
 
-  // Create new CSP object:
-  //   * by default we are trying to use the new C++ implmentation
-  //   * however, we still support XCSP headers during the transition phase
-  //     and fall back to the JS implementation if we find an XCSP header.
-
-  if (CSPService::sNewBackendEnabled) {
-    csp = do_CreateInstance("@mozilla.org/cspcontext;1", &rv);
-  }
-  else {
-    csp = do_CreateInstance("@mozilla.org/contentsecuritypolicy;1", &rv);
-  }
+  csp = do_CreateInstance("@mozilla.org/cspcontext;1", &rv);
 
   if (NS_FAILED(rv)) {
 #ifdef PR_LOGGING
@@ -2787,7 +2778,7 @@ nsDocument::InitCSP(nsIChannel* aChannel)
   aChannel->GetURI(getter_AddRefs(selfURI));
 
   // Store the request context for violation reports
-  csp->SetRequestContext(nullptr, nullptr, nullptr, aChannel);
+  csp->SetRequestContext(nullptr, nullptr, aChannel);
 
   // ----- if the doc is an app and we want a default CSP, apply it.
   if (applyAppDefaultCSP) {
@@ -2801,24 +2792,24 @@ nsDocument::InitCSP(nsIChannel* aChannel)
     }
 
     if (appCSP) {
-      csp->AppendPolicy(appCSP, selfURI, false);
+      csp->AppendPolicy(appCSP, false);
     }
   }
 
   // ----- if the doc is an app and specifies a CSP in its manifest, apply it.
   if (applyAppManifestCSP) {
-    csp->AppendPolicy(appManifestCSP, selfURI, false);
+    csp->AppendPolicy(appManifestCSP, false);
   }
 
   // ----- if there's a full-strength CSP header, apply it.
   if (!cspHeaderValue.IsEmpty()) {
-    rv = AppendCSPFromHeader(csp, cspHeaderValue, selfURI, false);
+    rv = AppendCSPFromHeader(csp, cspHeaderValue, false);
     NS_ENSURE_SUCCESS(rv, rv);
   }
 
   // ----- if there's a report-only CSP header, apply it.
   if (!cspROHeaderValue.IsEmpty()) {
-    rv = AppendCSPFromHeader(csp, cspROHeaderValue, selfURI, true);
+    rv = AppendCSPFromHeader(csp, cspROHeaderValue, true);
     NS_ENSURE_SUCCESS(rv, rv);
   }
 
@@ -4333,7 +4324,7 @@ void
 nsIDocument::SetContainer(nsDocShell* aContainer)
 {
   if (aContainer) {
-    mDocumentContainer = aContainer->asWeakPtr();
+    mDocumentContainer = aContainer;
   } else {
     mDocumentContainer = WeakPtr<nsDocShell>();
   }
