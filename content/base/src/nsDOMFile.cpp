@@ -301,7 +301,8 @@ DOMFile::CreateSlice(uint64_t aStart, uint64_t aLength,
 {
   nsRefPtr<DOMFileImpl> impl =
     mImpl->CreateSlice(aStart, aLength, aContentType);
-  return new DOMFile(impl);
+  nsRefPtr<DOMFile> slice = new DOMFile(impl);
+  return slice.forget();
 }
 
 NS_IMETHODIMP
