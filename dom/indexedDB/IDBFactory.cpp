@@ -456,6 +456,7 @@ IDBFactory::OpenInternal(nsIPrincipal* aPrincipal,
   DatabaseMetadata metadata;
   metadata.name() = aName;
   metadata.persistenceType() = persistenceType;
+  metadata.persistenceTypeIsExplicit() = aStorageType.WasPassed();
 
   FactoryRequestParams params;
   if (aDeleting) {

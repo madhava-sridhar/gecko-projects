@@ -2268,6 +2268,7 @@ CreateDatabaseConnection(nsIFile* aDBFile,
         return rv;
       }
       if (NS_WARN_IF(!isDirectory)) {
+        IDB_REPORT_INTERNAL_ERR();
         return NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
       }
 
@@ -2302,12 +2303,12 @@ CreateDatabaseConnection(nsIFile* aDBFile,
 
   // Unknown schema will fail origin initialization too.
   if (!schemaVersion && aName.IsVoid()) {
-    NS_WARNING("Unable to open IndexedDB database, schema is not set!");
+    IDB_WARNING("Unable to open IndexedDB database, schema is not set!");
     return NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
   }
 
   if (schemaVersion > kSQLiteSchemaVersion) {
-    NS_WARNING("Unable to open IndexedDB database, schema is too high!");
+    IDB_WARNING("Unable to open IndexedDB database, schema is too high!");
     return NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
   }
 
@@ -2395,9 +2396,8 @@ CreateDatabaseConnection(nsIFile* aDBFile,
         } else if (schemaVersion == MakeSchemaVersion(15, 0)) {
           rv = UpgradeSchemaFrom15_0To16_0(connection);
         } else {
-          NS_WARNING("Unable to open IndexedDB database, no upgrade path is "
-                     "available!");
-          IDB_REPORT_INTERNAL_ERR();
+          IDB_WARNING("Unable to open IndexedDB database, no upgrade path is "
+                      "available!");
           return NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
         }
 
@@ -2483,6 +2483,7 @@ GetDatabaseConnection(const nsAString& aDatabaseFilePath,
   }
 
   if (NS_WARN_IF(!exists)) {
+    IDB_REPORT_INTERNAL_ERR();
     return NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
   }
 
@@ -3794,6 +3795,7 @@ protected:
   State mState;
   StoragePrivilege mStoragePrivilege;
   const PersistenceType mPersistenceType;
+  const bool mPersistenceTypeIsExplicit;
   const bool mDeleting;
   bool mBlockedQuotaManager;
   bool mChromeWriteAccessAllowed;
@@ -3818,12 +3820,14 @@ protected:
             const PrincipalInfo& aPrincipalInfo,
             const nsAString& aName,
             PersistenceType aPersistenceType,
+            bool aPersistenceTypeIsExplicit,
             bool aDeleting)
     : mContentParent(Move(aContentParent))
     , mPrincipalInfo(aPrincipalInfo)
     , mName(aName)
     , mState(State_Initial)
     , mPersistenceType(aPersistenceType)
+    , mPersistenceTypeIsExplicit(aPersistenceTypeIsExplicit)
     , mDeleting(aDeleting)
     , mBlockedQuotaManager(false)
     , mChromeWriteAccessAllowed(false)
@@ -4034,6 +4038,7 @@ public:
                 aParams.principalInfo(),
                 aParams.metadata().name(),
                 aParams.metadata().persistenceType(),
+                aParams.metadata().persistenceTypeIsExplicit(),
                 /* aDeleting */ true)
     , mPreviousVersion(0)
   { }
@@ -5851,6 +5856,10 @@ Database::Invalidate()
         transaction->Abort(NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
       }
 
+      if (count) {
+        IDB_REPORT_INTERNAL_ERR();
+      }
+
       return true;
     }
 
@@ -6178,6 +6187,7 @@ Database::RecvPBackgroundIDBTransactionConstructor(
 
   TransactionThreadPool* threadPool = TransactionThreadPool::GetOrCreate();
   if (!threadPool) {
+    IDB_REPORT_INTERNAL_ERR();
     transaction->Abort(NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
     return true;
   }
@@ -6188,11 +6198,13 @@ Database::RecvPBackgroundIDBTransactionConstructor(
                                      aMode, gStartTransactionRunnable, false,
                                      nullptr);
   if (NS_WARN_IF(NS_FAILED(rv))) {
+    IDB_REPORT_INTERNAL_ERR();
     transaction->Abort(NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
     return true;
   }
 
   if (NS_WARN_IF(!RegisterTransaction(transaction))) {
+    IDB_REPORT_INTERNAL_ERR();
     transaction->Abort(NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
     return true;
   }
@@ -10121,6 +10133,7 @@ FactoryOp::Open()
   mContentParent.swap(contentParent);
 
   if (mActorDestroyed) {
+    IDB_REPORT_INTERNAL_ERR();
     return NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
   }
 
@@ -10190,6 +10203,7 @@ FactoryOp::RetryCheckPermission()
   mContentParent.swap(contentParent);
 
   if (mActorDestroyed) {
+    IDB_REPORT_INTERNAL_ERR();
     return NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
   }
 
@@ -10225,11 +10239,13 @@ FactoryOp::SendToIOThread()
   MOZ_ASSERT(mState == State_OpenPending);
 
   if (mActorDestroyed) {
+    IDB_REPORT_INTERNAL_ERR();
     return NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
   }
 
   QuotaManager* quotaManager = QuotaManager::Get();
   if (NS_WARN_IF(!quotaManager)) {
+    IDB_REPORT_INTERNAL_ERR();
     return NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
   }
 
@@ -10241,6 +10257,7 @@ FactoryOp::SendToIOThread()
 #ifdef DEBUG
     mState = State_OpenPending;
 #endif
+    IDB_REPORT_INTERNAL_ERR();
     return NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
   }
 
@@ -10508,8 +10525,17 @@ FactoryOp::FinishOpen()
   MOZ_ASSERT(!mBlockedQuotaManager);
   MOZ_ASSERT(!mContentParent);
 
+  // XXX This is temporary, but we don't currently support the explicit
+  //     'persistent' storage type.
+  if (mPersistenceType == PERSISTENCE_TYPE_PERSISTENT &&
+      mPersistenceTypeIsExplicit) {
+    IDB_REPORT_INTERNAL_ERR();
+    return NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
+  }
+
   QuotaManager* quotaManager = QuotaManager::GetOrCreate();
   if (NS_WARN_IF(!quotaManager)) {
+    IDB_REPORT_INTERNAL_ERR();
     return NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
   }
 
@@ -10617,6 +10643,7 @@ OpenDatabaseOp::OpenDatabaseOp(already_AddRefed<ContentParent> aContentParent,
               aParams.principalInfo(),
               aParams.metadata().name(),
               aParams.metadata().persistenceType(),
+              aParams.metadata().persistenceTypeIsExplicit(),
               /* aDeleting */ false)
   , mOptionalWindowId(aOptionalWindowId)
   , mMetadata(new FullDatabaseMetadata())
@@ -10699,6 +10726,7 @@ OpenDatabaseOp::DoDatabaseWork()
 
   if (NS_WARN_IF(QuotaManager::IsShuttingDown()) ||
       mActorDestroyed) {
+    IDB_REPORT_INTERNAL_ERR();
     return NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
   }
 
@@ -11145,6 +11173,7 @@ OpenDatabaseOp::BeginVersionChange()
   MOZ_ASSERT(!mDatabase);
 
   if (IsActorDestroyed()) {
+    IDB_REPORT_INTERNAL_ERR();
     return NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
   }
 
@@ -11271,7 +11300,13 @@ OpenDatabaseOp::NoteDatabaseClosed(Database* aDatabase)
 
   bool actorDestroyed = IsActorDestroyed() || mDatabase->IsActorDestroyed();
 
-  nsresult rv = actorDestroyed ? NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR : NS_OK;
+  nsresult rv;
+  if (actorDestroyed) {
+    IDB_REPORT_INTERNAL_ERR();
+    rv = NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
+  } else {
+    rv = NS_OK;
+  }
 
   if (mMaybeBlockedDatabases.RemoveElement(aDatabase) &&
       mMaybeBlockedDatabases.IsEmpty()) {
@@ -11323,6 +11358,7 @@ OpenDatabaseOp::DispatchToWorkThread()
   MOZ_ASSERT(mMaybeBlockedDatabases.IsEmpty());
 
   if (IsActorDestroyed()) {
+    IDB_REPORT_INTERNAL_ERR();
     return NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
   }
 
@@ -11362,6 +11398,7 @@ OpenDatabaseOp::SendUpgradeNeeded()
   MOZ_ASSERT_IF(!IsActorDestroyed(), mDatabase);
 
   if (IsActorDestroyed()) {
+    IDB_REPORT_INTERNAL_ERR();
     return NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
   }
 
@@ -11382,6 +11419,7 @@ OpenDatabaseOp::SendUpgradeNeeded()
                                            mRequestedVersion,
                                            mMetadata->mNextObjectStoreId,
                                            mMetadata->mNextIndexId)) {
+    IDB_REPORT_INTERNAL_ERR();
     return NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
   }
 
@@ -11543,6 +11581,7 @@ OpenDatabaseOp::EnsureDatabaseActorIsAlive()
   mDatabase->SetActorAlive();
 
   if (!factory->SendPBackgroundIDBDatabaseConstructor(mDatabase, spec, this)) {
+    IDB_REPORT_INTERNAL_ERR();
     return NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
   }
 
@@ -11973,6 +12012,7 @@ DeleteDatabaseOp::DoDatabaseWork()
                  js::ProfileEntry::Category::STORAGE);
 
   if (mActorDestroyed) {
+    IDB_REPORT_INTERNAL_ERR();
     return NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
   }
 
@@ -12048,6 +12088,7 @@ DeleteDatabaseOp::BeginVersionChange()
   MOZ_ASSERT(mMaybeBlockedDatabases.IsEmpty());
 
   if (IsActorDestroyed()) {
+    IDB_REPORT_INTERNAL_ERR();
     return NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
   }
 
@@ -12108,6 +12149,7 @@ DeleteDatabaseOp::DispatchToWorkThread()
   MOZ_ASSERT(mMaybeBlockedDatabases.IsEmpty());
 
   if (IsActorDestroyed()) {
+    IDB_REPORT_INTERNAL_ERR();
     return NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
   }
 
@@ -12128,7 +12170,13 @@ DeleteDatabaseOp::NoteDatabaseClosed(Database* aDatabase)
 
   bool actorDestroyed = IsActorDestroyed();
 
-  nsresult rv = actorDestroyed ? NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR : NS_OK;
+  nsresult rv;
+  if (actorDestroyed) {
+    IDB_REPORT_INTERNAL_ERR();
+    rv = NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
+  } else {
+    rv = NS_OK;
+  }
 
   if (mMaybeBlockedDatabases.RemoveElement(aDatabase) &&
       mMaybeBlockedDatabases.IsEmpty()) {
@@ -12205,6 +12253,7 @@ VersionChangeOp::RunOnMainThread()
 
   nsresult rv = quotaManager->IOThread()->Dispatch(this, NS_DISPATCH_NORMAL);
   if (NS_WARN_IF(NS_FAILED(rv))) {
+    IDB_REPORT_INTERNAL_ERR();
     return NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
   }
 
@@ -12223,6 +12272,7 @@ VersionChangeOp::RunOnIOThread()
                  js::ProfileEntry::Category::STORAGE);
 
   if (mActorDestroyed) {
+    IDB_REPORT_INTERNAL_ERR();
     return NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
   }
 
@@ -12325,6 +12375,7 @@ VersionChangeOp::RunOnIOThread()
     }
 
     if (NS_WARN_IF(!isDirectory)) {
+      IDB_REPORT_INTERNAL_ERR();
       return NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
     }
 
@@ -13789,6 +13840,7 @@ NormalTransactionOp::SendSuccessResult()
 
     if (NS_WARN_IF(!PBackgroundIDBRequestParent::Send__delete__(this,
                                                                 response))) {
+      IDB_REPORT_INTERNAL_ERR();
       return NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
     }
   }

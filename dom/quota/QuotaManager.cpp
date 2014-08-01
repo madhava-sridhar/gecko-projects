@@ -2626,10 +2626,12 @@ bool
 QuotaManager::LockedQuotaIsLifted()
 {
   mQuotaMutex.AssertCurrentThreadOwns();
+  MOZ_ASSERT(mCurrentWindowIndex != BAD_TLS_INDEX);
 
-  NS_ASSERTION(mCurrentWindowIndex != BAD_TLS_INDEX,
-               "Should have a valid TLS storage index!");
-
+#if 1
+  // XXX For now we always fail the quota prompt.
+  return false;
+#else
   nsPIDOMWindow* window =
     static_cast<nsPIDOMWindow*>(PR_GetThreadPrivate(mCurrentWindowIndex));
 
@@ -2671,6 +2673,7 @@ QuotaManager::LockedQuotaIsLifted()
   }
 
   return result;
+#endif
 }
 
 uint64_t
