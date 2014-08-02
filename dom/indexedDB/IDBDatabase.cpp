@@ -292,6 +292,17 @@ IDBDatabase::CloseInternal()
 }
 
 void
+IDBDatabase::InvalidateInternal()
+{
+  AssertIsOnOwningThread();
+
+  InvalidateMutableFiles();
+  AbortTransactions();
+
+  CloseInternal();
+}
+
+void
 IDBDatabase::EnterSetVersionTransaction(uint64_t aNewVersion)
 {
   AssertIsOnOwningThread();
@@ -1090,10 +1101,7 @@ IDBDatabase::Invalidate()
   if (!mInvalidated) {
     mInvalidated = true;
 
-    InvalidateMutableFiles();
-    AbortTransactions();
-
-    CloseInternal();
+    InvalidateInternal();
   }
 }
 
@@ -1350,7 +1358,7 @@ Observer::Observe(nsISupports* aSubject,
         nsRefPtr<IDBDatabase> database = mWeakDatabase;
         mWeakDatabase = nullptr;
 
-        database->Invalidate();
+        database->InvalidateInternal();
       }
     }
 

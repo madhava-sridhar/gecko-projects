@@ -277,6 +277,9 @@ private:
   void
   CloseInternal();
 
+  void
+  InvalidateInternal();
+
   bool
   RunningVersionChangeTransaction() const
   {

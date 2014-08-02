@@ -2529,7 +2529,14 @@ namespace {
 
 class Cursor;
 class Database;
+struct DatabaseActorInfo;
 class DatabaseFile;
+class DatabaseOfflineStorage;
+class Factory;
+class OpenDatabaseOp;
+template <class> class RequestOp;
+class TransactionBase;
+class VersionChangeTransaction;
 class TransactionBase;
 
 } // anonymous namespace
@@ -2541,6 +2548,7 @@ namespace indexedDB {
 using ::Cursor;
 using ::Database;
 using ::DatabaseFile;
+using ::Factory;
 using ::TransactionBase;
 
 } // namespace indexedDB
@@ -2548,14 +2556,6 @@ using ::TransactionBase;
 } // namespace mozilla
 
 namespace {
-
-class Cursor;
-struct DatabaseActorInfo;
-class DatabaseOfflineStorage;
-class OpenDatabaseOp;
-template <class> class RequestOp;
-class TransactionBase;
-class VersionChangeTransaction;
 
 class DatabaseOperationBase
   : public nsRunnable
@@ -2782,31 +2782,29 @@ private:
   NS_DECL_NSIRUNNABLE
 };
 
-class BackgroundFactoryParent MOZ_FINAL
+class Factory MOZ_FINAL
   : public PBackgroundIDBFactoryParent
 {
-  // Counts the number of "live" BackgroundFactoryParent instances that have not
-  // yet had ActorDestroy called.
+  // Counts the number of "live" Factory instances that have not yet had
+  // ActorDestroy called.
   static uint64_t sFactoryInstanceCount;
 
   const OptionalWindowId mOptionalWindowId;
 
-#ifdef DEBUG
-  bool mActorDestroyed;
-#endif
+  DebugOnly<bool> mActorDestroyed;
 
 public:
-  static already_AddRefed<BackgroundFactoryParent>
+  static already_AddRefed<Factory>
   Create(const OptionalWindowId& aOptionalWindowId);
 
-  NS_INLINE_DECL_THREADSAFE_REFCOUNTING(BackgroundFactoryParent)
+  NS_INLINE_DECL_THREADSAFE_REFCOUNTING(mozilla::dom::indexedDB::Factory)
 
 private:
   // Only constructed in Create().
-  BackgroundFactoryParent(const OptionalWindowId& aOptionalWindowId);
+  Factory(const OptionalWindowId& aOptionalWindowId);
 
   // Reference counted.
-  ~BackgroundFactoryParent();
+  ~Factory();
 
   // IPDL methods are only called by IPDL.
   virtual void
@@ -2846,7 +2844,7 @@ class Database MOZ_FINAL
 {
   friend class VersionChangeTransaction;
 
-  nsRefPtr<BackgroundFactoryParent> mFactory;
+  nsRefPtr<Factory> mFactory;
   nsRefPtr<FullDatabaseMetadata> mMetadata;
   nsRefPtr<FileManager> mFileManager;
   nsRefPtr<DatabaseOfflineStorage> mOfflineStorage;
@@ -2867,7 +2865,7 @@ class Database MOZ_FINAL
 
 public:
   // Created by OpenDatabaseOp.
-  Database(BackgroundFactoryParent* aFactory,
+  Database(Factory* aFactory,
            const PrincipalInfo& aPrincipalInfo,
            const nsACString& aGroup,
            const nsACString& aOrigin,
@@ -5457,8 +5455,7 @@ AllocPBackgroundIDBFactoryParent(PBackgroundParent* aManager,
     }
   }
 
-  nsRefPtr<BackgroundFactoryParent> actor =
-    BackgroundFactoryParent::Create(aOptionalWindowId);
+  nsRefPtr<Factory> actor = Factory::Create(aOptionalWindowId);
   return actor.forget().take();
 }
 
@@ -5479,8 +5476,7 @@ DeallocPBackgroundIDBFactoryParent(PBackgroundIDBFactoryParent* aActor)
   AssertIsOnBackgroundThread();
   MOZ_ASSERT(aActor);
 
-  nsRefPtr<BackgroundFactoryParent> actor =
-    dont_AddRef(static_cast<BackgroundFactoryParent*>(aActor));
+  nsRefPtr<Factory> actor = dont_AddRef(static_cast<Factory*>(aActor));
   return true;
 }
 
@@ -5544,29 +5540,26 @@ CreateQuotaClient()
 } // namespace mozilla
 
 /*******************************************************************************
- * BackgroundFactoryParent
+ * Factory
  ******************************************************************************/
 
-uint64_t BackgroundFactoryParent::sFactoryInstanceCount = 0;
+uint64_t Factory::sFactoryInstanceCount = 0;
 
-BackgroundFactoryParent::BackgroundFactoryParent(
-                                      const OptionalWindowId& aOptionalWindowId)
+Factory::Factory(const OptionalWindowId& aOptionalWindowId)
   : mOptionalWindowId(aOptionalWindowId)
-#ifdef DEBUG
   , mActorDestroyed(false)
-#endif
 {
   AssertIsOnBackgroundThread();
 }
 
-BackgroundFactoryParent::~BackgroundFactoryParent()
+Factory::~Factory()
 {
   MOZ_ASSERT(mActorDestroyed);
 }
 
 // static
-already_AddRefed<BackgroundFactoryParent>
-BackgroundFactoryParent::Create(const OptionalWindowId& aOptionalWindowId)
+already_AddRefed<Factory>
+Factory::Create(const OptionalWindowId& aOptionalWindowId)
 {
   AssertIsOnBackgroundThread();
 
@@ -5607,8 +5600,7 @@ BackgroundFactoryParent::Create(const OptionalWindowId& aOptionalWindowId)
 #endif
   }
 
-  nsRefPtr<BackgroundFactoryParent> actor =
-    new BackgroundFactoryParent(aOptionalWindowId);
+  nsRefPtr<Factory> actor = new Factory(aOptionalWindowId);
 
   sFactoryInstanceCount++;
 
@@ -5616,14 +5608,12 @@ BackgroundFactoryParent::Create(const OptionalWindowId& aOptionalWindowId)
 }
 
 void
-BackgroundFactoryParent::ActorDestroy(ActorDestroyReason aWhy)
+Factory::ActorDestroy(ActorDestroyReason aWhy)
 {
   AssertIsOnBackgroundThread();
   MOZ_ASSERT(!mActorDestroyed);
 
-#ifdef DEBUG
   mActorDestroyed = true;
-#endif
 
   // Clean up if there are no more instances.
   if (!(--sFactoryInstanceCount)) {
@@ -5662,7 +5652,7 @@ BackgroundFactoryParent::ActorDestroy(ActorDestroyReason aWhy)
 }
 
 bool
-BackgroundFactoryParent::RecvDeleteMe()
+Factory::RecvDeleteMe()
 {
   AssertIsOnBackgroundThread();
   MOZ_ASSERT(!mActorDestroyed);
@@ -5671,7 +5661,7 @@ BackgroundFactoryParent::RecvDeleteMe()
 }
 
 PBackgroundIDBFactoryRequestParent*
-BackgroundFactoryParent::AllocPBackgroundIDBFactoryRequestParent(
+Factory::AllocPBackgroundIDBFactoryRequestParent(
                                             const FactoryRequestParams& aParams)
 {
   AssertIsOnBackgroundThread();
@@ -5736,7 +5726,7 @@ BackgroundFactoryParent::AllocPBackgroundIDBFactoryRequestParent(
 }
 
 bool
-BackgroundFactoryParent::RecvPBackgroundIDBFactoryRequestConstructor(
+Factory::RecvPBackgroundIDBFactoryRequestConstructor(
                                      PBackgroundIDBFactoryRequestParent* aActor,
                                      const FactoryRequestParams& aParams)
 {
@@ -5751,7 +5741,7 @@ BackgroundFactoryParent::RecvPBackgroundIDBFactoryRequestConstructor(
 }
 
 bool
-BackgroundFactoryParent::DeallocPBackgroundIDBFactoryRequestParent(
+Factory::DeallocPBackgroundIDBFactoryRequestParent(
                                      PBackgroundIDBFactoryRequestParent* aActor)
 {
   AssertIsOnBackgroundThread();
@@ -5763,7 +5753,7 @@ BackgroundFactoryParent::DeallocPBackgroundIDBFactoryRequestParent(
 }
 
 PBackgroundIDBDatabaseParent*
-BackgroundFactoryParent::AllocPBackgroundIDBDatabaseParent(
+Factory::AllocPBackgroundIDBDatabaseParent(
                                    const DatabaseSpec& aSpec,
                                    PBackgroundIDBFactoryRequestParent* aRequest)
 {
@@ -5772,7 +5762,7 @@ BackgroundFactoryParent::AllocPBackgroundIDBDatabaseParent(
 }
 
 bool
-BackgroundFactoryParent::DeallocPBackgroundIDBDatabaseParent(
+Factory::DeallocPBackgroundIDBDatabaseParent(
                                            PBackgroundIDBDatabaseParent* aActor)
 {
   AssertIsOnBackgroundThread();
@@ -5786,7 +5776,7 @@ BackgroundFactoryParent::DeallocPBackgroundIDBDatabaseParent(
  * Database
  ******************************************************************************/
 
-Database::Database(BackgroundFactoryParent* aFactory,
+Database::Database(Factory* aFactory,
                    const PrincipalInfo& aPrincipalInfo,
                    const nsACString& aGroup,
                    const nsACString& aOrigin,
@@ -11528,7 +11518,7 @@ OpenDatabaseOp::EnsureDatabaseActor()
     mMetadata = info->mMetadata;
   }
 
-  auto factory = static_cast<BackgroundFactoryParent*>(Manager());
+  auto factory = static_cast<Factory*>(Manager());
 
   mDatabase = new Database(factory,
                            mPrincipalInfo,
@@ -11571,7 +11561,7 @@ OpenDatabaseOp::EnsureDatabaseActorIsAlive()
     return NS_OK;
   }
 
-  auto factory = static_cast<BackgroundFactoryParent*>(Manager());
+  auto factory = static_cast<Factory*>(Manager());
 
   DatabaseSpec spec;
   MetadataToSpec(spec);
@@ -12425,40 +12415,45 @@ VersionChangeOp::RunOnOwningThread()
   nsRefPtr<DeleteDatabaseOp> deleteOp;
   mDeleteDatabaseOp.swap(deleteOp);
 
-  DatabaseActorInfo* info;
-  if (gLiveDatabaseHashtable->Get(deleteOp->mDatabaseId, &info) &&
-      info->mWaitingFactoryOp) {
-    MOZ_ASSERT(info->mWaitingFactoryOp == deleteOp);
-    info->mWaitingFactoryOp = nullptr;
-  }
-
-  if (NS_FAILED(mResultCode)) {
-    if (NS_SUCCEEDED(deleteOp->ResultCode())) {
-      deleteOp->SetFailureCode(mResultCode);
-    }
+  if (deleteOp->IsActorDestroyed()) {
+    IDB_REPORT_INTERNAL_ERR();
+    deleteOp->SetFailureCode(NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
   } else {
-    // Inform all the other databases that they are now invalidated. That should
-    // remove the previous metadata from our table.
-    if (info) {
-      MOZ_ASSERT(!info->mLiveDatabases.IsEmpty());
+    DatabaseActorInfo* info;
+    if (gLiveDatabaseHashtable->Get(deleteOp->mDatabaseId, &info) &&
+        info->mWaitingFactoryOp) {
+      MOZ_ASSERT(info->mWaitingFactoryOp == deleteOp);
+      info->mWaitingFactoryOp = nullptr;
+    }
 
-      FallibleTArray<Database*> liveDatabases;
-      if (NS_WARN_IF(!liveDatabases.AppendElements(info->mLiveDatabases))) {
-        deleteOp->SetFailureCode(NS_ERROR_OUT_OF_MEMORY);
-      } else {
+    if (NS_FAILED(mResultCode)) {
+      if (NS_SUCCEEDED(deleteOp->ResultCode())) {
+        deleteOp->SetFailureCode(mResultCode);
+      }
+    } else {
+      // Inform all the other databases that they are now invalidated. That
+      // should remove the previous metadata from our table.
+      if (info) {
+        MOZ_ASSERT(!info->mLiveDatabases.IsEmpty());
+
+        FallibleTArray<Database*> liveDatabases;
+        if (NS_WARN_IF(!liveDatabases.AppendElements(info->mLiveDatabases))) {
+          deleteOp->SetFailureCode(NS_ERROR_OUT_OF_MEMORY);
+        } else {
 #ifdef DEBUG
-        // The code below should result in the deletion of |info|. Set to null
-        // here to make sure we find invalid uses later.
-        info = nullptr;
+          // The code below should result in the deletion of |info|. Set to null
+          // here to make sure we find invalid uses later.
+          info = nullptr;
 #endif
-        for (uint32_t count = liveDatabases.Length(), index = 0;
-             index < count;
-             index++) {
-          nsRefPtr<Database> database = liveDatabases[index];
-          database->Invalidate();
-        }
+          for (uint32_t count = liveDatabases.Length(), index = 0;
+               index < count;
+               index++) {
+            nsRefPtr<Database> database = liveDatabases[index];
+            database->Invalidate();
+          }
 
-        MOZ_ASSERT(!gLiveDatabaseHashtable->Get(deleteOp->mDatabaseId));
+          MOZ_ASSERT(!gLiveDatabaseHashtable->Get(deleteOp->mDatabaseId));
+        }
       }
     }
   }
