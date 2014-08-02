@@ -7073,24 +7073,24 @@ TransactionBase::ReleaseSavepoint()
              IDBTransaction::VERSION_CHANGE == mMode);
   MOZ_ASSERT(mSavepointCount);
 
+  mSavepointCount--;
+
   CachedStatement stmt;
   nsresult rv = GetCachedStatement(
     NS_LITERAL_CSTRING("RELEASE ") + NS_LITERAL_CSTRING(kSavepointClause),
     &stmt);
-  if (NS_WARN_IF(NS_FAILED(rv))) {
-    return rv;
+  if (NS_SUCCEEDED(rv)) {
+    rv = stmt->Execute();
+    if (NS_SUCCEEDED(rv)) {
+      mUpdateFileRefcountFunction->ReleaseSavepoint();
+    }
   }
 
-  rv = stmt->Execute();
   if (NS_WARN_IF(NS_FAILED(rv))) {
-    return rv;
+    mUpdateFileRefcountFunction->RollbackSavepoint();
   }
 
-  mUpdateFileRefcountFunction->ReleaseSavepoint();
-
-  mSavepointCount--;
-
-  return NS_OK;
+  return rv;
 }
 
 nsresult
@@ -7102,6 +7102,10 @@ TransactionBase::RollbackSavepoint()
              IDBTransaction::VERSION_CHANGE == mMode);
   MOZ_ASSERT(mSavepointCount);
 
+  mSavepointCount--;
+
+  mUpdateFileRefcountFunction->RollbackSavepoint();
+
   CachedStatement stmt;
   nsresult rv = GetCachedStatement(
     NS_LITERAL_CSTRING("ROLLBACK TO ") + NS_LITERAL_CSTRING(kSavepointClause),
@@ -7110,14 +7114,9 @@ TransactionBase::RollbackSavepoint()
     return rv;
   }
 
-  rv = stmt->Execute();
-  if (NS_WARN_IF(NS_FAILED(rv))) {
-    return rv;
-  }
-
-  mUpdateFileRefcountFunction->RollbackSavepoint();
-
-  mSavepointCount--;
+  // This may fail if SQLite already rolled back the savepoint so ignore any
+  // errors.
+  unused << stmt->Execute();
 
   return NS_OK;
 }
@@ -12722,8 +12721,10 @@ CommitOp::Run()
       mTransaction->mUpdateFileRefcountFunction->DidAbort();
     }
 
-    NS_NAMED_LITERAL_CSTRING(rollback, "ROLLBACK TRANSACTION");
-    MOZ_ALWAYS_TRUE(NS_SUCCEEDED(connection->ExecuteSimpleSQL(rollback)));
+    // This may fail if SQLite already rolled back the transaction so ignore any
+    // errors.
+    unused <<
+      connection->ExecuteSimpleSQL(NS_LITERAL_CSTRING("ROLLBACK TRANSACTION"));
   }
 
   CommitOrRollbackAutoIncrementCounts();
