@@ -42,13 +42,13 @@
         const databaseVersion = 1;
         const objectStoreName = "foo";
 
-        info("start");
+        info("setting quota pref");
 
         SpecialPowers.pushPrefEnv({ set: [["dom.indexedDB.warningQuota", 2]] },
                                   continueToNextStep);
         yield undefined;
 
-        info("prefs set");
+        info("opening database");
 
         let request = indexedDB.open(databaseName, databaseVersion);
         request.onerror = errorHandler;
@@ -98,6 +98,11 @@
         request.onsuccess = grabEventAndContinueHandler;
 
         event = yield undefined;
+
+        info("resetting quota pref");
+
+        SpecialPowers.popPrefEnv(continueToNextStep);
+        yield undefined;
 
         finishTest();
         yield undefined;
