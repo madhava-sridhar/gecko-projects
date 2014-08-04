@@ -1112,8 +1112,12 @@ BackgroundDatabaseChild::ReleaseDOMObject()
   MOZ_ASSERT(mOpenRequestActor);
   MOZ_ASSERT(mDatabase == mTemporaryStrongDatabase);
 
-  mTemporaryStrongDatabase = nullptr;
   mOpenRequestActor = nullptr;
+
+  // This may be the final reference to the IDBDatabase object so we may end up
+  // calling SendDeleteMeInternal() here. Make sure everything is cleaned up
+  // properly before proceeding.
+  mTemporaryStrongDatabase = nullptr;
 }
 
 void
