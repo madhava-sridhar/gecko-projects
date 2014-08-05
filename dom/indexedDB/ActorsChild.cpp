@@ -41,15 +41,60 @@
 #include "IndexedDatabaseManager.h"
 #endif
 
+#if defined(DEBUG) || defined(GC_ON_IPC_MESSAGES)
+
+#include "js/GCAPI.h"
+#include "nsJSEnvironment.h"
+
+#define BUILD_GC_ON_IPC_MESSAGES
+
+#endif // DEBUG || GC_ON_IPC_MESSAGES
+
 using namespace mozilla;
 using namespace mozilla::dom;
 using namespace mozilla::dom::indexedDB;
 
 /*******************************************************************************
- * Helper functions
+ * Helpers
  ******************************************************************************/
 
 namespace {
+
+void
+MaybeCollectGarbageOnIPCMessage()
+{
+#ifdef BUILD_GC_ON_IPC_MESSAGES
+  static const bool kCollectGarbageOnIPCMessages =
+#ifdef GC_ON_IPC_MESSAGES
+    true;
+#else
+    false;
+#endif // GC_ON_IPC_MESSAGES
+
+  if (!kCollectGarbageOnIPCMessages) {
+    return;
+  }
+
+  static bool haveWarnedAboutGC = false;
+  static bool haveWarnedAboutNonMainThread = false;
+
+  if (!haveWarnedAboutGC) {
+    haveWarnedAboutGC = true;
+    NS_WARNING("IndexedDB child actor GC debugging enabled!");
+  }
+
+  if (!NS_IsMainThread()) {
+    if (!haveWarnedAboutNonMainThread)  {
+      haveWarnedAboutNonMainThread = true;
+      NS_WARNING("Don't know how to GC on a non-main thread yet.");
+    }
+    return;
+  }
+
+  nsJSContext::GarbageCollectNow(JS::gcreason::DOM_IPC);
+  nsJSContext::CycleCollectNow();
+#endif // BUILD_GC_ON_IPC_MESSAGES
+}
 
 class MOZ_STACK_CLASS AutoSetCurrentTransaction MOZ_FINAL
 {
@@ -508,14 +553,6 @@ ConvertActorsToBlobs(IDBDatabase* aDatabase,
   }
 }
 
-} // anonymous namespace
-
-/*******************************************************************************
- * Helper functions
- ******************************************************************************/
-
-namespace {
-
 void
 DispatchSuccessEvent(ResultHelper* aResultHelper,
                      nsIDOMEvent* aEvent = nullptr)
@@ -649,6 +686,8 @@ PermissionRequestMainProcessHelper::OnPromptComplete(
   MOZ_ASSERT(mActor);
   mActor->AssertIsOnOwningThread();
 
+  MaybeCollectGarbageOnIPCMessage();
+
   mActor->SendPermissionRetry();
 
   mActor = nullptr;
@@ -662,6 +701,8 @@ PermissionRequestChildProcessActor::Recv__delete__(
   MOZ_ASSERT(mActor);
   mActor->AssertIsOnOwningThread();
   MOZ_ASSERT(mFactory);
+
+  MaybeCollectGarbageOnIPCMessage();
 
   nsRefPtr<IDBFactory> factory;
   mFactory.swap(factory);
@@ -766,6 +807,8 @@ void
 BackgroundFactoryChild::ActorDestroy(ActorDestroyReason aWhy)
 {
   AssertIsOnOwningThread();
+
+  MaybeCollectGarbageOnIPCMessage();
 
   if (mFactory) {
     mFactory->ClearBackgroundActor();
@@ -924,6 +967,8 @@ BackgroundFactoryRequestChild::ActorDestroy(ActorDestroyReason aWhy)
 {
   AssertIsOnOwningThread();
 
+  MaybeCollectGarbageOnIPCMessage();
+
   NoteActorDestroyed();
 }
 
@@ -933,6 +978,8 @@ BackgroundFactoryRequestChild::Recv__delete__(
 {
   AssertIsOnOwningThread();
   MOZ_ASSERT(mRequest);
+
+  MaybeCollectGarbageOnIPCMessage();
 
   switch (aResponse.type()) {
     case FactoryRequestResponse::Tnsresult:
@@ -956,6 +1003,8 @@ BackgroundFactoryRequestChild::RecvPermissionChallenge(
                                             const PrincipalInfo& aPrincipalInfo)
 {
   AssertIsOnOwningThread();
+
+  MaybeCollectGarbageOnIPCMessage();
 
   if (!NS_IsMainThread()) {
     MOZ_CRASH("Implement me for workers!");
@@ -1006,6 +1055,8 @@ bool
 BackgroundFactoryRequestChild::RecvBlocked(const uint64_t& aCurrentVersion)
 {
   AssertIsOnOwningThread();
+
+  MaybeCollectGarbageOnIPCMessage();
 
   if (!mRequest) {
     return true;
@@ -1125,6 +1176,8 @@ BackgroundDatabaseChild::ActorDestroy(ActorDestroyReason aWhy)
 {
   AssertIsOnOwningThread();
 
+  MaybeCollectGarbageOnIPCMessage();
+
   if (mDatabase) {
     mDatabase->ClearBackgroundActor();
 #ifdef DEBUG
@@ -1197,6 +1250,8 @@ BackgroundDatabaseChild::RecvPBackgroundIDBVersionChangeTransactionConstructor(
   MOZ_ASSERT(aActor);
   MOZ_ASSERT(mOpenRequestActor);
 
+  MaybeCollectGarbageOnIPCMessage();
+
   if (!EnsureDOMObject()) {
     return false;
   }
@@ -1253,6 +1308,8 @@ BackgroundDatabaseChild::RecvVersionChange(const uint64_t& aOldVersion,
                                            const NullableVersion& aNewVersion)
 {
   AssertIsOnOwningThread();
+
+  MaybeCollectGarbageOnIPCMessage();
 
   if (!mDatabase || mDatabase->IsClosed()) {
     return true;
@@ -1315,6 +1372,8 @@ bool
 BackgroundDatabaseChild::RecvInvalidate()
 {
   AssertIsOnOwningThread();
+
+  MaybeCollectGarbageOnIPCMessage();
 
   if (mDatabase) {
     mDatabase->Invalidate();
@@ -1445,6 +1504,8 @@ BackgroundTransactionChild::ActorDestroy(ActorDestroyReason aWhy)
 {
   AssertIsOnOwningThread();
 
+  MaybeCollectGarbageOnIPCMessage();
+
   NoteActorDestroyed();
 }
 
@@ -1452,6 +1513,8 @@ bool
 BackgroundTransactionChild::RecvComplete(const nsresult& aResult)
 {
   AssertIsOnOwningThread();
+
+  MaybeCollectGarbageOnIPCMessage();
 
   if (!mTransaction) {
     return true;
@@ -1550,6 +1613,8 @@ BackgroundVersionChangeTransactionChild::ActorDestroy(ActorDestroyReason aWhy)
 {
   AssertIsOnOwningThread();
 
+  MaybeCollectGarbageOnIPCMessage();
+
   mOpenDBRequest = nullptr;
 
   NoteActorDestroyed();
@@ -1559,6 +1624,8 @@ bool
 BackgroundVersionChangeTransactionChild::RecvComplete(const nsresult& aResult)
 {
   AssertIsOnOwningThread();
+
+  MaybeCollectGarbageOnIPCMessage();
 
   if (!mTransaction) {
     return true;
@@ -1784,6 +1851,8 @@ BackgroundRequestChild::ActorDestroy(ActorDestroyReason aWhy)
 {
   AssertIsOnOwningThread();
 
+  MaybeCollectGarbageOnIPCMessage();
+
   if (mTransaction) {
     mTransaction->AssertIsOnOwningThread();
     mTransaction->OnRequestFinished();
@@ -1800,6 +1869,8 @@ BackgroundRequestChild::Recv__delete__(const RequestResponse& aResponse)
   AssertIsOnOwningThread();
   MOZ_ASSERT(mRequest);
   MOZ_ASSERT(mTransaction);
+
+  MaybeCollectGarbageOnIPCMessage();
 
   // Always fire an "error" event with ABORT_ERR if the transaction was aborted,
   // even if the request succeeded or failed with another error.
@@ -2175,6 +2246,8 @@ BackgroundCursorChild::ActorDestroy(ActorDestroyReason aWhy)
   MOZ_ASSERT(!mStrongRequest);
   MOZ_ASSERT(!mStrongCursor);
 
+  MaybeCollectGarbageOnIPCMessage();
+
   if (mCursor) {
     mCursor->ClearBackgroundActor();
 #ifdef DEBUG
@@ -2199,6 +2272,8 @@ BackgroundCursorChild::RecvResponse(const CursorResponse& aResponse)
   MOZ_ASSERT(mTransaction);
   MOZ_ASSERT(mStrongRequest);
   MOZ_ASSERT_IF(mCursor, mStrongCursor);
+
+  MaybeCollectGarbageOnIPCMessage();
 
   nsRefPtr<IDBRequest> request;
   mStrongRequest.swap(request);
