@@ -678,8 +678,8 @@ TransactionThreadPool::WaitForDatabasesToComplete(
   NS_ASSERTION(!aDatabaseIds.IsEmpty(), "No databases to wait on!");
   NS_ASSERTION(aCallback, "Null pointer!");
 
-  nsAutoPtr<DatabasesCompleteCallback> callback =
-    new DatabasesCompleteCallback();
+  nsAutoPtr<DatabasesCompleteCallback> callback(
+    new DatabasesCompleteCallback());
   callback->mCallback = aCallback;
   callback->mDatabaseIds.SwapElements(aDatabaseIds);
   

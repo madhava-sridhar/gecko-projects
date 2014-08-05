@@ -5709,7 +5709,7 @@ Factory::ActorDestroy(ActorDestroyReason aWhy)
             warning->AppendLiteral("  - ");
             warning->Append(NS_ConvertUTF16toUTF8(aEntry->GetKey()));
             warning->AppendLiteral(" [");
-            warning->AppendInt(aEntry->mData);
+            warning->AppendInt(uint32_t(aEntry->mData));
             warning->AppendLiteral("]\n");
 
             return PL_DHASH_NEXT;
@@ -16744,7 +16744,7 @@ DumpIndexedDBLiveDatabaseConnections(FILE* aFile)
 
       fprintf_stderr(file,
                      "  - %s [%llu]\n",
-                     NS_ConvertUTF16toUTF8(aEntry->GetKey()),
+                     NS_ConvertUTF16toUTF8(aEntry->GetKey()).get(),
                      aEntry->mData);
       return PL_DHASH_NEXT;
     }
