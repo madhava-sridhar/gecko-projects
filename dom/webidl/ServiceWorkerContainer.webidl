@@ -18,21 +18,17 @@ interface ServiceWorkerContainer {
   [Unforgeable] readonly attribute ServiceWorker? active;
   [Unforgeable] readonly attribute ServiceWorker? controller;
 
-  // Promise<ServiceWorker>
   [Throws]
-  readonly attribute Promise ready;
+  readonly attribute Promise<any> ready;
 
-  // Promise<sequence<ServiceWorker>?>
   [Throws]
-  Promise getAll();
+  Promise<any> getAll();
 
-  // Promise<ServiceWorker>
   [Throws]
-  Promise register(DOMString url, optional RegistrationOptionList options);
+  Promise<ServiceWorker> register(DOMString url, optional RegistrationOptionList options);
 
-  // Promise<any>
   [Throws]
-  Promise unregister(DOMString? scope);
+  Promise<any> unregister(DOMString? scope);
 
   attribute EventHandler onupdatefound;
   attribute EventHandler oncontrollerchange;
@@ -41,15 +37,14 @@ interface ServiceWorkerContainer {
 };
 
 // Testing only.
-[ChromeOnly, Pref="dom.serviceWorkers.testing.enabled"]
 partial interface ServiceWorkerContainer {
-  [Throws]
-  Promise clearAllServiceWorkerData();
+  [Throws,Pref="dom.serviceWorkers.testing.enabled"]
+  Promise<any> clearAllServiceWorkerData();
 
-  [Throws]
+  [Throws,Pref="dom.serviceWorkers.testing.enabled"]
   DOMString getScopeForUrl(DOMString url);
 
-  [Throws]
+  [Throws,Pref="dom.serviceWorkers.testing.enabled"]
   DOMString getControllingWorkerScriptURLForPath(DOMString path);
 };
 

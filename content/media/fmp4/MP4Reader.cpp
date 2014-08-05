@@ -105,6 +105,7 @@ MP4Reader::MP4Reader(AbstractMediaDecoder* aDecoder)
   , mVideo("MP4 video decoder data", Preferences::GetUint("media.mp4-video-decode-ahead", 2))
   , mLastReportedNumDecodedFrames(0)
   , mLayersBackendType(layers::LayersBackend::LAYERS_NONE)
+  , mTimeRangesMonitor("MP4Reader::TimeRanges")
   , mDemuxerInitialized(false)
   , mIsEncrypted(false)
 {
@@ -142,6 +143,11 @@ MP4Reader::Shutdown()
   }
   // Dispose of the queued sample before shutting down the demuxer
   mQueuedVideoSample = nullptr;
+
+  if (mPlatform) {
+    mPlatform->Shutdown();
+    mPlatform = nullptr;
+  }
 }
 
 void
@@ -463,7 +469,8 @@ MP4Reader::Decode(TrackType aTrack)
     // if we need output.
     while (prevNumFramesOutput == data.mNumSamplesOutput &&
            (data.mInputExhausted ||
-           (data.mNumSamplesInput - data.mNumSamplesOutput) < data.mDecodeAhead)) {
+           (data.mNumSamplesInput - data.mNumSamplesOutput) < data.mDecodeAhead) &&
+           !data.mEOS) {
       data.mMonitor.AssertCurrentThreadOwns();
       data.mMonitor.Unlock();
       nsAutoPtr<MP4Sample> compressed(PopSample(aTrack));
@@ -471,6 +478,9 @@ MP4Reader::Decode(TrackType aTrack)
         // EOS, or error. Send the decoder a signal to drain.
         LOG("Draining %s", TrackTypeToStr(aTrack));
         data.mMonitor.Lock();
+        MOZ_ASSERT(!data.mEOS);
+        data.mEOS = true;
+        MOZ_ASSERT(!data.mDrainComplete);
         data.mDrainComplete = false;
         data.mMonitor.Unlock();
         data.mDecoder->Drain();
@@ -498,15 +508,27 @@ MP4Reader::Decode(TrackType aTrack)
     data.mMonitor.AssertCurrentThreadOwns();
     while (!data.mError &&
            prevNumFramesOutput == data.mNumSamplesOutput &&
-           !data.mInputExhausted &&
+           (!data.mInputExhausted || data.mEOS) &&
            !data.mDrainComplete) {
       data.mMonitor.Wait();
     }
+    if (data.mError ||
+        (data.mEOS && data.mDrainComplete)) {
+      break;
+    }
   }
   data.mMonitor.AssertCurrentThreadOwns();
-  bool drainComplete = data.mDrainComplete;
+  bool rv = !(data.mEOS || data.mError);
   data.mMonitor.Unlock();
-  return !drainComplete;
+  return rv;
+}
+
+nsresult
+MP4Reader::ResetDecode()
+{
+  Flush(kAudio);
+  Flush(kVideo);
+  return MediaDecoderReader::ResetDecode();
 }
 
 void
@@ -591,6 +613,8 @@ MP4Reader::Flush(TrackType aTrack)
   {
     MonitorAutoLock mon(data.mMonitor);
     data.mIsFlushing = true;
+    data.mDrainComplete = false;
+    data.mEOS = false;
   }
   data.mDecoder->Flush();
   {
@@ -668,9 +692,6 @@ MP4Reader::Seek(int64_t aTime,
   if (!mDecoder->GetResource()->IsTransportSeekable() || !mDemuxer->CanSeek()) {
     return NS_ERROR_FAILURE;
   }
-  Flush(kVideo);
-  Flush(kAudio);
-  ResetDecode();
 
   mQueuedVideoSample = nullptr;
   if (mDemuxer->HasValidVideo()) {
@@ -685,20 +706,30 @@ MP4Reader::Seek(int64_t aTime,
   return NS_OK;
 }
 
-nsresult
-MP4Reader::GetBuffered(dom::TimeRanges* aBuffered, int64_t aStartTime)
+void
+MP4Reader::NotifyDataArrived(const char* aBuffer, uint32_t aLength,
+                             int64_t aOffset)
 {
   nsTArray<MediaByteRange> ranges;
   if (NS_FAILED(mDecoder->GetResource()->GetCachedRanges(ranges))) {
-    return NS_ERROR_FAILURE;
+    return;
   }
 
   nsTArray<Interval<Microseconds>> timeRanges;
   mDemuxer->ConvertByteRangesToTime(ranges, &timeRanges);
 
-  for (size_t i = 0; i < timeRanges.Length(); i++) {
-    aBuffered->Add((timeRanges[i].start - aStartTime) / 1000000.0,
-                   (timeRanges[i].end - aStartTime) / 1000000.0);
+  MonitorAutoLock mon(mTimeRangesMonitor);
+  mTimeRanges = timeRanges;
+}
+
+
+nsresult
+MP4Reader::GetBuffered(dom::TimeRanges* aBuffered, int64_t aStartTime)
+{
+  MonitorAutoLock mon(mTimeRangesMonitor);
+  for (size_t i = 0; i < mTimeRanges.Length(); i++) {
+    aBuffered->Add((mTimeRanges[i].start - aStartTime) / 1000000.0,
+                   (mTimeRanges[i].end - aStartTime) / 1000000.0);
   }
 
   return NS_OK;

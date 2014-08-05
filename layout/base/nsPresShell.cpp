@@ -465,7 +465,7 @@ public:
 
   virtual void HandleEvent(EventChainPostVisitor& aVisitor) MOZ_OVERRIDE
   {
-    if (aVisitor.mPresContext && aVisitor.mEvent->eventStructType != NS_EVENT) {
+    if (aVisitor.mPresContext && aVisitor.mEvent->mClass != eBasicEventClass) {
       if (aVisitor.mEvent->message == NS_MOUSE_BUTTON_DOWN ||
           aVisitor.mEvent->message == NS_MOUSE_BUTTON_UP) {
         // Mouse-up and mouse-down events call nsFrame::HandlePress/Release
@@ -2245,7 +2245,7 @@ NS_IMETHODIMP PresShell::SetCaretEnabled(bool aInEnable)
       mCaret->SetCaretVisible(mCaretEnabled);
     }
     if (mTouchCaret) {
-      mTouchCaret->SyncVisibilityWithCaret();
+      mTouchCaret->UpdateTouchCaret(mCaretEnabled);
     }
   }
 
@@ -3931,9 +3931,6 @@ PresShell::UnsuppressAndInvalidate()
 
     if (mCaretEnabled && mCaret) {
       mCaret->CheckCaretDrawingState();
-    }
-    if (mTouchCaret) {
-      mTouchCaret->UpdatePositionIfNeeded();
     }
   }
 
@@ -5808,7 +5805,7 @@ PresShell::MarkImagesInSubtreeVisible(nsIFrame* aFrame, const nsRect& aRect)
     if (usingDisplayport) {
       rect = displayPort;
     } else {
-      rect = rect.Intersect(scrollFrame->GetScrollPortRect());
+      rect = rect.Intersect(scrollFrame->GetScrollPortRect());      
     }
     rect = scrollFrame->ExpandRectToNearlyVisible(rect);
   }
@@ -6707,7 +6704,7 @@ DispatchPointerFromMouseOrTouch(PresShell* aShell,
                                 nsEventStatus* aStatus)
 {
   uint32_t pointerMessage = 0;
-  if (aEvent->eventStructType == NS_MOUSE_EVENT) {
+  if (aEvent->mClass == eMouseEventClass) {
     WidgetMouseEvent* mouseEvent = aEvent->AsMouseEvent();
     // if it is not mouse then it is likely will come as touch event
     if (!mouseEvent->convertToPointer) {
@@ -6739,7 +6736,7 @@ DispatchPointerFromMouseOrTouch(PresShell* aShell,
                      0.0f;
     event.convertToPointer = mouseEvent->convertToPointer = false;
     aShell->HandleEvent(aFrame, &event, aDontRetargetEvents, aStatus);
-  } else if (aEvent->eventStructType == NS_TOUCH_EVENT) {
+  } else if (aEvent->mClass == eTouchEventClass) {
     WidgetTouchEvent* touchEvent = aEvent->AsTouchEvent();
     // loop over all touches and dispatch pointer events on each touch
     // copy the event
@@ -6901,8 +6898,7 @@ PresShell::HandleEvent(nsIFrame* aFrame,
 
   nsIContent* capturingContent =
     (aEvent->HasMouseEventMessage() ||
-     aEvent->eventStructType == NS_WHEEL_EVENT ? GetCapturingContent() :
-                                                 nullptr);
+     aEvent->mClass == eWheelEventClass ? GetCapturingContent() : nullptr);
 
   nsCOMPtr<nsIDocument> retargetEventDoc;
   if (!aDontRetargetEvents) {
@@ -6931,7 +6927,7 @@ PresShell::HandleEvent(nsIFrame* aFrame,
       // document that is being captured.
       retargetEventDoc = capturingContent->GetCrossShadowCurrentDoc();
 #ifdef ANDROID
-    } else if (aEvent->eventStructType == NS_TOUCH_EVENT) {
+    } else if (aEvent->mClass == eTouchEventClass) {
       retargetEventDoc = GetTouchEventTargetDocument();
 #endif
     }
@@ -6961,7 +6957,7 @@ PresShell::HandleEvent(nsIFrame* aFrame,
     }
   }
 
-  if (aEvent->eventStructType == NS_KEY_EVENT &&
+  if (aEvent->mClass == eKeyboardEventClass &&
       mDocument && mDocument->EventHandlingSuppressed()) {
     if (aEvent->message == NS_KEY_DOWN) {
       mNoDelayedKeyEvents = true;
@@ -6979,7 +6975,7 @@ PresShell::HandleEvent(nsIFrame* aFrame,
   if (aEvent->IsUsingCoordinates()) {
     ReleasePointerCaptureCaller releasePointerCaptureCaller;
     if (nsLayoutUtils::AreAsyncAnimationsEnabled() && mDocument) {
-      if (aEvent->eventStructType == NS_TOUCH_EVENT) {
+      if (aEvent->mClass == eTouchEventClass) {
         nsIDocument::UnlockPointer();
       }
 
@@ -7060,7 +7056,7 @@ PresShell::HandleEvent(nsIFrame* aFrame,
     }
 
     // all touch events except for touchstart use a captured target
-    if (aEvent->eventStructType == NS_TOUCH_EVENT &&
+    if (aEvent->mClass == eTouchEventClass &&
         aEvent->message != NS_TOUCH_START) {
       captureRetarget = true;
     }
@@ -7158,7 +7154,7 @@ PresShell::HandleEvent(nsIFrame* aFrame,
       } else {
         eventPoint = nsLayoutUtils::GetEventCoordinatesRelativeTo(aEvent, frame);
       }
-      if (mouseEvent && mouseEvent->eventStructType == NS_MOUSE_EVENT &&
+      if (mouseEvent && mouseEvent->mClass == eMouseEventClass &&
           mouseEvent->ignoreRootScrollFrame) {
         flags |= INPUT_IGNORE_ROOT_SCROLL_FRAME;
       }
@@ -7187,7 +7183,7 @@ PresShell::HandleEvent(nsIFrame* aFrame,
       }
     }
 
-    if (aEvent->eventStructType == NS_POINTER_EVENT &&
+    if (aEvent->mClass == ePointerEventClass &&
         aEvent->message != NS_POINTER_DOWN) {
       if (WidgetPointerEvent* pointerEvent = aEvent->AsPointerEvent()) {
         uint32_t pointerId = pointerEvent->pointerId;
@@ -7213,7 +7209,7 @@ PresShell::HandleEvent(nsIFrame* aFrame,
 
     // Suppress mouse event if it's being targeted at an element inside
     // a document which needs events suppressed
-    if (aEvent->eventStructType == NS_MOUSE_EVENT &&
+    if (aEvent->mClass == eMouseEventClass &&
         frame->PresContext()->Document()->EventHandlingSuppressed()) {
       if (aEvent->message == NS_MOUSE_BUTTON_DOWN) {
         mNoDelayedMouseEvents = true;
@@ -7759,14 +7755,14 @@ PresShell::HandleEventInternal(WidgetEvent* aEvent, nsEventStatus* aStatus)
     if (NS_SUCCEEDED(rv)) {
       bool wasHandlingKeyBoardEvent =
         nsContentUtils::IsHandlingKeyBoardEvent();
-      if (aEvent->eventStructType == NS_KEY_EVENT) {
+      if (aEvent->mClass == eKeyboardEventClass) {
         nsContentUtils::SetIsHandlingKeyBoardEvent(true);
       }
       if (aEvent->IsAllowedToDispatchDOMEvent()) {
         MOZ_ASSERT(nsContentUtils::IsSafeToRunScript(),
           "Somebody changed aEvent to cause a DOM event!");
         nsPresShellEventCB eventCB(this);
-        if (aEvent->eventStructType == NS_TOUCH_EVENT) {
+        if (aEvent->mClass == eTouchEventClass) {
           DispatchTouchEvent(aEvent, aStatus, &eventCB, touchIsNew);
         } else {
           nsCOMPtr<nsINode> eventTarget = mCurrentEventContent.get();
@@ -7787,8 +7783,8 @@ PresShell::HandleEventInternal(WidgetEvent* aEvent, nsEventStatus* aStatus)
             }
           }
           if (eventTarget) {
-            if (aEvent->eventStructType == NS_COMPOSITION_EVENT ||
-                aEvent->eventStructType == NS_TEXT_EVENT) {
+            if (aEvent->mClass == eCompositionEventClass ||
+                aEvent->mClass == eTextEventClass) {
               IMEStateManager::DispatchCompositionEvent(eventTarget,
                 mPresContext, aEvent, aStatus, eventCBPtr);
             } else {
@@ -8653,16 +8649,11 @@ PresShell::DidDoReflow(bool aInterruptible, bool aWasInterrupted)
   if (sSynthMouseMove) {
     SynthesizeMouseMove(false);
   }
-
   if (mCaret) {
     // Update the caret's position now to account for any changes created by
     // the reflow.
     mCaret->InvalidateOutsideCaret();
     mCaret->UpdateCaretPosition();
-  }
-
-  if (mTouchCaret) {
-    mTouchCaret->UpdatePositionIfNeeded();
   }
 
   if (!aWasInterrupted) {

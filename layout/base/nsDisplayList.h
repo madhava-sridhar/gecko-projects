@@ -1050,7 +1050,7 @@ public:
    * @return true if the contents of this item are rendered fixed relative
    * to the nearest viewport.
    */
-  virtual bool ShouldFixToViewport(nsDisplayListBuilder* aBuilder)
+  virtual bool ShouldFixToViewport(LayerManager* aManager)
   { return false; }
 
   /**
@@ -2153,11 +2153,12 @@ public:
   static nsRegion GetInsideClipRegion(nsDisplayItem* aItem, nsPresContext* aPresContext, uint8_t aClip,
                                       const nsRect& aRect, bool* aSnap);
 
-  virtual bool ShouldFixToViewport(nsDisplayListBuilder* aBuilder) MOZ_OVERRIDE
+  virtual bool ShouldFixToViewport(LayerManager* aManager) MOZ_OVERRIDE
   {
     // APZ doesn't (yet) know how to scroll the visible region for these type of
     // items, so don't layerize them if it's enabled.
-    if (nsLayoutUtils::UsesAsyncScrolling()) {
+    if (nsLayoutUtils::UsesAsyncScrolling() ||
+        (aManager && aManager->ShouldAvoidComponentAlphaLayers())) {
       return false;
     }
 
@@ -3157,6 +3158,7 @@ private:
  */ 
 class nsDisplayTransform: public nsDisplayItem
 {
+  typedef mozilla::gfx::Matrix4x4 Matrix4x4;
 public:
   /**
    * Returns a matrix (in pixels) for the current frame. The matrix should be relative to
@@ -3165,7 +3167,7 @@ public:
    * @param aFrame The frame to compute the transform for.
    * @param aAppUnitsPerPixel The number of app units per graphics unit.
    */
-  typedef gfx3DMatrix (* ComputeTransformFunction)(nsIFrame* aFrame, float aAppUnitsPerPixel);
+  typedef Matrix4x4 (* ComputeTransformFunction)(nsIFrame* aFrame, float aAppUnitsPerPixel);
 
   /* Constructor accepts a display list, empties it, and wraps it up.  It also
    * ferries the underlying frame to the nsDisplayItem constructor.
@@ -3244,7 +3246,7 @@ public:
     INDEX_MAX = UINT32_MAX >> nsDisplayItem::TYPE_BITS
   };
 
-  const gfx3DMatrix& GetTransform();
+  const Matrix4x4& GetTransform();
 
   float GetHitDepthAtPoint(nsDisplayListBuilder* aBuilder, const nsPoint& aPoint);
 
@@ -3387,7 +3389,7 @@ private:
                                                          bool aOffsetByOrigin);
 
   nsDisplayWrapList mStoredList;
-  gfx3DMatrix mTransform;
+  Matrix4x4 mTransform;
   ComputeTransformFunction mTransformGetter;
   nsRect mChildrenVisibleRect;
   uint32_t mIndex;

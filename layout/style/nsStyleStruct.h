@@ -194,7 +194,7 @@ struct nsStyleImage {
   nsStyleImage& operator=(const nsStyleImage& aOther);
 
   void SetNull();
-  void SetImageData(imgIRequest* aImage);
+  void SetImageData(imgRequestProxy* aImage);
   void TrackImage(nsPresContext* aContext);
   void UntrackImage(nsPresContext* aContext);
   void SetGradientData(nsStyleGradient* aGradient);
@@ -204,7 +204,7 @@ struct nsStyleImage {
   nsStyleImageType GetType() const {
     return mType;
   }
-  imgIRequest* GetImageData() const {
+  imgRequestProxy* GetImageData() const {
     NS_ABORT_IF_FALSE(mType == eStyleImageType_Image, "Data is not an image!");
     NS_ABORT_IF_FALSE(mImageTracked,
                       "Should be tracking any image we're going to use!");
@@ -297,7 +297,7 @@ private:
 
   nsStyleImageType mType;
   union {
-    imgIRequest* mImage;
+    imgRequestProxy* mImage;
     nsStyleGradient* mGradient;
     char16_t* mElementId;
   };
@@ -2192,8 +2192,6 @@ struct nsStyleTable {
   }
 
   uint8_t       mLayoutStrategy;// [reset] see nsStyleConsts.h NS_STYLE_TABLE_LAYOUT_*
-  uint8_t       mFrame;         // [reset] see nsStyleConsts.h NS_STYLE_TABLE_FRAME_*
-  uint8_t       mRules;         // [reset] see nsStyleConsts.h NS_STYLE_TABLE_RULES_*
   int32_t       mSpan;          // [reset] the number of columns spanned by a colgroup or col
 };
 

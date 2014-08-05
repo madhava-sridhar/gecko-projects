@@ -58,6 +58,9 @@ interface BluetoothAdapter : EventTarget {
   readonly attribute boolean                discoverable;
   readonly attribute boolean                discovering;
 
+  [AvailableIn=CertifiedApps]
+  readonly attribute BluetoothPairingListener pairingReqs;
+
   // Fired when pairing process is completed
            attribute EventHandler   onpairedstatuschanged;
 
@@ -84,26 +87,20 @@ interface BluetoothAdapter : EventTarget {
    * request, and the last one would indicate adapter.state becomes
    * enabled/disabled.
    */
-  // Promise<void>
   [NewObject, Throws]
-  Promise enable();
-  // Promise<void>
+  Promise<void> enable();
   [NewObject, Throws]
-  Promise disable();
+  Promise<void> disable();
 
-  // Promise<void>
   [NewObject, Throws]
-  Promise setName(DOMString aName);
-  // Promise<void>
+  Promise<void> setName(DOMString aName);
   [NewObject, Throws]
-  Promise setDiscoverable(boolean aDiscoverable);
+  Promise<void> setDiscoverable(boolean aDiscoverable);
 
-  // Promise<BluetoothDiscoveryHandle>
   [NewObject, Throws]
-  Promise startDiscovery();
-  // Promise<void>
+  Promise<BluetoothDiscoveryHandle> startDiscovery();
   [NewObject, Throws]
-  Promise stopDiscovery();
+  Promise<void> stopDiscovery();
 
   [NewObject, Throws]
   DOMRequest pair(DOMString deviceAddress);

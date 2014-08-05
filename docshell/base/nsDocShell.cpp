@@ -44,6 +44,7 @@
 #include "nsRect.h"
 #include "prenv.h"
 #include "nsIDOMWindow.h"
+#include "nsIGlobalObject.h"
 #include "nsIWebBrowserChrome.h"
 #include "nsPoint.h"
 #include "nsIObserverService.h"
@@ -1008,6 +1009,7 @@ NS_IMETHODIMP nsDocShell::GetInterface(const nsIID & aIID, void **aSink)
         *aSink = mContentListener;
     }
     else if ((aIID.Equals(NS_GET_IID(nsIScriptGlobalObject)) ||
+              aIID.Equals(NS_GET_IID(nsIGlobalObject)) ||
               aIID.Equals(NS_GET_IID(nsPIDOMWindow)) ||
               aIID.Equals(NS_GET_IID(nsIDOMWindow)) ||
               aIID.Equals(NS_GET_IID(nsIDOMWindowInternal))) &&
@@ -6160,6 +6162,35 @@ nsDocShell::ForceRefreshURIFromTimer(nsIURI * aURI,
     return ForceRefreshURI(aURI, aDelay, aMetaRefresh);
 }
 
+bool
+nsDocShell::DoAppRedirectIfNeeded(nsIURI * aURI,
+                                  nsIDocShellLoadInfo * aLoadInfo,
+                                  bool aFirstParty)
+{
+  uint32_t appId;
+  nsresult rv = GetAppId(&appId);
+  if (NS_FAILED(rv)) {
+    return false;
+  }
+
+  if (appId != nsIScriptSecurityManager::NO_APP_ID &&
+      appId != nsIScriptSecurityManager::UNKNOWN_APP_ID) {
+    nsCOMPtr<nsIAppsService> appsService =
+      do_GetService(APPS_SERVICE_CONTRACTID);
+    NS_ASSERTION(appsService, "No AppsService available");
+    nsCOMPtr<nsIURI> redirect;
+    rv = appsService->GetRedirect(appId, aURI, getter_AddRefs(redirect));
+    if (NS_SUCCEEDED(rv) && redirect) {
+      rv = LoadURI(redirect, aLoadInfo, nsIWebNavigation::LOAD_FLAGS_NONE, aFirstParty);
+      if (NS_SUCCEEDED(rv)) {
+        return true;
+      }
+    }
+  }
+
+  return false;
+}
+
 NS_IMETHODIMP
 nsDocShell::ForceRefreshURI(nsIURI * aURI,
                             int32_t aDelay, 
@@ -6211,6 +6242,10 @@ nsDocShell::ForceRefreshURI(nsIURI * aURI,
     }
     else {
         loadInfo->SetLoadType(nsIDocShellLoadInfo::loadRefresh);
+    }
+
+    if (DoAppRedirectIfNeeded(aURI, loadInfo, true)) {
+      return NS_OK;
     }
 
     /*
@@ -6630,6 +6665,7 @@ nsDocShell::Embed(nsIContentViewer * aContentViewer,
     PersistLayoutHistoryState();
 
     nsresult rv = SetupNewViewer(aContentViewer);
+    NS_ENSURE_SUCCESS(rv, rv);
 
     // If we are loading a wyciwyg url from history, change the base URI for 
     // the document to the original http url that created the document.write().
@@ -6845,27 +6881,8 @@ nsDocShell::OnRedirectStateChange(nsIChannel* aOldChannel,
         return;
     }
 
-    // Check if we have a redirect registered for this url.
-    uint32_t appId;
-    nsresult rv = GetAppId(&appId);
-    if (NS_FAILED(rv)) {
+    if (DoAppRedirectIfNeeded(newURI, nullptr, false)) {
       return;
-    }
-
-    if (appId != nsIScriptSecurityManager::NO_APP_ID &&
-        appId != nsIScriptSecurityManager::UNKNOWN_APP_ID) {
-      nsCOMPtr<nsIAppsService> appsService =
-        do_GetService(APPS_SERVICE_CONTRACTID);
-      NS_ASSERTION(appsService, "No AppsService available");
-      nsCOMPtr<nsIURI> redirect;
-      rv = appsService->GetRedirect(appId, newURI, getter_AddRefs(redirect));
-      if (NS_SUCCEEDED(rv) && redirect) {
-        aNewChannel->Cancel(NS_BINDING_ABORTED);
-        rv = LoadURI(redirect, nullptr, 0, false);
-        if (NS_SUCCEEDED(rv)) {
-          return;
-        }
-      }
     }
 
     // Below a URI visit is saved (see AddURIVisit method doc).
@@ -7327,6 +7344,8 @@ nsDocShell::EnsureContentViewer()
 
     nsresult rv = CreateAboutBlankContentViewer(principal, baseURI);
 
+    NS_ENSURE_STATE(mContentViewer);
+
     if (NS_SUCCEEDED(rv)) {
         nsCOMPtr<nsIDocument> doc(GetDocument());
         NS_ASSERTION(doc,
@@ -7355,20 +7374,24 @@ nsDocShell::CreateAboutBlankContentViewer(nsIPrincipal* aPrincipal,
   if (mCreatingDocument)
     return NS_ERROR_FAILURE;
 
+  AutoRestore<bool> creatingDocument(mCreatingDocument);
   mCreatingDocument = true;
 
   // mContentViewer->PermitUnload may release |this| docshell.
   nsCOMPtr<nsIDocShell> kungFuDeathGrip(this);
   
+  // Make sure timing is created.  But first record whether we had it
+  // already, so we don't clobber the timing for an in-progress load.
+  bool hadTiming = mTiming;
+  MaybeInitTiming();
   if (mContentViewer) {
     // We've got a content viewer already. Make sure the user
     // permits us to discard the current document and replace it
     // with about:blank. And also ensure we fire the unload events
     // in the current document.
 
-    // Make sure timing is created. Unload gets fired first for
+    // Unload gets fired first for
     // document loaded from the session history.
-    MaybeInitTiming();
     mTiming->NotifyBeforeUnload();
 
     bool okToUnload;
@@ -7441,17 +7464,23 @@ nsDocShell::CreateAboutBlankContentViewer(nsIPrincipal* aPrincipal,
       // hook 'em up
       if (viewer) {
         viewer->SetContainer(this);
-        Embed(viewer, "", 0);
+        rv = Embed(viewer, "", 0);
+        NS_ENSURE_SUCCESS(rv, rv);
 
         SetCurrentURI(blankDoc->GetDocumentURI(), nullptr, true, 0);
         rv = mIsBeingDestroyed ? NS_ERROR_NOT_AVAILABLE : NS_OK;
       }
     }
   }
-  mCreatingDocument = false;
 
   // The transient about:blank viewer doesn't have a session history entry.
   SetHistoryEntry(&mOSHE, nullptr);
+
+  // Clear out our mTiming like we would in EndPageLoad, if we didn't
+  // have one before entering this function.
+  if (!hadTiming) {
+    mTiming = nullptr;
+  }
 
   return rv;
 }
@@ -8658,7 +8687,7 @@ nsDocShell::SetupNewViewer(nsIContentViewer * aNewViewer)
 
     if (NS_FAILED(mContentViewer->Init(widget, bounds))) {
         mContentViewer = nullptr;
-        NS_ERROR("ContentViewer Initialization failed");
+        NS_WARNING("ContentViewer Initialization failed");
         return NS_ERROR_FAILURE;
     }
 
@@ -8704,6 +8733,7 @@ nsDocShell::SetupNewViewer(nsIContentViewer * aNewViewer)
 nsresult
 nsDocShell::SetDocCurrentStateObj(nsISHEntry *shEntry)
 {
+    NS_ENSURE_STATE(mContentViewer);
     nsCOMPtr<nsIDocument> document = GetDocument();
     NS_ENSURE_TRUE(document, NS_ERROR_FAILURE);
 

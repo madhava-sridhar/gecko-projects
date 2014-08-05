@@ -14,15 +14,6 @@
 namespace mozilla {
 namespace layers {
 
-/**
- * Default touch behavior (is used when no touch behavior is set).
- */
-static const TouchBlockState::TouchBehaviorFlags kDefaultTouchBehavior =
-    AllowedTouchBehavior::VERTICAL_PAN |
-    AllowedTouchBehavior::HORIZONTAL_PAN |
-    AllowedTouchBehavior::PINCH_ZOOM |
-    AllowedTouchBehavior::DOUBLE_TAP_ZOOM;
-
 TouchBlockState::TouchBlockState()
   : mAllowedTouchBehaviorSet(false)
   , mPreventDefault(false)
@@ -194,7 +185,8 @@ TouchBlockState::TouchActionAllowsPanningX() const
     return true;
   }
   if (mAllowedTouchBehaviors.IsEmpty()) {
-    return false;
+    // Default to allowed
+    return true;
   }
   TouchBehaviorFlags flags = mAllowedTouchBehaviors[0];
   return (flags & AllowedTouchBehavior::HORIZONTAL_PAN);
@@ -207,7 +199,8 @@ TouchBlockState::TouchActionAllowsPanningY() const
     return true;
   }
   if (mAllowedTouchBehaviors.IsEmpty()) {
-    return false;
+    // Default to allowed
+    return true;
   }
   TouchBehaviorFlags flags = mAllowedTouchBehaviors[0];
   return (flags & AllowedTouchBehavior::VERTICAL_PAN);
@@ -220,7 +213,8 @@ TouchBlockState::TouchActionAllowsPanningXY() const
     return true;
   }
   if (mAllowedTouchBehaviors.IsEmpty()) {
-    return false;
+    // Default to allowed
+    return true;
   }
   TouchBehaviorFlags flags = mAllowedTouchBehaviors[0];
   return (flags & AllowedTouchBehavior::HORIZONTAL_PAN)

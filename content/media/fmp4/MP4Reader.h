@@ -53,17 +53,21 @@ public:
 
   virtual bool IsMediaSeekable() MOZ_OVERRIDE;
 
+  virtual void NotifyDataArrived(const char* aBuffer, uint32_t aLength,
+                                 int64_t aOffset) MOZ_OVERRIDE;
+
   virtual nsresult GetBuffered(dom::TimeRanges* aBuffered,
                                int64_t aStartTime) MOZ_OVERRIDE;
 
   virtual bool IsWaitingMediaResources() MOZ_OVERRIDE;
 
+  virtual nsresult ResetDecode() MOZ_OVERRIDE;
+
+  virtual void Shutdown() MOZ_OVERRIDE;
+
 private:
 
   void ExtractCryptoInitData(nsTArray<uint8_t>& aInitData);
-
-  // Destroys all decoder resources.
-  void Shutdown();
 
   // Initializes mLayersBackendType if possible.
   void InitLayersBackendType();
@@ -121,6 +125,7 @@ private:
       , mError(false)
       , mIsFlushing(false)
       , mDrainComplete(false)
+      , mEOS(false)
     {
     }
 
@@ -143,6 +148,7 @@ private:
     bool mError;
     bool mIsFlushing;
     bool mDrainComplete;
+    bool mEOS;
   };
   DecoderData mAudio;
   DecoderData mVideo;
@@ -162,6 +168,8 @@ private:
   layers::LayersBackend mLayersBackendType;
 
   nsTArray<nsTArray<uint8_t>> mInitDataEncountered;
+  Monitor mTimeRangesMonitor;
+  nsTArray<mp4_demuxer::Interval<Microseconds>> mTimeRanges;
 
   // True if we've read the streams' metadata.
   bool mDemuxerInitialized;

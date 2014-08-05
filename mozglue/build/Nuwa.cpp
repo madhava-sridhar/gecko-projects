@@ -1047,6 +1047,16 @@ __wrap_pthread_cond_wait(pthread_cond_t *cond,
   }
   rv = REAL(pthread_cond_wait)(cond, mtx);
   if (recreated && mtx) {
+    // We have reacquired mtx. The main thread also wants to acquire mtx to
+    // synchronize with us. If the main thread didn't get a chance to acquire
+    // mtx let it do that now. The main thread clears condMutex after acquiring
+    // it to signal us.
+    if (tinfo->condMutex) {
+      // We need mtx to end up locked, so tell the main thread not to unlock
+      // mtx after it locks it.
+      tinfo->condMutexNeedsBalancing = false;
+      pthread_mutex_unlock(mtx);
+    }
     // We still need to be gated as not to acquire another mutex associated with
     // another VIP thread and interfere with it.
     RECREATE_GATE_VIP();
@@ -1081,6 +1091,10 @@ __wrap_pthread_cond_timedwait(pthread_cond_t *cond,
   }
   rv = REAL(pthread_cond_timedwait)(cond, mtx, abstime);
   if (recreated && mtx) {
+    if (tinfo->condMutex) {
+      tinfo->condMutexNeedsBalancing = false;
+      pthread_mutex_unlock(mtx);
+    }
     RECREATE_GATE_VIP();
   }
   THREAD_FREEZE_POINT2_VIP();
@@ -1119,6 +1133,10 @@ __wrap___pthread_cond_timedwait(pthread_cond_t *cond,
   }
   rv = REAL(__pthread_cond_timedwait)(cond, mtx, abstime, clock);
   if (recreated && mtx) {
+    if (tinfo->condMutex) {
+      tinfo->condMutexNeedsBalancing = false;
+      pthread_mutex_unlock(mtx);
+    }
     RECREATE_GATE_VIP();
   }
   THREAD_FREEZE_POINT2_VIP();
@@ -1430,8 +1448,13 @@ RecreateThreads() {
       if (tinfo->condMutex) {
         // Synchronize with the recreated thread in pthread_cond_wait().
         REAL(pthread_mutex_lock)(tinfo->condMutex);
+        // Tell the other thread that we have successfully locked the mutex.
+        // NB: condMutex can only be touched while it is held, so we must clear
+        // it here and store the mutex locally.
+        pthread_mutex_t *mtx = tinfo->condMutex;
+        tinfo->condMutex = nullptr;
         if (tinfo->condMutexNeedsBalancing) {
-          pthread_mutex_unlock(tinfo->condMutex);
+          pthread_mutex_unlock(mtx);
         }
       }
     } else if(!(tinfo->flags & TINFO_FLAG_NUWA_SKIP)) {

@@ -11,7 +11,7 @@ const {DebuggerServer} = require("resource://gre/modules/devtools/dbg-server.jsm
 const discovery = require("devtools/toolkit/discovery/discovery");
 const promise = require("promise");
 
-const Strings = Services.strings.createBundle("chrome://webide/content/webide.properties");
+const Strings = Services.strings.createBundle("chrome://browser/locale/devtools/webide.properties");
 
 function USBRuntime(id) {
   this.id = id;
@@ -91,6 +91,7 @@ SimulatorRuntime.prototype = {
     return simulator.launch({port: port}).then(() => {
       connection.port = port;
       connection.keepConnecting = true;
+      connection.once(Connection.Events.DISCONNECTED, simulator.close);
       connection.connect();
     });
   },

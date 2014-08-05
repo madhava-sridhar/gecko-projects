@@ -864,13 +864,52 @@ public:
   NS_METHOD CollectReports(nsIHandleReportCallback* aHandleReport,
                            nsISupports* aData, bool aAnonymize)
   {
-    return MOZ_COLLECT_REPORT(
-      "explicit/atom-tables", KIND_HEAP, UNITS_BYTES,
-      NS_SizeOfAtomTablesIncludingThis(MallocSizeOf),
-      "Memory used by the dynamic and static atoms tables.");
+    size_t Main, Static;
+    NS_SizeOfAtomTablesIncludingThis(MallocSizeOf, &Main, &Static);
+
+    nsresult rv;
+    rv = MOZ_COLLECT_REPORT(
+      "explicit/atom-tables/main", KIND_HEAP, UNITS_BYTES, Main,
+      "Memory used by the main atoms table.");
+    NS_ENSURE_SUCCESS(rv, rv);
+
+    rv = MOZ_COLLECT_REPORT(
+      "explicit/atom-tables/static", KIND_HEAP, UNITS_BYTES, Static,
+      "Memory used by the static atoms table.");
+    NS_ENSURE_SUCCESS(rv, rv);
+
+    return NS_OK;
   }
 };
 NS_IMPL_ISUPPORTS(AtomTablesReporter, nsIMemoryReporter)
+
+#ifdef DEBUG
+
+// Ideally, this would be implemented in BlockingResourceBase.cpp.
+// However, this ends up breaking the linking step of various unit tests due
+// to adding a new dependency to libdmd for a commonly used feature (mutexes)
+// in  DMD  builds. So instead we do it here.
+class DeadlockDetectorReporter MOZ_FINAL : public nsIMemoryReporter
+{
+  MOZ_DEFINE_MALLOC_SIZE_OF(MallocSizeOf)
+
+  ~DeadlockDetectorReporter() {}
+
+public:
+  NS_DECL_ISUPPORTS
+
+  NS_METHOD CollectReports(nsIHandleReportCallback* aHandleReport,
+                           nsISupports* aData, bool aAnonymize)
+  {
+    return MOZ_COLLECT_REPORT(
+      "explicit/deadlock-detector", KIND_HEAP, UNITS_BYTES,
+      BlockingResourceBase::SizeOfDeadlockDetector(MallocSizeOf),
+      "Memory used by the deadlock detector.");
+  }
+};
+NS_IMPL_ISUPPORTS(DeadlockDetectorReporter, nsIMemoryReporter)
+
+#endif
 
 #ifdef MOZ_DMD
 
@@ -974,6 +1013,10 @@ nsMemoryReporterManager::Init()
 #endif
 
   RegisterStrongReporter(new AtomTablesReporter());
+
+#ifdef DEBUG
+  RegisterStrongReporter(new DeadlockDetectorReporter());
+#endif
 
 #ifdef MOZ_DMD
   RegisterStrongReporter(new mozilla::dmd::DMDReporter());

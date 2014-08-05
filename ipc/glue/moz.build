@@ -135,12 +135,14 @@ IPDL_SOURCES = [
     'PBackgroundSharedTypes.ipdlh',
     'PBackgroundTest.ipdl',
     'PFileDescriptorSet.ipdl',
+    'PProcLoader.ipdl',
     'ProtocolTypes.ipdlh',
     'URIParams.ipdlh',
 ]
 
 
 LOCAL_INCLUDES += [
+    '/toolkit/xre',
     '/xpcom/threads',
 ]
 

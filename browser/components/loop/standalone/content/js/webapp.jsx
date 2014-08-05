@@ -82,23 +82,56 @@ loop.webapp = (function($, _, OT, webL10n) {
     }
   });
 
+  var ConversationHeader = React.createClass({
+    render: function() {
+      var cx = React.addons.classSet;
+      var conversationUrl = location.href;
+
+      var urlCreationDateClasses = cx({
+        "light-color-font": true,
+        "call-url-date": true, /* Used as a handler in the tests */
+        /*hidden until date is available*/
+        "hide": !this.props.urlCreationDateString.length
+      });
+
+      var callUrlCreationDateString = __("call_url_creation_date_label", {
+        "call_url_creation_date": this.props.urlCreationDateString
+      });
+
+      return (
+        /* jshint ignore:start */
+        <header className="container-box">
+          <h1 className="light-weight-font">
+            <strong>{__("brandShortname")}</strong> {__("clientShortname")}
+          </h1>
+          <div className="loop-logo" title="Firefox WebRTC! logo"></div>
+          <h3 className="call-url">
+            {conversationUrl}
+          </h3>
+          <h4 className={urlCreationDateClasses} >
+            {callUrlCreationDateString}
+          </h4>
+        </header>
+        /* jshint ignore:end */
+      );
+    }
+  });
+
+  var ConversationFooter = React.createClass({
+    render: function() {
+      return (
+        <div className="footer container-box">
+          <div title="Mozilla Logo" className="footer-logo"></div>
+        </div>
+      );
+    }
+  });
+
   /**
    * Conversation launcher view. A ConversationModel is associated and attached
    * as a `model` property.
    */
-  var ConversationFormView = sharedViews.BaseView.extend({
-    template: _.template([
-      '<form>',
-      '  <p>',
-      '    <button class="btn btn-success" data-l10n-id="start_call"></button>',
-      '  </p>',
-      '</form>'
-    ].join("")),
-
-    events: {
-      "submit": "initiate"
-    },
-
+  var StartConversationView = React.createClass({
     /**
      * Constructor.
      *
@@ -106,55 +139,105 @@ loop.webapp = (function($, _, OT, webL10n) {
      * - {loop.shared.model.ConversationModel}    model    Conversation model.
      * - {loop.shared.views.NotificationListView} notifier Notifier component.
      *
-     * @param  {Object} options Options object.
      */
-    initialize: function(options) {
-      options = options || {};
 
-      if (!options.model) {
-        throw new Error("missing required model");
-      }
-      this.model = options.model;
+    getInitialState: function() {
+      return {
+        urlCreationDateString: '',
+        disableCallButton: false
+      };
+    },
 
-      if (!options.notifier) {
-        throw new Error("missing required notifier");
-      }
-      this.notifier = options.notifier;
+    propTypes: {
+      model: React.PropTypes.instanceOf(sharedModels.ConversationModel)
+                                       .isRequired,
+      // XXX Check more tightly here when we start injecting window.loop.*
+      notifier: React.PropTypes.object.isRequired,
+      client: React.PropTypes.object.isRequired
+    },
 
-      this.listenTo(this.model, "session:error", this._onSessionError);
+    componentDidMount: function() {
+      this.props.model.listenTo(this.props.model, "session:error",
+                                this._onSessionError);
+      this.props.client.requestCallUrlInfo(this.props.model.get("loopToken"),
+                                           this._setConversationTimestamp);
+      // XXX DOM element does not exist before React view gets instantiated
+      // We should turn the notifier into a react component
+      this.props.notifier.$el = $("#messages");
     },
 
     _onSessionError: function(error) {
       console.error(error);
-      this.notifier.errorL10n("unable_retrieve_call_info");
-    },
-
-    /**
-     * Disables this form to prevent multiple submissions.
-     *
-     * @see  https://bugzilla.mozilla.org/show_bug.cgi?id=991126
-     */
-    disableForm: function() {
-      this.$("button").attr("disabled", "disabled");
+      this.props.notifier.errorL10n("unable_retrieve_call_info");
     },
 
     /**
      * Initiates the call.
-     *
-     * @param {SubmitEvent} event
      */
-    initiate: function(event) {
-      event.preventDefault();
-      this.model.initiate({
-        client: new loop.StandaloneClient({
-          baseServerUrl: baseServerUrl
-        }),
-        outgoing: true,
-        // For now, we assume both audio and video as there is no
-        // other option to select.
-        callType: "audio-video"
+    _initiateOutgoingCall: function() {
+      this.setState({disableCallButton: true});
+      this.props.model.setupOutgoingCall();
+    },
+
+    _setConversationTimestamp: function(err, callUrlInfo) {
+      if (err) {
+        this.props.notifier.errorL10n("unable_retrieve_call_info");
+      } else {
+        var date = (new Date(callUrlInfo.urlCreationDate * 1000));
+        var options = {year: "numeric", month: "long", day: "numeric"};
+        var timestamp = date.toLocaleDateString(navigator.language, options);
+
+        this.setState({urlCreationDateString: timestamp});
+      }
+    },
+
+    render: function() {
+      var tos_link_name = __("terms_of_use_link_text");
+      var privacy_notice_name = __("privacy_notice_link_text");
+
+      var tosHTML = __("legal_text_and_links", {
+        "terms_of_use_url": "<a target=_blank href='" +
+          "https://accounts.firefox.com/legal/terms'>" + tos_link_name + "</a>",
+        "privacy_notice_url": "<a target=_blank href='" +
+          "https://www.mozilla.org/privacy/'>" + privacy_notice_name + "</a>"
       });
-      this.disableForm();
+
+      var callButtonClasses = "btn btn-success btn-large " +
+                              loop.shared.utils.getTargetPlatform();
+
+      return (
+        /* jshint ignore:start */
+        <div className="container">
+          <div className="container-box">
+
+            <ConversationHeader
+              urlCreationDateString={this.state.urlCreationDateString} />
+
+            <p className="large-font light-weight-font">
+              {__("initiate_call_button_label")}
+            </p>
+
+            <div id="messages"></div>
+
+            <div className="button-group">
+              <div className="flex-padding-1"></div>
+              <button ref="submitButton" onClick={this._initiateOutgoingCall}
+                className={callButtonClasses}
+                disabled={this.state.disableCallButton}>
+                {__("initiate_call_button")}
+                <i className="icon icon-video"></i>
+              </button>
+              <div className="flex-padding-1"></div>
+            </div>
+
+            <p className="terms-service"
+               dangerouslySetInnerHTML={{__html: tosHTML}}></p>
+          </div>
+
+          <ConversationFooter />
+        </div>
+        /* jshint ignore:end */
+      );
     }
   });
 
@@ -174,15 +257,13 @@ loop.webapp = (function($, _, OT, webL10n) {
     initialize: function(options) {
       this.helper = options.helper;
       if (!this.helper) {
-        throw new Error("WebappRouter requires an helper object");
+        throw new Error("WebappRouter requires a helper object");
       }
 
       // Load default view
       this.loadView(new HomeView());
 
       this.listenTo(this._conversation, "timeout", this._onTimeout);
-      this.listenTo(this._conversation, "session:expired",
-                    this._onSessionExpired);
     },
 
     _onSessionExpired: function() {
@@ -190,14 +271,51 @@ loop.webapp = (function($, _, OT, webL10n) {
     },
 
     /**
-     * @override {loop.shared.router.BaseConversationRouter.startCall}
+     * Starts the set up of a call, obtaining the required information from the
+     * server.
      */
-    startCall: function() {
-      if (!this._conversation.get("loopToken")) {
+    setupOutgoingCall: function() {
+      var loopToken = this._conversation.get("loopToken");
+      if (!loopToken) {
         this._notifier.errorL10n("missing_conversation_info");
         this.navigate("home", {trigger: true});
       } else {
-        this.navigate("call/ongoing/" + this._conversation.get("loopToken"), {
+        this._conversation.once("call:outgoing", this.startCall, this);
+
+        // XXX For now, we assume both audio and video as there is no
+        // other option to select (bug 1048333)
+        this._client.requestCallInfo(this._conversation.get("loopToken"), "audio-video",
+                                     (err, sessionData) => {
+          if (err) {
+            switch (err.errno) {
+              // loop-server sends 404 + INVALID_TOKEN (errno 105) whenever a token is
+              // missing OR expired; we treat this information as if the url is always
+              // expired.
+              case 105:
+                this._onSessionExpired();
+                break;
+              default:
+                this._notifier.errorL10n("missing_conversation_info");
+                this.navigate("home", {trigger: true});
+                break;
+            }
+            return;
+          }
+          this._conversation.outgoing(sessionData);
+        });
+      }
+    },
+
+    /**
+     * Actually starts the call.
+     */
+    startCall: function() {
+      var loopToken = this._conversation.get("loopToken");
+      if (!loopToken) {
+        this._notifier.errorL10n("missing_conversation_info");
+        this.navigate("home", {trigger: true});
+      } else {
+        this.navigate("call/ongoing/" + loopToken, {
           trigger: true
         });
       }
@@ -250,10 +368,14 @@ loop.webapp = (function($, _, OT, webL10n) {
         this._conversation.endSession();
       }
       this._conversation.set("loopToken", loopToken);
-      this.loadView(new ConversationFormView({
+
+      var startView = StartConversationView({
         model: this._conversation,
-        notifier: this._notifier
-      }));
+        notifier: this._notifier,
+        client: this._client
+      });
+      this._conversation.once("call:outgoing:setup", this.setupOutgoingCall, this);
+      this.loadReactComponent(startView);
     },
 
     /**
@@ -294,9 +416,13 @@ loop.webapp = (function($, _, OT, webL10n) {
    */
   function init() {
     var helper = new WebappHelper();
+    var client = new loop.StandaloneClient({
+      baseServerUrl: baseServerUrl
+    }),
     router = new WebappRouter({
       helper: helper,
       notifier: new sharedViews.NotificationListView({el: "#messages"}),
+      client: client,
       conversation: new sharedModels.ConversationModel({}, {
         sdk: OT,
         pendingCallTimeout: loop.config.pendingCallTimeout
@@ -308,12 +434,15 @@ loop.webapp = (function($, _, OT, webL10n) {
     } else if (!OT.checkSystemRequirements()) {
       router.navigate("unsupportedBrowser", {trigger: true});
     }
+    // Set the 'lang' and 'dir' attributes to <html> when the page is translated
+    document.documentElement.lang = document.webL10n.getLanguage();
+    document.documentElement.dir = document.webL10n.getDirection();
   }
 
   return {
     baseServerUrl: baseServerUrl,
     CallUrlExpiredView: CallUrlExpiredView,
-    ConversationFormView: ConversationFormView,
+    StartConversationView: StartConversationView,
     HomeView: HomeView,
     init: init,
     PromoteFirefoxView: PromoteFirefoxView,

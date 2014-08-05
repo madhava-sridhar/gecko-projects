@@ -39,6 +39,7 @@ mgjar.sources += [
     'mozglue/WebRTCJNITarget.java',
 ]
 mgjar.generated_sources += [
+    'org/mozilla/gecko/AppConstants.java',
     'org/mozilla/gecko/mozglue/GeckoLoader.java',
 ]
 mgjar.javac_flags += ['-Xlint:all']
@@ -411,7 +412,6 @@ gbjar.sources += [
     'TouchEventInterceptor.java',
     'updater/UpdateService.java',
     'updater/UpdateServiceHelper.java',
-    'VideoPlayer.java',
     'Webapp.java',
     'webapp/Allocator.java',
     'webapp/ApkResources.java',
@@ -457,7 +457,6 @@ gbjar.sources += [ thirdparty_source_dir + f for f in [
 ] ]
 android_package_dir = CONFIG['ANDROID_PACKAGE_NAME'].replace('.', '/')
 gbjar.generated_sources += [
-    'org/mozilla/gecko/AppConstants.java',
     'org/mozilla/gecko/SysInfo.java',
     'org/mozilla/gecko/widget/ThemedEditText.java',
     'org/mozilla/gecko/widget/ThemedImageButton.java',
