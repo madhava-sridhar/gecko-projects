@@ -8,6 +8,7 @@
 #define mozilla_dom_indexeddb_transactionthreadpool_h__
 
 #include "mozilla/Attributes.h"
+#include "nsAutoPtr.h"
 #include "nsClassHashtable.h"
 #include "nsCOMPtr.h"
 #include "nsHashKeys.h"
@@ -44,7 +45,7 @@ class TransactionThreadPool MOZ_FINAL
   nsClassHashtable<nsCStringHashKey, DatabaseTransactionInfo>
     mTransactionsInProgress;
 
-  nsTArray<DatabasesCompleteCallback> mCompleteCallbacks;
+  nsTArray<nsAutoPtr<DatabasesCompleteCallback>> mCompleteCallbacks;
 
 #ifdef DEBUG
   PRThread* mDEBUGOwningPRThread;
@@ -125,7 +126,7 @@ private:
                                     const nsTArray<nsString>& aObjectStoreNames,
                                     uint16_t aMode);
 
-  bool MaybeFireCallback(DatabasesCompleteCallback aCallback);
+  bool MaybeFireCallback(DatabasesCompleteCallback* aCallback);
 };
 
 class NS_NO_VTABLE TransactionThreadPool::FinishCallback

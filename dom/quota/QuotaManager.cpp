@@ -3571,7 +3571,7 @@ OriginClearRunnable::DeleteFiles(QuotaManager* aQuotaManager,
     if (NS_FAILED(file->Remove(true))) {
       // This should never fail if we've closed all storage connections
       // correctly...
-      NS_ERROR("Failed to remove directory!");
+      MOZ_CRASH("Failed to remove directory!");
     }
   }
 

@@ -539,11 +539,8 @@ class BackgroundCursorChild MOZ_FINAL
   IDBIndex* mIndex;
   IDBCursor* mCursor;
 
-  // This is only set while a request is in progress and we have not yet created
-  // a cursor.
+  // These are only set while a request is in progress.
   nsRefPtr<IDBRequest> mStrongRequest;
-
-  // This is only set while a request is in progress.
   nsRefPtr<IDBCursor> mStrongCursor;
 
   Direction mDirection;

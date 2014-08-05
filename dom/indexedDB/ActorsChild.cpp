@@ -1961,6 +1961,7 @@ BackgroundCursorChild::SendContinueInternal(const CursorRequestParams& aParams)
   MOZ_ASSERT(!mStrongCursor);
 
   // Make sure all our DOM objects stay alive.
+  mStrongRequest = mRequest;
   mStrongCursor = mCursor;
 
   MOZ_ASSERT(mRequest->ReadyState() == IDBRequestReadyState::Done);
@@ -2196,8 +2197,8 @@ BackgroundCursorChild::RecvResponse(const CursorResponse& aResponse)
   MOZ_ASSERT(aResponse.type() != CursorResponse::T__None);
   MOZ_ASSERT(mRequest);
   MOZ_ASSERT(mTransaction);
+  MOZ_ASSERT(mStrongRequest);
   MOZ_ASSERT_IF(mCursor, mStrongCursor);
-  MOZ_ASSERT_IF(!mCursor, mStrongRequest);
 
   nsRefPtr<IDBRequest> request;
   mStrongRequest.swap(request);

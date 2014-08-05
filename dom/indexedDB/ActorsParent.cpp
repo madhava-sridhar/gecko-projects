@@ -164,8 +164,15 @@ enum AppId {
 
 #ifdef DEBUG
 
-const int32_t kDEBUGThreadPriority = nsISupportsPriority::PRIORITY_NORMAL;
+const int32_t kDEBUGThreadPriority =
+  nsISupportsPriority::PRIORITY_NORMAL;
 const uint32_t kDEBUGThreadSleepMS = 0;
+
+StaticAutoPtr<Mutex> gDEBUGConnectionMutex;
+
+typedef nsBaseHashtableET<nsStringHashKey, nsrefcnt> DEBUGConnectionEntry;
+
+StaticAutoPtr<nsTHashtable<DEBUGConnectionEntry>> gDEBUGConnectionTable;
 
 #endif
 
@@ -2511,6 +2518,27 @@ GetDatabaseConnection(const nsAString& aDatabaseFilePath,
     return rv;
   }
 
+#ifdef DEBUG
+  {
+    MOZ_ASSERT(gDEBUGConnectionMutex);
+
+    MutexAutoLock lock(*gDEBUGConnectionMutex);
+
+    MOZ_ASSERT(gDEBUGConnectionTable);
+
+    DEBUGConnectionEntry* entry =
+      gDEBUGConnectionTable->GetEntry(aDatabaseFilePath);
+    if (entry) {
+      entry->mData++;
+    } else {
+      entry = gDEBUGConnectionTable->PutEntry(aDatabaseFilePath);
+      MOZ_ASSERT(entry);
+
+      entry->mData = 1;
+    }
+  }
+#endif // DEBUG
+
   connection.forget(aConnection);
   return NS_OK;
 }
@@ -2975,14 +3003,6 @@ public:
     AssertIsOnBackgroundThread();
 
     return mInvalidated;
-  }
-
-  void
-  ClearOfflineStorage()
-  {
-    AssertIsOnBackgroundThread();
-
-    mOfflineStorage = nullptr;
   }
 
 private:
@@ -5138,6 +5158,7 @@ class DatabaseOfflineStorage MOZ_FINAL
   const nsCString mId;
   nsCOMPtr<nsIEventTarget> mOwningThread;
   Atomic<uint32_t> mTransactionCount;
+  bool mClosed;
   bool mInvalidated;
 
   DebugOnly<bool> mRegisteredWithQuotaManager;
@@ -5153,7 +5174,8 @@ public:
                          nsIEventTarget* aOwningThread);
 
   static void
-  CloseOnOwningThread(already_AddRefed<DatabaseOfflineStorage> aOfflineStorage);
+  UnregisterOnOwningThread(
+                      already_AddRefed<DatabaseOfflineStorage> aOfflineStorage);
 
   void
   SetDatabase(Database* aDatabase)
@@ -5215,6 +5237,9 @@ public:
     mRegisteredWithQuotaManager = false;
   }
 
+  void
+  CloseOnOwningThread();
+
   NS_DECL_THREADSAFE_ISUPPORTS
 
 private:
@@ -5232,6 +5257,9 @@ private:
 
   void
   InvalidateOnOwningThread();
+
+  void
+  UnregisterOnMainThread();
 
   NS_DECL_NSIOFFLINESTORAGE
 };
@@ -5597,7 +5625,13 @@ Factory::Create(const OptionalWindowId& aOptionalWindowId)
 
       MOZ_ALWAYS_TRUE(NS_SUCCEEDED(thread->AddObserver(gDEBUGThreadSlower)));
     }
-#endif
+
+    MOZ_ASSERT(!gDEBUGConnectionMutex);
+    gDEBUGConnectionMutex = new Mutex("IndexedDB gDEBUGConnectionMutex");
+
+    MOZ_ASSERT(!gDEBUGConnectionTable);
+    gDEBUGConnectionTable = new nsTHashtable<DEBUGConnectionEntry>();
+#endif // DEBUG
   }
 
   nsRefPtr<Factory> actor = new Factory(aOptionalWindowId);
@@ -5647,7 +5681,54 @@ Factory::ActorDestroy(ActorDestroyReason aWhy)
 
       gDEBUGThreadSlower = nullptr;
     }
-#endif
+
+    nsAutoCString openDatabaseFilesWarning;
+
+    {
+      MOZ_ASSERT(gDEBUGConnectionMutex);
+
+      MutexAutoLock lock(*gDEBUGConnectionMutex);
+
+      MOZ_ASSERT(gDEBUGConnectionTable);
+
+      if (gDEBUGConnectionTable->Count()) {
+        openDatabaseFilesWarning.AssignLiteral("Connections to database files "
+                                               "exist past the last actor!\n");
+
+        class MOZ_STACK_CLASS Helper MOZ_FINAL
+        {
+        public:
+          static PLDHashOperator
+          Enumerate(DEBUGConnectionEntry* aEntry, void* aClosure)
+          {
+            MOZ_ASSERT(aEntry);
+
+            auto* warning = static_cast<nsAutoCString*>(aClosure);
+            MOZ_ASSERT(warning);
+
+            warning->AppendLiteral("  - ");
+            warning->Append(NS_ConvertUTF16toUTF8(aEntry->GetKey()));
+            warning->AppendLiteral(" [");
+            warning->AppendInt(aEntry->mData);
+            warning->AppendLiteral("]\n");
+
+            return PL_DHASH_NEXT;
+          }
+        };
+
+        gDEBUGConnectionTable->EnumerateEntries(&Helper::Enumerate,
+                                                &openDatabaseFilesWarning);
+      }
+
+      gDEBUGConnectionTable = nullptr;
+    }
+
+    gDEBUGConnectionMutex = nullptr;
+
+    if (!openDatabaseFilesWarning.IsEmpty()) {
+      NS_WARNING(openDatabaseFilesWarning.get());
+    }
+#endif // DEBUG
   }
 }
 
@@ -5926,6 +6007,11 @@ Database::UnregisterTransaction(TransactionBase* aTransaction)
 
   if (mOfflineStorage) {
     mOfflineStorage->NoteFinishedTransaction();
+
+    if (IsClosed()) {
+      DatabaseOfflineStorage::UnregisterOnOwningThread(
+        mOfflineStorage.forget());
+    }
   }
 }
 
@@ -5958,7 +6044,12 @@ Database::CloseInternal(DatabaseActorInfo* aActorInfo)
   mClosed = true;
 
   if (mOfflineStorage) {
-    DatabaseOfflineStorage::CloseOnOwningThread(mOfflineStorage.forget());
+    mOfflineStorage->CloseOnOwningThread();
+
+    if (!mTransactions.Count()) {
+      DatabaseOfflineStorage::UnregisterOnOwningThread(
+        mOfflineStorage.forget());
+    }
   }
 
   if (!aActorInfo) {
@@ -7368,6 +7459,34 @@ TransactionBase::ReleaseTransactionThreadObjects()
 
   mCachedStatements.Clear();
 
+#ifdef DEBUG
+  {
+    nsCOMPtr<nsIFile> databaseFile;
+    MOZ_ALWAYS_TRUE(NS_SUCCEEDED(
+      mConnection->GetDatabaseFile(getter_AddRefs(databaseFile))));
+    MOZ_ASSERT(databaseFile);
+
+    nsString databaseFilePath;
+    MOZ_ALWAYS_TRUE(NS_SUCCEEDED(databaseFile->GetPath(databaseFilePath)));
+
+    MOZ_ASSERT(gDEBUGConnectionMutex);
+
+    MutexAutoLock lock(*gDEBUGConnectionMutex);
+
+    MOZ_ASSERT(gDEBUGConnectionTable);
+
+    DEBUGConnectionEntry* entry =
+      gDEBUGConnectionTable->GetEntry(databaseFilePath);
+    MOZ_ASSERT(entry);
+
+    if (entry->mData > 1) {
+      entry->mData--;
+    } else {
+      gDEBUGConnectionTable->RemoveEntry(databaseFilePath);
+    }
+  }
+#endif // DEBUG
+
   MOZ_ALWAYS_TRUE(NS_SUCCEEDED(mConnection->Close()));
   mConnection = nullptr;
 }
@@ -7414,8 +7533,13 @@ bool
 NormalTransaction::SendCompleteNotification(nsresult aResult)
 {
   AssertIsOnBackgroundThread();
+  MOZ_ASSERT(!IsActorDestroyed());
 
-  return IsActorDestroyed() ? true : SendComplete(aResult);
+  if (NS_WARN_IF(!SendComplete(aResult))) {
+    return false;
+  }
+
+  return true;
 }
 
 void
@@ -7712,6 +7836,7 @@ VersionChangeTransaction::UpdateMetadata(nsresult aResult)
   MOZ_ASSERT(mOpenDatabaseOp);
   MOZ_ASSERT(mOpenDatabaseOp->mDatabase);
   MOZ_ASSERT(!mOpenDatabaseOp->mDatabaseId.IsEmpty());
+  MOZ_ASSERT(!mActorDestroyed);
 
   class MOZ_STACK_CLASS Helper MOZ_FINAL
   {
@@ -7757,7 +7882,10 @@ VersionChangeTransaction::UpdateMetadata(nsresult aResult)
   mOldMetadata.swap(oldMetadata);
 
   DatabaseActorInfo* info;
-  MOZ_ALWAYS_TRUE(gLiveDatabaseHashtable->Get(oldMetadata->mDatabaseId, &info));
+  if (!gLiveDatabaseHashtable->Get(oldMetadata->mDatabaseId, &info)) {
+    MOZ_ASSERT(mDatabase->IsInvalidated());
+    return;
+  }
 
   MOZ_ASSERT(!info->mLiveDatabases.IsEmpty());
 
@@ -7784,25 +7912,22 @@ VersionChangeTransaction::SendCompleteNotification(nsresult aResult)
 {
   AssertIsOnBackgroundThread();
   MOZ_ASSERT(mOpenDatabaseOp);
+  MOZ_ASSERT(!IsActorDestroyed());
 
   nsRefPtr<OpenDatabaseOp> openDatabaseOp;
   mOpenDatabaseOp.swap(openDatabaseOp);
 
-  if (!IsActorDestroyed()) {
-    if (NS_FAILED(aResult) && NS_SUCCEEDED(openDatabaseOp->mResultCode)) {
-      openDatabaseOp->mResultCode = aResult;
-    }
-
-    openDatabaseOp->mState = OpenDatabaseOp::State_SendingResults;
-
-    bool result = SendComplete(aResult);
-
-    MOZ_ALWAYS_TRUE(NS_SUCCEEDED(openDatabaseOp->Run()));
-
-    return result;
+  if (NS_FAILED(aResult) && NS_SUCCEEDED(openDatabaseOp->mResultCode)) {
+    openDatabaseOp->mResultCode = aResult;
   }
 
-  return true;
+  openDatabaseOp->mState = OpenDatabaseOp::State_SendingResults;
+
+  bool result = SendComplete(aResult);
+
+  MOZ_ALWAYS_TRUE(NS_SUCCEEDED(openDatabaseOp->Run()));
+
+  return result;
 }
 
 void
@@ -9221,6 +9346,7 @@ QuotaClient::WaitForStoragesToComplete(nsTArray<nsIOfflineStorage*>& aStorages,
       if (!backgroundThread) {
         backgroundThread =
           static_cast<DatabaseOfflineStorage*>(storage)->OwningThread();
+        MOZ_ASSERT(backgroundThread);
       }
     }
   }
@@ -9530,6 +9656,7 @@ DatabaseOfflineStorage::DatabaseOfflineStorage(
   , mId(aId)
   , mOwningThread(aOwningThread)
   , mTransactionCount(0)
+  , mClosed(false)
   , mInvalidated(false)
   , mRegisteredWithQuotaManager(false)
 {
@@ -9553,19 +9680,39 @@ DatabaseOfflineStorage::DatabaseOfflineStorage(
 
 // static
 void
-DatabaseOfflineStorage::CloseOnOwningThread(
+DatabaseOfflineStorage::UnregisterOnOwningThread(
                        already_AddRefed<DatabaseOfflineStorage> aOfflineStorage)
 {
   AssertIsOnBackgroundThread();
 
   nsRefPtr<DatabaseOfflineStorage> offlineStorage = Move(aOfflineStorage);
   MOZ_ASSERT(offlineStorage);
-
-  offlineStorage->SetDatabase(nullptr);
+  MOZ_ASSERT(offlineStorage->mClosed);
+  MOZ_ASSERT(!offlineStorage->mDatabase);
 
   nsCOMPtr<nsIRunnable> runnable =
     NS_NewRunnableMethod(offlineStorage.get(),
-                         &DatabaseOfflineStorage::CloseOnMainThread);
+                         &DatabaseOfflineStorage::UnregisterOnMainThread);
+  MOZ_ASSERT(runnable);
+
+  MOZ_ALWAYS_TRUE(NS_SUCCEEDED(NS_DispatchToMainThread(runnable)));
+}
+
+void
+DatabaseOfflineStorage::CloseOnOwningThread()
+{
+  AssertIsOnBackgroundThread();
+
+  if (mClosed) {
+    return;
+  }
+
+  mClosed = true;
+
+  SetDatabase(nullptr);
+
+  nsCOMPtr<nsIRunnable> runnable =
+    NS_NewRunnableMethod(this, &DatabaseOfflineStorage::CloseOnMainThread);
   MOZ_ASSERT(runnable);
 
   MOZ_ALWAYS_TRUE(NS_SUCCEEDED(NS_DispatchToMainThread(runnable)));
@@ -9576,20 +9723,12 @@ DatabaseOfflineStorage::CloseOnMainThread()
 {
   MOZ_ASSERT(NS_IsMainThread());
 
-  if (mStrongQuotaClient) {
-    mInvalidated = true;
+  mInvalidated = true;
 
-    QuotaManager* quotaManager = QuotaManager::Get();
-    MOZ_ASSERT(quotaManager);
+  QuotaManager* quotaManager = QuotaManager::Get();
+  MOZ_ASSERT(quotaManager);
 
-    quotaManager->OnStorageClosed(this);
-    quotaManager->UnregisterStorage(this);
-
-    NoteUnregisteredWithQuotaManager();
-
-    mStrongQuotaClient->NoteFinishedStorage(this);
-    mStrongQuotaClient = nullptr;
-  }
+  quotaManager->OnStorageClosed(this);
 }
 
 void
@@ -9608,12 +9747,9 @@ DatabaseOfflineStorage::InvalidateOnMainThread()
                          &DatabaseOfflineStorage::InvalidateOnOwningThread);
   MOZ_ASSERT(runnable);
 
-  nsCOMPtr<nsIEventTarget> owningThread;
-  mOwningThread.swap(owningThread);
+  nsCOMPtr<nsIEventTarget> owningThread = mOwningThread;
+  MOZ_ASSERT(owningThread);
 
-  // Call this now while we're guaranteed to have an extra reference in the
-  // runnable we just constructed. Otherwise we could die prematurely when
-  // calling QuotaManager::UnregisterStorage().
   CloseOnMainThread();
 
   MOZ_ALWAYS_TRUE(NS_SUCCEEDED(owningThread->Dispatch(runnable,
@@ -9630,8 +9766,28 @@ DatabaseOfflineStorage::InvalidateOnOwningThread()
   if (database) {
     SetDatabase(nullptr);
 
-    database->ClearOfflineStorage();
     database->Invalidate();
+  }
+}
+
+void
+DatabaseOfflineStorage::UnregisterOnMainThread()
+{
+  MOZ_ASSERT(NS_IsMainThread());
+  MOZ_ASSERT(mInvalidated);
+
+  if (mStrongQuotaClient) {
+    mOwningThread = nullptr;
+
+    QuotaManager* quotaManager = QuotaManager::Get();
+    MOZ_ASSERT(quotaManager);
+
+    quotaManager->UnregisterStorage(this);
+
+    NoteUnregisteredWithQuotaManager();
+
+    mStrongQuotaClient->NoteFinishedStorage(this);
+    mStrongQuotaClient = nullptr;
   }
 }
 
@@ -11445,7 +11601,7 @@ OpenDatabaseOp::SendResults()
     mVersionChangeTransaction = nullptr;
   }
 
-  if (!IsActorDestroyed()) {
+  if (!IsActorDestroyed() && (!mDatabase || !mDatabase->IsInvalidated())) {
     FactoryRequestResponse response;
 
     if (NS_SUCCEEDED(mResultCode)) {
@@ -11484,7 +11640,8 @@ OpenDatabaseOp::SendResults()
   }
 
   if (NS_FAILED(mResultCode) && mOfflineStorage) {
-    DatabaseOfflineStorage::CloseOnOwningThread(mOfflineStorage.forget());
+    mOfflineStorage->CloseOnOwningThread();
+    DatabaseOfflineStorage::UnregisterOnOwningThread(mOfflineStorage.forget());
   }
 
   FinishSendResults();
@@ -12745,7 +12902,9 @@ CommitOp::TransactionFinishedBeforeUnblock()
                  "CommitOp::TransactionFinishedBeforeUnblock",
                  js::ProfileEntry::Category::STORAGE);
 
-  mTransaction->UpdateMetadata(mResultCode);
+  if (!mActorDestroyed) {
+    mTransaction->UpdateMetadata(mResultCode);
+  }
 }
 
 void
@@ -12763,7 +12922,9 @@ CommitOp::TransactionFinishedAfterUnblock()
                     "IDBTransaction[%llu] MT Complete",
                     mTransaction->TransactionId(), mResultCode);
 
-  mTransaction->SendCompleteNotification(ClampResultCode(mResultCode));
+  if (!IsActorDestroyed()) {
+    mTransaction->SendCompleteNotification(ClampResultCode(mResultCode));
+  }
 
   mTransaction->ReleaseBackgroundThreadObjects();
   mTransaction = nullptr;
@@ -16564,5 +16725,53 @@ DEBUGThreadSlower::AfterProcessNextEvent(nsIThreadInternal* /* aThread */,
                     PR_SUCCESS);
   return NS_OK;
 }
+
+extern "C" {
+
+MOZ_EXPORT void
+DumpIndexedDBLiveDatabaseConnections(FILE* aFile)
+{
+  class MOZ_STACK_CLASS Helper MOZ_FINAL
+  {
+  public:
+    static PLDHashOperator
+    Enumerate(DEBUGConnectionEntry* aEntry, void* aClosure)
+    {
+      MOZ_ASSERT(aEntry);
+
+      auto* file = static_cast<FILE*>(aClosure);
+      MOZ_ASSERT(file);
+
+      fprintf_stderr(file,
+                     "  - %s [%llu]\n",
+                     NS_ConvertUTF16toUTF8(aEntry->GetKey()),
+                     aEntry->mData);
+      return PL_DHASH_NEXT;
+    }
+  };
+
+  if (!aFile) {
+    aFile = stderr;
+  }
+
+  // XXX This function doesn't do precise locking as it's assumed to only be
+  //     called from a debugger where other threads are appropriately paused.
+  if (!gDEBUGConnectionTable) {
+    fprintf_stderr(aFile,
+                   "Connection table has not been constructed or has already "
+                   "been destroyed.");
+  } else if (!gDEBUGConnectionTable->Count()) {
+    fprintf_stderr(aFile, "Connection table contains no entries.");
+  } else {
+    fprintf_stderr(aFile,
+                   "Connection table contains the following entries:\n");
+    gDEBUGConnectionTable->EnumerateEntries(&Helper::Enumerate, aFile);
+    fprintf_stderr(aFile, "[end of entries]\n");
+  }
+
+  fflush(aFile);
+}
+
+} // extern "C"
 
 #endif // DEBUG

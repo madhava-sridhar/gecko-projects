@@ -11,6 +11,7 @@
 #include "mozilla/ipc/BackgroundParent.h"
 #include "nsComponentManagerUtils.h"
 #include "nsIRunnable.h"
+#include "nsISupportsPriority.h"
 #include "nsIThreadPool.h"
 #include "nsThreadUtils.h"
 #include "nsServiceManagerUtils.h"
@@ -34,7 +35,18 @@ TransactionThreadPool* gThreadPool = nullptr;
 // Only touched on the PBackground thread.
 uint64_t gUniqueTransactionId = 0;
 
-#ifdef MOZ_ENABLE_PROFILER_SPS
+#if defined(DEBUG) || defined(MOZ_ENABLE_PROFILER_SPS)
+#define BUILD_THREADPOOL_LISTENER
+#endif
+
+#ifdef DEBUG
+
+const int32_t kDEBUGThreadPriority = nsISupportsPriority::PRIORITY_NORMAL;
+const uint32_t kDEBUGThreadSleepMS = 0;
+
+#endif // DEBUG
+
+#ifdef BUILD_THREADPOOL_LISTENER
 
 class TransactionThreadPoolListener MOZ_FINAL
   : public nsIThreadPoolListener
@@ -52,7 +64,7 @@ private:
   NS_DECL_NSITHREADPOOLLISTENER
 };
 
-#endif // MOZ_ENABLE_PROFILER_SPS
+#endif // BUILD_THREADPOOL_LISTENER
 
 } // anonymous namespace
 
@@ -144,6 +156,8 @@ struct TransactionThreadPool::DatabaseTransactionInfo MOZ_FINAL
 
 struct TransactionThreadPool::DatabasesCompleteCallback MOZ_FINAL
 {
+  friend class nsAutoPtr<DatabasesCompleteCallback>;
+
   nsTArray<nsCString> mDatabaseIds;
   nsCOMPtr<nsIRunnable> mCallback;
 
@@ -152,6 +166,7 @@ struct TransactionThreadPool::DatabasesCompleteCallback MOZ_FINAL
     MOZ_COUNT_CTOR(DatabasesCompleteCallback);
   }
 
+private:
   ~DatabasesCompleteCallback()
   {
     MOZ_COUNT_DTOR(DatabasesCompleteCallback);
@@ -363,7 +378,7 @@ TransactionThreadPool::Init()
     return rv;
   }
 
-#ifdef MOZ_ENABLE_PROFILER_SPS
+#ifdef BUILD_THREADPOOL_LISTENER
   nsCOMPtr<nsIThreadPoolListener> listener =
     new TransactionThreadPoolListener();
 
@@ -371,7 +386,11 @@ TransactionThreadPool::Init()
   if (NS_WARN_IF(NS_FAILED(rv))) {
     return rv;
   }
-#endif
+#endif // BUILD_THREADPOOL_LISTENER
+
+  NS_WARN_IF_FALSE(!kDEBUGThreadSleepMS,
+                   "TransactionThreadPool thread debugging enabled, sleeping "
+                   "after every event!");
 
   return NS_OK;
 }
@@ -395,7 +414,8 @@ TransactionThreadPool::Cleanup()
   if (!mCompleteCallbacks.IsEmpty()) {
     // Run all callbacks manually now.
     for (uint32_t index = 0; index < mCompleteCallbacks.Length(); index++) {
-      mCompleteCallbacks[index].mCallback->Run();
+      MOZ_ASSERT(mCompleteCallbacks[index]);
+      mCompleteCallbacks[index]->mCallback->Run();
     }
     mCompleteCallbacks.Clear();
 
@@ -473,8 +493,7 @@ TransactionThreadPool::FinishTransaction(
     while (index < mCompleteCallbacks.Length()) {
       if (MaybeFireCallback(mCompleteCallbacks[index])) {
         mCompleteCallbacks.RemoveElementAt(index);
-      }
-      else {
+      } else {
         index++;
       }
     }
@@ -659,13 +678,13 @@ TransactionThreadPool::WaitForDatabasesToComplete(
   NS_ASSERTION(!aDatabaseIds.IsEmpty(), "No databases to wait on!");
   NS_ASSERTION(aCallback, "Null pointer!");
 
-  DatabasesCompleteCallback* callback = mCompleteCallbacks.AppendElement();
-
+  nsAutoPtr<DatabasesCompleteCallback> callback =
+    new DatabasesCompleteCallback();
   callback->mCallback = aCallback;
   callback->mDatabaseIds.SwapElements(aDatabaseIds);
-
-  if (MaybeFireCallback(*callback)) {
-    mCompleteCallbacks.RemoveElementAt(mCompleteCallbacks.Length() - 1);
+  
+  if (!MaybeFireCallback(callback)) {
+    mCompleteCallbacks.AppendElement(callback.forget());
   }
 }
 
@@ -728,26 +747,29 @@ TransactionThreadPool::HasTransactionsForDatabase(const nsACString& aDatabaseId)
 }
 
 bool
-TransactionThreadPool::MaybeFireCallback(DatabasesCompleteCallback aCallback)
+TransactionThreadPool::MaybeFireCallback(DatabasesCompleteCallback* aCallback)
 {
   AssertIsOnOwningThread();
+  MOZ_ASSERT(aCallback);
+  MOZ_ASSERT(!aCallback->mDatabaseIds.IsEmpty());
+  MOZ_ASSERT(aCallback->mCallback);
 
   PROFILER_LABEL("IndexedDB",
                  "TransactionThreadPool::MaybeFireCallback",
                  js::ProfileEntry::Category::STORAGE);
 
-  for (uint32_t index = 0; index < aCallback.mDatabaseIds.Length(); index++) {
-    nsCString databaseId = aCallback.mDatabaseIds[index];
-    if (databaseId.IsEmpty()) {
-      MOZ_CRASH();
-    }
+  for (uint32_t count = aCallback->mDatabaseIds.Length(), index = 0;
+       index < count;
+       index++) {
+    const nsCString& databaseId = aCallback->mDatabaseIds[index];
+    MOZ_ASSERT(!databaseId.IsEmpty());
 
     if (mTransactionsInProgress.Get(databaseId, nullptr)) {
       return false;
     }
   }
 
-  aCallback.mCallback->Run();
+  aCallback->mCallback->Run();
   return true;
 }
 
@@ -845,6 +867,14 @@ TransactionThreadPool::TransactionQueue::Run()
 
     uint32_t count = queue.Length();
     for (uint32_t index = 0; index < count; index++) {
+#ifdef DEBUG
+      if (kDEBUGThreadSleepMS) {
+        MOZ_ALWAYS_TRUE(
+          PR_Sleep(PR_MillisecondsToInterval(kDEBUGThreadSleepMS)) ==
+            PR_SUCCESS);
+      }
+#endif // DEBUG
+
       nsCOMPtr<nsIRunnable>& runnable = queue[index];
       runnable->Run();
       runnable = nullptr;
@@ -920,7 +950,7 @@ FinishTransactionRunnable::Run()
   return NS_OK;
 }
 
-#ifdef MOZ_ENABLE_PROFILER_SPS
+#ifdef BUILD_THREADPOOL_LISTENER
 
 NS_IMPL_ISUPPORTS(TransactionThreadPoolListener, nsIThreadPoolListener)
 
@@ -928,8 +958,24 @@ NS_IMETHODIMP
 TransactionThreadPoolListener::OnThreadCreated()
 {
   MOZ_ASSERT(!NS_IsMainThread());
+
+#ifdef MOZ_ENABLE_PROFILER_SPS
   char aLocal;
   profiler_register_thread("IndexedDB Transaction", &aLocal);
+#endif // MOZ_ENABLE_PROFILER_SPS
+
+#ifdef DEBUG
+  if (kDEBUGThreadPriority != nsISupportsPriority::PRIORITY_NORMAL) {
+      NS_WARNING("TransactionThreadPool thread debugging enabled, priority has "
+                 "been modified!");
+      nsCOMPtr<nsISupportsPriority> thread =
+        do_QueryInterface(NS_GetCurrentThread());
+      MOZ_ASSERT(thread);
+
+      MOZ_ALWAYS_TRUE(NS_SUCCEEDED(thread->SetPriority(kDEBUGThreadPriority)));
+  }
+#endif // DEBUG
+
   return NS_OK;
 }
 
@@ -937,8 +983,12 @@ NS_IMETHODIMP
 TransactionThreadPoolListener::OnThreadShuttingDown()
 {
   MOZ_ASSERT(!NS_IsMainThread());
+
+#ifdef MOZ_ENABLE_PROFILER_SPS
   profiler_unregister_thread();
+#endif // MOZ_ENABLE_PROFILER_SPS
+
   return NS_OK;
 }
 
-#endif // MOZ_ENABLE_PROFILER_SPS
+#endif // BUILD_THREADPOOL_LISTENER
