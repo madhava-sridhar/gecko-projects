@@ -3012,7 +3012,10 @@ private:
   }
 
   bool
-  CloseInternal(DatabaseActorInfo* aActorInfo);
+  CloseInternal();
+
+  void
+  CleanupMetadata();
 
   // IPDL methods are only called by IPDL.
   virtual void
@@ -3835,6 +3838,7 @@ protected:
     : mContentParent(Move(aContentParent))
     , mCommonParams(aCommonParams)
     , mState(State_Initial)
+    , mStoragePrivilege(mozilla::dom::quota::Content)
     , mDeleting(aDeleting)
     , mBlockedQuotaManager(false)
     , mChromeWriteAccessAllowed(false)
@@ -5142,8 +5146,11 @@ class DatabaseOfflineStorage MOZ_FINAL
   const nsCString mId;
   nsCOMPtr<nsIEventTarget> mOwningThread;
   Atomic<uint32_t> mTransactionCount;
-  bool mClosed;
-  bool mInvalidated;
+
+  bool mClosedOnMainThread;
+  bool mClosedOnOwningThread;
+  bool mInvalidatedOnMainThread;
+  bool mInvalidatedOnOwningThread;
 
   DebugOnly<bool> mRegisteredWithQuotaManager;
 
@@ -5165,7 +5172,8 @@ public:
   SetDatabase(Database* aDatabase)
   {
     AssertIsOnBackgroundThread();
-    MOZ_ASSERT_IF(aDatabase, !mDatabase);
+    MOZ_ASSERT(aDatabase);
+    MOZ_ASSERT(!mDatabase);
 
     mDatabase = aDatabase;
   }
@@ -5210,15 +5218,6 @@ public:
     MOZ_ASSERT(!mRegisteredWithQuotaManager);
 
     mRegisteredWithQuotaManager = true;
-  }
-
-  void
-  NoteUnregisteredWithQuotaManager()
-  {
-    MOZ_ASSERT(NS_IsMainThread());
-    MOZ_ASSERT(mRegisteredWithQuotaManager);
-
-    mRegisteredWithQuotaManager = false;
   }
 
   void
@@ -5941,22 +5940,13 @@ Database::Invalidate()
     unused << SendInvalidate();
   }
 
-  Helper::AbortTransactions(mTransactions);
-
-  DatabaseActorInfo* info;
-  MOZ_ALWAYS_TRUE(gLiveDatabaseHashtable->Get(Id(), &info));
-
-  MOZ_ALWAYS_TRUE(CloseInternal(info));
-
-  MOZ_ALWAYS_TRUE(info->mLiveDatabases.RemoveElement(this));
-
-  if (info->mLiveDatabases.IsEmpty()) {
-    MOZ_ASSERT(!info->mWaitingFactoryOp ||
-               !info->mWaitingFactoryOp->HasBlockedDatabases());
-    gLiveDatabaseHashtable->Remove(Id());
+  if (!Helper::AbortTransactions(mTransactions)) {
+    NS_WARNING("Failed to abort all transactions!");
   }
 
-  mMetadata = nullptr;
+  MOZ_ALWAYS_TRUE(CloseInternal());
+
+  CleanupMetadata();
 }
 
 bool
@@ -5990,6 +5980,7 @@ Database::UnregisterTransaction(TransactionBase* aTransaction)
     if (IsClosed()) {
       DatabaseOfflineStorage::UnregisterOnOwningThread(
         mOfflineStorage.forget());
+      CleanupMetadata();
     }
   }
 }
@@ -6006,7 +5997,7 @@ Database::SetActorAlive()
 }
 
 bool
-Database::CloseInternal(DatabaseActorInfo* aActorInfo)
+Database::CloseInternal()
 {
   AssertIsOnBackgroundThread();
 
@@ -6022,26 +6013,45 @@ Database::CloseInternal(DatabaseActorInfo* aActorInfo)
 
   mClosed = true;
 
+  DatabaseActorInfo* info;
+  MOZ_ALWAYS_TRUE(gLiveDatabaseHashtable->Get(Id(), &info));
+
+  MOZ_ASSERT(info->mLiveDatabases.Contains(this));
+
+  if (info->mWaitingFactoryOp) {
+    info->mWaitingFactoryOp->NoteDatabaseClosed(this);
+  }
+
   if (mOfflineStorage) {
     mOfflineStorage->CloseOnOwningThread();
 
     if (!mTransactions.Count()) {
       DatabaseOfflineStorage::UnregisterOnOwningThread(
         mOfflineStorage.forget());
+      CleanupMetadata();
     }
   }
 
-  if (!aActorInfo) {
-    MOZ_ALWAYS_TRUE(gLiveDatabaseHashtable->Get(Id(), &aActorInfo));
-  }
-
-  MOZ_ASSERT(aActorInfo->mLiveDatabases.Contains(this));
-
-  if (aActorInfo->mWaitingFactoryOp) {
-    aActorInfo->mWaitingFactoryOp->NoteDatabaseClosed(this);
-  }
-
   return true;
+}
+
+void
+Database::CleanupMetadata()
+{
+  AssertIsOnBackgroundThread();
+
+  if (mMetadata) {
+    DatabaseActorInfo* info;
+    MOZ_ALWAYS_TRUE(gLiveDatabaseHashtable->Get(Id(), &info));
+    MOZ_ALWAYS_TRUE(info->mLiveDatabases.RemoveElement(this));
+
+    if (info->mLiveDatabases.IsEmpty()) {
+      MOZ_ASSERT(!info->mWaitingFactoryOp ||
+                 !info->mWaitingFactoryOp->HasBlockedDatabases());
+      gLiveDatabaseHashtable->Remove(Id());
+    }
+    mMetadata = nullptr;
+  }
 }
 
 void
@@ -6343,7 +6353,7 @@ Database::RecvClose()
 {
   AssertIsOnBackgroundThread();
 
-  if (NS_WARN_IF(!CloseInternal(nullptr))) {
+  if (NS_WARN_IF(!CloseInternal())) {
     ASSERT_UNLESS_FUZZING();
     return false;
   }
@@ -7862,7 +7872,7 @@ VersionChangeTransaction::UpdateMetadata(nsresult aResult)
 
   DatabaseActorInfo* info;
   if (!gLiveDatabaseHashtable->Get(oldMetadata->mDatabaseId, &info)) {
-    MOZ_ASSERT(mDatabase->IsInvalidated());
+    MOZ_ASSERT(!mDatabase->Metadata());
     return;
   }
 
@@ -9635,8 +9645,10 @@ DatabaseOfflineStorage::DatabaseOfflineStorage(
   , mId(aId)
   , mOwningThread(aOwningThread)
   , mTransactionCount(0)
-  , mClosed(false)
-  , mInvalidated(false)
+  , mClosedOnMainThread(false)
+  , mClosedOnOwningThread(false)
+  , mInvalidatedOnMainThread(false)
+  , mInvalidatedOnOwningThread(false)
   , mRegisteredWithQuotaManager(false)
 {
   MOZ_ASSERT(NS_IsMainThread());
@@ -9666,8 +9678,9 @@ DatabaseOfflineStorage::UnregisterOnOwningThread(
 
   nsRefPtr<DatabaseOfflineStorage> offlineStorage = Move(aOfflineStorage);
   MOZ_ASSERT(offlineStorage);
-  MOZ_ASSERT(offlineStorage->mClosed);
-  MOZ_ASSERT(!offlineStorage->mDatabase);
+  MOZ_ASSERT(offlineStorage->mClosedOnOwningThread);
+
+  offlineStorage->mDatabase = nullptr;
 
   nsCOMPtr<nsIRunnable> runnable =
     NS_NewRunnableMethod(offlineStorage.get(),
@@ -9682,13 +9695,11 @@ DatabaseOfflineStorage::CloseOnOwningThread()
 {
   AssertIsOnBackgroundThread();
 
-  if (mClosed) {
+  if (mClosedOnOwningThread) {
     return;
   }
 
-  mClosed = true;
-
-  SetDatabase(nullptr);
+  mClosedOnOwningThread = true;
 
   nsCOMPtr<nsIRunnable> runnable =
     NS_NewRunnableMethod(this, &DatabaseOfflineStorage::CloseOnMainThread);
@@ -9702,7 +9713,11 @@ DatabaseOfflineStorage::CloseOnMainThread()
 {
   MOZ_ASSERT(NS_IsMainThread());
 
-  mInvalidated = true;
+  if (mClosedOnMainThread) {
+    return;
+  }
+
+  mClosedOnMainThread = true;
 
   QuotaManager* quotaManager = QuotaManager::Get();
   MOZ_ASSERT(quotaManager);
@@ -9715,11 +9730,11 @@ DatabaseOfflineStorage::InvalidateOnMainThread()
 {
   MOZ_ASSERT(NS_IsMainThread());
 
-  if (mInvalidated) {
+  if (mInvalidatedOnMainThread) {
     return;
   }
 
-  mInvalidated = true;
+  mInvalidatedOnMainThread = true;
 
   nsCOMPtr<nsIRunnable> runnable =
     NS_NewRunnableMethod(this,
@@ -9740,10 +9755,14 @@ DatabaseOfflineStorage::InvalidateOnOwningThread()
 {
   AssertIsOnBackgroundThread();
 
-  nsRefPtr<Database> database = mDatabase;
+  if (mInvalidatedOnOwningThread) {
+    return;
+  }
 
-  if (database) {
-    SetDatabase(nullptr);
+  mInvalidatedOnOwningThread = true;
+
+  if (nsRefPtr<Database> database = mDatabase) {
+    mDatabase = nullptr;
 
     database->Invalidate();
   }
@@ -9753,21 +9772,20 @@ void
 DatabaseOfflineStorage::UnregisterOnMainThread()
 {
   MOZ_ASSERT(NS_IsMainThread());
-  MOZ_ASSERT(mInvalidated);
+  MOZ_ASSERT(mStrongQuotaClient);
+  MOZ_ASSERT(mOwningThread);
+  MOZ_ASSERT(mRegisteredWithQuotaManager);
 
-  if (mStrongQuotaClient) {
-    mOwningThread = nullptr;
+  QuotaManager* quotaManager = QuotaManager::Get();
+  MOZ_ASSERT(quotaManager);
 
-    QuotaManager* quotaManager = QuotaManager::Get();
-    MOZ_ASSERT(quotaManager);
+  quotaManager->UnregisterStorage(this);
+  mRegisteredWithQuotaManager = false;
 
-    quotaManager->UnregisterStorage(this);
+  mStrongQuotaClient->NoteFinishedStorage(this);
+  mStrongQuotaClient = nullptr;
 
-    NoteUnregisteredWithQuotaManager();
-
-    mStrongQuotaClient->NoteFinishedStorage(this);
-    mStrongQuotaClient = nullptr;
-  }
+  mOwningThread = nullptr;
 }
 
 NS_IMPL_ISUPPORTS(DatabaseOfflineStorage, nsIOfflineStorage)
@@ -9827,7 +9845,7 @@ DatabaseOfflineStorage::IsClosed()
 {
   MOZ_ASSERT(NS_IsMainThread());
 
-  return mInvalidated;
+  return mClosedOnMainThread;
 }
 
 NS_IMETHODIMP_(void)
@@ -11605,8 +11623,6 @@ OpenDatabaseOp::SendResults()
     FactoryRequestResponse response;
 
     if (NS_SUCCEEDED(mResultCode)) {
-      MOZ_ASSERT_IF(mDatabase, mDatabase->Metadata() == mMetadata);
-
       // If we just successfully completed a versionchange operation then we
       // need to update the version in our metadata.
       mMetadata->mCommonMetadata.version() = mRequestedVersion;
@@ -11629,7 +11645,6 @@ OpenDatabaseOp::SendResults()
       // If something failed then our metadata pointer is now bad. No one should
       // ever touch it again though so just null it out in DEBUG builds to make
       // sure we find such cases.
-      MOZ_ASSERT_IF(mDatabase, mDatabase->Metadata() != mMetadata);
       mMetadata = nullptr;
 #endif
       response = ClampResultCode(mResultCode);
@@ -11659,7 +11674,6 @@ OpenDatabaseOp::EnsureDatabaseActor()
   MOZ_ASSERT(!IsActorDestroyed());
 
   if (mDatabase) {
-    MOZ_ASSERT(mDatabase->Metadata() == mMetadata);
     return NS_OK;
   }
 
@@ -11711,8 +11725,6 @@ OpenDatabaseOp::EnsureDatabaseActorIsAlive()
   if (NS_WARN_IF(NS_FAILED(rv))) {
     return rv;
   }
-
-  MOZ_ASSERT(mDatabase->Metadata() == mMetadata);
 
   if (mDatabase->IsActorAlive()) {
     return NS_OK;
