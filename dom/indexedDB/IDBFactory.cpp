@@ -19,7 +19,9 @@
 #include "mozilla/ipc/PBackgroundChild.h"
 #include "nsGlobalWindow.h"
 #include "nsIIPCBackgroundChildCreateCallback.h"
+#include "nsILoadContext.h"
 #include "nsIPrincipal.h"
+#include "nsIWebNavigation.h"
 #include "ProfilerHelpers.h"
 #include "ReportInternalError.h"
 
@@ -117,6 +119,7 @@ IDBFactory::IDBFactory()
   , mBackgroundActor(nullptr)
   , mRootedOwningObject(false)
   , mBackgroundActorFailed(false)
+  , mPrivateBrowsingMode(false)
 {
 #ifdef DEBUG
   mOwningThread = PR_GetCurrentThread();
@@ -188,10 +191,16 @@ IDBFactory::CreateForWindow(nsPIDOMWindow* aWindow,
     return NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
   }
 
+  nsCOMPtr<nsIWebNavigation> webNav = do_GetInterface(aWindow);
+  nsCOMPtr<nsILoadContext> loadContext = do_QueryInterface(webNav);
+
+  bool privateBrowsingMode = loadContext && loadContext->UsePrivateBrowsing();
+
   nsRefPtr<IDBFactory> factory = new IDBFactory();
   factory->mPrincipalInfo = Move(principalInfo);
   factory->mWindow = aWindow;
   factory->mTabChild = TabChild::GetFrom(aWindow);
+  factory->mPrivateBrowsingMode = privateBrowsingMode;
 
   factory.forget(aFactory);
   return NS_OK;
@@ -310,8 +319,12 @@ IDBFactory::Open(const nsAString& aName,
                  uint64_t aVersion,
                  ErrorResult& aRv)
 {
-  return OpenInternal(nullptr, aName, Optional<uint64_t>(aVersion),
-                      Optional<StorageType>(), false, aRv);
+  return OpenInternal(/* aPrincipal */ nullptr,
+                      aName,
+                      Optional<uint64_t>(aVersion),
+                      Optional<StorageType>(),
+                      /* aDeleting */ false,
+                      aRv);
 }
 
 already_AddRefed<IDBOpenDBRequest>
@@ -319,8 +332,12 @@ IDBFactory::Open(const nsAString& aName,
                  const IDBOpenDBOptions& aOptions,
                  ErrorResult& aRv)
 {
-  return OpenInternal(nullptr, aName, aOptions.mVersion, aOptions.mStorage,
-                      false, aRv);
+  return OpenInternal(/* aPrincipal */ nullptr,
+                      aName,
+                      aOptions.mVersion,
+                      aOptions.mStorage,
+                      /* aDeleting */ false,
+                      aRv);
 }
 
 already_AddRefed<IDBOpenDBRequest>
@@ -328,8 +345,12 @@ IDBFactory::DeleteDatabase(const nsAString& aName,
                            const IDBOpenDBOptions& aOptions,
                            ErrorResult& aRv)
 {
-  return OpenInternal (nullptr, aName, Optional<uint64_t>(), aOptions.mStorage,
-                       true, aRv);
+  return OpenInternal(/* aPrincipal */ nullptr,
+                      aName,
+                      Optional<uint64_t>(),
+                      aOptions.mStorage,
+                      /* aDeleting */ true,
+                      aRv);
 }
 
 int16_t
@@ -358,8 +379,10 @@ IDBFactory::Cmp(JSContext* aCx, JS::Handle<JS::Value> aFirst,
 }
 
 already_AddRefed<IDBOpenDBRequest>
-IDBFactory::OpenForPrincipal(nsIPrincipal* aPrincipal, const nsAString& aName,
-                             uint64_t aVersion, ErrorResult& aRv)
+IDBFactory::OpenForPrincipal(nsIPrincipal* aPrincipal,
+                             const nsAString& aName,
+                             uint64_t aVersion,
+                             ErrorResult& aRv)
 {
   MOZ_ASSERT(aPrincipal);
   if (!NS_IsMainThread()) {
@@ -367,13 +390,19 @@ IDBFactory::OpenForPrincipal(nsIPrincipal* aPrincipal, const nsAString& aName,
   }
   MOZ_ASSERT(nsContentUtils::IsCallerChrome());
 
-  return OpenInternal(aPrincipal, aName, Optional<uint64_t>(aVersion),
-                      Optional<StorageType>(), false, aRv);
+  return OpenInternal(aPrincipal,
+                      aName,
+                      Optional<uint64_t>(aVersion),
+                      Optional<StorageType>(),
+                      /* aDeleting */ false,
+                      aRv);
 }
 
 already_AddRefed<IDBOpenDBRequest>
-IDBFactory::OpenForPrincipal(nsIPrincipal* aPrincipal, const nsAString& aName,
-                             const IDBOpenDBOptions& aOptions, ErrorResult& aRv)
+IDBFactory::OpenForPrincipal(nsIPrincipal* aPrincipal,
+                             const nsAString& aName,
+                             const IDBOpenDBOptions& aOptions,
+                             ErrorResult& aRv)
 {
   MOZ_ASSERT(aPrincipal);
   if (!NS_IsMainThread()) {
@@ -381,12 +410,17 @@ IDBFactory::OpenForPrincipal(nsIPrincipal* aPrincipal, const nsAString& aName,
   }
   MOZ_ASSERT(nsContentUtils::IsCallerChrome());
 
-  return OpenInternal(aPrincipal, aName, aOptions.mVersion, aOptions.mStorage,
-                      false, aRv);
+  return OpenInternal(aPrincipal,
+                      aName,
+                      aOptions.mVersion,
+                      aOptions.mStorage,
+                      /* aDeleting */ false,
+                      aRv);
 }
 
 already_AddRefed<IDBOpenDBRequest>
-IDBFactory::DeleteForPrincipal(nsIPrincipal* aPrincipal, const nsAString& aName,
+IDBFactory::DeleteForPrincipal(nsIPrincipal* aPrincipal,
+                               const nsAString& aName,
                                const IDBOpenDBOptions& aOptions,
                                ErrorResult& aRv)
 {
@@ -396,8 +430,12 @@ IDBFactory::DeleteForPrincipal(nsIPrincipal* aPrincipal, const nsAString& aName,
   }
   MOZ_ASSERT(nsContentUtils::IsCallerChrome());
 
-  return OpenInternal(aPrincipal, aName, Optional<uint64_t>(),
-                      aOptions.mStorage, true, aRv);
+  return OpenInternal(aPrincipal,
+                      aName,
+                      Optional<uint64_t>(),
+                      aOptions.mStorage,
+                      /* aDeleting */ true,
+                      aRv);
 }
 
 already_AddRefed<IDBOpenDBRequest>
@@ -409,8 +447,12 @@ IDBFactory::OpenInternal(nsIPrincipal* aPrincipal,
                          ErrorResult& aRv)
 {
   MOZ_ASSERT(mWindow || mOwningObject);
+  MOZ_ASSERT_IF(!mWindow, !mPrivateBrowsingMode);
 
-  PrincipalInfo principalInfo;
+  CommonFactoryRequestParams commonParams;
+  commonParams.privateBrowsingMode() = mPrivateBrowsingMode;
+
+  PrincipalInfo& principalInfo = commonParams.principalInfo();
 
   if (aPrincipal) {
     if (!NS_IsMainThread()) {
@@ -453,7 +495,7 @@ IDBFactory::OpenInternal(nsIPrincipal* aPrincipal,
     PERSISTENCE_TYPE_PERSISTENT :
     PersistenceTypeFromStorage(aStorageType, PERSISTENCE_TYPE_PERSISTENT);
 
-  DatabaseMetadata metadata;
+  DatabaseMetadata& metadata = commonParams.metadata();
   metadata.name() = aName;
   metadata.persistenceType() = persistenceType;
   metadata.persistenceTypeIsExplicit() = aStorageType.WasPassed();
@@ -461,10 +503,10 @@ IDBFactory::OpenInternal(nsIPrincipal* aPrincipal,
   FactoryRequestParams params;
   if (aDeleting) {
     metadata.version() = 0;
-    params = DeleteDatabaseRequestParams(metadata, principalInfo);
+    params = DeleteDatabaseRequestParams(commonParams);
   } else {
     metadata.version() = version;
-    params = OpenDatabaseRequestParams(metadata, principalInfo);
+    params = OpenDatabaseRequestParams(commonParams);
   }
 
   if (!mBackgroundActor) {
@@ -633,7 +675,7 @@ IDBFactory::InitiateRequest(IDBOpenDBRequest* aRequest,
   switch (aParams.type()) {
     case FactoryRequestParams::TDeleteDatabaseRequestParams: {
       const DatabaseMetadata& metadata =
-        aParams.get_DeleteDatabaseRequestParams().metadata();
+        aParams.get_DeleteDatabaseRequestParams().commonParams().metadata();
       deleting = true;
       requestedVersion = metadata.version();
       persistenceType = metadata.persistenceType();
@@ -642,7 +684,7 @@ IDBFactory::InitiateRequest(IDBOpenDBRequest* aRequest,
 
     case FactoryRequestParams::TOpenDatabaseRequestParams: {
       const DatabaseMetadata& metadata =
-        aParams.get_OpenDatabaseRequestParams().metadata();
+        aParams.get_OpenDatabaseRequestParams().commonParams().metadata();
       deleting = false;
       requestedVersion = metadata.version();
       persistenceType = metadata.persistenceType();

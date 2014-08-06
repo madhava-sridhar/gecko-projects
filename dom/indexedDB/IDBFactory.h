@@ -75,6 +75,7 @@ class IDBFactory MOZ_FINAL
 
   bool mRootedOwningObject;
   bool mBackgroundActorFailed;
+  bool mPrivateBrowsingMode;
 
 public:
   static nsresult

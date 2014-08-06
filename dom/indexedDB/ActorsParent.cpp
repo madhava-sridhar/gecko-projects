@@ -258,14 +258,12 @@ struct FullDatabaseMetadata
   int64_t mNextIndexId;
 
 public:
-  FullDatabaseMetadata()
-    : mNextObjectStoreId(0)
+  FullDatabaseMetadata(const DatabaseMetadata& aCommonMetadata)
+    : mCommonMetadata(aCommonMetadata)
+    , mNextObjectStoreId(0)
     , mNextIndexId(0)
   {
     AssertIsOnBackgroundThread();
-
-    mCommonMetadata.version() = 0;
-    mCommonMetadata.persistenceType() = PERSISTENCE_TYPE_TEMPORARY;
   }
 
   NS_INLINE_DECL_THREADSAFE_REFCOUNTING(FullDatabaseMetadata)
@@ -3805,15 +3803,12 @@ protected:
 
   nsTArray<Database*> mMaybeBlockedDatabases;
 
-  const PrincipalInfo mPrincipalInfo;
-  const nsString mName;
+  const CommonFactoryRequestParams mCommonParams;
   nsCString mGroup;
   nsCString mOrigin;
   nsCString mDatabaseId;
   State mState;
   StoragePrivilege mStoragePrivilege;
-  const PersistenceType mPersistenceType;
-  const bool mPersistenceTypeIsExplicit;
   const bool mDeleting;
   bool mBlockedQuotaManager;
   bool mChromeWriteAccessAllowed;
@@ -3835,17 +3830,11 @@ public:
 
 protected:
   FactoryOp(already_AddRefed<ContentParent> aContentParent,
-            const PrincipalInfo& aPrincipalInfo,
-            const nsAString& aName,
-            PersistenceType aPersistenceType,
-            bool aPersistenceTypeIsExplicit,
+            const CommonFactoryRequestParams& aCommonParams,
             bool aDeleting)
     : mContentParent(Move(aContentParent))
-    , mPrincipalInfo(aPrincipalInfo)
-    , mName(aName)
+    , mCommonParams(aCommonParams)
     , mState(State_Initial)
-    , mPersistenceType(aPersistenceType)
-    , mPersistenceTypeIsExplicit(aPersistenceTypeIsExplicit)
     , mDeleting(aDeleting)
     , mBlockedQuotaManager(false)
     , mChromeWriteAccessAllowed(false)
@@ -3945,7 +3934,7 @@ class OpenDatabaseOp MOZ_FINAL
 public:
   OpenDatabaseOp(already_AddRefed<ContentParent> aContentParent,
                  const OptionalWindowId& aOptionalWindowId,
-                 const OpenDatabaseRequestParams& aParams);
+                 const CommonFactoryRequestParams& aParams);
 
   bool
   IsOtherProcessActor() const
@@ -4051,13 +4040,8 @@ class DeleteDatabaseOp MOZ_FINAL
 
 public:
   DeleteDatabaseOp(already_AddRefed<ContentParent> aContentParent,
-                   const DeleteDatabaseRequestParams& aParams)
-    : FactoryOp(Move(aContentParent),
-                aParams.principalInfo(),
-                aParams.metadata().name(),
-                aParams.metadata().persistenceType(),
-                aParams.metadata().persistenceTypeIsExplicit(),
-                /* aDeleting */ true)
+                   const CommonFactoryRequestParams& aParams)
+    : FactoryOp(Move(aContentParent), aParams, /* aDeleting */ true)
     , mPreviousVersion(0)
   { }
 
@@ -5748,25 +5732,20 @@ Factory::AllocPBackgroundIDBFactoryRequestParent(
   AssertIsOnBackgroundThread();
   MOZ_ASSERT(aParams.type() != FactoryRequestParams::T__None);
 
-  // These two are common parameters for both open and delete calls that must be
-  // verified first.
-  const DatabaseMetadata* metadata;
-  const PrincipalInfo* principalInfo;
+  const CommonFactoryRequestParams* commonParams;
 
   switch (aParams.type()) {
     case FactoryRequestParams::TOpenDatabaseRequestParams: {
       const OpenDatabaseRequestParams& params =
          aParams.get_OpenDatabaseRequestParams();
-      metadata = &params.metadata();
-      principalInfo = &params.principalInfo();
+      commonParams = &params.commonParams();
       break;
     }
 
     case FactoryRequestParams::TDeleteDatabaseRequestParams: {
       const DeleteDatabaseRequestParams& params =
          aParams.get_DeleteDatabaseRequestParams();
-      metadata = &params.metadata();
-      principalInfo = &params.principalInfo();
+      commonParams = &params.commonParams();
       break;
     }
 
@@ -5775,16 +5754,17 @@ Factory::AllocPBackgroundIDBFactoryRequestParent(
       return nullptr;
   }
 
-  MOZ_ASSERT(metadata);
-  MOZ_ASSERT(principalInfo);
+  MOZ_ASSERT(commonParams);
 
-  if (NS_WARN_IF(metadata->persistenceType() != PERSISTENCE_TYPE_PERSISTENT &&
-                 metadata->persistenceType() != PERSISTENCE_TYPE_TEMPORARY)) {
+  const DatabaseMetadata& metadata = commonParams->metadata();
+  if (NS_WARN_IF(metadata.persistenceType() != PERSISTENCE_TYPE_PERSISTENT &&
+                 metadata.persistenceType() != PERSISTENCE_TYPE_TEMPORARY)) {
     ASSERT_UNLESS_FUZZING();
     return nullptr;
   }
 
-  if (NS_WARN_IF(principalInfo->type() == PrincipalInfo::TNullPrincipalInfo)) {
+  const PrincipalInfo& principalInfo = commonParams->principalInfo();
+  if (NS_WARN_IF(principalInfo.type() == PrincipalInfo::TNullPrincipalInfo)) {
     ASSERT_UNLESS_FUZZING();
     return nullptr;
   }
@@ -5796,10 +5776,9 @@ Factory::AllocPBackgroundIDBFactoryRequestParent(
   if (aParams.type() == FactoryRequestParams::TOpenDatabaseRequestParams) {
     actor = new OpenDatabaseOp(contentParent.forget(),
                                mOptionalWindowId,
-                               aParams.get_OpenDatabaseRequestParams());
+                               *commonParams);
   } else {
-    actor = new DeleteDatabaseOp(contentParent.forget(),
-                                 aParams.get_DeleteDatabaseRequestParams());
+    actor = new DeleteDatabaseOp(contentParent.forget(), *commonParams);
   }
 
   // Transfer ownership to IPDL.
@@ -7792,9 +7771,9 @@ VersionChangeTransaction::CopyDatabaseMetadata()
 
   // FullDatabaseMetadata contains two hash tables of pointers that we need to
   // duplicate so we can't just use the copy constructor.
-  nsRefPtr<FullDatabaseMetadata> newMetadata = new FullDatabaseMetadata();
+  nsRefPtr<FullDatabaseMetadata> newMetadata =
+    new FullDatabaseMetadata(origMetadata->mCommonMetadata);
 
-  newMetadata->mCommonMetadata = origMetadata->mCommonMetadata;
   newMetadata->mDatabaseId = origMetadata->mDatabaseId;
   newMetadata->mFilePath = origMetadata->mFilePath;
   newMetadata->mNextObjectStoreId = origMetadata->mNextObjectStoreId;
@@ -10302,7 +10281,12 @@ FactoryOp::Open()
     return NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
   }
 
-  QuotaManager::GetStorageId(mPersistenceType, mOrigin, Client::IDB, mName,
+  const DatabaseMetadata& metadata = mCommonParams.metadata();
+
+  QuotaManager::GetStorageId(metadata.persistenceType(),
+                             mOrigin,
+                             Client::IDB,
+                             metadata.name(),
                              mDatabaseId);
 
   if (permission == PermissionRequestBase::kPermissionPrompt) {
@@ -10327,9 +10311,11 @@ FactoryOp::ChallengePermission()
 {
   AssertIsOnOwningThread();
   MOZ_ASSERT(mState == State_PermissionChallenge);
-  MOZ_ASSERT(mPrincipalInfo.type() == PrincipalInfo::TContentPrincipalInfo);
 
-  if (NS_WARN_IF(!SendPermissionChallenge(mPrincipalInfo))) {
+  const PrincipalInfo& principalInfo = mCommonParams.principalInfo();
+  MOZ_ASSERT(principalInfo.type() == PrincipalInfo::TContentPrincipalInfo);
+
+  if (NS_WARN_IF(!SendPermissionChallenge(principalInfo))) {
     return NS_ERROR_FAILURE;
   }
 
@@ -10341,7 +10327,8 @@ FactoryOp::RetryCheckPermission()
 {
   MOZ_ASSERT(NS_IsMainThread());
   MOZ_ASSERT(mState == State_PermissionRetry);
-  MOZ_ASSERT(mPrincipalInfo.type() == PrincipalInfo::TContentPrincipalInfo);
+  MOZ_ASSERT(mCommonParams.principalInfo().type() ==
+               PrincipalInfo::TContentPrincipalInfo);
 
   // Swap this to the stack now to ensure that we release it on this thread.
   nsRefPtr<ContentParent> contentParent;
@@ -10432,10 +10419,13 @@ FactoryOp::UnblockQuotaManager()
   MOZ_ASSERT(NS_IsMainThread());
   MOZ_ASSERT(mState == State_UnblockingQuotaManager);
 
+  Nullable<PersistenceType> persistenceType(
+    const_cast<PersistenceType&>(mCommonParams.metadata().persistenceType()));
+
   if (QuotaManager* quotaManager = QuotaManager::Get()) {
     quotaManager->
       AllowNextSynchronizedOp(OriginOrPatternString::FromOrigin(mOrigin),
-                              Nullable<PersistenceType>(mPersistenceType),
+                              persistenceType,
                               mDatabaseId);
   } else {
     NS_WARNING("QuotaManager went away before we could unblock it!");
@@ -10450,7 +10440,6 @@ FactoryOp::CheckPermission(ContentParent* aContentParent,
 {
   MOZ_ASSERT(NS_IsMainThread());
   MOZ_ASSERT(mState == State_Initial || mState == State_PermissionRetry);
-  MOZ_ASSERT(mPrincipalInfo.type() != PrincipalInfo::TNullPrincipalInfo);
 
   if (NS_WARN_IF(!Preferences::GetBool(kPrefIndexedDBEnabled, false))) {
     if (aContentParent) {
@@ -10461,7 +10450,15 @@ FactoryOp::CheckPermission(ContentParent* aContentParent,
     return NS_ERROR_DOM_INDEXEDDB_NOT_ALLOWED_ERR;
   }
 
-  if (mPrincipalInfo.type() == PrincipalInfo::TSystemPrincipalInfo) {
+  if (NS_WARN_IF(mCommonParams.privateBrowsingMode())) {
+    // XXX This is only temporary.
+    return NS_ERROR_DOM_INDEXEDDB_NOT_ALLOWED_ERR;
+  }
+
+  const PrincipalInfo& principalInfo = mCommonParams.principalInfo();
+  MOZ_ASSERT(principalInfo.type() != PrincipalInfo::TNullPrincipalInfo);
+
+  if (principalInfo.type() == PrincipalInfo::TSystemPrincipalInfo) {
     MOZ_ASSERT(mState == State_Initial);
 
     if (aContentParent) {
@@ -10469,7 +10466,7 @@ FactoryOp::CheckPermission(ContentParent* aContentParent,
       // is accessing.
       NS_NAMED_LITERAL_CSTRING(permissionStringBase,
                                kPermissionStringChromeBase);
-      NS_ConvertUTF16toUTF8 databaseName(mName);
+      NS_ConvertUTF16toUTF8 databaseName(mCommonParams.metadata().name());
       NS_NAMED_LITERAL_CSTRING(readSuffix, kPermissionStringChromeReadSuffix);
       NS_NAMED_LITERAL_CSTRING(writeSuffix, kPermissionStringChromeWriteSuffix);
 
@@ -10519,22 +10516,24 @@ FactoryOp::CheckPermission(ContentParent* aContentParent,
     return NS_OK;
   }
 
-  MOZ_ASSERT(mPrincipalInfo.type() == PrincipalInfo::TContentPrincipalInfo);
+  MOZ_ASSERT(principalInfo.type() == PrincipalInfo::TContentPrincipalInfo);
 
   nsresult rv;
   nsCOMPtr<nsIPrincipal> principal =
-    PrincipalInfoToPrincipal(mPrincipalInfo, &rv);
+    PrincipalInfoToPrincipal(principalInfo, &rv);
   if (NS_WARN_IF(NS_FAILED(rv))) {
     return rv;
   }
 
   PermissionRequestBase::PermissionValue permission;
 
-  if (mPersistenceType == PERSISTENCE_TYPE_TEMPORARY) {
+  if (mCommonParams.metadata().persistenceType() ==
+        PERSISTENCE_TYPE_TEMPORARY) {
     // Temporary storage doesn't need to check the permission.
     permission = PermissionRequestBase::kPermissionAllowed;
   } else {
-    MOZ_ASSERT(mPersistenceType == PERSISTENCE_TYPE_PERSISTENT);
+    MOZ_ASSERT(mCommonParams.metadata().persistenceType() ==
+                 PERSISTENCE_TYPE_PERSISTENT);
 
     if (aContentParent) {
       if (NS_WARN_IF(!AssertAppPrincipal(aContentParent, principal))) {
@@ -10670,10 +10669,12 @@ FactoryOp::FinishOpen()
   MOZ_ASSERT(!mBlockedQuotaManager);
   MOZ_ASSERT(!mContentParent);
 
+  PersistenceType persistenceType = mCommonParams.metadata().persistenceType();
+
   // XXX This is temporary, but we don't currently support the explicit
   //     'persistent' storage type.
-  if (mPersistenceType == PERSISTENCE_TYPE_PERSISTENT &&
-      mPersistenceTypeIsExplicit) {
+  if (persistenceType == PERSISTENCE_TYPE_PERSISTENT &&
+      mCommonParams.metadata().persistenceTypeIsExplicit()) {
     IDB_REPORT_INTERNAL_ERR();
     return NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
   }
@@ -10687,7 +10688,7 @@ FactoryOp::FinishOpen()
   nsresult rv =
     quotaManager->
       WaitForOpenAllowed(OriginOrPatternString::FromOrigin(mOrigin),
-                         Nullable<PersistenceType>(mPersistenceType),
+                         Nullable<PersistenceType>(persistenceType),
                          mDatabaseId,
                          this);
   if (NS_WARN_IF(NS_FAILED(rv))) {
@@ -10783,22 +10784,15 @@ FactoryOp::RecvPermissionRetry()
 
 OpenDatabaseOp::OpenDatabaseOp(already_AddRefed<ContentParent> aContentParent,
                                const OptionalWindowId& aOptionalWindowId,
-                               const OpenDatabaseRequestParams& aParams)
-  : FactoryOp(Move(aContentParent),
-              aParams.principalInfo(),
-              aParams.metadata().name(),
-              aParams.metadata().persistenceType(),
-              aParams.metadata().persistenceTypeIsExplicit(),
-              /* aDeleting */ false)
+                               const CommonFactoryRequestParams& aParams)
+  : FactoryOp(Move(aContentParent), aParams, /* aDeleting */ false)
   , mOptionalWindowId(aOptionalWindowId)
-  , mMetadata(new FullDatabaseMetadata())
+  , mMetadata(new FullDatabaseMetadata(aParams.metadata()))
   , mRequestedVersion(aParams.metadata().version())
   , mWasBlocked(false)
 {
   MOZ_ASSERT_IF(mContentParent,
                 mOptionalWindowId.type() == OptionalWindowId::Tvoid_t);
-
-  mMetadata->mCommonMetadata = aParams.metadata();
 
   auto& optionalContentParentId =
     const_cast<OptionalWindowId&>(mOptionalContentParentId);
@@ -10837,7 +10831,7 @@ OpenDatabaseOp::QuotaManagerOpen()
                                mGroup,
                                mOrigin,
                                mDatabaseId,
-                               mPersistenceType,
+                               mCommonParams.metadata().persistenceType(),
                                mOwningThread);
 
   if (NS_WARN_IF(!quotaManager->RegisterStorage(offlineStorage))) {
@@ -10875,13 +10869,17 @@ OpenDatabaseOp::DoDatabaseWork()
     return NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
   }
 
+  const nsString& databaseName = mCommonParams.metadata().name();
+  PersistenceType persistenceType = mCommonParams.metadata().persistenceType();
+
   QuotaManager* quotaManager = QuotaManager::Get();
   MOZ_ASSERT(quotaManager);
 
   nsCOMPtr<nsIFile> dbDirectory;
 
   nsresult rv =
-    quotaManager->EnsureOriginIsInitialized(mPersistenceType, mGroup,
+    quotaManager->EnsureOriginIsInitialized(persistenceType,
+                                            mGroup,
                                             mOrigin,
                                             mStoragePrivilege != Chrome,
                                             getter_AddRefs(dbDirectory));
@@ -10915,7 +10913,7 @@ OpenDatabaseOp::DoDatabaseWork()
 #endif
 
   nsAutoString filename;
-  GetDatabaseFilename(mName, filename);
+  GetDatabaseFilename(databaseName, filename);
 
   nsCOMPtr<nsIFile> dbFile;
   rv = dbDirectory->Clone(getter_AddRefs(dbFile));
@@ -10947,8 +10945,8 @@ OpenDatabaseOp::DoDatabaseWork()
   nsCOMPtr<mozIStorageConnection> connection;
   rv = CreateDatabaseConnection(dbFile,
                                 fmDirectory,
-                                mName,
-                                mPersistenceType,
+                                databaseName,
+                                persistenceType,
                                 mGroup,
                                 mOrigin,
                                 getter_AddRefs(connection));
@@ -10992,11 +10990,13 @@ OpenDatabaseOp::DoDatabaseWork()
   MOZ_ASSERT(mgr);
 
   nsRefPtr<FileManager> fileManager =
-    mgr->GetFileManager(mPersistenceType, mOrigin, mName);
+    mgr->GetFileManager(persistenceType, mOrigin, databaseName);
   if (!fileManager) {
-    fileManager = new FileManager(mPersistenceType, mGroup, mOrigin,
+    fileManager = new FileManager(persistenceType,
+                                  mGroup,
+                                  mOrigin,
                                   mStoragePrivilege,
-                                  mMetadata->mCommonMetadata.name());
+                                  databaseName);
 
     rv = fileManager->Init(fmDirectory, connection);
     if (NS_WARN_IF(NS_FAILED(rv))) {
@@ -11058,7 +11058,7 @@ OpenDatabaseOp::LoadDatabaseInformation(mozIStorageConnection* aConnection)
     return rv;
   }
 
-  if (NS_WARN_IF(mMetadata->mCommonMetadata.name() != databaseName)) {
+  if (NS_WARN_IF(mCommonParams.metadata().name() != databaseName)) {
     return NS_ERROR_FILE_CORRUPTED;
   }
 
@@ -11678,7 +11678,7 @@ OpenDatabaseOp::EnsureDatabaseActor()
   auto factory = static_cast<Factory*>(Manager());
 
   mDatabase = new Database(factory,
-                           mPrincipalInfo,
+                           mCommonParams.principalInfo(),
                            mGroup,
                            mOrigin,
                            mMetadata,
@@ -12081,20 +12081,21 @@ DeleteDatabaseOp::LoadPreviousVersion(nsIFile* aDatabaseFile)
       "SELECT name "
       "FROM database"
     ), getter_AddRefs(stmt));
-    NS_WARN_IF(NS_FAILED(rv));
+    NS_WARN_IF_FALSE(NS_SUCCEEDED(rv), "CreateStatement failed!");
 
     if (NS_SUCCEEDED(rv)) {
       bool hasResult;
       rv = stmt->ExecuteStep(&hasResult);
-      NS_WARN_IF(NS_FAILED(rv));
+      NS_WARN_IF_FALSE(NS_SUCCEEDED(rv), "ExecuteStep failed!");
 
       if (NS_SUCCEEDED(rv)) {
         nsString databaseName;
         rv = stmt->GetString(0, databaseName);
-        NS_WARN_IF(NS_FAILED(rv));
+        NS_WARN_IF_FALSE(NS_SUCCEEDED(rv), "GetString failed!");
 
         if (NS_SUCCEEDED(rv)) {
-          NS_WARN_IF(databaseName != mName);
+          NS_WARN_IF_FALSE(mCommonParams.metadata().name() == databaseName,
+                           "Database names don't match!");
         }
       }
     }
@@ -12162,11 +12163,14 @@ DeleteDatabaseOp::DoDatabaseWork()
     return NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
   }
 
+  const nsString& databaseName = mCommonParams.metadata().name();
+  PersistenceType persistenceType = mCommonParams.metadata().persistenceType();
+
   QuotaManager* quotaManager = QuotaManager::Get();
   MOZ_ASSERT(quotaManager);
 
   nsCOMPtr<nsIFile> directory;
-  nsresult rv = quotaManager->GetDirectoryForOrigin(mPersistenceType,
+  nsresult rv = quotaManager->GetDirectoryForOrigin(persistenceType,
                                                     mOrigin,
                                                     getter_AddRefs(directory));
   if (NS_WARN_IF(NS_FAILED(rv))) {
@@ -12184,7 +12188,7 @@ DeleteDatabaseOp::DoDatabaseWork()
   }
 
   nsAutoString filename;
-  GetDatabaseFilename(mName, filename);
+  GetDatabaseFilename(databaseName, filename);
 
   mDatabaseFilenameBase = filename;
 
@@ -12447,6 +12451,11 @@ VersionChangeOp::RunOnIOThread()
     return rv;
   }
 
+  const nsString& databaseName =
+    mDeleteDatabaseOp->mCommonParams.metadata().name();
+  PersistenceType persistenceType =
+    mDeleteDatabaseOp->mCommonParams.metadata().persistenceType();
+
   QuotaManager* quotaManager = QuotaManager::Get();
   MOZ_ASSERT(quotaManager);
 
@@ -12466,7 +12475,7 @@ VersionChangeOp::RunOnIOThread()
     }
 
     if (mDeleteDatabaseOp->mStoragePrivilege != Chrome) {
-      quotaManager->DecreaseUsageForOrigin(mDeleteDatabaseOp->mPersistenceType,
+      quotaManager->DecreaseUsageForOrigin(persistenceType,
                                            mDeleteDatabaseOp->mGroup,
                                            mDeleteDatabaseOp->mOrigin,
                                            fileSize);
@@ -12540,7 +12549,7 @@ VersionChangeOp::RunOnIOThread()
     }
 
     if (mDeleteDatabaseOp->mStoragePrivilege != Chrome) {
-      quotaManager->DecreaseUsageForOrigin(mDeleteDatabaseOp->mPersistenceType,
+      quotaManager->DecreaseUsageForOrigin(persistenceType,
                                            mDeleteDatabaseOp->mGroup,
                                            mDeleteDatabaseOp->mOrigin,
                                            usage);
@@ -12550,9 +12559,9 @@ VersionChangeOp::RunOnIOThread()
   IndexedDatabaseManager* mgr = IndexedDatabaseManager::Get();
   MOZ_ASSERT(mgr);
 
-  mgr->InvalidateFileManager(mDeleteDatabaseOp->mPersistenceType,
+  mgr->InvalidateFileManager(persistenceType,
                              mDeleteDatabaseOp->mOrigin,
-                             mDeleteDatabaseOp->mName);
+                             databaseName);
 
   rv = mOwningThread->Dispatch(this, NS_DISPATCH_NORMAL);
   if (NS_WARN_IF(NS_FAILED(rv))) {
