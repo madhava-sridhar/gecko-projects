@@ -521,6 +521,7 @@ ConvertActorsToBlobs(IDBDatabase* aDatabase,
 
   MOZ_ASSERT_IF(IndexedDatabaseManager::IsMainProcess(),
                 blobs.Length() == fileInfos.Length());
+  MOZ_ASSERT_IF(!IndexedDatabaseManager::IsMainProcess(), fileInfos.IsEmpty());
 
   if (!blobs.IsEmpty()) {
     const uint32_t count = blobs.Length();
@@ -529,16 +530,16 @@ ConvertActorsToBlobs(IDBDatabase* aDatabase,
     for (uint32_t index = 0; index < count; index++) {
       BlobChild* actor = static_cast<BlobChild*>(blobs[index]);
 
-      MOZ_ASSERT_IF(IndexedDatabaseManager::IsMainProcess(), fileInfos[index]);
-
       nsCOMPtr<nsIDOMBlob> blob = actor->GetBlob();
       MOZ_ASSERT(blob);
 
-      nsRefPtr<FileInfo> fileInfo =
-        dont_AddRef(reinterpret_cast<FileInfo*>(fileInfos[index]));
+      nsRefPtr<FileInfo> fileInfo;
+      if (!fileInfos.IsEmpty()) {
+        fileInfo = dont_AddRef(reinterpret_cast<FileInfo*>(fileInfos[index]));
 
-      if (fileInfo) {
+        MOZ_ASSERT(fileInfo);
         MOZ_ASSERT(fileInfo->Id() > 0);
+
         blob->AddFileInfo(fileInfo);
       }
 

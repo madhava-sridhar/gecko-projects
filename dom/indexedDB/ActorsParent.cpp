@@ -10553,6 +10553,7 @@ FactoryOp::CheckPermission(ContentParent* aContentParent,
     MOZ_ASSERT(mCommonParams.metadata().persistenceType() ==
                  PERSISTENCE_TYPE_PERSISTENT);
 
+#ifdef MOZ_CHILD_PERMISSIONS
     if (aContentParent) {
       if (NS_WARN_IF(!AssertAppPrincipal(aContentParent, principal))) {
         IDB_REPORT_INTERNAL_ERR();
@@ -10564,7 +10565,9 @@ FactoryOp::CheckPermission(ContentParent* aContentParent,
 
       permission =
         PermissionRequestBase::PermissionValueForIntPermission(intPermission);
-    } else {
+    } else
+#endif // MOZ_CHILD_PERMISSIONS
+    {
       rv = PermissionRequestBase::GetCurrentPermission(principal, &permission);
       if (NS_WARN_IF(NS_FAILED(rv))) {
         return rv;

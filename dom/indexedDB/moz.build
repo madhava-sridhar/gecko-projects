@@ -6,6 +6,17 @@
 
 TEST_DIRS += ['test/extensions']
 
+MOCHITEST_MANIFESTS += ['test/mochitest.ini']
+
+BROWSER_CHROME_MANIFESTS += ['test/browser.ini']
+
+MOCHITEST_CHROME_MANIFESTS += ['test/chrome.ini']
+
+XPCSHELL_TESTS_MANIFESTS += [
+    'test/unit/xpcshell-child-process.ini',
+    'test/unit/xpcshell-parent-process.ini'
+]
+
 EXPORTS.mozilla.dom.indexedDB += [
     'ActorsParent.h',
     'DatabaseInfo.h',
@@ -73,12 +84,10 @@ IPDL_SOURCES += [
     'PIndexedDBPermissionRequest.ipdl',
 ]
 
-# Don't treat warnings as errors for now.
-FAIL_ON_WARNINGS = False
-
 include('/ipc/chromium/chromium-config.mozbuild')
 
 FINAL_LIBRARY = 'xul'
+
 LOCAL_INCLUDES += [
     '/caps/include',
     '/content/base/src',
@@ -89,17 +98,3 @@ LOCAL_INCLUDES += [
     '/ipc/glue',
     '/xpcom/build',
 ]
-MOCHITEST_MANIFESTS += [
-    'test/mochitest.ini',
-    'test/unit/mochitest.ini',
-]
-
-BROWSER_CHROME_MANIFESTS += ['test/browser.ini']
-
-MOCHITEST_CHROME_MANIFESTS += ['test/chrome.ini']
-
-XPCSHELL_TESTS_MANIFESTS += [
-    'test/unit/xpcshell-child-process.ini',
-    'test/unit/xpcshell-parent-process.ini'
-]
-
