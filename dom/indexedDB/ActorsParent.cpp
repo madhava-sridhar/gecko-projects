@@ -3149,6 +3149,7 @@ protected:
   Atomic<bool> mActorDestroyed;
   Mode mMode;
   bool mCommittedOrAborted;
+  bool mExpectRacingCommitOrAbort;
 
   DebugOnly<PRThread*> mTransactionThread;
   DebugOnly<uint32_t> mSavepointCount;
@@ -3190,7 +3191,7 @@ public:
   EnsureConnection();
 
   void
-  Abort(nsresult aResultCode);
+  Abort(nsresult aResultCode, bool aExpectRacingCommitOrAbort);
 
   mozIStorageConnection*
   Connection() const
@@ -5902,7 +5903,8 @@ Database::Invalidate()
         nsRefPtr<TransactionBase> transaction = transactions[index].forget();
         MOZ_ASSERT(transaction);
 
-        transaction->Abort(NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
+        transaction->Abort(NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR,
+                           /* aExpectRacingCommitOrAbort */ true);
       }
 
       if (count) {
@@ -6258,7 +6260,8 @@ Database::RecvPBackgroundIDBTransactionConstructor(
   TransactionThreadPool* threadPool = TransactionThreadPool::GetOrCreate();
   if (!threadPool) {
     IDB_REPORT_INTERNAL_ERR();
-    transaction->Abort(NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
+    transaction->Abort(NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR,
+                       /* aExpectRacingCommitOrAbort */ false);
     return true;
   }
 
@@ -6269,13 +6272,15 @@ Database::RecvPBackgroundIDBTransactionConstructor(
                                      nullptr);
   if (NS_WARN_IF(NS_FAILED(rv))) {
     IDB_REPORT_INTERNAL_ERR();
-    transaction->Abort(NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
+    transaction->Abort(NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR,
+                       /* aExpectRacingCommitOrAbort */ false);
     return true;
   }
 
   if (NS_WARN_IF(!RegisterTransaction(transaction))) {
     IDB_REPORT_INTERNAL_ERR();
-    transaction->Abort(NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
+    transaction->Abort(NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR,
+                       /* aExpectRacingCommitOrAbort */ false);
     return true;
   }
 
@@ -6415,6 +6420,7 @@ TransactionBase::TransactionBase(Database* aDatabase,
   , mActorDestroyed(false)
   , mMode(aMode)
   , mCommittedOrAborted(false)
+  , mExpectRacingCommitOrAbort(false)
   , mTransactionThread(nullptr)
   , mSavepointCount(0)
 {
@@ -6490,12 +6496,15 @@ TransactionBase::EnsureConnection()
 }
 
 void
-TransactionBase::Abort(nsresult aResultCode)
+TransactionBase::Abort(nsresult aResultCode, bool aExpectRacingCommitOrAbort)
 {
   AssertIsOnBackgroundThread();
   MOZ_ASSERT(NS_FAILED(aResultCode));
+  MOZ_ASSERT(!mExpectRacingCommitOrAbort);
 
   unused << CommitOrAbort(aResultCode);
+
+  mExpectRacingCommitOrAbort = aExpectRacingCommitOrAbort;
 }
 
 bool
@@ -7555,7 +7564,7 @@ NormalTransaction::RecvCommit()
 {
   AssertIsOnBackgroundThread();
 
-  if (NS_WARN_IF(!CommitOrAbort(NS_OK) && !mDatabase->IsInvalidated())) {
+  if (NS_WARN_IF(!CommitOrAbort(NS_OK) && !mExpectRacingCommitOrAbort)) {
     ASSERT_UNLESS_FUZZING();
     return false;
   }
@@ -7579,7 +7588,7 @@ NormalTransaction::RecvAbort(const nsresult& aResultCode)
     return false;
   }
 
-  if (NS_WARN_IF(!CommitOrAbort(aResultCode) && !mDatabase->IsInvalidated())) {
+  if (NS_WARN_IF(!CommitOrAbort(aResultCode) && !mExpectRacingCommitOrAbort)) {
     ASSERT_UNLESS_FUZZING();
     return false;
   }
@@ -7943,7 +7952,7 @@ VersionChangeTransaction::RecvCommit()
 {
   AssertIsOnBackgroundThread();
 
-  if (NS_WARN_IF(!CommitOrAbort(NS_OK) && !mDatabase->IsInvalidated())) {
+  if (NS_WARN_IF(!CommitOrAbort(NS_OK) && !mExpectRacingCommitOrAbort)) {
     ASSERT_UNLESS_FUZZING();
     return false;
   }
@@ -7967,7 +7976,7 @@ VersionChangeTransaction::RecvAbort(const nsresult& aResultCode)
     return false;
   }
 
-  if (NS_WARN_IF(!CommitOrAbort(aResultCode) && !mDatabase->IsInvalidated())) {
+  if (NS_WARN_IF(!CommitOrAbort(aResultCode) && !mExpectRacingCommitOrAbort)) {
     ASSERT_UNLESS_FUZZING();
     return false;
   }
@@ -11618,7 +11627,8 @@ OpenDatabaseOp::SendResults()
   if (mVersionChangeTransaction) {
     MOZ_ASSERT(NS_FAILED(mResultCode));
 
-    mVersionChangeTransaction->Abort(mResultCode);
+    mVersionChangeTransaction->Abort(mResultCode,
+                                     /* aExpectRacingCommitOrAbort */ false);
     mVersionChangeTransaction = nullptr;
   }
 
@@ -12757,7 +12767,7 @@ CommonDatabaseOperationBase::Run()
       // This should definitely release the IPDL reference.
       if (!SendFailureResult(mResultCode)) {
         // Abort the transaction.
-        mTransaction->Abort(mResultCode);
+        mTransaction->Abort(mResultCode, /* aExpectRacingCommitOrAbort */ true);
       }
     }
   }
@@ -12946,7 +12956,7 @@ CommitOp::TransactionFinishedAfterUnblock()
                     "IDBTransaction[%llu] MT Complete",
                     mTransaction->TransactionId(), mResultCode);
 
-  if (!IsActorDestroyed()) {
+  if (!mTransaction->IsActorDestroyed()) {
     mTransaction->SendCompleteNotification(ClampResultCode(mResultCode));
   }
 
