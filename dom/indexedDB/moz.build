@@ -46,7 +46,6 @@ EXPORTS.mozilla.dom.indexedDB += [
 SOURCES += [
     'ActorsChild.cpp',
     'ActorsParent.cpp',
-    'AsyncConnectionHelper.cpp',
     'DatabaseInfo.cpp',
     'FileInfo.cpp',
     'FileSnapshot.cpp',
