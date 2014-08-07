@@ -5635,7 +5635,7 @@ Factory::ActorDestroy(ActorDestroyReason aWhy)
 
   // Clean up if there are no more instances.
   if (!(--sFactoryInstanceCount)) {
-    TransactionThreadPool::Shutdown(nullptr);
+    TransactionThreadPool::Shutdown(/* aCallback */ nullptr);
 
     MOZ_ASSERT(gStartTransactionRunnable);
     gStartTransactionRunnable = nullptr;
@@ -6257,19 +6257,17 @@ Database::RecvPBackgroundIDBTransactionConstructor(
 
   auto* transaction = static_cast<NormalTransaction*>(aActor);
 
-  TransactionThreadPool* threadPool = TransactionThreadPool::GetOrCreate();
-  if (!threadPool) {
-    IDB_REPORT_INTERNAL_ERR();
-    transaction->Abort(NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR,
-                       /* aExpectRacingCommitOrAbort */ false);
-    return true;
-  }
+  TransactionThreadPool* threadPool = TransactionThreadPool::Get();
+  MOZ_ASSERT(threadPool);
 
   // Add a placeholder for this transaction immediately.
   nsresult rv = threadPool->Dispatch(transaction->TransactionId(),
-                                     mMetadata->mDatabaseId, aObjectStoreNames,
-                                     aMode, gStartTransactionRunnable, false,
-                                     nullptr);
+                                     mMetadata->mDatabaseId,
+                                     aObjectStoreNames,
+                                     aMode,
+                                     gStartTransactionRunnable,
+                                     /* aFinish */ false,
+                                     /* aFinishCallback */ nullptr);
   if (NS_WARN_IF(NS_FAILED(rv))) {
     IDB_REPORT_INTERNAL_ERR();
     transaction->Abort(NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR,
@@ -6524,7 +6522,11 @@ TransactionBase::CommitOrAbort(nsresult aResultCode)
   TransactionThreadPool* threadPool = TransactionThreadPool::Get();
   MOZ_ASSERT(threadPool);
 
-  threadPool->Dispatch(TransactionId(), DatabaseId(), commitOp, true, commitOp);
+  threadPool->Dispatch(TransactionId(),
+                       DatabaseId(),
+                       commitOp,
+                       /* aFinish */ true,
+                       /* aFinishCallback */ commitOp);
 
   mDatabase->UnregisterTransaction(this);
 
@@ -11415,9 +11417,12 @@ OpenDatabaseOp::BeginVersionChange()
 
   // Add a placeholder for this transaction immediately.
   rv = threadPool->Dispatch(transaction->TransactionId(),
-                            transaction->DatabaseId(), objectStoreNames,
+                            transaction->DatabaseId(),
+                            objectStoreNames,
                             IDBTransaction::VERSION_CHANGE,
-                            gStartTransactionRunnable, false, nullptr);
+                            gStartTransactionRunnable,
+                            /* aFinish */ false,
+                            /* aFinishCallback */ nullptr);
   if (NS_WARN_IF(NS_FAILED(rv))) {
     return rv;
   }
@@ -11548,8 +11553,11 @@ OpenDatabaseOp::DispatchToWorkThread()
   nsresult rv =
     threadPool->Dispatch(mVersionChangeTransaction->TransactionId(),
                          mVersionChangeTransaction->DatabaseId(),
-                         objectStoreNames, mVersionChangeTransaction->GetMode(),
-                         versionChangeOp, false, nullptr);
+                         objectStoreNames,
+                         mVersionChangeTransaction->GetMode(),
+                         versionChangeOp,
+                         /* aFinish */ false,
+                         /* aFinishCallback */ nullptr);
   if (NS_WARN_IF(NS_FAILED(rv))) {
     return rv;
   }
@@ -12707,7 +12715,10 @@ CommonDatabaseOperationBase::DispatchToTransactionThreadPool()
   MOZ_ASSERT(threadPool);
 
   threadPool->Dispatch(mTransaction->TransactionId(),
-                       mTransaction->DatabaseId(), this, false, nullptr);
+                       mTransaction->DatabaseId(),
+                       this,
+                       /* aFinish */ false,
+                       /* aFinishCallback */ nullptr);
 }
 
 NS_IMETHODIMP

@@ -100,25 +100,30 @@ private:
 class TransactionThreadPool::CleanupRunnable MOZ_FINAL
   : public nsRunnable
 {
-  nsAutoPtr<TransactionThreadPool> mThreadPool;
   nsCOMPtr<nsIRunnable> mCallback;
 
 public:
-  CleanupRunnable(TransactionThreadPool* aThreadPool, nsIRunnable* aCallback)
-    : mThreadPool(aThreadPool)
-    , mCallback(aCallback)
+  CleanupRunnable(nsIRunnable* aCallback)
+    : mCallback(aCallback)
   {
-    MOZ_ASSERT(aThreadPool);
-    aThreadPool->AssertIsOnOwningThread();
+    MOZ_ASSERT(gThreadPool);
+    gThreadPool->AssertIsOnOwningThread();
   }
 
   NS_IMETHOD
   Run()
   {
-    mThreadPool->AssertIsOnOwningThread();
+    MOZ_ASSERT(gThreadPool);
+    gThreadPool->AssertIsOnOwningThread();
 
-    if (NS_FAILED(mThreadPool->Cleanup())) {
-      NS_WARNING("Failed to clean up thread pool!");
+    {
+      nsAutoPtr<TransactionThreadPool> threadPool(gThreadPool);
+
+      if (NS_FAILED(threadPool->Cleanup())) {
+        NS_WARNING("Failed to clean up thread pool!");
+      }
+
+      gThreadPool = nullptr;
     }
 
     if (mCallback) {
@@ -327,10 +332,7 @@ TransactionThreadPool::Shutdown(nsIRunnable* aCallback)
   if (gThreadPool) {
     gThreadPool->AssertIsOnOwningThread();
 
-    nsRefPtr<CleanupRunnable> runnable =
-      new CleanupRunnable(gThreadPool, aCallback);
-    gThreadPool = nullptr;
-
+    nsRefPtr<CleanupRunnable> runnable = new CleanupRunnable(aCallback);
     MOZ_ALWAYS_TRUE(NS_SUCCEEDED(NS_DispatchToCurrentThread(runnable)));
   } else if (aCallback) {
     MOZ_ALWAYS_TRUE(NS_SUCCEEDED(NS_DispatchToCurrentThread(aCallback)));

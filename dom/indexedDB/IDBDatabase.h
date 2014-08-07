@@ -177,6 +177,9 @@ public:
   GetOrCreateFileActorForBlob(nsIDOMBlob* aBlob);
 
   void
+  NoteFinishedFileActor(PBackgroundIDBDatabaseFileChild* aFileActor);
+
+  void
   NoteReceivedBlob(nsIDOMBlob* aBlob);
 
   void

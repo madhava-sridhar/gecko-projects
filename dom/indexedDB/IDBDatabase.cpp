@@ -128,7 +128,25 @@ public:
 private:
   ~DatabaseFile()
   {
+    MOZ_ASSERT(!mDatabase);
+
     MOZ_COUNT_DTOR(DatabaseFile);
+  }
+
+  virtual void
+  ActorDestroy(ActorDestroyReason aWhy) MOZ_OVERRIDE
+  {
+    MOZ_ASSERT(mDatabase);
+    mDatabase->AssertIsOnOwningThread();
+
+    if (aWhy != Deletion) {
+      nsRefPtr<IDBDatabase> database = mDatabase;
+      database->NoteFinishedFileActor(this);
+    }
+
+#ifdef DEBUG
+    mDatabase = nullptr;
+#endif
   }
 };
 
@@ -862,6 +880,35 @@ IDBDatabase::GetOrCreateFileActorForBlob(nsIDOMBlob* aBlob)
   MOZ_ASSERT(actor);
 
   return actor;
+}
+
+void
+IDBDatabase::NoteFinishedFileActor(PBackgroundIDBDatabaseFileChild* aFileActor)
+{
+  AssertIsOnOwningThread();
+  MOZ_ASSERT(aFileActor);
+
+  class MOZ_STACK_CLASS Helper MOZ_FINAL
+  {
+  public:
+    static PLDHashOperator
+    Remove(nsISupports* aKey,
+           PBackgroundIDBDatabaseFileChild*& aValue,
+           void* aClosure)
+    {
+      MOZ_ASSERT(aKey);
+      MOZ_ASSERT(aValue);
+      MOZ_ASSERT(aClosure);
+
+      if (aValue == static_cast<PBackgroundIDBDatabaseFileChild*>(aClosure)) {
+        return PL_DHASH_REMOVE;
+      }
+
+      return PL_DHASH_NEXT;
+    }
+  };
+
+  mFileActors.Enumerate(&Helper::Remove, aFileActor);
 }
 
 void
