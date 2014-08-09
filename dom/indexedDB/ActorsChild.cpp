@@ -2244,8 +2244,8 @@ void
 BackgroundCursorChild::ActorDestroy(ActorDestroyReason aWhy)
 {
   AssertIsOnOwningThread();
-  MOZ_ASSERT(!mStrongRequest);
-  MOZ_ASSERT(!mStrongCursor);
+  MOZ_ASSERT_IF(aWhy == Deletion, !mStrongRequest);
+  MOZ_ASSERT_IF(aWhy == Deletion, !mStrongCursor);
 
   MaybeCollectGarbageOnIPCMessage();
 

@@ -2563,7 +2563,6 @@ class OpenDatabaseOp;
 template <class> class RequestOp;
 class TransactionBase;
 class VersionChangeTransaction;
-class TransactionBase;
 
 } // anonymous namespace
 
@@ -2731,6 +2730,7 @@ class CommonDatabaseOperationBase
   : public DatabaseOperationBase
 {
   nsRefPtr<TransactionBase> mTransaction;
+  bool mTransactionIsAborted;
 
 public:
   void
@@ -2745,43 +2745,22 @@ public:
   // background thread before being dispatched. Returning false will kill the
   // child actors and prevent dispatch.
   virtual bool
-  Init(TransactionBase* aTransaction)
-  {
-    AssertIsOnBackgroundThread();
-    MOZ_ASSERT(aTransaction);
-
-    return true;
-  }
+  Init(TransactionBase* aTransaction);
 
   // This callback will be called on the background thread before releasing the
   // final reference to this request object. Subclasses may perform any
   // additional cleanup here but must always call the base class implementation.
   virtual void
-  Cleanup()
-  {
-    AssertIsOnOwningThread();
-    MOZ_ASSERT(mTransaction);
-
-    mTransaction = nullptr;
-  }
+  Cleanup();
 
   void
   DispatchToTransactionThreadPool();
 
 protected:
-  CommonDatabaseOperationBase(TransactionBase* aTransaction)
-    : mTransaction(aTransaction)
-  {
-    MOZ_ASSERT(aTransaction);
-  }
+  CommonDatabaseOperationBase(TransactionBase* aTransaction);
 
   virtual
-  ~CommonDatabaseOperationBase()
-  {
-    MOZ_ASSERT(!mTransaction,
-               "CommonDatabaseOperationBase::Cleanup() was not called by a "
-               "subclass!");
-  }
+  ~CommonDatabaseOperationBase();
 
   // Must be overridden in subclasses. Called on the target thread to allow the
   // subclass to perform necessary database or file operations. A successful
@@ -2804,6 +2783,12 @@ protected:
   SendFailureResult(nsresult aResultCode) = 0;
 
 private:
+  void
+  RunOnTransactionThread();
+
+  void
+  RunOnOwningThread();
+
   // Not to be overridden by subclasses.
   NS_DECL_NSIRUNNABLE
 };
@@ -3146,10 +3131,13 @@ protected:
     mModifiedAutoIncrementObjectStoreMetadataArray;
   const uint64_t mTransactionId;
   const nsCString mDatabaseId;
+  uint64_t mActiveRequestCount;
   Atomic<bool> mActorDestroyed;
+  nsresult mResultCode;
   Mode mMode;
+  bool mHasBeenActive;
+  bool mCommitOrAbortReceived;
   bool mCommittedOrAborted;
-  bool mExpectRacingCommitOrAbort;
 
   DebugOnly<PRThread*> mTransactionThread;
   DebugOnly<uint32_t> mSavepointCount;
@@ -3170,7 +3158,16 @@ public:
     return mActorDestroyed;
   }
 
-  NS_INLINE_DECL_THREADSAFE_REFCOUNTING(mozilla::dom::indexedDB::TransactionBase)
+  void
+  SetActive()
+  {
+    AssertIsOnBackgroundThread();
+
+    mHasBeenActive = true;
+  }
+
+  NS_INLINE_DECL_THREADSAFE_REFCOUNTING(
+    mozilla::dom::indexedDB::TransactionBase)
 
   nsresult
   GetCachedStatement(const nsACString& aQuery,
@@ -3191,7 +3188,7 @@ public:
   EnsureConnection();
 
   void
-  Abort(nsresult aResultCode, bool aExpectRacingCommitOrAbort);
+  Abort(nsresult aResultCode, bool aForce);
 
   mozIStorageConnection*
   Connection() const
@@ -3225,7 +3222,16 @@ public:
   {
     AssertIsOnBackgroundThread();
     MOZ_ASSERT(mDatabase);
+
     return mDatabase;
+  }
+
+  bool
+  IsAborted() const
+  {
+    AssertIsOnBackgroundThread();
+
+    return NS_FAILED(mResultCode);
   }
 
   already_AddRefed<FullObjectStoreMetadata>
@@ -3259,6 +3265,12 @@ public:
   nsresult
   RollbackSavepoint();
 
+  void
+  NoteActiveRequest();
+
+  void
+  NoteFinishedRequest();
+
 protected:
   TransactionBase(Database* aDatabase,
                   Mode aMode);
@@ -3275,15 +3287,36 @@ protected:
     mActorDestroyed = true;
   }
 
-  virtual void
-  UpdateMetadata(nsresult aResult)
-  { }
-
-  virtual bool
-  SendCompleteNotification(nsresult aResult) = 0;
+  bool
+  RecvCommit();
 
   bool
-  CommitOrAbort(nsresult aResultCode);
+  RecvAbort(nsresult aResultCode);
+
+  void
+  MaybeCommitOrAbort()
+  {
+    AssertIsOnBackgroundThread();
+
+    // If there are active requests then we have to wait for those requests to
+    // complete (see NoteFinishedRequest).
+    if (mActiveRequestCount) {
+      return;
+    }
+
+    // If we haven't yet received a commit or abort message then there could be
+    // additional requests coming.
+    if (!mCommitOrAbortReceived) {
+      return;
+    }
+
+    // If we've already committed or aborted then there's nothing else to do.
+    if (mCommittedOrAborted) {
+      return;
+    }
+
+    CommitOrAbort();
+  }
 
   PBackgroundIDBRequestParent*
   AllocRequest(const RequestParams& aParams, bool aTrustParams);
@@ -3303,6 +3336,13 @@ protected:
 
   bool
   DeallocCursor(PBackgroundIDBCursorParent* aActor);
+
+  virtual void
+  UpdateMetadata(nsresult aResult)
+  { }
+
+  virtual bool
+  SendCompleteNotification(nsresult aResult) = 0;
 
 private:
   // Only called by CommitOp.
@@ -3330,6 +3370,9 @@ private:
 
   bool
   VerifyRequestParams(const OptionalKeyRange& aKeyRange) const;
+
+  void
+  CommitOrAbort();
 };
 
 class TransactionBase::CommitOp MOZ_FINAL
@@ -4914,7 +4957,9 @@ struct DatabaseActorInfo
     : mMetadata(aMetadata)
   {
     MOZ_ASSERT(aDatabase);
+
     MOZ_COUNT_CTOR(indexedDB::DatabaseActorInfo);
+
     mLiveDatabases.AppendElement(aDatabase);
   }
 
@@ -4924,6 +4969,7 @@ private:
     MOZ_ASSERT(mLiveDatabases.IsEmpty());
     MOZ_ASSERT(!mWaitingFactoryOp ||
                !mWaitingFactoryOp->HasBlockedDatabases());
+
     MOZ_COUNT_DTOR(indexedDB::DatabaseActorInfo);
   }
 };
@@ -5899,16 +5945,16 @@ Database::Invalidate()
         return false;
       }
 
-      for (uint32_t index = 0; index < count; index++) {
-        nsRefPtr<TransactionBase> transaction = transactions[index].forget();
-        MOZ_ASSERT(transaction);
-
-        transaction->Abort(NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR,
-                           /* aExpectRacingCommitOrAbort */ true);
-      }
-
       if (count) {
         IDB_REPORT_INTERNAL_ERR();
+
+        for (uint32_t index = 0; index < count; index++) {
+          nsRefPtr<TransactionBase> transaction = transactions[index].forget();
+          MOZ_ASSERT(transaction);
+
+          transaction->Abort(NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR,
+                             /* aForce */ true);
+        }
       }
 
       return true;
@@ -6270,15 +6316,15 @@ Database::RecvPBackgroundIDBTransactionConstructor(
                                      /* aFinishCallback */ nullptr);
   if (NS_WARN_IF(NS_FAILED(rv))) {
     IDB_REPORT_INTERNAL_ERR();
-    transaction->Abort(NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR,
-                       /* aExpectRacingCommitOrAbort */ false);
+    transaction->Abort(NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR, /* aForce */ false);
     return true;
   }
 
+  transaction->SetActive();
+
   if (NS_WARN_IF(!RegisterTransaction(transaction))) {
     IDB_REPORT_INTERNAL_ERR();
-    transaction->Abort(NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR,
-                       /* aExpectRacingCommitOrAbort */ false);
+    transaction->Abort(NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR, /* aForce */ false);
     return true;
   }
 
@@ -6415,10 +6461,13 @@ TransactionBase::TransactionBase(Database* aDatabase,
   : mDatabase(aDatabase)
   , mTransactionId(TransactionThreadPool::NextTransactionId())
   , mDatabaseId(aDatabase->Id())
+  , mActiveRequestCount(0)
   , mActorDestroyed(false)
+  , mResultCode(NS_OK)
   , mMode(aMode)
+  , mHasBeenActive(false)
+  , mCommitOrAbortReceived(false)
   , mCommittedOrAborted(false)
-  , mExpectRacingCommitOrAbort(false)
   , mTransactionThread(nullptr)
   , mSavepointCount(0)
 {
@@ -6429,7 +6478,9 @@ TransactionBase::TransactionBase(Database* aDatabase,
 TransactionBase::~TransactionBase()
 {
   MOZ_ASSERT(!mSavepointCount);
+  MOZ_ASSERT(!mActiveRequestCount);
   MOZ_ASSERT(mActorDestroyed);
+  MOZ_ASSERT_IF(mHasBeenActive, mCommittedOrAborted);
 }
 
 nsresult
@@ -6494,30 +6545,79 @@ TransactionBase::EnsureConnection()
 }
 
 void
-TransactionBase::Abort(nsresult aResultCode, bool aExpectRacingCommitOrAbort)
+TransactionBase::Abort(nsresult aResultCode, bool aForce)
 {
   AssertIsOnBackgroundThread();
   MOZ_ASSERT(NS_FAILED(aResultCode));
-  MOZ_ASSERT(!mExpectRacingCommitOrAbort);
 
-  unused << CommitOrAbort(aResultCode);
+  if (NS_SUCCEEDED(mResultCode)) {
+    mResultCode = aResultCode;
+  }
 
-  mExpectRacingCommitOrAbort = aExpectRacingCommitOrAbort;
+  if (aForce) {
+    mCommitOrAbortReceived = true;
+  }
+
+  MaybeCommitOrAbort();
 }
 
 bool
-TransactionBase::CommitOrAbort(nsresult aResultCode)
+TransactionBase::RecvCommit()
 {
   AssertIsOnBackgroundThread();
 
-  if (mCommittedOrAborted) {
+  if (NS_WARN_IF(mCommitOrAbortReceived)) {
+    ASSERT_UNLESS_FUZZING();
     return false;
   }
 
+  mCommitOrAbortReceived = true;
+
+  MaybeCommitOrAbort();
+  return true;
+}
+
+bool
+TransactionBase::RecvAbort(nsresult aResultCode)
+{
+  AssertIsOnBackgroundThread();
+
+  if (NS_WARN_IF(NS_SUCCEEDED(aResultCode))) {
+    ASSERT_UNLESS_FUZZING();
+    return false;
+  }
+
+  if (NS_WARN_IF(NS_ERROR_GET_MODULE(aResultCode) !=
+                 NS_ERROR_MODULE_DOM_INDEXEDDB)) {
+    ASSERT_UNLESS_FUZZING();
+    return false;
+  }
+
+  if (NS_WARN_IF(mCommitOrAbortReceived)) {
+    ASSERT_UNLESS_FUZZING();
+    return false;
+  }
+
+  mCommitOrAbortReceived = true;
+
+  Abort(aResultCode, /* aForce */ false);
+  return true;
+}
+
+void
+TransactionBase::CommitOrAbort()
+{
+  AssertIsOnBackgroundThread();
+  MOZ_ASSERT(!mCommittedOrAborted);
+
   mCommittedOrAborted = true;
 
+  if (!mHasBeenActive) {
+    return;
+  }
+
   nsRefPtr<CommitOp> commitOp =
-    new CommitOp(this, ClampResultCode(aResultCode));
+    new CommitOp(this, ClampResultCode(mResultCode));
 
   TransactionThreadPool* threadPool = TransactionThreadPool::Get();
   MOZ_ASSERT(threadPool);
@@ -6529,8 +6629,6 @@ TransactionBase::CommitOrAbort(nsresult aResultCode)
                        /* aFinishCallback */ commitOp);
 
   mDatabase->UnregisterTransaction(this);
-
-  return true;
 }
 
 already_AddRefed<FullObjectStoreMetadata>
@@ -6605,11 +6703,6 @@ TransactionBase::VerifyRequestParams(const RequestParams& aParams) const
 {
   AssertIsOnBackgroundThread();
   MOZ_ASSERT(aParams.type() != RequestParams::T__None);
-
-  if (mCommittedOrAborted) {
-    ASSERT_UNLESS_FUZZING();
-    return false;
-  }
 
   switch (aParams.type()) {
     case RequestParams::TObjectStoreAddParams: {
@@ -6843,11 +6936,6 @@ TransactionBase::VerifyRequestParams(const OpenCursorParams& aParams) const
   AssertIsOnBackgroundThread();
   MOZ_ASSERT(aParams.type() != OpenCursorParams::T__None);
 
-  if (mCommittedOrAborted) {
-    ASSERT_UNLESS_FUZZING();
-    return false;
-  }
-
   switch (aParams.type()) {
     case OpenCursorParams::TObjectStoreOpenCursorParams: {
       const ObjectStoreOpenCursorParams& params =
@@ -6937,11 +7025,6 @@ TransactionBase::VerifyRequestParams(const CursorRequestParams& aParams) const
 {
   AssertIsOnBackgroundThread();
   MOZ_ASSERT(aParams.type() != CursorRequestParams::T__None);
-
-  if (mCommittedOrAborted) {
-    ASSERT_UNLESS_FUZZING();
-    return false;
-  }
 
   switch (aParams.type()) {
     case CursorRequestParams::TContinueParams:
@@ -7202,6 +7285,26 @@ TransactionBase::RollbackSavepoint()
   return NS_OK;
 }
 
+void
+TransactionBase::NoteActiveRequest()
+{
+  AssertIsOnBackgroundThread();
+  MOZ_ASSERT(mActiveRequestCount < UINT64_MAX);
+
+  mActiveRequestCount++;
+}
+
+void
+TransactionBase::NoteFinishedRequest()
+{
+  AssertIsOnBackgroundThread();
+  MOZ_ASSERT(mActiveRequestCount);
+
+  mActiveRequestCount--;
+
+  MaybeCommitOrAbort();
+}
+
 PBackgroundIDBRequestParent*
 TransactionBase::AllocRequest(const RequestParams& aParams, bool aTrustParams)
 {
@@ -7214,6 +7317,11 @@ TransactionBase::AllocRequest(const RequestParams& aParams, bool aTrustParams)
 #endif
 
   if (!aTrustParams && NS_WARN_IF(!VerifyRequestParams(aParams))) {
+    ASSERT_UNLESS_FUZZING();
+    return nullptr;
+  }
+
+  if (NS_WARN_IF(mCommitOrAbortReceived)) {
     ASSERT_UNLESS_FUZZING();
     return nullptr;
   }
@@ -7334,6 +7442,11 @@ TransactionBase::AllocCursor(const OpenCursorParams& aParams, bool aTrustParams)
 #endif
 
   if (!aTrustParams && NS_WARN_IF(!VerifyRequestParams(aParams))) {
+    ASSERT_UNLESS_FUZZING();
+    return nullptr;
+  }
+
+  if (NS_WARN_IF(mCommitOrAbortReceived)) {
     ASSERT_UNLESS_FUZZING();
     return nullptr;
   }
@@ -7547,7 +7660,16 @@ NormalTransaction::ActorDestroy(ActorDestroyReason aWhy)
 {
   AssertIsOnBackgroundThread();
 
-  unused << CommitOrAbort(NS_ERROR_DOM_INDEXEDDB_ABORT_ERR);
+  if (!mCommittedOrAborted) {
+    if (NS_SUCCEEDED(mResultCode)) {
+      IDB_REPORT_INTERNAL_ERR();
+      mResultCode = NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
+    }
+
+    mCommitOrAbortReceived = true;
+
+    MaybeCommitOrAbort();
+  }
 
   NoteActorDestroyed();
 }
@@ -7566,12 +7688,7 @@ NormalTransaction::RecvCommit()
 {
   AssertIsOnBackgroundThread();
 
-  if (NS_WARN_IF(!CommitOrAbort(NS_OK) && !mExpectRacingCommitOrAbort)) {
-    ASSERT_UNLESS_FUZZING();
-    return false;
-  }
-
-  return true;
+  return TransactionBase::RecvCommit();
 }
 
 bool
@@ -7579,23 +7696,7 @@ NormalTransaction::RecvAbort(const nsresult& aResultCode)
 {
   AssertIsOnBackgroundThread();
 
-  if (NS_WARN_IF(NS_SUCCEEDED(aResultCode))) {
-    MOZ_ASSERT(false);
-    return false;
-  }
-
-  if (NS_WARN_IF(NS_ERROR_GET_MODULE(aResultCode) !=
-                 NS_ERROR_MODULE_DOM_INDEXEDDB)) {
-    MOZ_ASSERT(false);
-    return false;
-  }
-
-  if (NS_WARN_IF(!CommitOrAbort(aResultCode) && !mExpectRacingCommitOrAbort)) {
-    ASSERT_UNLESS_FUZZING();
-    return false;
-  }
-
-  return true;
+  return TransactionBase::RecvAbort(aResultCode);
 }
 
 PBackgroundIDBRequestParent*
@@ -7935,7 +8036,16 @@ VersionChangeTransaction::ActorDestroy(ActorDestroyReason aWhy)
 {
   AssertIsOnBackgroundThread();
 
-  unused << CommitOrAbort(NS_ERROR_DOM_INDEXEDDB_ABORT_ERR);
+  if (!mCommittedOrAborted) {
+    if (NS_SUCCEEDED(mResultCode)) {
+      IDB_REPORT_INTERNAL_ERR();
+      mResultCode = NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
+    }
+
+    mCommitOrAbortReceived = true;
+
+    MaybeCommitOrAbort();
+  }
 
   NoteActorDestroyed();
 }
@@ -7954,12 +8064,7 @@ VersionChangeTransaction::RecvCommit()
 {
   AssertIsOnBackgroundThread();
 
-  if (NS_WARN_IF(!CommitOrAbort(NS_OK) && !mExpectRacingCommitOrAbort)) {
-    ASSERT_UNLESS_FUZZING();
-    return false;
-  }
-
-  return true;
+  return TransactionBase::RecvCommit();
 }
 
 bool
@@ -7967,23 +8072,7 @@ VersionChangeTransaction::RecvAbort(const nsresult& aResultCode)
 {
   AssertIsOnBackgroundThread();
 
-  if (NS_SUCCEEDED(aResultCode)) {
-    MOZ_ASSERT(false);
-    return false;
-  }
-
-  if (NS_WARN_IF(NS_ERROR_GET_MODULE(aResultCode) !=
-                 NS_ERROR_MODULE_DOM_INDEXEDDB)) {
-    MOZ_ASSERT(false);
-    return false;
-  }
-
-  if (NS_WARN_IF(!CommitOrAbort(aResultCode) && !mExpectRacingCommitOrAbort)) {
-    ASSERT_UNLESS_FUZZING();
-    return false;
-  }
-
-  return true;
+  return TransactionBase::RecvAbort(aResultCode);
 }
 
 bool
@@ -8010,6 +8099,11 @@ VersionChangeTransaction::RecvCreateObjectStore(
       dbMetadata->mObjectStores, aMetadata.id(), aMetadata.name());
 
   if (NS_WARN_IF(foundMetadata)) {
+    ASSERT_UNLESS_FUZZING();
+    return false;
+  }
+
+  if (NS_WARN_IF(mCommitOrAbortReceived)) {
     ASSERT_UNLESS_FUZZING();
     return false;
   }
@@ -8060,6 +8154,11 @@ VersionChangeTransaction::RecvDeleteObjectStore(const int64_t& aObjectStoreId)
     GetMetadataForObjectStoreId(aObjectStoreId);
 
   if (NS_WARN_IF(!foundMetadata)) {
+    ASSERT_UNLESS_FUZZING();
+    return false;
+  }
+
+  if (NS_WARN_IF(mCommitOrAbortReceived)) {
     ASSERT_UNLESS_FUZZING();
     return false;
   }
@@ -8115,6 +8214,11 @@ VersionChangeTransaction::RecvCreateIndex(const int64_t& aObjectStoreId,
       foundObjectStoreMetadata->mIndexes, aMetadata.id(), aMetadata.name());
 
   if (NS_WARN_IF(foundIndexMetadata)) {
+    ASSERT_UNLESS_FUZZING();
+    return false;
+  }
+
+  if (NS_WARN_IF(mCommitOrAbortReceived)) {
     ASSERT_UNLESS_FUZZING();
     return false;
   }
@@ -8185,6 +8289,11 @@ VersionChangeTransaction::RecvDeleteIndex(const int64_t& aObjectStoreId,
     GetMetadataForIndexId(foundObjectStoreMetadata, aIndexId);
 
   if (NS_WARN_IF(!foundIndexMetadata)) {
+    ASSERT_UNLESS_FUZZING();
+    return false;
+  }
+
+  if (NS_WARN_IF(mCommitOrAbortReceived)) {
     ASSERT_UNLESS_FUZZING();
     return false;
   }
@@ -8349,7 +8458,6 @@ Cursor::Start(const OpenCursorParams& aParams)
   mCurrentlyRunningOp = openOp;
 
   return true;
-
 }
 
 void
@@ -8462,6 +8570,11 @@ Cursor::RecvContinue(const CursorRequestParams& aParams)
   MOZ_ASSERT(!mActorDestroyed);
 
   if (NS_WARN_IF(mCurrentlyRunningOp)) {
+    return false;
+  }
+
+  if (NS_WARN_IF(mTransaction->mCommitOrAbortReceived)) {
+    ASSERT_UNLESS_FUZZING();
     return false;
   }
 
@@ -11427,6 +11540,8 @@ OpenDatabaseOp::BeginVersionChange()
     return rv;
   }
 
+  transaction->SetActive();
+
   for (uint32_t count = mMaybeBlockedDatabases.Length(), index = 0;
        index < count;
        /* incremented conditionally */) {
@@ -11562,6 +11677,10 @@ OpenDatabaseOp::DispatchToWorkThread()
     return rv;
   }
 
+  mVersionChangeTransaction->SetActive();
+
+  mVersionChangeTransaction->NoteActiveRequest();
+
   if (!mWasBlocked &&
       NS_WARN_IF(!mDatabase->RegisterTransaction(mVersionChangeTransaction))) {
     return NS_ERROR_OUT_OF_MEMORY;
@@ -11635,8 +11754,7 @@ OpenDatabaseOp::SendResults()
   if (mVersionChangeTransaction) {
     MOZ_ASSERT(NS_FAILED(mResultCode));
 
-    mVersionChangeTransaction->Abort(mResultCode,
-                                     /* aExpectRacingCommitOrAbort */ false);
+    mVersionChangeTransaction->Abort(mResultCode, /* aForce */ true);
     mVersionChangeTransaction = nullptr;
   }
 
@@ -11727,8 +11845,6 @@ OpenDatabaseOp::EnsureDatabaseActor()
     info = new DatabaseActorInfo(mMetadata, mDatabase);
     gLiveDatabaseHashtable->Put(mDatabaseId, info);
   }
-
-  MOZ_ASSERT(mDatabase->Metadata() == mMetadata);
 
   return NS_OK;
 }
@@ -12695,6 +12811,21 @@ VersionChangeOp::Run()
   return NS_OK;
 }
 
+CommonDatabaseOperationBase::CommonDatabaseOperationBase(
+                                                  TransactionBase* aTransaction)
+  : mTransaction(aTransaction)
+  , mTransactionIsAborted(aTransaction->IsAborted())
+{
+  MOZ_ASSERT(aTransaction);
+}
+
+CommonDatabaseOperationBase::~CommonDatabaseOperationBase()
+{
+  MOZ_ASSERT(!mTransaction,
+             "CommonDatabaseOperationBase::Cleanup() was not called by a "
+             "subclass!");
+}
+
 #ifdef DEBUG
 
 void
@@ -12719,48 +12850,57 @@ CommonDatabaseOperationBase::DispatchToTransactionThreadPool()
                        this,
                        /* aFinish */ false,
                        /* aFinishCallback */ nullptr);
+
+  mTransaction->NoteActiveRequest();
 }
 
-NS_IMETHODIMP
-CommonDatabaseOperationBase::Run()
+void
+CommonDatabaseOperationBase::RunOnTransactionThread()
 {
-  MOZ_ASSERT(mOwningThread);
+  MOZ_ASSERT(mTransaction);
+  MOZ_ASSERT(NS_SUCCEEDED(mResultCode));
 
-  if (!IsOnBackgroundThread()) {
-    MOZ_ASSERT(NS_SUCCEEDED(mResultCode));
-
-    if (NS_WARN_IF(mActorDestroyed)) {
-      // The child must have crashed so there's no reason to attempt any
-      // database operations.
+  if (NS_WARN_IF(mActorDestroyed)) {
+    // There's no reason to attempt any database operations if the actor was
+    // already destroyed.
+    IDB_REPORT_INTERNAL_ERR();
+    mResultCode = NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
+  } else if (mTransactionIsAborted) {
+    // There's no reason to attempt any database operations if the transaction
+    // is already going to be aborted.
+    mResultCode = NS_ERROR_DOM_INDEXEDDB_ABORT_ERR;
+  } else {
+    nsresult rv = mTransaction->EnsureConnection();
+    if (NS_WARN_IF(NS_FAILED(rv))) {
+      mResultCode = rv;
     } else {
-      nsresult rv = mTransaction->EnsureConnection();
+      mTransaction->AssertIsOnTransactionThread();
+
+      AutoSetProgressHandler autoProgress;
+      rv = autoProgress.Register(this, mTransaction->Connection());
       if (NS_WARN_IF(NS_FAILED(rv))) {
         mResultCode = rv;
       } else {
-        AutoSetProgressHandler autoProgress;
-        rv = autoProgress.Register(this, mTransaction->Connection());
-        if (NS_WARN_IF(NS_FAILED(rv))) {
+        rv = DoDatabaseWork(mTransaction);
+        if (NS_FAILED(rv)) {
           mResultCode = rv;
-        } else {
-          rv = DoDatabaseWork(mTransaction);
-          if (NS_FAILED(rv)) {
-            mResultCode = rv;
-          }
         }
       }
     }
-
-    if (NS_WARN_IF(NS_FAILED(mOwningThread->Dispatch(this,
-                                                     NS_DISPATCH_NORMAL)))) {
-      // This should only happen if the child has crashed.
-      MOZ_ASSERT(mActorDestroyed);
-      return NS_ERROR_FAILURE;
-    }
-
-    return NS_OK;
   }
 
+  if (NS_WARN_IF(NS_FAILED(mOwningThread->Dispatch(this,
+                                                   NS_DISPATCH_NORMAL)))) {
+    // This should only happen if the child has crashed.
+    MOZ_ASSERT(mActorDestroyed);
+  }
+}
+
+void
+CommonDatabaseOperationBase::RunOnOwningThread()
+{
   AssertIsOnOwningThread();
+  MOZ_ASSERT(mTransaction);
 
   if (NS_WARN_IF(mActorDestroyed)) {
     // Don't send any notifications if the actor was destroyed already.
@@ -12769,7 +12909,11 @@ CommonDatabaseOperationBase::Run()
       mResultCode = NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
     }
   } else {
-    if (NS_SUCCEEDED(mResultCode)) {
+    if (mTransaction->IsAborted()) {
+      // Aborted transactions always see their requests fail with ABORT_ERR,
+      // even if the request succeeded or failed with another error.
+      mResultCode = NS_ERROR_DOM_INDEXEDDB_ABORT_ERR;
+    } else if (NS_SUCCEEDED(mResultCode)) {
       // This may release the IPDL reference.
       mResultCode = SendSuccessResult();
     }
@@ -12778,14 +12922,46 @@ CommonDatabaseOperationBase::Run()
       // This should definitely release the IPDL reference.
       if (!SendFailureResult(mResultCode)) {
         // Abort the transaction.
-        mTransaction->Abort(mResultCode, /* aExpectRacingCommitOrAbort */ true);
+        mTransaction->Abort(mResultCode, /* aForce */ false);
       }
     }
   }
 
-  Cleanup();
+  mTransaction->NoteFinishedRequest();
 
-  return mResultCode;
+  Cleanup();
+}
+
+bool
+CommonDatabaseOperationBase::Init(TransactionBase* aTransaction)
+{
+  AssertIsOnBackgroundThread();
+  MOZ_ASSERT(aTransaction);
+
+  return true;
+}
+
+void
+CommonDatabaseOperationBase::Cleanup()
+{
+  AssertIsOnOwningThread();
+  MOZ_ASSERT(mTransaction);
+
+  mTransaction = nullptr;
+}
+
+NS_IMETHODIMP
+CommonDatabaseOperationBase::Run()
+{
+  MOZ_ASSERT(mTransaction);
+
+  if (IsOnBackgroundThread()) {
+    RunOnOwningThread();
+  } else {
+    RunOnTransactionThread();
+  }
+
+  return NS_OK;
 }
 
 nsresult
@@ -14075,7 +14251,7 @@ void
 NormalTransactionOp::Cleanup()
 {
   AssertIsOnOwningThread();
-  MOZ_ASSERT(mResponseSent);
+  MOZ_ASSERT_IF(!IsActorDestroyed(), mResponseSent);
 
   CommonDatabaseOperationBase::Cleanup();
 }
@@ -15588,7 +15764,7 @@ CursorOpBase::Cleanup()
 {
   AssertIsOnOwningThread();
   MOZ_ASSERT(mCursor);
-  MOZ_ASSERT(mResponseSent);
+  MOZ_ASSERT_IF(!IsActorDestroyed(), mResponseSent);
 
   mCursor = nullptr;
 
