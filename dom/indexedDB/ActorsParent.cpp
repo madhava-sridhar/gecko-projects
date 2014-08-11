@@ -40,7 +40,6 @@
 #include "mozilla/dom/indexedDB/PBackgroundIDBVersionChangeTransactionParent.h"
 #include "mozilla/dom/indexedDB/PIndexedDBPermissionRequestParent.h"
 #include "mozilla/dom/ipc/BlobParent.h"
-#include "mozilla/dom/quota/AcquireListener.h"
 #include "mozilla/dom/quota/Client.h"
 #include "mozilla/dom/quota/FileStreams.h"
 #include "mozilla/dom/quota/OriginOrPatternString.h"
@@ -3818,14 +3817,18 @@ protected:
     // Waiting for other databases to close. This state may persist until all
     // databases are closed. If a database is blocked then the next state is
     // State_BlockedWaitingForOtherDatabasesToClose. If all databases close then
-    // the next state is State_DatabaseWorkVersionChange.
+    // the next state is State_WaitingForTransactionsToComplete.
     State_WaitingForOtherDatabasesToClose,
 
     // Waiting for other databases to close after sending the blocked
     // notification. This state will  persist until all databases are closed.
     // Once all databases close then the next state is
-    // State_DatabaseWorkVersionChange.
+    // State_WaitingForTransactionsToComplete.
     State_BlockedWaitingForOtherDatabasesToClose,
+
+    // Waiting for all transactions that could interfere with this operation to
+    // complete. Next state is State_DatabaseWorkVersionChange.
+    State_WaitingForTransactionsToComplete,
 
     // Waiting to do/doing work on the "work thread". For the OpenDatabaseOp the
     // next step is State_SendUpgradeNeeded if the database work succeeds,
@@ -3910,6 +3913,9 @@ protected:
   SendToIOThread();
 
   void
+  WaitForTransactions();
+
+  void
   FinishSendResults();
 
   void
@@ -3976,8 +3982,6 @@ class OpenDatabaseOp MOZ_FINAL
   nsRefPtr<VersionChangeTransaction> mVersionChangeTransaction;
 
   nsRefPtr<DatabaseOfflineStorage> mOfflineStorage;
-
-  bool mWasBlocked;
 
 public:
   OpenDatabaseOp(already_AddRefed<ContentParent> aContentParent,
@@ -10539,6 +10543,31 @@ FactoryOp::SendToIOThread()
 }
 
 void
+FactoryOp::WaitForTransactions()
+{
+  AssertIsOnOwningThread();
+  MOZ_ASSERT(mState == State_BeginVersionChange ||
+             mState == State_WaitingForOtherDatabasesToClose ||
+             mState == State_BlockedWaitingForOtherDatabasesToClose);
+  MOZ_ASSERT(!mDatabaseId.IsEmpty());
+  MOZ_ASSERT(!mActorDestroyed);
+
+  nsTArray<nsCString> databaseIds;
+  databaseIds.AppendElement(mDatabaseId);
+
+  TransactionThreadPool* threadPool = TransactionThreadPool::Get();
+  MOZ_ASSERT(threadPool);
+
+  // WaitForDatabasesToComplete() will run this op immediately if there are no
+  // transactions blocking it, so be sure to set the next state here before
+  // calling it.
+  mState = State_WaitingForTransactionsToComplete;
+
+  threadPool->WaitForDatabasesToComplete(databaseIds, this);
+  return;
+}
+
+void
 FactoryOp::FinishSendResults()
 {
   AssertIsOnOwningThread();
@@ -10876,6 +10905,10 @@ FactoryOp::Run()
       rv = BeginVersionChange();
       break;
 
+    case State_WaitingForTransactionsToComplete:
+      rv = DispatchToWorkThread();
+      break;
+
     case State_SendingResults:
       SendResults();
       return NS_OK;
@@ -10934,7 +10967,6 @@ OpenDatabaseOp::OpenDatabaseOp(already_AddRefed<ContentParent> aContentParent,
   , mOptionalWindowId(aOptionalWindowId)
   , mMetadata(new FullDatabaseMetadata(aParams.metadata()))
   , mRequestedVersion(aParams.metadata().version())
-  , mWasBlocked(false)
 {
   MOZ_ASSERT_IF(mContentParent,
                 mOptionalWindowId.type() == OptionalWindowId::Tvoid_t);
@@ -11461,6 +11493,7 @@ OpenDatabaseOp::BeginVersionChange()
   MOZ_ASSERT(mMaybeBlockedDatabases.IsEmpty());
   MOZ_ASSERT(mMetadata->mCommonMetadata.version() != mRequestedVersion);
   MOZ_ASSERT(!mDatabase);
+  MOZ_ASSERT(!mVersionChangeTransaction);
 
   if (IsActorDestroyed()) {
     IDB_REPORT_INTERNAL_ERR();
@@ -11508,78 +11541,33 @@ OpenDatabaseOp::BeginVersionChange()
     }
   }
 
-  if (mMaybeBlockedDatabases.IsEmpty()) {
-    // No other databases need to be notified, we can jump directly to the
-    // transaction thread pool.
-    mVersionChangeTransaction.swap(transaction);
-
-    mState = State_DatabaseWorkVersionChange;
-    rv = DispatchToWorkThread();
-    if (NS_WARN_IF(NS_FAILED(rv))) {
-      return rv;
-    }
-
-    return NS_OK;
-  }
-
-  TransactionThreadPool* threadPool = TransactionThreadPool::Get();
-  MOZ_ASSERT(threadPool);
-
-  // Intentionally empty.
-  nsTArray<nsString> objectStoreNames;
-
-  // Add a placeholder for this transaction immediately.
-  rv = threadPool->Dispatch(transaction->TransactionId(),
-                            transaction->DatabaseId(),
-                            objectStoreNames,
-                            IDBTransaction::VERSION_CHANGE,
-                            gStartTransactionRunnable,
-                            /* aFinish */ false,
-                            /* aFinishCallback */ nullptr);
-  if (NS_WARN_IF(NS_FAILED(rv))) {
-    return rv;
-  }
-
-  transaction->SetActive();
-
-  for (uint32_t count = mMaybeBlockedDatabases.Length(), index = 0;
-       index < count;
-       /* incremented conditionally */) {
-    if (mMaybeBlockedDatabases[index]->SendVersionChange(
+  if (!mMaybeBlockedDatabases.IsEmpty()) {
+    for (uint32_t count = mMaybeBlockedDatabases.Length(), index = 0;
+         index < count;
+         /* incremented conditionally */) {
+      if (mMaybeBlockedDatabases[index]->SendVersionChange(
                                            mMetadata->mCommonMetadata.version(),
                                            mRequestedVersion)) {
-      index++;
-    } else {
-      // We don't want to wait forever if we were not able to send the message.
-      mMaybeBlockedDatabases.RemoveElementAt(index);
-      count--;
+        index++;
+      } else {
+        // We don't want to wait forever if we were not able to send the
+        // message.
+        mMaybeBlockedDatabases.RemoveElementAt(index);
+        count--;
+      }
     }
   }
+
+  mVersionChangeTransaction.swap(transaction);
 
   if (mMaybeBlockedDatabases.IsEmpty()) {
-    // We didn't need to wait after all.
-    mVersionChangeTransaction.swap(transaction);
-
-    mState = State_DatabaseWorkVersionChange;
-    rv = DispatchToWorkThread();
-    if (NS_WARN_IF(NS_FAILED(rv))) {
-      return rv;
-    }
-
+    // We don't need to wait on any databases, just jump to the transaction
+    // pool.
+    WaitForTransactions();
     return NS_OK;
-  }
-
-  MOZ_ASSERT(!mMaybeBlockedDatabases.IsEmpty());
-
-  mWasBlocked = true;
-
-  if (NS_WARN_IF(!mDatabase->RegisterTransaction(transaction))) {
-    return NS_ERROR_OUT_OF_MEMORY;
   }
 
   info->mWaitingFactoryOp = this;
-
-  mVersionChangeTransaction.swap(transaction);
 
   mState = State_WaitingForOtherDatabasesToClose;
   return NS_OK;
@@ -11611,8 +11599,7 @@ OpenDatabaseOp::NoteDatabaseClosed(Database* aDatabase)
       MOZ_ASSERT(info->mWaitingFactoryOp == this);
       info->mWaitingFactoryOp = nullptr;
     } else {
-      mState = State_DatabaseWorkVersionChange;
-      rv = DispatchToWorkThread();
+      WaitForTransactions();
     }
   }
 
@@ -11648,7 +11635,7 @@ nsresult
 OpenDatabaseOp::DispatchToWorkThread()
 {
   AssertIsOnOwningThread();
-  MOZ_ASSERT(mState == State_DatabaseWorkVersionChange);
+  MOZ_ASSERT(mState == State_WaitingForTransactionsToComplete);
   MOZ_ASSERT(mVersionChangeTransaction);
   MOZ_ASSERT(mMaybeBlockedDatabases.IsEmpty());
 
@@ -11656,6 +11643,8 @@ OpenDatabaseOp::DispatchToWorkThread()
     IDB_REPORT_INTERNAL_ERR();
     return NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
   }
+
+  mState = State_DatabaseWorkVersionChange;
 
   TransactionThreadPool* threadPool = TransactionThreadPool::Get();
   MOZ_ASSERT(threadPool);
@@ -11681,8 +11670,7 @@ OpenDatabaseOp::DispatchToWorkThread()
 
   mVersionChangeTransaction->NoteActiveRequest();
 
-  if (!mWasBlocked &&
-      NS_WARN_IF(!mDatabase->RegisterTransaction(mVersionChangeTransaction))) {
+  if (NS_WARN_IF(!mDatabase->RegisterTransaction(mVersionChangeTransaction))) {
     return NS_ERROR_OUT_OF_MEMORY;
   }
 
@@ -12434,23 +12422,25 @@ DeleteDatabaseOp::BeginVersionChange()
     }
   }
 
-  // No other databases need to be notified, we can jump directly to the
-  // QuotaManager IO thread.
-  mState = State_DatabaseWorkVersionChange;
-  return DispatchToWorkThread();
+  // No other databases need to be notified, just make sure that all
+  // transactions are complete.
+  WaitForTransactions();
+  return NS_OK;
 }
 
 nsresult
 DeleteDatabaseOp::DispatchToWorkThread()
 {
   AssertIsOnOwningThread();
-  MOZ_ASSERT(mState == State_DatabaseWorkVersionChange);
+  MOZ_ASSERT(mState == State_WaitingForTransactionsToComplete);
   MOZ_ASSERT(mMaybeBlockedDatabases.IsEmpty());
 
   if (IsActorDestroyed()) {
     IDB_REPORT_INTERNAL_ERR();
     return NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
   }
+
+  mState = State_DatabaseWorkVersionChange;
 
   nsRefPtr<VersionChangeOp> versionChangeOp = new VersionChangeOp(this);
 
@@ -12485,8 +12475,7 @@ DeleteDatabaseOp::NoteDatabaseClosed(Database* aDatabase)
       MOZ_ASSERT(info->mWaitingFactoryOp == this);
       info->mWaitingFactoryOp = nullptr;
     } else {
-      mState = State_DatabaseWorkVersionChange;
-      rv = DispatchToWorkThread();
+      WaitForTransactions();
     }
   }
 
