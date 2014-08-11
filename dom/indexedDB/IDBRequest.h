@@ -182,8 +182,8 @@ public:
   WrapObject(JSContext* aCx) MOZ_OVERRIDE;
 
 protected:
-  IDBRequest(IDBDatabase* aDatabase);
-  IDBRequest(nsPIDOMWindow* aOwner);
+  explicit IDBRequest(IDBDatabase* aDatabase);
+  explicit IDBRequest(nsPIDOMWindow* aOwner);
   ~IDBRequest();
 
   void

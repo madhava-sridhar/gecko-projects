@@ -44,8 +44,8 @@ public:
 #endif
 
 protected:
-  IDBWrapperCache(DOMEventTargetHelper* aOwner);
-  IDBWrapperCache(nsPIDOMWindow* aOwner);
+  explicit IDBWrapperCache(DOMEventTargetHelper* aOwner);
+  explicit IDBWrapperCache(nsPIDOMWindow* aOwner);
 
   virtual ~IDBWrapperCache();
 };

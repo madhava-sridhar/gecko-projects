@@ -30,7 +30,7 @@ public:
   static
   FileInfo* Create(FileManager* aFileManager, int64_t aId);
 
-  FileInfo(FileManager* aFileManager);
+  explicit FileInfo(FileManager* aFileManager);
 
   void
   AddRef()

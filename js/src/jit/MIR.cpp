@@ -2351,6 +2351,20 @@ MResumePoint::New(TempAllocator &alloc, MBasicBlock *block, jsbytecode *pc, MRes
     return resume;
 }
 
+MResumePoint *
+MResumePoint::New(TempAllocator &alloc, MBasicBlock *block, jsbytecode *pc, MResumePoint *parent,
+                  Mode mode, const MDefinitionVector &operands)
+{
+    MResumePoint *resume = new(alloc) MResumePoint(block, pc, parent, mode);
+
+    if (!resume->operands_.init(alloc, operands.length()))
+        return nullptr;
+    for (size_t i = 0; i < operands.length(); i++)
+        resume->initOperand(i, operands[i]);
+
+    return resume;
+}
+
 MResumePoint::MResumePoint(MBasicBlock *block, jsbytecode *pc, MResumePoint *caller,
                            Mode mode)
   : MNode(block),
@@ -2971,6 +2985,28 @@ MLoadFixedSlot::mightAlias(const MDefinition *store) const
     return true;
 }
 
+MDefinition *
+MLoadFixedSlot::foldsTo(TempAllocator &alloc)
+{
+    if (!dependency() || !dependency()->isStoreFixedSlot())
+        return this;
+
+    MStoreFixedSlot *store = dependency()->toStoreFixedSlot();
+    if (!store->block()->dominates(block()))
+        return this;
+
+    if (store->object() != object())
+        return this;
+
+    if (store->slot() != slot())
+        return this;
+
+    if (store->value()->type() != type())
+        return this;
+
+    return store->value();
+}
+
 bool
 MAsmJSLoadHeap::mightAlias(const MDefinition *def) const
 {
@@ -3023,6 +3059,25 @@ MAsmJSLoadGlobalVar::congruentTo(const MDefinition *ins) const
     return false;
 }
 
+MDefinition *
+MAsmJSLoadGlobalVar::foldsTo(TempAllocator &alloc)
+{
+    if (!dependency() || !dependency()->isAsmJSStoreGlobalVar())
+        return this;
+
+    MAsmJSStoreGlobalVar *store = dependency()->toAsmJSStoreGlobalVar();
+    if (!store->block()->dominates(block()))
+        return this;
+
+    if (store->globalDataOffset() != globalDataOffset())
+        return this;
+
+    if (store->value()->type() != type())
+        return this;
+
+    return store->value();
+}
+
 HashNumber
 MAsmJSLoadFuncPtr::valueHash() const
 {
@@ -3073,6 +3128,47 @@ MLoadSlot::valueHash() const
     HashNumber hash = MDefinition::valueHash();
     hash = addU32ToHash(hash, slot_);
     return hash;
+}
+
+MDefinition *
+MLoadSlot::foldsTo(TempAllocator &alloc)
+{
+    if (!dependency() || !dependency()->isStoreSlot())
+        return this;
+
+    MStoreSlot *store = dependency()->toStoreSlot();
+    if (!store->block()->dominates(block()))
+        return this;
+
+    if (store->slots() != slots())
+        return this;
+
+    if (store->value()->type() != type())
+        return this;
+
+    return store->value();
+}
+
+MDefinition *
+MLoadElement::foldsTo(TempAllocator &alloc)
+{
+    if (!dependency() || !dependency()->isStoreElement())
+        return this;
+
+    MStoreElement *store = dependency()->toStoreElement();
+    if (!store->block()->dominates(block()))
+        return this;
+
+    if (store->elements() != elements())
+        return this;
+
+    if (store->index() != index())
+        return this;
+
+    if (store->value()->type() != type())
+        return this;
+
+    return store->value();
 }
 
 bool

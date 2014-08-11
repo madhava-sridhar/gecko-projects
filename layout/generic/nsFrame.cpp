@@ -26,6 +26,7 @@
 #include "nsIScrollableFrame.h"
 #include "nsPresContext.h"
 #include "nsStyleConsts.h"
+#include "nsStyleUtil.h"
 #include "nsIPresShell.h"
 #include "prlog.h"
 #include "prprf.h"
@@ -1922,8 +1923,6 @@ nsIFrame::BuildDisplayListForStackingContext(nsDisplayListBuilder* aBuilder,
   AutoSaveRestoreBlendMode autoRestoreBlendMode(*aBuilder);
   aBuilder->SetContainsBlendModes(BlendModeSet());
  
-  nsPoint offsetToReferenceFrame = aBuilder->ToReferenceFrame(this);
-
   if (isTransformed) {
     const nsRect overflow = GetVisualOverflowRectRelativeToSelf();
     if (aBuilder->IsForPainting() &&
@@ -1934,10 +1933,9 @@ nsIFrame::BuildDisplayListForStackingContext(nsDisplayListBuilder* aBuilder,
         return;
       }
 
-      dirtyRect += offsetToReferenceFrame;
       nsRect untransformedDirtyRect;
       if (nsDisplayTransform::UntransformRect(dirtyRect, overflow, this,
-            offsetToReferenceFrame, &untransformedDirtyRect)) {
+            nsPoint(0,0), &untransformedDirtyRect)) {
         dirtyRect = untransformedDirtyRect;
       } else {
         NS_WARNING("Unable to untransform dirty rect!");
@@ -2105,7 +2103,13 @@ nsIFrame::BuildDisplayListForStackingContext(nsDisplayListBuilder* aBuilder,
     clipState.Restore();
     // Revert to the dirtyrect coming in from the parent, without our transform
     // taken into account.
-    buildingDisplayList.SetDirtyRect(aDirtyRect + offsetToReferenceFrame);
+    buildingDisplayList.SetDirtyRect(aDirtyRect);
+    // Revert to the outer reference frame and offset because all display
+    // items we create from now on are outside the transform.
+    const nsIFrame* outerReferenceFrame =
+      aBuilder->FindReferenceFrameFor(nsLayoutUtils::GetTransformRootFrame(this));
+    buildingDisplayList.SetReferenceFrameAndCurrentOffset(outerReferenceFrame,
+      GetOffsetToCrossDoc(outerReferenceFrame));
 
     if (Preserves3DChildren()) {
       WrapPreserve3DList(this, aBuilder, &resultList);
@@ -2774,7 +2778,7 @@ nsFrame::HandlePress(nsPresContext* aPresContext,
   if (mouseEvent->clickCount > 1) {
     // These methods aren't const but can't actually delete anything,
     // so no need for nsWeakFrame.
-    fc->SetMouseDownState(true);
+    fc->SetDragState(true);
     fc->SetMouseDoubleDown(true);
     return HandleMultiplePress(aPresContext, mouseEvent, aEventStatus, control);
   }
@@ -2812,7 +2816,7 @@ nsFrame::HandlePress(nsPresContext* aPresContext,
                                 &target);
   if (NS_SUCCEEDED(rv) && parentContent)
   {
-    fc->SetMouseDownState(true);
+    fc->SetDragState(true);
     return fc->HandleTableSelection(parentContent, contentOffset, target,
                                     mouseEvent);
   }
@@ -2861,13 +2865,13 @@ nsFrame::HandlePress(nsPresContext* aPresContext,
     }
 
     if (inSelection) {
-      fc->SetMouseDownState(false);
+      fc->SetDragState(false);
       fc->SetDelayedCaretData(mouseEvent);
       return NS_OK;
     }
   }
 
-  fc->SetMouseDownState(true);
+  fc->SetDragState(true);
 
   // Do not touch any nsFrame members after this point without adding
   // weakFrame checks.
@@ -2889,7 +2893,7 @@ nsFrame::HandlePress(nsPresContext* aPresContext,
     // -moz-user-select: all or a non-text node without children).
     // Therefore, disable selection extension during mouse moves.
     // XXX This is a bit hacky; shouldn't editor be able to deal with this?
-    fc->SetMouseDownState(false);
+    fc->SetDragState(false);
   }
 
   return rv;
@@ -3090,7 +3094,7 @@ NS_IMETHODIMP nsFrame::HandleDrag(nsPresContext* aPresContext,
   nsIPresShell *presShell = aPresContext->PresShell();
 
   nsRefPtr<nsFrameSelection> frameselection = GetFrameSelection();
-  bool mouseDown = frameselection->GetMouseDownState();
+  bool mouseDown = frameselection->GetDragState();
   if (!mouseDown)
     return NS_OK;
 
@@ -3174,7 +3178,7 @@ HandleFrameSelection(nsFrameSelection*         aFrameSelection,
       //  * that's the normal click position to use (although really, in
       //    the normal case, small movements that don't count as a drag
       //    can do selection)
-      aFrameSelection->SetMouseDownState(true);
+      aFrameSelection->SetDragState(true);
 
       rv = aFrameSelection->HandleClick(aOffsets.content,
                                         aOffsets.StartOffset(),
@@ -3186,7 +3190,7 @@ HandleFrameSelection(nsFrameSelection*         aFrameSelection,
         return rv;
       }
     } else if (aParentContentForTableSel) {
-      aFrameSelection->SetMouseDownState(false);
+      aFrameSelection->SetDragState(false);
       rv = aFrameSelection->HandleTableSelection(
                               aParentContentForTableSel,
                               aContentOffsetForTableSel,
@@ -3199,7 +3203,7 @@ HandleFrameSelection(nsFrameSelection*         aFrameSelection,
     aFrameSelection->SetDelayedCaretData(0);
   }
 
-  aFrameSelection->SetMouseDownState(false);
+  aFrameSelection->SetDragState(false);
   aFrameSelection->StopAutoScrollTimer();
 
   return NS_OK;
@@ -3238,7 +3242,7 @@ NS_IMETHODIMP nsFrame::HandleRelease(nsPresContext* aPresContext,
       // If not, the user must have clicked in a part of the selection.
       // Place the caret before continuing!
 
-      bool mouseDown = frameselection->GetMouseDownState();
+      bool mouseDown = frameselection->GetDragState();
 
       if (!mouseDown && frameselection->HasDelayedCaretData() &&
           frameselection->GetClickCountInDelayedCaretData() < 2) {
@@ -3278,7 +3282,7 @@ NS_IMETHODIMP nsFrame::HandleRelease(nsPresContext* aPresContext,
   }
 
   if (frameSelection) {
-    frameSelection->SetMouseDownState(false);
+    frameSelection->SetDragState(false);
     frameSelection->StopAutoScrollTimer();
   }
 
@@ -4057,8 +4061,8 @@ nsFrame::ComputeSize(nsRenderingContext *aRenderingContext,
   if (isFlexItem) {
     // Flex items use their "flex-basis" property in place of their main-size
     // property (e.g. "width") for sizing purposes, *unless* they have
-    // "flex-basis:auto", in which case they use their main-size property after
-    // all.
+    // "flex-basis:main-size", in which case they use their main-size property
+    // after all.
     uint32_t flexDirection = GetParent()->StylePosition()->mFlexDirection;
     isHorizontalFlexItem =
       flexDirection == NS_STYLE_FLEX_DIRECTION_ROW ||
@@ -4068,21 +4072,9 @@ nsFrame::ComputeSize(nsRenderingContext *aRenderingContext,
     // widthStyleCoord and heightStyleCoord in
     // nsLayoutUtils::ComputeSizeWithIntrinsicDimensions().
     const nsStyleCoord* flexBasis = &(stylePos->mFlexBasis);
-    if (flexBasis->GetUnit() != eStyleUnit_Auto) {
-      if (isHorizontalFlexItem) {
-        widthStyleCoord = flexBasis;
-      } else {
-        // One caveat for vertical flex items: We don't support enumerated
-        // values (e.g. "max-content") for height properties yet. So, if our
-        // computed flex-basis is an enumerated value, we'll just behave as if
-        // it were "auto", which means "use the main-size property after all"
-        // (which is "height", in this case).
-        // NOTE: Once we support intrinsic sizing keywords for "height",
-        // we should remove this check.
-        if (flexBasis->GetUnit() != eStyleUnit_Enumerated) {
-          heightStyleCoord = flexBasis;
-        }
-      }
+    if (!nsStyleUtil::IsFlexBasisMainSize(*flexBasis, isHorizontalFlexItem)) {
+      (isHorizontalFlexItem ?
+       widthStyleCoord : heightStyleCoord) = flexBasis;
     }
   }
 

@@ -1021,7 +1021,7 @@ nsFrameLoader::ShowRemoteFrame(const nsIntSize& size,
       mRemoteBrowserInitialized = true;
     }
   } else {
-    nsRect dimensions;
+    nsIntRect dimensions;
     NS_ENSURE_SUCCESS(GetWindowDimensions(dimensions), false);
 
     // Don't show remote iframe if we are waiting for the completion of reflow.
@@ -1877,7 +1877,7 @@ nsFrameLoader::CheckForRecursiveLoad(nsIURI* aURI)
 }
 
 nsresult
-nsFrameLoader::GetWindowDimensions(nsRect& aRect)
+nsFrameLoader::GetWindowDimensions(nsIntRect& aRect)
 {
   // Need to get outer window position here
   nsIDocument* doc = mOwnerContent->GetDocument();
@@ -1917,7 +1917,7 @@ nsFrameLoader::UpdatePositionAndSize(nsSubDocumentFrame *aIFrame)
   if (mRemoteFrame) {
     if (mRemoteBrowser) {
       nsIntSize size = aIFrame->GetSubdocumentSize();
-      nsRect dimensions;
+      nsIntRect dimensions;
       NS_ENSURE_SUCCESS(GetWindowDimensions(dimensions), NS_ERROR_FAILURE);
       mRemoteBrowser->UpdateDimensions(dimensions, size);
     }
@@ -2326,7 +2326,7 @@ nsFrameLoader::DoSendAsyncMessage(JSContext* aCx,
       return false;
     }
     return tabParent->SendAsyncMessage(nsString(aMessage), data, cpows,
-                                       aPrincipal);
+                                       IPC::Principal(aPrincipal));
   }
 
   if (mChildMessageManager) {
@@ -2672,6 +2672,29 @@ nsFrameLoader::ResetPermissionManagerStatus()
     mAppIdSentToPermissionManager = appId;
     permMgr->AddrefAppId(mAppIdSentToPermissionManager);
   }
+}
+
+/**
+ * Send the RequestNotifyAfterRemotePaint message to the current Tab.
+ */
+NS_IMETHODIMP
+nsFrameLoader::RequestNotifyAfterRemotePaint()
+{
+  // If remote browsing (e10s), handle this with the TabParent.
+  if (mRemoteBrowser) {
+    unused << mRemoteBrowser->SendRequestNotifyAfterRemotePaint();
+    return NS_OK;
+  }
+
+  // If not remote browsing, directly use the document's window.
+  nsCOMPtr<nsPIDOMWindow> window = do_GetInterface(mDocShell);
+  if (!window) {
+    NS_WARNING("Unable to get window for synchronous MozAfterRemotePaint event.");
+    return NS_OK;
+  }
+
+  window->SetRequestNotifyAfterRemotePaint();
+  return NS_OK;
 }
 
 /* [infallible] */ NS_IMETHODIMP

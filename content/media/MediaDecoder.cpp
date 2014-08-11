@@ -560,21 +560,27 @@ nsresult MediaDecoder::InitializeStateMachine(MediaDecoder* aCloneDonor)
     DECODER_LOG(PR_LOG_WARNING, "Failed to init state machine!");
     return NS_ERROR_FAILURE;
   }
-  {
-    ReentrantMonitorAutoEnter mon(GetReentrantMonitor());
-    mDecoderStateMachine->SetDuration(mDuration);
-    mDecoderStateMachine->SetVolume(mInitialVolume);
-    mDecoderStateMachine->SetAudioCaptured(mInitialAudioCaptured);
-    SetPlaybackRate(mInitialPlaybackRate);
-    mDecoderStateMachine->SetPreservesPitch(mInitialPreservesPitch);
-    if (mMinimizePreroll) {
-      mDecoderStateMachine->SetMinimizePrerollUntilPlaybackStarts();
-    }
-  }
+
+  // If some parameters got set before the state machine got created,
+  // set them now
+  SetStateMachineParameters();
 
   ChangeState(PLAY_STATE_LOADING);
 
   return ScheduleStateMachineThread();
+}
+
+void MediaDecoder::SetStateMachineParameters()
+{
+  ReentrantMonitorAutoEnter mon(GetReentrantMonitor());
+  mDecoderStateMachine->SetDuration(mDuration);
+  mDecoderStateMachine->SetVolume(mInitialVolume);
+  mDecoderStateMachine->SetAudioCaptured(mInitialAudioCaptured);
+  SetPlaybackRate(mInitialPlaybackRate);
+  mDecoderStateMachine->SetPreservesPitch(mInitialPreservesPitch);
+  if (mMinimizePreroll) {
+    mDecoderStateMachine->SetMinimizePrerollUntilPlaybackStarts();
+  }
 }
 
 void MediaDecoder::SetMinimizePrerollUntilPlaybackStarts()
@@ -1660,6 +1666,7 @@ bool MediaDecoder::CanPlayThrough()
          stats.mDownloadPosition > stats.mPlaybackPosition + readAheadMargin;
 }
 
+#ifdef MOZ_EME
 nsresult
 MediaDecoder::SetCDMProxy(CDMProxy* aProxy)
 {
@@ -1678,6 +1685,7 @@ MediaDecoder::GetCDMProxy()
   MOZ_ASSERT(OnDecodeThread() || NS_IsMainThread());
   return mProxy;
 }
+#endif
 
 #ifdef MOZ_RAW
 bool

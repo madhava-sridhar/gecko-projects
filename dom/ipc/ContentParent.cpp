@@ -3487,7 +3487,7 @@ ContentParent::DoSendAsyncMessage(JSContext* aCx,
     if (aCpows && !GetCPOWManager()->Wrap(aCx, aCpows, &cpows)) {
         return false;
     }
-    return SendAsyncMessage(nsString(aMessage), data, cpows, aPrincipal);
+    return SendAsyncMessage(nsString(aMessage), data, cpows, Principal(aPrincipal));
 }
 
 bool

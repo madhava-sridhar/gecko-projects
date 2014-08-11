@@ -52,20 +52,12 @@ ul {
 }
 
 @media (max-width: 675px) {
-  #errorTitle {
+  #errorTitleText {
     padding-top: 0;
     background-image: none;
     -moz-padding-start: 0;
     -moz-margin-start: 0;
   }
-}
-
-
-/* common.css overrides */
-
-button {
-  font-size: 1em;
-  min-width: 150px;
 }
 
 /* Pressing the retry button will cause the cursor to flicker from a pointer to

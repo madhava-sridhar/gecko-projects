@@ -552,7 +552,7 @@ TabParent::Show(const nsIntSize& size)
 }
 
 void
-TabParent::UpdateDimensions(const nsRect& rect, const nsIntSize& size)
+TabParent::UpdateDimensions(const nsIntRect& rect, const nsIntSize& size)
 {
   if (mIsDestroyed) {
     return;
@@ -706,7 +706,7 @@ PContentPermissionRequestParent*
 TabParent::AllocPContentPermissionRequestParent(const InfallibleTArray<PermissionRequest>& aRequests,
                                                 const IPC::Principal& aPrincipal)
 {
-  return CreateContentPermissionRequestParent(aRequests, mFrameElement, aPrincipal);
+  return nsContentPermissionUtils::CreateContentPermissionRequestParent(aRequests, mFrameElement, aPrincipal);
 }
 
 bool
@@ -2103,6 +2103,25 @@ TabParent::SetIsDocShellActive(bool isActive)
 {
   unused << SendSetIsDocShellActive(isActive);
   return NS_OK;
+}
+
+bool
+TabParent::RecvRemotePaintIsReady()
+{
+  nsCOMPtr<mozilla::dom::EventTarget> target = do_QueryInterface(mFrameElement);
+  if (!target) {
+    NS_WARNING("Could not locate target for MozAfterRemotePaint message.");
+    return true;
+  }
+
+  nsCOMPtr<nsIDOMEvent> event;
+  NS_NewDOMEvent(getter_AddRefs(event), mFrameElement, nullptr, nullptr);
+  event->InitEvent(NS_LITERAL_STRING("MozAfterRemotePaint"), false, false);
+  event->SetTrusted(true);
+  event->GetInternalNSEvent()->mFlags.mOnlyChromeDispatch = true;
+  bool dummy;
+  mFrameElement->DispatchEvent(event, &dummy);
+  return true;
 }
 
 class FakeChannel MOZ_FINAL : public nsIChannel,

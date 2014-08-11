@@ -526,11 +526,11 @@ nsComputedDOMStyle::GetAdjustedValuesForBoxSizing()
 nsIPresShell*
 nsComputedDOMStyle::GetPresShellForContent(nsIContent* aContent)
 {
-  nsIDocument* currentDoc = aContent->GetCurrentDoc();
-  if (!currentDoc)
+  nsIDocument* composedDoc = aContent->GetComposedDoc();
+  if (!composedDoc)
     return nullptr;
 
-  return currentDoc->GetShell();
+  return composedDoc->GetShell();
 }
 
 // nsDOMCSSDeclaration abstract methods which should never be called
@@ -3649,7 +3649,7 @@ nsComputedDOMStyle::DoGetFlexBasis()
   //   }
 
   SetValueToCoord(val, StylePosition()->mFlexBasis, true,
-                  nullptr, nsCSSProps::kWidthKTable);
+                  nullptr, nsCSSProps::kFlexBasisKTable);
   return val;
 }
 

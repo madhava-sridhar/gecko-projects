@@ -1571,10 +1571,12 @@ CodeGenerator::visitMoveGroup(LMoveGroup *group)
 #else
           case LDefinition::BOX:
 #endif
-          case LDefinition::GENERAL: moveType = MoveOp::GENERAL; break;
-          case LDefinition::INT32:   moveType = MoveOp::INT32;   break;
-          case LDefinition::FLOAT32: moveType = MoveOp::FLOAT32; break;
-          case LDefinition::DOUBLE:  moveType = MoveOp::DOUBLE;  break;
+          case LDefinition::GENERAL:    moveType = MoveOp::GENERAL;   break;
+          case LDefinition::INT32:      moveType = MoveOp::INT32;     break;
+          case LDefinition::FLOAT32:    moveType = MoveOp::FLOAT32;   break;
+          case LDefinition::DOUBLE:     moveType = MoveOp::DOUBLE;    break;
+          case LDefinition::INT32X4:    moveType = MoveOp::INT32X4;   break;
+          case LDefinition::FLOAT32X4:  moveType = MoveOp::FLOAT32X4; break;
           default: MOZ_ASSUME_UNREACHABLE("Unexpected move type");
         }
 
@@ -3122,10 +3124,11 @@ CodeGenerator::maybeCreateScriptCounts()
             // Find a PC offset in the outermost script to use. If this block
             // is from an inlined script, find a location in the outer script
             // to associate information about the inlining with.
-            MResumePoint *resume = block->entryResumePoint();
-            while (resume->caller())
-                resume = resume->caller();
-            offset = script->pcToOffset(resume->pc());
+            if (MResumePoint *resume = block->entryResumePoint()) {
+                while (resume->caller())
+                    resume = resume->caller();
+                offset = script->pcToOffset(resume->pc());
+            }
         }
 
         if (!counts->block(i).init(block->id(), offset, block->numSuccessors())) {
@@ -5327,7 +5330,7 @@ JitCompartment::generateStringConcatStub(JSContext *cx, ExecutionMode mode)
 
     Linker linker(masm);
     AutoFlushICache afc("StringConcatStub");
-    JitCode *code = linker.newCode<CanGC>(cx, JSC::OTHER_CODE);
+    JitCode *code = linker.newCode<CanGC>(cx, OTHER_CODE);
 
 #ifdef JS_ION_PERF
     writePerfSpewerJitCodeProfile(code, "StringConcatStub");
@@ -5365,7 +5368,7 @@ JitRuntime::generateMallocStub(JSContext *cx)
 
     Linker linker(masm);
     AutoFlushICache afc("MallocStub");
-    JitCode *code = linker.newCode<NoGC>(cx, JSC::OTHER_CODE);
+    JitCode *code = linker.newCode<NoGC>(cx, OTHER_CODE);
 
 #ifdef JS_ION_PERF
     writePerfSpewerJitCodeProfile(code, "MallocStub");
@@ -5399,7 +5402,7 @@ JitRuntime::generateFreeStub(JSContext *cx)
 
     Linker linker(masm);
     AutoFlushICache afc("FreeStub");
-    JitCode *code = linker.newCode<NoGC>(cx, JSC::OTHER_CODE);
+    JitCode *code = linker.newCode<NoGC>(cx, OTHER_CODE);
 
 #ifdef JS_ION_PERF
     writePerfSpewerJitCodeProfile(code, "FreeStub");
@@ -6710,7 +6713,7 @@ CodeGenerator::link(JSContext *cx, types::CompilerConstraintList *constraints)
     AutoFlushICache afc("IonLink");
     JitCode *code = (executionMode == SequentialExecution)
                     ? linker.newCodeForIonScript(cx)
-                    : linker.newCode<CanGC>(cx, JSC::ION_CODE);
+                    : linker.newCode<CanGC>(cx, ION_CODE);
     if (!code) {
         // Use js_free instead of IonScript::Destroy: the cache list and
         // backedge list are still uninitialized.

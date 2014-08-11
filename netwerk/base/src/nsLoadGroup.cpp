@@ -50,7 +50,7 @@ static PRLogModuleInfo* gLoadGroupLog = nullptr;
 class RequestMapEntry : public PLDHashEntryHdr
 {
 public:
-    RequestMapEntry(nsIRequest *aRequest) :
+    explicit RequestMapEntry(nsIRequest *aRequest) :
         mKey(aRequest)
     {
     }
@@ -1171,7 +1171,7 @@ nsresult nsLoadGroup::Init()
     };
 
     PL_DHashTableInit(&mRequests, &hash_table_ops, nullptr,
-                      sizeof(RequestMapEntry), 16);
+                      sizeof(RequestMapEntry));
 
     mConnectionInfo = new nsLoadGroupConnectionInfo();
 

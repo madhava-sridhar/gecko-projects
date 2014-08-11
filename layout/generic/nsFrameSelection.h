@@ -332,18 +332,18 @@ public:
                                     int32_t aContentLength,
                                     bool aSlowCheck) const;
 
-  /** SetMouseDownState(bool);
-   *  sets the mouse state to aState for resons of drag state.
-   * @param aState is the new state of mousedown
+  /** SetDragState(bool);
+   *  sets the drag state to aState for resons of drag state.
+   * @param aState is the new state of drag
    */
   /*unsafe*/
-  void SetMouseDownState(bool aState);
+  void SetDragState(bool aState);
 
-  /** GetMouseDownState(bool *);
-   *  gets the mouse state to aState for resons of drag state.
-   * @param aState will hold the state of mousedown
+  /** GetDragState(bool *);
+   *  gets the drag state to aState for resons of drag state.
+   * @param aState will hold the state of drag
    */
-  bool GetMouseDownState() const { return mMouseDownState; }
+  bool GetDragState() const { return mDragState; }
 
   /**
     if we are in table cell selection mode. aka ctrl click in table cell
@@ -580,6 +580,11 @@ public:
    */
   nsresult MaintainSelection(nsSelectionAmount aAmount = eSelectNoAmount);
 
+  nsresult ConstrainFrameAndPointToAnchorSubtree(nsIFrame *aFrame,
+                                                 nsPoint& aPoint,
+                                                 nsIFrame **aRetFrame,
+                                                 nsPoint& aRetPoint);
+
   nsFrameSelection();
 
   void StartBatchChanges();
@@ -642,8 +647,6 @@ private:
   nsresult     FetchDesiredX(nscoord &aDesiredX); //the x position requested by the Key Handling for up down
   void         InvalidateDesiredX(); //do not listen to mDesiredX you must get another.
   void         SetDesiredX(nscoord aX); //set the mDesiredX
-
-  nsresult     ConstrainFrameAndPointToAnchorSubtree(nsIFrame *aFrame, nsPoint& aPoint, nsIFrame **aRetFrame, nsPoint& aRetPoint);
 
   uint32_t     GetBatching() const {return mBatching; }
   bool         GetNotifyFrames() const { return mNotifyFrames; }
@@ -718,7 +721,7 @@ private:
   bool mChangesDuringBatching;
   bool mNotifyFrames;
   bool mDragSelectingCells;
-  bool mMouseDownState;   //for drag purposes
+  bool mDragState;   //for drag purposes
   bool mMouseDoubleDownState; //has the doubleclick down happened
   bool mDesiredXSet;
 

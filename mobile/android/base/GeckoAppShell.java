@@ -183,6 +183,7 @@ public class GeckoAppShell
     /* The Android-side API: API methods that Android calls */
 
     // Initialization methods
+    public static native void registerJavaUiThread();
     public static native void nativeInit();
 
     // helper methods
@@ -411,7 +412,7 @@ public class GeckoAppShell
      *  The Gecko-side API: API methods that Gecko calls
      */
 
-    @WrapElementForJNI(allowMultithread = true, generateStatic = true, noThrow = true)
+    @WrapElementForJNI(allowMultithread = true, noThrow = true)
     public static void handleUncaughtException(Thread thread, Throwable e) {
         if (GeckoThread.checkLaunchState(GeckoThread.LaunchState.GeckoExited)) {
             // We've called System.exit. All exceptions after this point are Android
@@ -452,14 +453,14 @@ public class GeckoAppShell
         }
     }
 
-    @WrapElementForJNI(generateStatic = true)
+    @WrapElementForJNI
     public static void notifyIME(int type) {
         if (editableListener != null) {
             editableListener.notifyIME(type);
         }
     }
 
-    @WrapElementForJNI(generateStatic = true)
+    @WrapElementForJNI
     public static void notifyIMEContext(int state, String typeHint,
                                         String modeHint, String actionHint) {
         if (editableListener != null) {
@@ -468,7 +469,7 @@ public class GeckoAppShell
         }
     }
 
-    @WrapElementForJNI(generateStatic = true)
+    @WrapElementForJNI
     public static void notifyIMEChange(String text, int start, int end, int newEnd) {
         if (newEnd < 0) { // Selection change
             editableListener.onSelectionChange(start, end);
@@ -518,6 +519,24 @@ public class GeckoAppShell
             sWaitingForEventAck = false;
             sEventAckLock.notifyAll();
         }
+    }
+
+    private static Runnable sCallbackRunnable = new Runnable() {
+        @Override
+        public void run() {
+            ThreadUtils.assertOnUiThread();
+            long nextDelay = runUiThreadCallback();
+            if (nextDelay >= 0) {
+                ThreadUtils.getUiHandler().postDelayed(this, nextDelay);
+            }
+        }
+    };
+
+    private static native long runUiThreadCallback();
+
+    @WrapElementForJNI(allowMultithread = true)
+    private static void requestUiThreadCallback(long delay) {
+        ThreadUtils.getUiHandler().postDelayed(sCallbackRunnable, delay);
     }
 
     private static float getLocationAccuracy(Location location) {
@@ -1577,7 +1596,7 @@ public class GeckoAppShell
     public static boolean checkForGeckoProcs() {
 
         class GeckoPidCallback implements GeckoProcessesVisitor {
-            public boolean otherPidExist = false;
+            public boolean otherPidExist;
             @Override
             public boolean callback(int pid) {
                 if (pid != android.os.Process.myPid()) {
@@ -2099,12 +2118,12 @@ public class GeckoAppShell
         sGeckoInterface = aGeckoInterface;
     }
 
-    public static android.hardware.Camera sCamera = null;
+    public static android.hardware.Camera sCamera;
 
     static native void cameraCallbackBridge(byte[] data);
 
     static int kPreferedFps = 25;
-    static byte[] sCameraBuffer = null;
+    static byte[] sCameraBuffer;
 
 
     @WrapElementForJNI(stubName = "InitCameraWrapper")

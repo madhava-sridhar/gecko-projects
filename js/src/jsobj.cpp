@@ -2374,13 +2374,13 @@ JSObject::ReserveForTradeGuts(JSContext *cx, JSObject *aArg, JSObject *bArg,
     unsigned bdynamic = dynamicSlotsCount(reserved.newbfixed, a->slotSpan(), a->getClass());
 
     if (adynamic) {
-        reserved.newaslots = cx->pod_malloc<HeapSlot>(adynamic);
+        reserved.newaslots = a->zone()->pod_malloc<HeapSlot>(adynamic);
         if (!reserved.newaslots)
             return false;
         Debug_SetSlotRangeToCrashOnTouch(reserved.newaslots, adynamic);
     }
     if (bdynamic) {
-        reserved.newbslots = cx->pod_malloc<HeapSlot>(bdynamic);
+        reserved.newbslots = b->zone()->pod_malloc<HeapSlot>(bdynamic);
         if (!reserved.newbslots)
             return false;
         Debug_SetSlotRangeToCrashOnTouch(reserved.newbslots, bdynamic);
@@ -2530,9 +2530,6 @@ JSObject::TradeGuts(JSContext *cx, JSObject *a, JSObject *b, TradeGutsReserved &
 bool
 JSObject::swap(JSContext *cx, HandleObject a, HandleObject b)
 {
-    AutoMarkInDeadZone adc1(a->zone());
-    AutoMarkInDeadZone adc2(b->zone());
-
     // Ensure swap doesn't cause a finalizer to not be run.
     JS_ASSERT(IsBackgroundFinalized(a->tenuredGetAllocKind()) ==
               IsBackgroundFinalized(b->tenuredGetAllocKind()));
@@ -2856,13 +2853,13 @@ AllocateSlots(ThreadSafeContext *cx, JSObject *obj, uint32_t nslots)
 {
 #ifdef JSGC_GENERATIONAL
     if (cx->isJSContext())
-        return cx->asJSContext()->runtime()->gc.nursery.allocateSlots(cx->asJSContext(), obj, nslots);
+        return cx->asJSContext()->runtime()->gc.nursery.allocateSlots(obj, nslots);
 #endif
 #ifdef JSGC_FJGENERATIONAL
     if (cx->isForkJoinContext())
         return cx->asForkJoinContext()->nursery().allocateSlots(obj, nslots);
 #endif
-    return cx->pod_malloc<HeapSlot>(nslots);
+    return obj->zone()->pod_malloc<HeapSlot>(nslots);
 }
 
 // This will not run the garbage collector.  If a nursery cannot accomodate the slot array
@@ -2875,8 +2872,7 @@ ReallocateSlots(ThreadSafeContext *cx, JSObject *obj, HeapSlot *oldSlots,
 {
 #ifdef JSGC_GENERATIONAL
     if (cx->isJSContext()) {
-        return cx->asJSContext()->runtime()->gc.nursery.reallocateSlots(cx->asJSContext(),
-                                                                        obj, oldSlots,
+        return cx->asJSContext()->runtime()->gc.nursery.reallocateSlots(obj, oldSlots,
                                                                         oldCount, newCount);
     }
 #endif
@@ -2886,8 +2882,7 @@ ReallocateSlots(ThreadSafeContext *cx, JSObject *obj, HeapSlot *oldSlots,
                                                                   oldCount, newCount);
     }
 #endif
-    return (HeapSlot *)cx->realloc_(oldSlots, oldCount * sizeof(HeapSlot),
-                                    newCount * sizeof(HeapSlot));
+    return obj->zone()->pod_realloc<HeapSlot>(oldSlots, oldCount, newCount);
 }
 
 /* static */ bool
@@ -2958,7 +2953,7 @@ FreeSlots(ThreadSafeContext *cx, HeapSlot *slots)
 #ifdef JSGC_GENERATIONAL
     // Note: threads without a JSContext do not have access to GGC nursery allocated things.
     if (cx->isJSContext())
-        return cx->asJSContext()->runtime()->gc.nursery.freeSlots(cx->asJSContext(), slots);
+        return cx->asJSContext()->runtime()->gc.nursery.freeSlots(slots);
 #endif
 #ifdef JSGC_FJGENERATIONAL
     if (cx->isForkJoinContext())
@@ -3186,14 +3181,14 @@ AllocateElements(ThreadSafeContext *cx, JSObject *obj, uint32_t nelems)
 {
 #ifdef JSGC_GENERATIONAL
     if (cx->isJSContext())
-        return cx->asJSContext()->runtime()->gc.nursery.allocateElements(cx->asJSContext(), obj, nelems);
+        return cx->asJSContext()->runtime()->gc.nursery.allocateElements(obj, nelems);
 #endif
 #ifdef JSGC_FJGENERATIONAL
     if (cx->isForkJoinContext())
         return cx->asForkJoinContext()->nursery().allocateElements(obj, nelems);
 #endif
 
-    return static_cast<js::ObjectElements *>(cx->malloc_(nelems * sizeof(HeapValue)));
+    return reinterpret_cast<js::ObjectElements *>(obj->zone()->pod_malloc<HeapSlot>(nelems));
 }
 
 // This will not run the garbage collector.  If a nursery cannot accomodate the element array
@@ -3204,9 +3199,8 @@ ReallocateElements(ThreadSafeContext *cx, JSObject *obj, ObjectElements *oldHead
 {
 #ifdef JSGC_GENERATIONAL
     if (cx->isJSContext()) {
-        return cx->asJSContext()->runtime()->gc.nursery.reallocateElements(cx->asJSContext(), obj,
-                                                                           oldHeader, oldCount,
-                                                                           newCount);
+        return cx->asJSContext()->runtime()->gc.nursery.reallocateElements(obj, oldHeader,
+                                                                           oldCount, newCount);
     }
 #endif
 #ifdef JSGC_FJGENERATIONAL
@@ -3216,12 +3210,13 @@ ReallocateElements(ThreadSafeContext *cx, JSObject *obj, ObjectElements *oldHead
     }
 #endif
 
-    return static_cast<js::ObjectElements *>(cx->realloc_(oldHeader, oldCount * sizeof(HeapSlot),
-                                                          newCount * sizeof(HeapSlot)));
+    return reinterpret_cast<js::ObjectElements *>(
+            obj->zone()->pod_realloc<HeapSlot>(reinterpret_cast<HeapSlot *>(oldHeader),
+                                               oldCount, newCount));
 }
 
-// Round up |count| to one of our standard slot counts.  Up to 1 mebislot (i.e.
-// 1,048,576 slots) the slot count is always a power-of-two:
+// Round up |reqAllocated| to a good size. Up to 1 Mebi (i.e. 1,048,576) the
+// slot count is usually a power-of-two:
 //
 //   8, 16, 32, 64, ..., 256 Ki, 512 Ki, 1 Mi
 //
@@ -3235,10 +3230,45 @@ ReallocateElements(ThreadSafeContext *cx, JSObject *obj, ObjectElements *oldHead
 // Having the second class means that for bigger arrays the constant factor is
 // higher, but we waste less space.
 //
+// There are two exceptions to the above rules. Both exceptions optimize for
+// cases where the requested capacity is near the array's length.
+//
+// - If |reqAllocated| would give us a capacity equal to |length|, it's
+//   probably due to code like this:
+//
+//      var a = new Array(1024);
+//
+//   1024 is smaller than |EagerAllocationMaxLength|, so the array elements
+//   are allocated immediately. This is likely to be the final size of the
+//   array, so we just allocate the exact length immediately. In this case, the
+//   capacity is 1024 and |goodAllocated| is 1026.
+//
+// - If the |goodAllocated| value we compute gives a capacity slightly smaller
+//   than |length|, we nudge |goodAllocated| up so that the capacity equals the
+//   length. Consider the following code, which is very much like some code
+//   that appears in the Kraken benchmark suite:
+//
+//     var a = new Array(8192);
+//     for (var i = 0; i < 8192; i++) { a[i] = i; }
+//
+//   8192 is larger than |EagerAllocationMaxLength|, so the elements will be
+//   resized up to the final size rather than allocated immediately. Without
+//   this exception, it would be repeatedly resized and |goodAllocated| would
+//   reach 8192, which gives a capacity of 8190, which isn't quite enough, so
+//   it would then be have to be resized one more time to 16382 elements,
+//   wasting time and memory. But with the exception, the final resizing is
+//   nudged, resulting in a capacity of 8192 and |goodAllocated| value of 8194.
+//
 /* static */ uint32_t
 JSObject::goodAllocated(uint32_t reqAllocated, uint32_t length = 0)
 {
     static const uint32_t Mebi = 1024 * 1024;
+
+    uint32_t reqCapacity = reqAllocated - ObjectElements::VALUES_PER_HEADER;
+    if (reqCapacity == length && reqAllocated >= JSObject::SLOT_CAPACITY_MIN) {
+        // This is the first exception mentioned above.
+        return length + ObjectElements::VALUES_PER_HEADER;
+    }
 
     // This table was generated with this JavaScript code and a small amount
     // subsequent reformatting:
@@ -3285,26 +3315,10 @@ JSObject::goodAllocated(uint32_t reqAllocated, uint32_t length = 0)
         }
     }
 
-    // |goodAllocated| is typically a power-of-two, e.g. 8192, which gives us a
-    // capacity of 8190. This leads to bad behaviour if the user code uses
-    // array lengths that are powers of two.  For example, code very much like
-    // this appears in the Kraken benchmark suite:
-    //
-    //   var a = new Array(8192);
-    //   for (var i = 0; i < 8192; i++) { a[i] = i; }
-    //
-    // The array will be repeatedly resized up to a capacity of 8190, which
-    // isn't quite enough, so it'll be resized one more time to 16382.
-    //
-    // So if the capacity that |goodAllocated| would have given us is slightly
-    // smaller than |length|, we nudge |goodAllocated| up so that the capacity
-    // equals the length. This results in some slop, but the amount wasted is
-    // equal to or (more commonly) smaller than the size increase we'd get from
-    // re-doubling, and we don't have to pay the cost of re-doubling.
-    //
-    uint32_t capacity = goodAllocated - ObjectElements::VALUES_PER_HEADER;
-    if (length > capacity && (length - capacity) < 16) {
-        goodAllocated = length + ObjectElements::VALUES_PER_HEADER;
+    uint32_t goodCapacity = goodAllocated - ObjectElements::VALUES_PER_HEADER;
+    if (length > goodCapacity && (length - goodCapacity) < 16) {
+        // This is the second exception mentioned above.
+        return length + ObjectElements::VALUES_PER_HEADER;
     }
 
     return goodAllocated;

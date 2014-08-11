@@ -664,13 +664,10 @@ nsIdentifierMapEntry::HasIdElementExposedAsHTMLDocumentProperty()
          nsGenericHTMLElement::ShouldExposeIdAsHTMLDocumentProperty(idElement);
 }
 
-// static
 size_t
-nsIdentifierMapEntry::SizeOfExcludingThis(nsIdentifierMapEntry* aEntry,
-                                          MallocSizeOf aMallocSizeOf,
-                                          void*)
+nsIdentifierMapEntry::SizeOfExcludingThis(MallocSizeOf aMallocSizeOf) const
 {
-  return aEntry->GetKey().SizeOfExcludingThisIfUnshared(aMallocSizeOf);
+  return nsStringHashKey::SizeOfExcludingThis(aMallocSizeOf);
 }
 
 // Helper structs for the content->subdoc map
@@ -3743,7 +3740,7 @@ nsDocument::SetSubDocumentFor(Element* aElement, nsIDocument* aSubDoc)
       };
 
       mSubDocuments = PL_NewDHashTable(&hash_table_ops, nullptr,
-                                       sizeof(SubDocMapEntry), 16);
+                                       sizeof(SubDocMapEntry));
       if (!mSubDocuments) {
         return NS_ERROR_OUT_OF_MEMORY;
       }
@@ -6820,7 +6817,7 @@ nsDocument::GetBoxObjectFor(Element* aElement, ErrorResult& aRv)
   }
 
   if (!mBoxObjectTable) {
-    mBoxObjectTable = new nsInterfaceHashtable<nsPtrHashKey<nsIContent>, nsPIBoxObject>(12);
+    mBoxObjectTable = new nsInterfaceHashtable<nsPtrHashKey<nsIContent>, nsPIBoxObject>(6);
   } else {
     nsCOMPtr<nsPIBoxObject> boxObject = mBoxObjectTable->Get(aElement);
     if (boxObject) {
@@ -11423,12 +11420,8 @@ public:
 
     // Handling a request from user input in non-fullscreen mode.
     // Do a normal permission check.
-    nsCOMPtr<nsIContentPermissionPrompt> prompt =
-      do_CreateInstance(NS_CONTENT_PERMISSION_PROMPT_CONTRACTID);
-    if (prompt) {
-      prompt->Prompt(this);
-    }
-
+    nsCOMPtr<nsPIDOMWindow> window = doc->GetInnerWindow();
+    nsContentPermissionUtils::AskPermission(this, window);
     return NS_OK;
   }
 
@@ -11457,10 +11450,10 @@ NS_IMETHODIMP
 nsPointerLockPermissionRequest::GetTypes(nsIArray** aTypes)
 {
   nsTArray<nsString> emptyOptions;
-  return CreatePermissionArray(NS_LITERAL_CSTRING("pointerLock"),
-                               NS_LITERAL_CSTRING("unused"),
-                               emptyOptions,
-                               aTypes);
+  return nsContentPermissionUtils::CreatePermissionArray(NS_LITERAL_CSTRING("pointerLock"),
+                                                         NS_LITERAL_CSTRING("unused"),
+                                                         emptyOptions,
+                                                         aTypes);
 }
 
 NS_IMETHODIMP
@@ -12024,8 +12017,7 @@ nsDocument::DocAddSizeOfExcludingThis(nsWindowSizes* aWindowSizes) const
     mStyledLinks.SizeOfExcludingThis(nullptr, aWindowSizes->mMallocSizeOf);
 
   aWindowSizes->mDOMOtherSize +=
-    mIdentifierMap.SizeOfExcludingThis(nsIdentifierMapEntry::SizeOfExcludingThis,
-                                       aWindowSizes->mMallocSizeOf);
+    mIdentifierMap.SizeOfExcludingThis(aWindowSizes->mMallocSizeOf);
 
   // Measurement of the following members may be added later if DMD finds it
   // is worthwhile:

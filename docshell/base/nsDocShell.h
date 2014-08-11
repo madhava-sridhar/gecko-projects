@@ -50,6 +50,7 @@
 namespace mozilla {
 namespace dom {
 class EventTarget;
+class URLSearchParams;
 }
 }
 
@@ -665,7 +666,7 @@ protected:
     class RestorePresentationEvent : public nsRunnable {
     public:
         NS_DECL_NSIRUNNABLE
-        RestorePresentationEvent(nsDocShell *ds) : mDocShell(ds) {}
+        explicit RestorePresentationEvent(nsDocShell *ds) : mDocShell(ds) {}
         void Revoke() { mDocShell = nullptr; }
     private:
         nsRefPtr<nsDocShell> mDocShell;
@@ -762,6 +763,9 @@ protected:
     nsCOMPtr<nsIURI>           mFailedURI;
     nsCOMPtr<nsIChannel>       mFailedChannel;
     uint32_t                   mFailedLoadType;
+
+    // window.location.searchParams is updated in sync with this object.
+    nsRefPtr<mozilla::dom::URLSearchParams> mURLSearchParams;
 
     // Set in DoURILoad when either the LOAD_RELOAD_ALLOW_MIXED_CONTENT flag or
     // the LOAD_NORMAL_ALLOW_MIXED_CONTENT flag is set.
@@ -928,7 +932,7 @@ private:
 public:
     class InterfaceRequestorProxy : public nsIInterfaceRequestor {
     public:
-        InterfaceRequestorProxy(nsIInterfaceRequestor* p);
+        explicit InterfaceRequestorProxy(nsIInterfaceRequestor* p);
         NS_DECL_THREADSAFE_ISUPPORTS
         NS_DECL_NSIINTERFACEREQUESTOR
  

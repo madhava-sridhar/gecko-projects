@@ -172,6 +172,9 @@ JSRuntime::JSRuntime(JSRuntime *parentRuntime)
     negativeInfinityValue(DoubleValue(NegativeInfinity<double>())),
     positiveInfinityValue(DoubleValue(PositiveInfinity<double>())),
     emptyString(nullptr),
+#ifdef NIGHTLY_BUILD
+    assertOnScriptEntryHook_(nullptr),
+#endif
     debugMode(false),
     spsProfiler(thisFromCtor()),
     profilingScripts(false),
@@ -180,7 +183,7 @@ JSRuntime::JSRuntime(JSRuntime *parentRuntime)
     data(nullptr),
     signalHandlersInstalled_(false),
     canUseSignalHandlers_(false),
-    defaultFreeOp_(thisFromCtor(), false),
+    defaultFreeOp_(thisFromCtor()),
     debuggerMutations(0),
     securityCallbacks(const_cast<JSSecurityCallbacks *>(&NullSecurityCallbacks)),
     DOMcallbacks(nullptr),
@@ -512,7 +515,7 @@ JSRuntime::addSizeOfIncludingThis(mozilla::MallocSizeOf mallocSizeOf, JS::Runtim
     {
         AutoLockForInterrupt lock(this);
         if (jitRuntime()) {
-            if (JSC::ExecutableAllocator *ionAlloc = jitRuntime()->ionAlloc(this))
+            if (jit::ExecutableAllocator *ionAlloc = jitRuntime()->ionAlloc(this))
                 ionAlloc->addSizeOfCode(&rtSizes->code);
         }
     }
@@ -553,13 +556,13 @@ JSRuntime::requestInterrupt(InterruptMode mode)
     }
 }
 
-JSC::ExecutableAllocator *
+jit::ExecutableAllocator *
 JSRuntime::createExecutableAllocator(JSContext *cx)
 {
     JS_ASSERT(!execAlloc_);
     JS_ASSERT(cx->runtime() == this);
 
-    execAlloc_ = js_new<JSC::ExecutableAllocator>();
+    execAlloc_ = js_new<jit::ExecutableAllocator>();
     if (!execAlloc_)
         js_ReportOutOfMemory(cx);
     return execAlloc_;

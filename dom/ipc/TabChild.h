@@ -62,7 +62,7 @@ class TabChildGlobal : public DOMEventTargetHelper,
                        public nsIGlobalObject
 {
 public:
-  TabChildGlobal(TabChildBase* aTabChild);
+  explicit TabChildGlobal(TabChildBase* aTabChild);
   void Init();
   NS_DECL_ISUPPORTS_INHERITED
   NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(TabChildGlobal, DOMEventTargetHelper)
@@ -147,7 +147,7 @@ protected:
 class ContentListener MOZ_FINAL : public nsIDOMEventListener
 {
 public:
-  ContentListener(TabChild* aTabChild) : mTabChild(aTabChild) {}
+  explicit ContentListener(TabChild* aTabChild) : mTabChild(aTabChild) {}
   NS_DECL_ISUPPORTS
   NS_DECL_NSIDOMEVENTLISTENER
 protected:
@@ -178,7 +178,7 @@ public:
     // viewport data on a document may have changed. If it didn't
     // change, this function doesn't do anything.  However, it should
     // not be called all the time as it is fairly expensive.
-    bool HandlePossibleViewportChange();
+    bool HandlePossibleViewportChange(const ScreenIntSize& aOldScreenSize);
     virtual bool DoUpdateZoomConstraints(const uint32_t& aPresShellId,
                                          const mozilla::layers::FrameMetrics::ViewID& aViewId,
                                          const bool& aIsRoot,
@@ -318,7 +318,7 @@ public:
                                          const FileDescriptor& aFileDescriptor)
                                          MOZ_OVERRIDE;
     virtual bool RecvShow(const nsIntSize& size) MOZ_OVERRIDE;
-    virtual bool RecvUpdateDimensions(const nsRect& rect,
+    virtual bool RecvUpdateDimensions(const nsIntRect& rect,
                                       const nsIntSize& size,
                                       const ScreenOrientation& orientation) MOZ_OVERRIDE;
     virtual bool RecvUpdateFrame(const mozilla::layers::FrameMetrics& aFrameMetrics) MOZ_OVERRIDE;
@@ -385,13 +385,6 @@ public:
     virtual PColorPickerChild*
     AllocPColorPickerChild(const nsString& title, const nsString& initialColor) MOZ_OVERRIDE;
     virtual bool DeallocPColorPickerChild(PColorPickerChild* actor) MOZ_OVERRIDE;
-
-#ifdef DEBUG
-    virtual PContentPermissionRequestChild*
-    SendPContentPermissionRequestConstructor(PContentPermissionRequestChild* aActor,
-                                             const InfallibleTArray<PermissionRequest>& aRequests,
-                                             const IPC::Principal& aPrincipal);
-#endif /* DEBUG */
 
     virtual PContentPermissionRequestChild*
     AllocPContentPermissionRequestChild(const InfallibleTArray<PermissionRequest>& aRequests,
@@ -503,6 +496,8 @@ protected:
     virtual bool RecvDestroy() MOZ_OVERRIDE;
     virtual bool RecvSetUpdateHitRegion(const bool& aEnabled) MOZ_OVERRIDE;
     virtual bool RecvSetIsDocShellActive(const bool& aIsActive) MOZ_OVERRIDE;
+
+    virtual bool RecvRequestNotifyAfterRemotePaint();
 
 private:
     /**

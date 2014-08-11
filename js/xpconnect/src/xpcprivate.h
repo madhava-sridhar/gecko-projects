@@ -175,20 +175,20 @@
 /***************************************************************************/
 // default initial sizes for maps (hashtables)
 
-#define XPC_CONTEXT_MAP_SIZE                16
-#define XPC_JS_MAP_SIZE                     64
-#define XPC_JS_CLASS_MAP_SIZE               64
+#define XPC_CONTEXT_MAP_LENGTH                   8
+#define XPC_JS_MAP_LENGTH                       32
+#define XPC_JS_CLASS_MAP_LENGTH                 32
 
-#define XPC_NATIVE_MAP_SIZE                 64
-#define XPC_NATIVE_PROTO_MAP_SIZE           16
-#define XPC_DYING_NATIVE_PROTO_MAP_SIZE     16
-#define XPC_DETACHED_NATIVE_PROTO_MAP_SIZE  32
-#define XPC_NATIVE_INTERFACE_MAP_SIZE       64
-#define XPC_NATIVE_SET_MAP_SIZE             64
-#define XPC_NATIVE_JSCLASS_MAP_SIZE         32
-#define XPC_THIS_TRANSLATOR_MAP_SIZE         8
-#define XPC_NATIVE_WRAPPER_MAP_SIZE         16
-#define XPC_WRAPPER_MAP_SIZE                16
+#define XPC_NATIVE_MAP_LENGTH                   32
+#define XPC_NATIVE_PROTO_MAP_LENGTH              8
+#define XPC_DYING_NATIVE_PROTO_MAP_LENGTH        8
+#define XPC_DETACHED_NATIVE_PROTO_MAP_LENGTH    16
+#define XPC_NATIVE_INTERFACE_MAP_LENGTH         32
+#define XPC_NATIVE_SET_MAP_LENGTH               32
+#define XPC_NATIVE_JSCLASS_MAP_LENGTH           16
+#define XPC_THIS_TRANSLATOR_MAP_LENGTH           4
+#define XPC_NATIVE_WRAPPER_MAP_LENGTH            8
+#define XPC_WRAPPER_MAP_LENGTH                   8
 
 /***************************************************************************/
 // data declarations...
@@ -3587,6 +3587,7 @@ public:
         , forcePermissiveCOWs(false)
         , adoptedNode(false)
         , donatedNode(false)
+        , warnedAboutXrays(false)
         , scriptability(c)
         , scope(nullptr)
     {
@@ -3641,6 +3642,10 @@ public:
     // for telemetry. See bug 928476.
     bool adoptedNode;
     bool donatedNode;
+
+    // Whether we've emitted a warning about a property that was filtered out
+    // by XrayWrappers. See XrayWrapper.cpp.
+    bool warnedAboutXrays;
 
     // The scriptability of this compartment.
     Scriptability scriptability;

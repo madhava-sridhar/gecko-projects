@@ -38,10 +38,10 @@
 #include "jsapi.h"
 
 // Initial size for the cache holding visited status observers.
-#define VISIT_OBSERVERS_INITIAL_CACHE_SIZE 128
+#define VISIT_OBSERVERS_INITIAL_CACHE_LENGTH 64
 
-// Initial size for the visits removal hash.
-#define VISITS_REMOVAL_INITIAL_HASH_SIZE 128
+// Initial length for the visits removal hash.
+#define VISITS_REMOVAL_INITIAL_HASH_LENGTH 64
 
 using namespace mozilla::dom;
 using namespace mozilla::ipc;
@@ -839,6 +839,13 @@ public:
     MOZ_ASSERT(NS_IsMainThread(), "This should be called on the main thread");
     MOZ_ASSERT(aPlaces.Length() > 0, "Must pass a non-empty array!");
 
+    // Make sure nsNavHistory service is up before proceeding:
+    nsNavHistory* navHistory = nsNavHistory::GetHistoryService();
+    MOZ_ASSERT(navHistory, "Could not get nsNavHistory?!");
+    if (!navHistory) {
+      return NS_ERROR_FAILURE;
+    }
+
     nsRefPtr<InsertVisitedURIs> event =
       new InsertVisitedURIs(aConnection, aPlaces, aCallback);
 
@@ -927,9 +934,6 @@ private:
 
     (void)mPlaces.SwapElements(aPlaces);
     (void)mReferrers.SetLength(mPlaces.Length());
-
-    nsNavHistory* navHistory = nsNavHistory::GetHistoryService();
-    NS_ABORT_IF_FALSE(navHistory, "Could not get nsNavHistory?!");
 
     for (nsTArray<VisitData>::size_type i = 0; i < mPlaces.Length(); i++) {
       mReferrers[i].spec = mPlaces[i].referrerSpec;
@@ -1558,8 +1562,10 @@ static PLDHashOperator NotifyVisitRemoval(PlaceHashKey* aEntry,
   const nsTArray<VisitData>& visits = aEntry->visits;
   nsCOMPtr<nsIURI> uri;
   (void)NS_NewURI(getter_AddRefs(uri), visits[0].spec);
-  bool removingPage = visits.Length() == aEntry->visitCount &&
-                      !aEntry->bookmarked;
+  // XXX visitCount should really just be unsigned (bug 1049812)
+  bool removingPage =
+    visits.Length() == static_cast<size_t>(aEntry->visitCount) &&
+    !aEntry->bookmarked;
   // FindRemovableVisits only sets the transition type on the VisitData objects
   // it collects if the visits were filtered by transition type.
   // RemoveVisitsFilter currently only supports filtering by transition type, so
@@ -1584,7 +1590,7 @@ class NotifyRemoveVisits : public nsRunnable
 public:
 
   NotifyRemoveVisits(nsTHashtable<PlaceHashKey>& aPlaces)
-    : mPlaces(VISITS_REMOVAL_INITIAL_HASH_SIZE)
+    : mPlaces(VISITS_REMOVAL_INITIAL_HASH_LENGTH)
     , mHistory(History::GetService())
   {
     MOZ_ASSERT(!NS_IsMainThread(),
@@ -1636,7 +1642,9 @@ static PLDHashOperator ListToBeRemovedPlaceIds(PlaceHashKey* aEntry,
 {
   const nsTArray<VisitData>& visits = aEntry->visits;
   // Only orphan ids should be listed.
-  if (visits.Length() == aEntry->visitCount && !aEntry->bookmarked) {
+  // XXX visitCount should really just be unsigned (bug 1049812)
+  if (visits.Length() == static_cast<size_t>(aEntry->visitCount) &&
+      !aEntry->bookmarked) {
     nsCString* list = static_cast<nsCString*>(aIdsList);
     if (!list->IsEmpty())
       list->Append(',');
@@ -1689,7 +1697,7 @@ public:
 
     // Find all the visits relative to the current filters and whether their
     // pages will be removed or not.
-    nsTHashtable<PlaceHashKey> places(VISITS_REMOVAL_INITIAL_HASH_SIZE);
+    nsTHashtable<PlaceHashKey> places(VISITS_REMOVAL_INITIAL_HASH_LENGTH);
     nsresult rv = FindRemovableVisits(places);
     NS_ENSURE_SUCCESS(rv, rv);
 
@@ -1921,7 +1929,7 @@ History* History::gService = nullptr;
 History::History()
   : mShuttingDown(false)
   , mShutdownMutex("History::mShutdownMutex")
-  , mObservers(VISIT_OBSERVERS_INITIAL_CACHE_SIZE)
+  , mObservers(VISIT_OBSERVERS_INITIAL_CACHE_LENGTH)
   , mRecentlyVisitedURIsNextIndex(0)
 {
   NS_ASSERTION(!gService, "Ruh-roh!  This service has already been created!");
@@ -2223,12 +2231,6 @@ History::FetchPageInfo(VisitData& _place, bool* _exists)
   return NS_OK;
 }
 
-/* static */ size_t
-History::SizeOfEntryExcludingThis(KeyClass* aEntry, mozilla::MallocSizeOf aMallocSizeOf, void *)
-{
-  return aEntry->array.SizeOfExcludingThis(aMallocSizeOf);
-}
-
 MOZ_DEFINE_MALLOC_SIZE_OF(HistoryMallocSizeOf)
 
 NS_IMETHODIMP
@@ -2246,7 +2248,7 @@ size_t
 History::SizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOfThis)
 {
   return aMallocSizeOfThis(this) +
-         mObservers.SizeOfExcludingThis(SizeOfEntryExcludingThis, aMallocSizeOfThis);
+         mObservers.SizeOfExcludingThis(aMallocSizeOfThis);
 }
 
 /* static */
@@ -2691,9 +2693,14 @@ History::RemoveAllDownloads()
 NS_IMETHODIMP
 History::GetPlacesInfo(JS::Handle<JS::Value> aPlaceIdentifiers,
                        mozIVisitInfoCallback* aCallback,
-                       JSContext* aCtx) {
+                       JSContext* aCtx)
+{
+  // Make sure nsNavHistory service is up before proceeding:
   nsNavHistory* navHistory = nsNavHistory::GetHistoryService();
-  NS_ABORT_IF_FALSE(navHistory, "Could not get nsNavHistory?!");
+  MOZ_ASSERT(navHistory, "Could not get nsNavHistory?!");
+  if (!navHistory) {
+    return NS_ERROR_FAILURE;
+  }
 
   uint32_t placesIndentifiersLength;
   JS::Rooted<JSObject*> placesIndentifiers(aCtx);

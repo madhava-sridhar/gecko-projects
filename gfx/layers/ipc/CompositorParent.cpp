@@ -145,9 +145,10 @@ CompositorThreadHolder::CreateCompositorThread()
      128ms is chosen for transient hangs because 8Hz should be the minimally
      acceptable goal for Compositor responsiveness (normal goal is 60Hz). */
   options.transient_hang_timeout = 128; // milliseconds
-  /* 8192ms is chosen for permanent hangs because it's several seconds longer
-     than the default hang timeout on major platforms (about 5 seconds). */
-  options.permanent_hang_timeout = 8192; // milliseconds
+  /* 2048ms is chosen for permanent hangs because it's longer than most
+   * Compositor hangs seen in the wild, but is short enough to not miss getting
+   * native hang stacks. */
+  options.permanent_hang_timeout = 2048; // milliseconds
 
   if (!compositorThread->StartWithOptions(options)) {
     delete compositorThread;
@@ -1126,6 +1127,7 @@ public:
     : mTransport(aTransport)
     , mChildProcessId(aOtherProcess)
     , mCompositorThreadHolder(sCompositorThreadHolder)
+    , mNotifyAfterRemotePaint(false)
   {
     MOZ_ASSERT(NS_IsMainThread());
   }
@@ -1152,6 +1154,11 @@ public:
   virtual bool RecvNotifyRegionInvalidated(const nsIntRegion& aRegion) { return true; }
   virtual bool RecvStartFrameTimeRecording(const int32_t& aBufferSize, uint32_t* aOutStartIndex) MOZ_OVERRIDE { return true; }
   virtual bool RecvStopFrameTimeRecording(const uint32_t& aStartIndex, InfallibleTArray<float>* intervals) MOZ_OVERRIDE  { return true; }
+
+  /**
+   * Tells this CompositorParent to send a message when the compositor has received the transaction.
+   */
+  virtual bool RecvRequestNotifyAfterRemotePaint() MOZ_OVERRIDE;
 
   virtual PLayerTransactionParent*
     AllocPLayerTransactionParent(const nsTArray<LayersBackend>& aBackendHints,
@@ -1194,6 +1201,9 @@ private:
   base::ProcessId mChildProcessId;
 
   nsRefPtr<CompositorThreadHolder> mCompositorThreadHolder;
+  // If true, we should send a RemotePaintIsReady message when the layer transaction
+  // is received
+  bool mNotifyAfterRemotePaint;
 };
 
 void
@@ -1284,6 +1294,13 @@ static void
 RemoveIndirectTree(uint64_t aId)
 {
   sIndirectLayerTrees.erase(aId);
+}
+
+bool
+CrossProcessCompositorParent::RecvRequestNotifyAfterRemotePaint()
+{
+  mNotifyAfterRemotePaint = true;
+  return true;
 }
 
 void
@@ -1380,6 +1397,13 @@ CrossProcessCompositorParent::ShadowLayersUpdated(
 
   state->mParent->NotifyShadowTreeTransaction(id, aIsFirstPaint, aScheduleComposite,
       aPaintSequenceNumber, aIsRepeatTransaction);
+
+  // Send the 'remote paint ready' message to the content thread if it has already asked.
+  if(mNotifyAfterRemotePaint)  {
+    unused << SendRemotePaintIsReady();
+    mNotifyAfterRemotePaint = false;
+  }
+
   aLayerTree->SetPendingTransactionId(aTransactionId);
 }
 

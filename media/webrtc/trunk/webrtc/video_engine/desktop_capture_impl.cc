@@ -42,6 +42,11 @@ int32_t ScreenDeviceInfoImpl::Init() {
   return 0;
 }
 
+int32_t ScreenDeviceInfoImpl::Refresh() {
+  desktop_device_info_->Refresh();
+  return 0;
+}
+
 uint32_t ScreenDeviceInfoImpl::NumberOfDevices() {
   return desktop_device_info_->getDisplayDeviceCount();
 }
@@ -130,6 +135,11 @@ AppDeviceInfoImpl::~AppDeviceInfoImpl(void) {
 
 int32_t AppDeviceInfoImpl::Init() {
   desktop_device_info_.reset(DesktopDeviceInfoImpl::Create());
+  return 0;
+}
+
+int32_t AppDeviceInfoImpl::Refresh() {
+  desktop_device_info_->Refresh();
   return 0;
 }
 
@@ -225,6 +235,11 @@ VideoCaptureModule* DesktopCaptureImpl::Create(const int32_t id,
 
 int32_t WindowDeviceInfoImpl::Init() {
   desktop_device_info_.reset(DesktopDeviceInfoImpl::Create());
+  return 0;
+}
+
+int32_t WindowDeviceInfoImpl::Refresh() {
+  desktop_device_info_->Refresh();
   return 0;
 }
 
@@ -359,7 +374,12 @@ int32_t DesktopCaptureImpl::Init(const char* uniqueId,
     MouseCursorMonitor * pMouseCursorMonitor = MouseCursorMonitor::CreateForScreen(webrtc::DesktopCaptureOptions::CreateDefault(), webrtc::kFullDesktopScreenId);
     desktop_capturer_cursor_composer_.reset(new DesktopAndCursorComposer(pAppCapturer, pMouseCursorMonitor));
   } else if (type == Screen) {
-    ScreenCapturer *pScreenCapturer = ScreenCapturer::Create();
+
+    DesktopCaptureOptions options = DesktopCaptureOptions::CreateDefault();
+    // Leave desktop effects enabled during WebRTC captures.
+    options.set_disable_effects(false);
+
+    ScreenCapturer *pScreenCapturer = ScreenCapturer::Create(options);
     if (!pScreenCapturer) {
       return -1;
     }
@@ -368,7 +388,7 @@ int32_t DesktopCaptureImpl::Init(const char* uniqueId,
     pScreenCapturer->SelectScreen(screenid);
     pScreenCapturer->SetMouseShapeObserver(this);
 
-    MouseCursorMonitor * pMouseCursorMonitor = MouseCursorMonitor::CreateForScreen(webrtc::DesktopCaptureOptions::CreateDefault(), screenid);
+    MouseCursorMonitor * pMouseCursorMonitor = MouseCursorMonitor::CreateForScreen(options, screenid);
     desktop_capturer_cursor_composer_.reset(new DesktopAndCursorComposer(pScreenCapturer, pMouseCursorMonitor));
   } else if (type == Window) {
     WindowCapturer *pWindowCapturer = WindowCapturer::Create();
@@ -379,6 +399,7 @@ int32_t DesktopCaptureImpl::Init(const char* uniqueId,
     std::string idStr(uniqueId);
     const std::string prefix("\\win\\");
     if (idStr.substr(0, prefix.size()) != prefix) {
+      delete pWindowCapturer;
       // invalid id
       return -1;
     }

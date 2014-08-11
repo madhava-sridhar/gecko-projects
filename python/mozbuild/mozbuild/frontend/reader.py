@@ -104,10 +104,6 @@ def is_read_allowed(path, config):
     return False
 
 
-class PathWithTrigger(unicode):
-    __slots__ = ('trigger',)
-
-
 class SandboxCalledError(SandboxError):
     """Represents an error resulting from calling the error() function."""
 
@@ -140,34 +136,25 @@ class MozbuildSandbox(Sandbox):
         topsrcdir = config.topsrcdir
         norm_topsrcdir = mozpath.normpath(topsrcdir)
 
+        self.external_source_dirs = []
+        external_dirs = config.substs.get('EXTERNAL_SOURCE_DIR', '').split()
+        for external in external_dirs:
+            external = mozpath.normpath(external)
+
+            if not os.path.isabs(external):
+                external = mozpath.join(config.topsrcdir, external)
+
+            external = mozpath.normpath(external)
+            self.external_source_dirs.append(external)
+
+
         if not path.startswith(norm_topsrcdir):
-            external_dirs = config.substs.get('EXTERNAL_SOURCE_DIR', '').split()
-            for external in external_dirs:
-                external = mozpath.normpath(external)
-
-                if not os.path.isabs(external):
-                    external = mozpath.join(config.topsrcdir, external)
-
-                external = mozpath.normpath(external)
-
+            for external in self.external_source_dirs:
                 if not path.startswith(external):
                     continue
 
                 topsrcdir = external
 
-                # This is really hacky and should be replaced with something
-                # more robust. We assume that if an external source directory
-                # is in play that the main build system is built in a
-                # subdirectory of its topobjdir. Therefore, the topobjdir of
-                # the external source directory is the parent of our topobjdir.
-                topobjdir = mozpath.dirname(topobjdir)
-
-                # This is suboptimal because we load the config.status multiple
-                # times. We should consider caching it, possibly by moving this
-                # code up to the reader.
-                config = ConfigEnvironment.from_config_status(
-                    mozpath.join(topobjdir, 'config.status'))
-                self.config = config
                 break
 
         self.topsrcdir = topsrcdir
@@ -200,8 +187,8 @@ class MozbuildSandbox(Sandbox):
             extra_vars = self.metadata.get('exports', dict())
             self._globals.update(extra_vars)
 
-    def exec_file(self, path, filesystem_absolute=False):
-        """Override exec_file to normalize paths and restrict file loading.
+    def normalize_path(self, path, filesystem_absolute=False, srcdir=None):
+        """Normalizes paths.
 
         If the path is absolute, behavior is governed by filesystem_absolute.
         If filesystem_absolute is True, the path is interpreted as absolute on
@@ -211,31 +198,43 @@ class MozbuildSandbox(Sandbox):
         If the path is not absolute, it will be treated as relative to the
         currently executing file. If there is no currently executing file, it
         will be treated as relative to topsrcdir.
-
-        Paths will be rejected if they do not fall under topsrcdir.
         """
         if os.path.isabs(path):
-            if not filesystem_absolute:
-                path = mozpath.normpath(mozpath.join(self.topsrcdir,
-                    path[1:]))
-
+            if filesystem_absolute:
+                return path
+            for root in [self.topsrcdir] + self.external_source_dirs:
+                # mozpath.join would ignore the self.topsrcdir argument if we
+                # passed in the absolute path, so omit the leading /
+                p = mozpath.normpath(mozpath.join(root, path[1:]))
+                if os.path.exists(p):
+                    return p
+            # mozpath.join would ignore the self.topsrcdir argument if we passed
+            # in the absolute path, so omit the leading /
+            return mozpath.normpath(mozpath.join(self.topsrcdir, path[1:]))
+        elif srcdir:
+            return mozpath.normpath(mozpath.join(srcdir, path))
+        elif len(self._execution_stack):
+            return mozpath.normpath(mozpath.join(
+                mozpath.dirname(self._execution_stack[-1]), path))
         else:
-            if len(self._execution_stack):
-                path = mozpath.normpath(mozpath.join(
-                    mozpath.dirname(self._execution_stack[-1]),
-                    path))
-            else:
-                path = mozpath.normpath(mozpath.join(
-                    self.topsrcdir, path))
+            return mozpath.normpath(mozpath.join(self.topsrcdir, path))
+
+    def exec_file(self, path, filesystem_absolute=False):
+        """Override exec_file to normalize paths and restrict file loading.
+
+        Paths will be rejected if they do not fall under topsrcdir or one of
+        the external roots.
+        """
 
         # realpath() is needed for true security. But, this isn't for security
         # protection, so it is omitted.
-        normalized_path = mozpath.normpath(path)
+        normalized_path = self.normalize_path(path,
+            filesystem_absolute=filesystem_absolute)
         if not is_read_allowed(normalized_path, self.config):
             raise SandboxLoadError(list(self._execution_stack),
                 sys.exc_info()[2], illegal_path=path)
 
-        Sandbox.exec_file(self, path)
+        Sandbox.exec_file(self, normalized_path)
 
     def _add_java_jar(self, name):
         """Add a Java JAR build target."""
@@ -281,8 +280,7 @@ class MozbuildSandbox(Sandbox):
         data.is_library = True
         return data
 
-    def _add_tier_directory(self, tier, reldir, static=False, external=False,
-            trigger=None):
+    def _add_tier_directory(self, tier, reldir, external=False):
         """Register a tier directory with the build."""
         if isinstance(reldir, text_type):
             reldir = [reldir]
@@ -290,22 +288,15 @@ class MozbuildSandbox(Sandbox):
         if not tier in self['TIERS']:
             self['TIERS'][tier] = {
                 'regular': [],
-                'static': [],
                 'external': [],
             }
 
-        key = 'static' if static else 'external' if external else 'regular'
-        if external and static:
-            raise Exception('Only one of external or static can be set at the '
-                'same time')
-
+        key = 'external' if external else 'regular'
         for path in reldir:
             if path in self['TIERS'][tier][key]:
                 raise Exception('Directory has already been registered with '
                     'tier: %s' % path)
 
-            path = PathWithTrigger(path)
-            path.trigger = trigger
             self['TIERS'][tier][key].append(path)
 
     def _export(self, varname):
@@ -877,7 +868,7 @@ class BuildReader(object):
                     'TIERS defined but it should not be', sandbox)
 
             for tier, values in sandbox['TIERS'].items():
-                # We don't descend into static directories because static by
+                # We don't descend into external directories because external by
                 # definition is external to the build system.
                 for d in values['regular']:
                     if d in recurse_info:
@@ -886,16 +877,19 @@ class BuildReader(object):
                             'times in %s' % (d, tier), sandbox)
                     recurse_info[d] = {'tier': tier,
                                        'parent': sandbox['RELATIVEDIR'],
+                                       'check_external': True,
                                        'var': 'DIRS'}
 
         for relpath, child_metadata in recurse_info.items():
-            child_path = mozpath.join(curdir, relpath, 'moz.build')
+            if 'check_external' in child_metadata:
+                relpath = '/' + relpath
+            child_path = sandbox.normalize_path(mozpath.join(relpath,
+                'moz.build'), srcdir=curdir)
 
             # Ensure we don't break out of the topsrcdir. We don't do realpath
             # because it isn't necessary. If there are symlinks in the srcdir,
             # that's not our problem. We're not a hosted application: we don't
             # need to worry about security too much.
-            child_path = mozpath.normpath(child_path)
             if not is_read_allowed(child_path, sandbox.config):
                 raise SandboxValidationError(
                     'Attempting to process file outside of allowed paths: %s' %

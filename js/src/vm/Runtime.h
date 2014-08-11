@@ -73,8 +73,6 @@ js_ReportAllocationOverflow(js::ThreadSafeContext *cx);
 extern void
 js_ReportOverRecursed(js::ThreadSafeContext *cx);
 
-namespace JSC { class ExecutableAllocator; }
-
 namespace js {
 
 class Activation;
@@ -381,23 +379,16 @@ struct RegExpTestCache
  * FreeOp is passed to finalizers and other sweep-phase hooks so that we do not
  * need to pass a JSContext to those hooks.
  */
-class FreeOp : public JSFreeOp {
-    bool        shouldFreeLater_;
-
+class FreeOp : public JSFreeOp
+{
   public:
     static FreeOp *get(JSFreeOp *fop) {
         return static_cast<FreeOp *>(fop);
     }
 
-    FreeOp(JSRuntime *rt, bool shouldFreeLater)
-      : JSFreeOp(rt),
-        shouldFreeLater_(shouldFreeLater)
-    {
-    }
-
-    bool shouldFreeLater() const {
-        return shouldFreeLater_;
-    }
+    FreeOp(JSRuntime *rt)
+      : JSFreeOp(rt)
+    {}
 
     inline void free_(void *p);
 
@@ -407,16 +398,6 @@ class FreeOp : public JSFreeOp {
             p->~T();
             free_(p);
         }
-    }
-
-    static void staticAsserts() {
-        /*
-         * Check that JSFreeOp is the first base class for FreeOp and we can
-         * reinterpret a pointer to JSFreeOp as a pointer to FreeOp without
-         * any offset adjustments. JSClass::finalize <-> Class::finalize depends
-         * on this.
-         */
-        JS_STATIC_ASSERT(offsetof(FreeOp, shouldFreeLater_) == sizeof(JSFreeOp));
     }
 };
 
@@ -835,7 +816,7 @@ struct JSRuntime : public JS::shadow::Runtime,
      * Both of these allocators are used for regular expression code which is shared at the
      * thread-data level.
      */
-    JSC::ExecutableAllocator *execAlloc_;
+    js::jit::ExecutableAllocator *execAlloc_;
     js::jit::JitRuntime *jitRuntime_;
 
     /*
@@ -847,18 +828,18 @@ struct JSRuntime : public JS::shadow::Runtime,
     /* Space for interpreter frames. */
     js::InterpreterStack interpreterStack_;
 
-    JSC::ExecutableAllocator *createExecutableAllocator(JSContext *cx);
+    js::jit::ExecutableAllocator *createExecutableAllocator(JSContext *cx);
     js::jit::JitRuntime *createJitRuntime(JSContext *cx);
 
   public:
-    JSC::ExecutableAllocator *getExecAlloc(JSContext *cx) {
+    js::jit::ExecutableAllocator *getExecAlloc(JSContext *cx) {
         return execAlloc_ ? execAlloc_ : createExecutableAllocator(cx);
     }
-    JSC::ExecutableAllocator &execAlloc() {
+    js::jit::ExecutableAllocator &execAlloc() {
         JS_ASSERT(execAlloc_);
         return *execAlloc_;
     }
-    JSC::ExecutableAllocator *maybeExecAlloc() {
+    js::jit::ExecutableAllocator *maybeExecAlloc() {
         return execAlloc_;
     }
     js::jit::JitRuntime *getJitRuntime(JSContext *cx) {
@@ -1009,6 +990,10 @@ struct JSRuntime : public JS::shadow::Runtime,
     }
 
     mozilla::UniquePtr<js::SourceHook> sourceHook;
+
+#ifdef NIGHTLY_BUILD
+    js::AssertOnScriptEntryHook assertOnScriptEntryHook_;
+#endif
 
     /* If true, new compartments are initially in debug mode. */
     bool                debugMode;
@@ -1459,10 +1444,6 @@ VersionIsKnown(JSVersion version)
 inline void
 FreeOp::free_(void *p)
 {
-    if (shouldFreeLater()) {
-        runtime()->gc.freeLater(p);
-        return;
-    }
     js_free(p);
 }
 

@@ -111,6 +111,9 @@ public:
   // Returns true if the data in the source buffer contains the given time.
   bool ContainsTime(double aTime);
 
+  double GetBufferedStart();
+  double GetBufferedEnd();
+
 private:
   ~SourceBuffer();
 
@@ -135,10 +138,6 @@ private:
   // Shared implementation of AppendBuffer overloads.
   void AppendData(const uint8_t* aData, uint32_t aLength, ErrorResult& aRv);
 
-  // Provide the minimum start time and maximum end time that is available
-  // in the data buffered by this SourceBuffer.
-  void GetBufferedStartEndTime(double* aStart, double* aEnd);
-
   nsRefPtr<MediaSource> mMediaSource;
 
   const nsCString mType;
@@ -146,6 +145,7 @@ private:
   nsAutoPtr<ContainerParser> mParser;
 
   nsRefPtr<SubBufferDecoder> mDecoder;
+  nsTArray<nsRefPtr<SubBufferDecoder>> mDecoders;
 
   double mAppendWindowStart;
   double mAppendWindowEnd;

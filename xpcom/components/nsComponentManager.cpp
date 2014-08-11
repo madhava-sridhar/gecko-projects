@@ -215,7 +215,7 @@ namespace {
 class MOZ_STACK_CLASS MutexLock
 {
 public:
-  MutexLock(SafeMutex& aMutex)
+  explicit MutexLock(SafeMutex& aMutex)
     : mMutex(aMutex)
     , mLocked(false)
   {
@@ -306,11 +306,11 @@ nsComponentManagerImpl::Create(nsISupports* aOuter, REFNSIID aIID,
   return gComponentManager->QueryInterface(aIID, aResult);
 }
 
-static const int CONTRACTID_HASHTABLE_INITIAL_SIZE = 2048;
+static const int CONTRACTID_HASHTABLE_INITIAL_LENGTH = 1024;
 
 nsComponentManagerImpl::nsComponentManagerImpl()
-  : mFactories(CONTRACTID_HASHTABLE_INITIAL_SIZE)
-  , mContractIDs(CONTRACTID_HASHTABLE_INITIAL_SIZE)
+  : mFactories(CONTRACTID_HASHTABLE_INITIAL_LENGTH)
+  , mContractIDs(CONTRACTID_HASHTABLE_INITIAL_LENGTH)
   , mLock("nsComponentManagerImpl.mLock")
   , mStatus(NOT_INITIALIZED)
 {
