@@ -160,11 +160,6 @@ function removePermission(permission, url)
   throw "removePermission";
 }
 
-function setQuota(quota)
-{
-  throw "setQuota";
-}
-
 function allowIndexedDB(url)
 {
   throw "allowIndexedDB";

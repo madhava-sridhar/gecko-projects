@@ -34,42 +34,7 @@ function executeSoon(aFun)
 }
 
 function clearAllDatabases(callback) {
-  function runCallback() {
-    SimpleTest.executeSoon(function () { callback(); });
-  }
-
-  if (!SpecialPowers.isMainProcess()) {
-    runCallback();
-    return;
-  }
-
-  let comp = SpecialPowers.wrap(Components);
-
-  let quotaManager =
-    comp.classes["@mozilla.org/dom/quota/manager;1"]
-        .getService(comp.interfaces.nsIQuotaManager);
-
-  let uri = SpecialPowers.wrap(document).documentURIObject;
-
-  // We need to pass a JS callback to getUsageForURI. However, that callback
-  // takes an XPCOM URI object, which will cause us to throw when we wrap it
-  // for the content compartment. So we need to define the function in a
-  // privileged scope, which we do using a sandbox.
-  var sysPrin = SpecialPowers.Services.scriptSecurityManager.getSystemPrincipal();
-  var sb = new SpecialPowers.Cu.Sandbox(sysPrin);
-  sb.ok = ok;
-  sb.runCallback = runCallback;
-  var cb = SpecialPowers.Cu.evalInSandbox((function(uri, usage, fileUsage) {
-    if (usage) {
-      ok(false,
-         "getUsageForURI returned non-zero usage after clearing all " +
-         "storages!");
-    }
-    runCallback();
-  }).toSource(), sb);
-
-  quotaManager.clearStoragesForURI(uri);
-  quotaManager.getUsageForURI(uri, cb);
+  SpecialPowers.clearStorageForURI(document.documentURI, callback);
 }
 
 if (!window.runTest) {
@@ -221,11 +186,6 @@ function removePermission(type, url)
     url = window.document;
   }
   SpecialPowers.removePermission(type, url);
-}
-
-function setQuota(quota)
-{
-  SpecialPowers.setIntPref("dom.indexedDB.warningQuota", quota);
 }
 
 function allowUnlimitedQuota(url)
