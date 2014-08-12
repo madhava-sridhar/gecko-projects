@@ -163,8 +163,7 @@ enum AppId {
 
 #ifdef DEBUG
 
-const int32_t kDEBUGThreadPriority =
-  nsISupportsPriority::PRIORITY_NORMAL;
+const int32_t kDEBUGThreadPriority = nsISupportsPriority::PRIORITY_NORMAL;
 const uint32_t kDEBUGThreadSleepMS = 0;
 
 #endif

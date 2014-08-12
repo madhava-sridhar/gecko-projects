@@ -226,10 +226,14 @@
     event = yield undefined;
 
     let blobFromDB = event.target.result.blob;
+    info("Got blob from db");
+
     let txn = db.transaction("foo", "readwrite");
     txn.objectStore("foo").put(event.target.result, key);
     txn.oncomplete = grabEventAndContinueHandler;
     event = yield undefined;
+
+    info("Stored blob back into db");
 
     let fileReader = new FileReader();
     fileReader.onload = grabEventAndContinueHandler;

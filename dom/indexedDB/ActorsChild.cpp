@@ -41,7 +41,9 @@
 #include "IndexedDatabaseManager.h"
 #endif
 
-#if defined(DEBUG) || defined(GC_ON_IPC_MESSAGES)
+#define GC_ON_IPC_MESSAGES 0
+
+#if defined(DEBUG) || GC_ON_IPC_MESSAGES
 
 #include "js/GCAPI.h"
 #include "nsJSEnvironment.h"
@@ -65,7 +67,7 @@ MaybeCollectGarbageOnIPCMessage()
 {
 #ifdef BUILD_GC_ON_IPC_MESSAGES
   static const bool kCollectGarbageOnIPCMessages =
-#ifdef GC_ON_IPC_MESSAGES
+#if GC_ON_IPC_MESSAGES
     true;
 #else
     false;
