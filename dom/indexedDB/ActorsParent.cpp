@@ -167,12 +167,6 @@ const int32_t kDEBUGThreadPriority =
   nsISupportsPriority::PRIORITY_NORMAL;
 const uint32_t kDEBUGThreadSleepMS = 0;
 
-StaticAutoPtr<Mutex> gDEBUGConnectionMutex;
-
-typedef nsBaseHashtableET<nsStringHashKey, nsrefcnt> DEBUGConnectionEntry;
-
-StaticAutoPtr<nsTHashtable<DEBUGConnectionEntry>> gDEBUGConnectionTable;
-
 #endif
 
 } // anonymous namespace
@@ -2514,27 +2508,6 @@ GetDatabaseConnection(const nsAString& aDatabaseFilePath,
   if (NS_WARN_IF(NS_FAILED(rv))) {
     return rv;
   }
-
-#ifdef DEBUG
-  {
-    MOZ_ASSERT(gDEBUGConnectionMutex);
-
-    MutexAutoLock lock(*gDEBUGConnectionMutex);
-
-    MOZ_ASSERT(gDEBUGConnectionTable);
-
-    DEBUGConnectionEntry* entry =
-      gDEBUGConnectionTable->GetEntry(aDatabaseFilePath);
-    if (entry) {
-      entry->mData++;
-    } else {
-      entry = gDEBUGConnectionTable->PutEntry(aDatabaseFilePath);
-      MOZ_ASSERT(entry);
-
-      entry->mData = 1;
-    }
-  }
-#endif // DEBUG
 
   connection.forget(aConnection);
   return NS_OK;
@@ -5659,12 +5632,6 @@ Factory::Create(const OptionalWindowId& aOptionalWindowId)
 
       MOZ_ALWAYS_TRUE(NS_SUCCEEDED(thread->AddObserver(gDEBUGThreadSlower)));
     }
-
-    MOZ_ASSERT(!gDEBUGConnectionMutex);
-    gDEBUGConnectionMutex = new Mutex("IndexedDB gDEBUGConnectionMutex");
-
-    MOZ_ASSERT(!gDEBUGConnectionTable);
-    gDEBUGConnectionTable = new nsTHashtable<DEBUGConnectionEntry>();
 #endif // DEBUG
   }
 
@@ -5714,53 +5681,6 @@ Factory::ActorDestroy(ActorDestroyReason aWhy)
       MOZ_ALWAYS_TRUE(NS_SUCCEEDED(thread->RemoveObserver(gDEBUGThreadSlower)));
 
       gDEBUGThreadSlower = nullptr;
-    }
-
-    nsAutoCString openDatabaseFilesWarning;
-
-    {
-      MOZ_ASSERT(gDEBUGConnectionMutex);
-
-      MutexAutoLock lock(*gDEBUGConnectionMutex);
-
-      MOZ_ASSERT(gDEBUGConnectionTable);
-
-      if (gDEBUGConnectionTable->Count()) {
-        openDatabaseFilesWarning.AssignLiteral("Connections to database files "
-                                               "exist past the last actor!\n");
-
-        class MOZ_STACK_CLASS Helper MOZ_FINAL
-        {
-        public:
-          static PLDHashOperator
-          Enumerate(DEBUGConnectionEntry* aEntry, void* aClosure)
-          {
-            MOZ_ASSERT(aEntry);
-
-            auto* warning = static_cast<nsAutoCString*>(aClosure);
-            MOZ_ASSERT(warning);
-
-            warning->AppendLiteral("  - ");
-            warning->Append(NS_ConvertUTF16toUTF8(aEntry->GetKey()));
-            warning->AppendLiteral(" [");
-            warning->AppendInt(uint32_t(aEntry->mData));
-            warning->AppendLiteral("]\n");
-
-            return PL_DHASH_NEXT;
-          }
-        };
-
-        gDEBUGConnectionTable->EnumerateEntries(&Helper::Enumerate,
-                                                &openDatabaseFilesWarning);
-      }
-
-      gDEBUGConnectionTable = nullptr;
-    }
-
-    gDEBUGConnectionMutex = nullptr;
-
-    if (!openDatabaseFilesWarning.IsEmpty()) {
-      NS_WARNING(openDatabaseFilesWarning.get());
     }
 #endif // DEBUG
   }
@@ -7575,34 +7495,6 @@ TransactionBase::ReleaseTransactionThreadObjects()
   AssertIsOnTransactionThread();
 
   mCachedStatements.Clear();
-
-#ifdef DEBUG
-  {
-    nsCOMPtr<nsIFile> databaseFile;
-    MOZ_ALWAYS_TRUE(NS_SUCCEEDED(
-      mConnection->GetDatabaseFile(getter_AddRefs(databaseFile))));
-    MOZ_ASSERT(databaseFile);
-
-    nsString databaseFilePath;
-    MOZ_ALWAYS_TRUE(NS_SUCCEEDED(databaseFile->GetPath(databaseFilePath)));
-
-    MOZ_ASSERT(gDEBUGConnectionMutex);
-
-    MutexAutoLock lock(*gDEBUGConnectionMutex);
-
-    MOZ_ASSERT(gDEBUGConnectionTable);
-
-    DEBUGConnectionEntry* entry =
-      gDEBUGConnectionTable->GetEntry(databaseFilePath);
-    MOZ_ASSERT(entry);
-
-    if (entry->mData > 1) {
-      entry->mData--;
-    } else {
-      gDEBUGConnectionTable->RemoveEntry(databaseFilePath);
-    }
-  }
-#endif // DEBUG
 
   MOZ_ALWAYS_TRUE(NS_SUCCEEDED(mConnection->Close()));
   mConnection = nullptr;
@@ -16935,53 +16827,5 @@ DEBUGThreadSlower::AfterProcessNextEvent(nsIThreadInternal* /* aThread */,
                     PR_SUCCESS);
   return NS_OK;
 }
-
-extern "C" {
-
-MOZ_EXPORT void
-DumpIndexedDBLiveDatabaseConnections(FILE* aFile)
-{
-  class MOZ_STACK_CLASS Helper MOZ_FINAL
-  {
-  public:
-    static PLDHashOperator
-    Enumerate(DEBUGConnectionEntry* aEntry, void* aClosure)
-    {
-      MOZ_ASSERT(aEntry);
-
-      auto* file = static_cast<FILE*>(aClosure);
-      MOZ_ASSERT(file);
-
-      fprintf_stderr(file,
-                     "  - %s [%llu]\n",
-                     NS_ConvertUTF16toUTF8(aEntry->GetKey()).get(),
-                     aEntry->mData);
-      return PL_DHASH_NEXT;
-    }
-  };
-
-  if (!aFile) {
-    aFile = stderr;
-  }
-
-  // XXX This function doesn't do precise locking as it's assumed to only be
-  //     called from a debugger where other threads are appropriately paused.
-  if (!gDEBUGConnectionTable) {
-    fprintf_stderr(aFile,
-                   "Connection table has not been constructed or has already "
-                   "been destroyed.");
-  } else if (!gDEBUGConnectionTable->Count()) {
-    fprintf_stderr(aFile, "Connection table contains no entries.");
-  } else {
-    fprintf_stderr(aFile,
-                   "Connection table contains the following entries:\n");
-    gDEBUGConnectionTable->EnumerateEntries(&Helper::Enumerate, aFile);
-    fprintf_stderr(aFile, "[end of entries]\n");
-  }
-
-  fflush(aFile);
-}
-
-} // extern "C"
 
 #endif // DEBUG
