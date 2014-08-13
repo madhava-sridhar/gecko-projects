@@ -668,7 +668,7 @@ class BlobParent::OpenStreamRunnable MOZ_FINAL
   nsCOMPtr<nsIInputStream> mStream;
   nsCOMPtr<nsIIPCSerializableInputStream> mSerializable;
   nsCOMPtr<nsIEventTarget> mActorTarget;
-  nsCOMPtr<nsIEventTarget> mIOTarget;
+  nsCOMPtr<nsIThread> mIOTarget;
 
   bool mRevoked;
   bool mClosing;
@@ -678,7 +678,7 @@ public:
                      PBlobStreamParent* aStreamActor,
                      nsIInputStream* aStream,
                      nsIIPCSerializableInputStream* aSerializable,
-                     nsIEventTarget* aIOTarget)
+                     nsIThread* aIOTarget)
     : mBlobActor(aBlobActor)
     , mStreamActor(aStreamActor)
     , mStream(aStream)
@@ -704,20 +704,6 @@ public:
     AssertIsOnOwningThread();
   }
 
-  NS_IMETHOD
-  Run() MOZ_OVERRIDE
-  {
-    if (IsOnOwningThread()) {
-      return SendResponse();
-    }
-
-    if (!mClosing) {
-      return OpenStream();
-    }
-
-    return CloseStream();
-  }
-
   nsresult
   Dispatch()
   {
@@ -730,7 +716,12 @@ public:
     return NS_OK;
   }
 
+  NS_DECL_ISUPPORTS_INHERITED
+
 private:
+  ~OpenStreamRunnable()
+  { }
+
   bool
   IsOnOwningThread() const
   {
@@ -785,10 +776,12 @@ private:
       NS_WARNING("Available failed on this stream!");
     }
 
-    nsresult rv = mActorTarget ?
-      mActorTarget->Dispatch(this, NS_DISPATCH_NORMAL) :
-      NS_DispatchToMainThread(this);
-    NS_ENSURE_SUCCESS(rv, rv);
+    if (mActorTarget) {
+      nsresult rv = mActorTarget->Dispatch(this, NS_DISPATCH_NORMAL);
+      NS_ENSURE_SUCCESS(rv, rv);
+    } else {
+      MOZ_ALWAYS_TRUE(NS_SUCCEEDED(NS_DispatchToMainThread(this)));
+    }
 
     return NS_OK;
   }
@@ -803,8 +796,16 @@ private:
     nsCOMPtr<nsIInputStream> stream;
     mStream.swap(stream);
 
-    nsresult rv = stream->Close();
-    NS_ENSURE_SUCCESS(rv, rv);
+    nsCOMPtr<nsIThread> ioTarget;
+    mIOTarget.swap(ioTarget);
+
+    NS_WARN_IF_FALSE(NS_SUCCEEDED(stream->Close()), "Failed to close stream!");
+
+    nsCOMPtr<nsIRunnable> shutdownRunnable =
+      NS_NewRunnableMethod(ioTarget, &nsIThread::Shutdown);
+    MOZ_ASSERT(shutdownRunnable);
+
+    MOZ_ALWAYS_TRUE(NS_SUCCEEDED(NS_DispatchToMainThread(shutdownRunnable)));
 
     return NS_OK;
   }
@@ -864,15 +865,30 @@ private:
 
     mClosing = true;
 
-    nsCOMPtr<nsIEventTarget> ioTarget;
-    mIOTarget.swap(ioTarget);
-
-    nsresult rv = ioTarget->Dispatch(this, NS_DISPATCH_NORMAL);
+    nsresult rv = mIOTarget->Dispatch(this, NS_DISPATCH_NORMAL);
     NS_ENSURE_SUCCESS(rv, rv);
 
     return NS_OK;
   }
+
+  NS_IMETHOD
+  Run() MOZ_OVERRIDE
+  {
+    MOZ_ASSERT(mIOTarget);
+
+    if (IsOnOwningThread()) {
+      return SendResponse();
+    }
+
+    if (!mClosing) {
+      return OpenStream();
+    }
+
+    return CloseStream();
+  }
 };
+
+NS_IMPL_ISUPPORTS_INHERITED0(BlobParent::OpenStreamRunnable, nsRunnable)
 
 /*******************************************************************************
  * BlobChild::RemoteBlob Declaration
@@ -2644,9 +2660,24 @@ BlobParent::RecvPBlobStreamConstructor(PBlobStreamParent* aActor)
     impl = mBlobImpl;
   }
 
+  MOZ_ASSERT(impl);
+
   nsCOMPtr<nsIInputStream> stream;
   nsresult rv = impl->GetInternalStream(getter_AddRefs(stream));
   NS_ENSURE_SUCCESS(rv, false);
+
+  // If the stream is entirely backed by memory then we can serialize and send
+  // it immediately.
+  if (impl->IsMemoryFile()) {
+    InputStreamParams params;
+    nsTArray<FileDescriptor> fds;
+    SerializeInputStream(stream, params, fds);
+
+    MOZ_ASSERT(params.type() != InputStreamParams::T__None);
+    MOZ_ASSERT(fds.IsEmpty());
+
+    return PBlobStreamParent::Send__delete__(aActor, params, void_t());
+  }
 
   nsCOMPtr<nsIRemoteBlob> remoteBlob = do_QueryInterface(impl);
   nsCOMPtr<IPrivateRemoteInputStream> remoteStream;
@@ -2675,9 +2706,11 @@ BlobParent::RecvPBlobStreamConstructor(PBlobStreamParent* aActor)
     }
   }
 
-  nsCOMPtr<nsIEventTarget> target =
-    do_GetService(NS_STREAMTRANSPORTSERVICE_CONTRACTID);
-  NS_ENSURE_TRUE(target, false);
+  nsCOMPtr<nsIThread> target;
+  rv = NS_NewNamedThread("Blob Opener", getter_AddRefs(target));
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return false;
+  }
 
   nsRefPtr<OpenStreamRunnable> runnable =
     new OpenStreamRunnable(this, aActor, stream, serializableStream, target);
