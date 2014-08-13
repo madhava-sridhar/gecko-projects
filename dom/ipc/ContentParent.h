@@ -626,6 +626,16 @@ private:
     virtual bool
     DeallocPFileDescriptorSetParent(PFileDescriptorSetParent*) MOZ_OVERRIDE;
 
+    virtual bool
+    RecvGetFileReferences(const PersistenceType& aPersistenceType,
+                          const nsCString& aOrigin,
+                          const nsString& aDatabaseName,
+                          const int64_t& aFileId,
+                          int32_t* aRefCnt,
+                          int32_t* aDBRefCnt,
+                          int32_t* aSliceRefCnt,
+                          bool* aResult) MOZ_OVERRIDE;
+
     // If you add strong pointers to cycle collected objects here, be sure to
     // release these objects in ShutDownProcess.  See the comment there for more
     // details.

@@ -3728,6 +3728,38 @@ ContentParent::DeallocPFileDescriptorSetParent(PFileDescriptorSetParent* aActor)
 }
 
 bool
+ContentParent::RecvGetFileReferences(const PersistenceType& aPersistenceType,
+                                     const nsCString& aOrigin,
+                                     const nsString& aDatabaseName,
+                                     const int64_t& aFileId,
+                                     int32_t* aRefCnt,
+                                     int32_t* aDBRefCnt,
+                                     int32_t* aSliceRefCnt,
+                                     bool* aResult)
+{
+    nsRefPtr<IndexedDatabaseManager> mgr = IndexedDatabaseManager::Get();
+    if (!mgr) {
+        *aRefCnt = *aDBRefCnt = *aSliceRefCnt = -1;
+        *aResult = false;
+        return true;
+    }
+
+    if (!IndexedDatabaseManager::IsMainProcess()) {
+        NS_RUNTIMEABORT("Not supported yet!");
+    }
+
+    nsresult rv = mgr->BlockAndGetFileReferences(aPersistenceType, aOrigin,
+                                                 aDatabaseName, aFileId, aRefCnt,
+                                                 aDBRefCnt, aSliceRefCnt,
+                                                 aResult);
+    if (NS_WARN_IF(NS_FAILED(rv))) {
+      return false;
+    }
+
+    return true;
+}
+
+bool
 ContentParent::IgnoreIPCPrincipal()
 {
   static bool sDidAddVarCache = false;

@@ -1821,7 +1821,7 @@ SpecialPowersAPI.prototype = {
   },
 
   getStorageUsageForURI: function(uri, callback, appId, inBrowser) {
-    this._quotaManagerRequest('getUsage', uri, callback);
+    this._quotaManagerRequest('getUsage', uri, appId, inBrowser, callback);
   },
 
   _quotaManagerRequest: function(op, uri, appId, inBrowser, callback) {
