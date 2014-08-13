@@ -18,6 +18,7 @@
 #include "mozilla/dom/nsIContentChild.h"
 #include "mozilla/dom/PBlobStreamChild.h"
 #include "mozilla/dom/PBlobStreamParent.h"
+#include "mozilla/dom/indexedDB/IndexedDatabaseManager.h"
 #include "mozilla/ipc/InputStreamUtils.h"
 #include "mozilla/ipc/PBackgroundChild.h"
 #include "mozilla/ipc/PBackgroundParent.h"
@@ -2843,10 +2844,17 @@ BlobParent::RecvResolveMystery(const ResolveMysteryParams& aParams)
 bool
 BlobParent::RecvGetFileId(int64_t* aFileId)
 {
+  using namespace mozilla::dom::indexedDB;
+
   AssertIsOnOwningThread();
   MOZ_ASSERT_IF(mBlob, !mBlobImpl);
   MOZ_ASSERT_IF(!mBlob, mBlobImpl);
   MOZ_ASSERT(!mRemoteBlob);
+
+  if (NS_WARN_IF(!IndexedDatabaseManager::InTestingMode())) {
+    MOZ_ASSERT(false);
+    return false;
+  }
 
   nsRefPtr<DOMFileImpl> blobImpl;
   if (mBlob) {
@@ -2864,10 +2872,17 @@ BlobParent::RecvGetFileId(int64_t* aFileId)
 bool
 BlobParent::RecvGetFilePath(nsString* aFilePath)
 {
+  using namespace mozilla::dom::indexedDB;
+
   AssertIsOnOwningThread();
   MOZ_ASSERT_IF(mBlob, !mBlobImpl);
   MOZ_ASSERT_IF(!mBlob, mBlobImpl);
   MOZ_ASSERT(!mRemoteBlob);
+
+  if (NS_WARN_IF(!IndexedDatabaseManager::InTestingMode())) {
+    MOZ_ASSERT(false);
+    return false;
+  }
 
   nsRefPtr<DOMFileImpl> blobImpl;
   if (mBlob) {
