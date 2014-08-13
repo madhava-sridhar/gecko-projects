@@ -112,10 +112,13 @@ END_INDEXEDDB_NAMESPACE
 
 namespace {
 
+const char kTestingPref[] = "dom.indexedDB.testing";
+
 mozilla::StaticRefPtr<IndexedDatabaseManager> gDBManager;
 
 mozilla::Atomic<bool> gInitialized(false);
 mozilla::Atomic<bool> gClosed(false);
+mozilla::Atomic<bool> gTestingMode(false);
 
 class AsyncDeleteFileRunnable MOZ_FINAL : public nsIRunnable
 {
@@ -187,6 +190,16 @@ struct MOZ_STACK_CLASS InvalidateInfo
   PersistenceType persistenceType;
   const nsACString& pattern;
 };
+
+void
+TestingPrefChangedCallback(const char* aPrefName, void* aClosure)
+{
+  MOZ_ASSERT(NS_IsMainThread());
+  MOZ_ASSERT(!strcmp(aPrefName, kTestingPref));
+  MOZ_ASSERT(!aClosure);
+
+  gTestingMode = Preferences::GetBool(aPrefName);
+}
 
 } // anonymous namespace
 
@@ -286,6 +299,9 @@ IndexedDatabaseManager::Init()
     NS_ENSURE_SUCCESS(rv, rv);
   }
 
+  Preferences::RegisterCallbackAndCall(TestingPrefChangedCallback,
+                                       kTestingPref);
+
   return NS_OK;
 }
 
@@ -297,6 +313,8 @@ IndexedDatabaseManager::Destroy()
   if (gInitialized && gClosed.exchange(true)) {
     NS_ERROR("Shutdown more than once?!");
   }
+
+  Preferences::UnregisterCallback(TestingPrefChangedCallback, kTestingPref);
 
   delete this;
 }
@@ -477,6 +495,16 @@ IndexedDatabaseManager::InLowDiskSpaceMode()
 }
 #endif
 
+// static
+bool
+IndexedDatabaseManager::InTestingMode()
+{
+  MOZ_ASSERT(gDBManager,
+             "InTestingMode() called before indexedDB has been initialized!");
+
+  return gTestingMode;
+}
+
 already_AddRefed<FileManager>
 IndexedDatabaseManager::GetFileManager(PersistenceType aPersistenceType,
                                        const nsACString& aOrigin,
@@ -632,6 +660,10 @@ IndexedDatabaseManager::BlockAndGetFileReferences(
                                                int32_t* aSliceRefCnt,
                                                bool* aResult)
 {
+  if (NS_WARN_IF(!InTestingMode())) {
+    return NS_ERROR_UNEXPECTED;
+  }
+
   if (IsMainProcess()) {
     nsRefPtr<GetFileReferencesHelper> helper =
       new GetFileReferencesHelper(aPersistenceType, aOrigin, aDatabaseName,
@@ -650,10 +682,13 @@ IndexedDatabaseManager::BlockAndGetFileReferences(
     }
 
     if (!contentChild->SendGetFileReferences(aPersistenceType,
-                                             PromiseFlatCString(aOrigin),
-                                             PromiseFlatString(aDatabaseName),
-                                             aFileId, aRefCnt, aDBRefCnt,
-                                             aSliceRefCnt, aResult)) {
+                                             nsCString(aOrigin),
+                                             nsString(aDatabaseName),
+                                             aFileId,
+                                             aRefCnt,
+                                             aDBRefCnt,
+                                             aSliceRefCnt,
+                                             aResult)) {
       return NS_ERROR_FAILURE;
     }
   }

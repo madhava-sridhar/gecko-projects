@@ -75,6 +75,9 @@ public:
   }
 #endif
 
+  static bool
+  InTestingMode();
+
   already_AddRefed<FileManager>
   GetFileManager(PersistenceType aPersistenceType,
                  const nsACString& aOrigin,

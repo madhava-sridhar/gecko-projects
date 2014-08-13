@@ -3737,21 +3737,46 @@ ContentParent::RecvGetFileReferences(const PersistenceType& aPersistenceType,
                                      int32_t* aSliceRefCnt,
                                      bool* aResult)
 {
+    MOZ_ASSERT(aRefCnt);
+    MOZ_ASSERT(aDBRefCnt);
+    MOZ_ASSERT(aSliceRefCnt);
+    MOZ_ASSERT(aResult);
+
+    if (NS_WARN_IF(aPersistenceType != quota::PERSISTENCE_TYPE_PERSISTENT &&
+                   aPersistenceType != quota::PERSISTENCE_TYPE_TEMPORARY)) {
+        return false;
+    }
+
+    if (NS_WARN_IF(aOrigin.IsEmpty())) {
+        return false;
+    }
+
+    if (NS_WARN_IF(aDatabaseName.IsEmpty())) {
+        return false;
+    }
+
+    if (NS_WARN_IF(aFileId < 1)) {
+        return false;
+    }
+
     nsRefPtr<IndexedDatabaseManager> mgr = IndexedDatabaseManager::Get();
-    if (!mgr) {
-        *aRefCnt = *aDBRefCnt = *aSliceRefCnt = -1;
-        *aResult = false;
-        return true;
+    if (NS_WARN_IF(!mgr)) {
+        return false;
     }
 
-    if (!IndexedDatabaseManager::IsMainProcess()) {
-        NS_RUNTIMEABORT("Not supported yet!");
+    if (NS_WARN_IF(!mgr->IsMainProcess())) {
+        return false;
     }
 
-    nsresult rv = mgr->BlockAndGetFileReferences(aPersistenceType, aOrigin,
-                                                 aDatabaseName, aFileId, aRefCnt,
-                                                 aDBRefCnt, aSliceRefCnt,
-                                                 aResult);
+    nsresult rv =
+        mgr->BlockAndGetFileReferences(aPersistenceType,
+                                       aOrigin,
+                                       aDatabaseName,
+                                       aFileId,
+                                       aRefCnt,
+                                       aDBRefCnt,
+                                       aSliceRefCnt,
+                                       aResult);
     if (NS_WARN_IF(NS_FAILED(rv))) {
       return false;
     }

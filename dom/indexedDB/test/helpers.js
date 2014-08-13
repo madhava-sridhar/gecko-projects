@@ -49,6 +49,7 @@ if (!window.runTest) {
       allowUnlimitedQuota();
     }
 
+    enableTesting();
     enableExperimental();
     enableArchiveReader();
 
@@ -61,6 +62,7 @@ function finishTest()
   resetUnlimitedQuota();
   resetExperimental();
   resetArchiveReader();
+  resetTesting();
   SpecialPowers.notifyObserversInParentProcess(null, "disk-space-watcher",
                                                "free");
 
@@ -222,6 +224,16 @@ function enableExperimental()
 function resetExperimental()
 {
   SpecialPowers.clearUserPref("dom.indexedDB.experimental");
+}
+
+function enableTesting()
+{
+  SpecialPowers.setBoolPref("dom.indexedDB.testing", true);
+}
+
+function resetTesting()
+{
+  SpecialPowers.clearUserPref("dom.indexedDB.testing");
 }
 
 function gc()

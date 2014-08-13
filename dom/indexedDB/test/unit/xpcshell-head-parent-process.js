@@ -42,6 +42,7 @@ if (!this.runTest) {
       // XPCShell does not get a profile by default.
       do_get_profile();
 
+      enableTesting();
       enableExperimental();
     }
 
@@ -56,6 +57,7 @@ function finishTest()
 {
   if (SpecialPowers.isMainProcess()) {
     resetExperimental();
+    resetTesting();
 
     SpecialPowers.notifyObserversInParentProcess(null, "disk-space-watcher",
                                                  "free");
@@ -188,6 +190,16 @@ function enableExperimental()
 function resetExperimental()
 {
   SpecialPowers.clearUserPref("dom.indexedDB.experimental");
+}
+
+function enableTesting()
+{
+  SpecialPowers.setBoolPref("dom.indexedDB.testing", true);
+}
+
+function resetTesting()
+{
+  SpecialPowers.clearUserPref("dom.indexedDB.testing");
 }
 
 function gc()
