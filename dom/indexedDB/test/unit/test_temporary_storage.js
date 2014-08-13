@@ -10,15 +10,15 @@ function testSteps()
   const name = this.window ? window.location.pathname : "Splendid Test";
 
   const urls = [
-    { url: "http://www.alpha.com",        flags: [true, true, false, false] },
+    { url: "http://www.alpha.com",        flags: [true, true, true, true] },
     { url: "http://www.beta.com",         flags: [true, false, false, false] },
     { url: "http://www.gamma.com",        flags: [true, true, false, false] },
     { url: "http://www.delta.com",        flags: [true, true, false, false] },
     { url: "http://www.epsilon.com",      flags: [true, true, false, false] },
     { url: "http://www2.alpha.com",       flags: [true, true, false, false] },
     { url: "http://www2.beta.com",        flags: [true, true, false, false] },
-    { url: "http://www2.gamma.com",       flags: [true, true, true, false] },
-    { url: "http://www2.delta.com",       flags: [true, true, true, true] },
+    { url: "http://www2.gamma.com",       flags: [true, true, false, false] },
+    { url: "http://www2.delta.com",       flags: [true, true, true, false] },
     { url: "http://www2.epsilon.com",     flags: [true, true, true, true] },
     { url: "http://joe.blog.alpha.com",   flags: [true, true, true, true] },
     { url: "http://joe.blog.beta.com",    flags: [true, true, true, true] },
