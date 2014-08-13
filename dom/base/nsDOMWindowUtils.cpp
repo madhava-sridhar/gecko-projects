@@ -6,9 +6,6 @@
 
 #include "nsDOMWindowUtils.h"
 
-#include "mozilla/dom/PBlobChild.h"
-#include "mozilla/ipc/BackgroundChild.h"
-#include "mozilla/ipc/PBackgroundChild.h"
 #include "mozilla/layers/CompositorChild.h"
 #include "mozilla/layers/LayerTransactionChild.h"
 #include "nsPresContext.h"
@@ -3051,17 +3048,8 @@ nsDOMWindowUtils::GetFileId(JS::Handle<JS::Value> aFile, JSContext* aCx,
 
   nsCOMPtr<nsIDOMBlob> blob = do_QueryInterface(nativeObj);
   if (blob) {
-    PBackgroundChild* bgActor = BackgroundChild::GetForCurrentThread();
-    if (bgActor) {
-      PBlobChild* blobActor = BackgroundChild::GetActorForBlob(bgActor, blob);
-      if (blobActor) {
-        int64_t fileId;
-        if (blobActor->SendGetFileId(&fileId)) {
-          *_retval = fileId;
-          return NS_OK;
-        }
-      }
-    }
+    *_retval = blob->GetFileId();
+    return NS_OK;
   }
 
   *_retval = -1;
@@ -3084,19 +3072,16 @@ nsDOMWindowUtils::GetFilePath(JS::HandleValue aFile, JSContext* aCx,
   nsISupports* nativeObj =
     nsContentUtils::XPConnect()->GetNativeOfWrapper(aCx, obj);
 
-  nsCOMPtr<nsIDOMBlob> blob = do_QueryInterface(nativeObj);
-  if (blob) {
-    PBackgroundChild* bgActor = BackgroundChild::GetForCurrentThread();
-    if (bgActor) {
-      PBlobChild* blobActor = BackgroundChild::GetActorForBlob(bgActor, blob);
-      if (blobActor) {
-        nsString filePath;
-        if (blobActor->SendGetFilePath(&filePath)) {
-          _retval = filePath;
-          return NS_OK;
-        }
-      }
+  nsCOMPtr<nsIDOMFile> file = do_QueryInterface(nativeObj);
+  if (file) {
+    nsString filePath;
+    nsresult rv = file->GetMozFullPathInternal(filePath);
+    if (NS_WARN_IF(NS_FAILED(rv))) {
+      return rv;
     }
+
+    _retval = filePath;
+    return NS_OK;
   }
 
   _retval.Truncate();

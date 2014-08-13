@@ -64,10 +64,6 @@ public:
   GetOrCreateForCurrentThread(nsIIPCBackgroundChildCreateCallback* aCallback);
 
   static mozilla::dom::PBlobChild*
-  GetActorForBlob(PBackgroundChild* aBackgroundActor,
-                  nsIDOMBlob* aBlob);
-
-  static mozilla::dom::PBlobChild*
   GetOrCreateActorForBlob(PBackgroundChild* aBackgroundActor,
                           nsIDOMBlob* aBlob,
                           bool* aActorWasCreated = nullptr);

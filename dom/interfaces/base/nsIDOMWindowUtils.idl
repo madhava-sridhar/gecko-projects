@@ -1474,7 +1474,7 @@ interface nsIDOMWindowUtils : nsISupports {
   [implicit_jscontext] long long getFileId(in jsval aFile);
 
   /**
-   * Get internal file path of the stored blob, file or file handle.
+   * Get internal file path of the stored file or file handle.
    *
    * TODO: File handle objects are actually not supported at the moment.
    */

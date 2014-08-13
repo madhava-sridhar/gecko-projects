@@ -937,12 +937,18 @@ public:
 
   NS_DECL_ISUPPORTS_INHERITED
 
+  virtual nsresult
+  GetMozFullPathInternal(nsAString &aFilePath) MOZ_OVERRIDE;
+
   virtual already_AddRefed<DOMFileImpl>
   CreateSlice(uint64_t aStart, uint64_t aLength, const nsAString& aContentType)
               MOZ_OVERRIDE;
 
   virtual nsresult
   GetInternalStream(nsIInputStream** aStream) MOZ_OVERRIDE;
+
+  virtual int64_t
+  GetFileId() MOZ_OVERRIDE;
 
   virtual nsresult
   GetLastModifiedDate(JSContext* cx,
@@ -1240,6 +1246,23 @@ NS_IMPL_QUERY_INTERFACE_INHERITED(BlobChild::RemoteBlob,
                                   DOMFileImpl,
                                   nsIRemoteBlob)
 
+nsresult
+BlobChild::
+RemoteBlob::GetMozFullPathInternal(nsAString &aFilePath)
+{
+  if (!mActor) {
+    return NS_ERROR_UNEXPECTED;
+  }
+
+  nsString filePath;
+  if (!mActor->SendGetFilePath(&filePath)) {
+    return NS_ERROR_FAILURE;
+  }
+
+  aFilePath = filePath;
+  return NS_OK;
+}
+
 already_AddRefed<DOMFileImpl>
 BlobChild::
 RemoteBlob::CreateSlice(uint64_t aStart,
@@ -1270,6 +1293,18 @@ RemoteBlob::GetInternalStream(nsIInputStream** aStream)
 
   nsRefPtr<StreamHelper> helper = new StreamHelper(mActor, this);
   return helper->GetStream(aStream);
+}
+
+int64_t
+BlobChild::
+RemoteBlob::GetFileId()
+{
+  int64_t fileId;
+  if (mActor && mActor->SendGetFileId(&fileId)) {
+    return fileId;
+  }
+
+  return -1;
 }
 
 nsresult
