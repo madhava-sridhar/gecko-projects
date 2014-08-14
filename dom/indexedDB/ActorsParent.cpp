@@ -429,13 +429,16 @@ GetDatabaseFilename(const nsAString& aName,
   const char* forwardIter = escapedName.BeginReading();
   const char* backwardIter = escapedName.EndReading() - 1;
 
-  while (forwardIter <= backwardIter && aDatabaseFilename.Length() < 21) {
-    if (aDatabaseFilename.Length() % 2) {
-      aDatabaseFilename.Append(*backwardIter--);
+  nsAutoCString substring;
+  while (forwardIter <= backwardIter && substring.Length() < 21) {
+    if (substring.Length() % 2) {
+      substring.Append(*backwardIter--);
     } else {
-      aDatabaseFilename.Append(*forwardIter++);
+      substring.Append(*forwardIter++);
     }
   }
+
+  aDatabaseFilename.AppendASCII(substring.get(), substring.Length());
 }
 
 nsresult
