@@ -71,6 +71,7 @@ UpdatePromise::ResolveAllPromises(const nsACString& aScriptSpec, const nsACStrin
   for (uint32_t i = 0; i < array.Length(); ++i) {
     WeakPtr<Promise>& pendingPromise = array.ElementAt(i);
     if (pendingPromise) {
+      nsRefPtr<Promise> kungfuDeathGrip = pendingPromise.get();
       nsCOMPtr<nsIGlobalObject> go =
         do_QueryInterface(pendingPromise->GetParentObject());
       MOZ_ASSERT(go);
@@ -94,8 +95,7 @@ UpdatePromise::ResolveAllPromises(const nsACString& aScriptSpec, const nsACStrin
 
       // Since ServiceWorkerRegistration is only exposed to windows we can be
       // certain about this cast.
-      nsCOMPtr<nsPIDOMWindow> window =
-        do_QueryInterface(pendingPromise->GetParentObject());
+      nsCOMPtr<nsPIDOMWindow> window = do_QueryInterface(go);
       nsRefPtr<ServiceWorkerRegistration> swr =
         new ServiceWorkerRegistration(window, NS_ConvertUTF8toUTF16(aScope));
 
