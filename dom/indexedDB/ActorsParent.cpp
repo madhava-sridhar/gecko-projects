@@ -11859,11 +11859,11 @@ OpenDatabaseOp::AssertMetadataConsistency(const FullDatabaseMetadata* aMetadata)
 
   public:
     static void
-    AssertConsistent(const ObjectStoreTable& aObjectStores1,
-                     const ObjectStoreTable& aObjectStores2)
+    AssertConsistent(const ObjectStoreTable& aThisObjectStores,
+                     const ObjectStoreTable& aOtherObjectStores)
     {
-      Helper helper(aObjectStores2);
-      aObjectStores1.EnumerateRead(Enumerate, &helper);
+      Helper helper(aOtherObjectStores);
+      aThisObjectStores.EnumerateRead(Enumerate, &helper);
     }
 
   private:
@@ -11873,109 +11873,114 @@ OpenDatabaseOp::AssertMetadataConsistency(const FullDatabaseMetadata* aMetadata)
     { }
 
     static PLDHashOperator
-    Enumerate(const uint64_t& aKey,
-              FullObjectStoreMetadata* aValue,
+    Enumerate(const uint64_t& /* aKey */,
+              FullObjectStoreMetadata* aThisObjectStore,
               void* aClosure)
     {
-      MOZ_ASSERT(aKey);
-      MOZ_ASSERT(aValue);
-      MOZ_ASSERT(!aValue->mDeleted);
+      MOZ_ASSERT(aThisObjectStore);
+      MOZ_ASSERT(!aThisObjectStore->mDeleted);
       MOZ_ASSERT(aClosure);
 
       auto* helper = static_cast<Helper*>(aClosure);
 
       MOZ_ASSERT(!helper->mCurrentOtherIndexTable);
 
-      auto* otherValue =
+      auto* otherObjectStore =
         MetadataNameOrIdMatcher<FullObjectStoreMetadata>::Match(
-          helper->mOtherObjectStores, aValue->mCommonMetadata.id());
-      MOZ_ASSERT(otherValue);
+          helper->mOtherObjectStores, aThisObjectStore->mCommonMetadata.id());
+      MOZ_ASSERT(otherObjectStore);
 
-      MOZ_ASSERT(aValue != otherValue);
+      MOZ_ASSERT(aThisObjectStore != otherObjectStore);
 
-      MOZ_ASSERT(aValue->mCommonMetadata.id() ==
-                 otherValue->mCommonMetadata.id());
-      MOZ_ASSERT(aValue->mCommonMetadata.name() ==
-                 otherValue->mCommonMetadata.name());
-      MOZ_ASSERT(aValue->mCommonMetadata.autoIncrement() ==
-                 otherValue->mCommonMetadata.autoIncrement());
-      MOZ_ASSERT(aValue->mCommonMetadata.keyPath() ==
-                 otherValue->mCommonMetadata.keyPath());
-      MOZ_ASSERT(aValue->mNextAutoIncrementId ==
-                 otherValue->mNextAutoIncrementId);
-      MOZ_ASSERT(aValue->mComittedAutoIncrementId ==
-                 otherValue->mComittedAutoIncrementId);
-      MOZ_ASSERT(!otherValue->mDeleted);
+      MOZ_ASSERT(aThisObjectStore->mCommonMetadata.id() ==
+                   otherObjectStore->mCommonMetadata.id());
+      MOZ_ASSERT(aThisObjectStore->mCommonMetadata.name() ==
+                   otherObjectStore->mCommonMetadata.name());
+      MOZ_ASSERT(aThisObjectStore->mCommonMetadata.autoIncrement() ==
+                   otherObjectStore->mCommonMetadata.autoIncrement());
+      MOZ_ASSERT(aThisObjectStore->mCommonMetadata.keyPath() ==
+                   otherObjectStore->mCommonMetadata.keyPath());
+      // mNextAutoIncrementId and mComittedAutoIncrementId may be modified
+      // concurrently with this OpenOp, so it is not possible to assert equality
+      // here.
+      MOZ_ASSERT(aThisObjectStore->mNextAutoIncrementId <=
+                   otherObjectStore->mNextAutoIncrementId);
+      MOZ_ASSERT(aThisObjectStore->mComittedAutoIncrementId <=
+                   otherObjectStore->mComittedAutoIncrementId);
+      MOZ_ASSERT(!otherObjectStore->mDeleted);
 
-      MOZ_ASSERT(aValue->mIndexes.Count() == otherValue->mIndexes.Count());
+      MOZ_ASSERT(aThisObjectStore->mIndexes.Count() ==
+                   otherObjectStore->mIndexes.Count());
 
       AutoRestore<IndexTable*> ar(helper->mCurrentOtherIndexTable);
-      helper->mCurrentOtherIndexTable = &otherValue->mIndexes;
+      helper->mCurrentOtherIndexTable = &otherObjectStore->mIndexes;
 
-      aValue->mIndexes.EnumerateRead(Enumerate, helper);
+      aThisObjectStore->mIndexes.EnumerateRead(Enumerate, helper);
 
       return PL_DHASH_NEXT;
     }
 
     static PLDHashOperator
-    Enumerate(const uint64_t& aKey, FullIndexMetadata* aValue, void* aClosure)
+    Enumerate(const uint64_t& /* aKey */,
+              FullIndexMetadata* aThisIndex,
+              void* aClosure)
     {
-      MOZ_ASSERT(aKey);
-      MOZ_ASSERT(aValue);
-      MOZ_ASSERT(!aValue->mDeleted);
+      MOZ_ASSERT(aThisIndex);
+      MOZ_ASSERT(!aThisIndex->mDeleted);
       MOZ_ASSERT(aClosure);
 
       auto* helper = static_cast<Helper*>(aClosure);
 
       MOZ_ASSERT(helper->mCurrentOtherIndexTable);
 
-      auto* otherValue =
+      auto* otherIndex =
         MetadataNameOrIdMatcher<FullIndexMetadata>::Match(
-          *helper->mCurrentOtherIndexTable, aValue->mCommonMetadata.id());
-      MOZ_ASSERT(otherValue);
+          *helper->mCurrentOtherIndexTable, aThisIndex->mCommonMetadata.id());
+      MOZ_ASSERT(otherIndex);
 
-      MOZ_ASSERT(aValue != otherValue);
+      MOZ_ASSERT(aThisIndex != otherIndex);
 
-      MOZ_ASSERT(aValue->mCommonMetadata.id() ==
-                 otherValue->mCommonMetadata.id());
-      MOZ_ASSERT(aValue->mCommonMetadata.name() ==
-                 otherValue->mCommonMetadata.name());
-      MOZ_ASSERT(aValue->mCommonMetadata.keyPath() ==
-                 otherValue->mCommonMetadata.keyPath());
-      MOZ_ASSERT(aValue->mCommonMetadata.unique() ==
-                 otherValue->mCommonMetadata.unique());
-      MOZ_ASSERT(aValue->mCommonMetadata.multiEntry() ==
-                 otherValue->mCommonMetadata.multiEntry());
-      MOZ_ASSERT(!otherValue->mDeleted);
+      MOZ_ASSERT(aThisIndex->mCommonMetadata.id() ==
+                   otherIndex->mCommonMetadata.id());
+      MOZ_ASSERT(aThisIndex->mCommonMetadata.name() ==
+                   otherIndex->mCommonMetadata.name());
+      MOZ_ASSERT(aThisIndex->mCommonMetadata.keyPath() ==
+                   otherIndex->mCommonMetadata.keyPath());
+      MOZ_ASSERT(aThisIndex->mCommonMetadata.unique() ==
+                   otherIndex->mCommonMetadata.unique());
+      MOZ_ASSERT(aThisIndex->mCommonMetadata.multiEntry() ==
+                   otherIndex->mCommonMetadata.multiEntry());
+      MOZ_ASSERT(!otherIndex->mDeleted);
 
       return PL_DHASH_NEXT;
     }
   };
 
-  const FullDatabaseMetadata* db1 = aMetadata;
-  const FullDatabaseMetadata* db2 = mMetadata;
+  const FullDatabaseMetadata* thisDB = mMetadata;
+  const FullDatabaseMetadata* otherDB = aMetadata;
 
-  MOZ_ASSERT(db1);
-  MOZ_ASSERT(db2);
-  MOZ_ASSERT(db1 != db2);
+  MOZ_ASSERT(thisDB);
+  MOZ_ASSERT(otherDB);
+  MOZ_ASSERT(thisDB != otherDB);
 
-  MOZ_ASSERT(db1->mCommonMetadata.name() == db2->mCommonMetadata.name());
-  MOZ_ASSERT(db1->mCommonMetadata.version() == db2->mCommonMetadata.version());
-  MOZ_ASSERT(db1->mCommonMetadata.persistenceType() ==
-             db2->mCommonMetadata.persistenceType());
-  MOZ_ASSERT(db1->mDatabaseId == db2->mDatabaseId);
-  MOZ_ASSERT(db1->mFilePath == db2->mFilePath);
+  MOZ_ASSERT(thisDB->mCommonMetadata.name() == otherDB->mCommonMetadata.name());
+  MOZ_ASSERT(thisDB->mCommonMetadata.version() ==
+               otherDB->mCommonMetadata.version());
+  MOZ_ASSERT(thisDB->mCommonMetadata.persistenceType() ==
+               otherDB->mCommonMetadata.persistenceType());
+  MOZ_ASSERT(thisDB->mDatabaseId == otherDB->mDatabaseId);
+  MOZ_ASSERT(thisDB->mFilePath == otherDB->mFilePath);
 
   // The newer database metadata (db2) reflects the latest objectStore and index
   // ids that have committed to disk. The in-memory metadata (db1) keeps track
   // of objectStores and indexes that were created and then removed as well, so
   // the next ids for db1 may be higher than for db2.
-  MOZ_ASSERT(db1->mNextObjectStoreId >= db2->mNextObjectStoreId);
-  MOZ_ASSERT(db1->mNextIndexId >= db2->mNextIndexId);
+  MOZ_ASSERT(thisDB->mNextObjectStoreId >= otherDB->mNextObjectStoreId);
+  MOZ_ASSERT(thisDB->mNextIndexId >= otherDB->mNextIndexId);
 
-  MOZ_ASSERT(db1->mObjectStores.Count() == db2->mObjectStores.Count());
+  MOZ_ASSERT(thisDB->mObjectStores.Count() == otherDB->mObjectStores.Count());
 
-  Helper::AssertConsistent(db1->mObjectStores, db2->mObjectStores);
+  Helper::AssertConsistent(thisDB->mObjectStores, otherDB->mObjectStores);
 }
 
 #endif // DEBUG
