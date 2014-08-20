@@ -80,7 +80,6 @@ IDBRequest::InitMembers()
 
 #ifdef MOZ_ENABLE_PROFILER_SPS
   {
-    using namespace mozilla::ipc;
     BackgroundChildImpl::ThreadLocal* threadLocal =
       BackgroundChildImpl::GetThreadLocalForCurrentThread();
     MOZ_ASSERT(threadLocal);
@@ -339,8 +338,8 @@ IDBRequest::SetResult(GetResultCallback aCallback, void* aUserData)
   mHaveResultOrErrorCode = true;
 }
 
-mozilla::dom::DOMError*
-IDBRequest::GetError(mozilla::ErrorResult& aRv)
+DOMError*
+IDBRequest::GetError(ErrorResult& aRv)
 {
   AssertIsOnOwningThread();
 

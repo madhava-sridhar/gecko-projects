@@ -197,6 +197,7 @@ IDBDatabase::IDBDatabase(IDBWrapperCache* aOwnerCache,
   , mBackgroundActor(aActor)
   , mClosed(false)
   , mInvalidated(false)
+  , mInvalidatedByParent(false)
 {
   MOZ_ASSERT(aOwnerCache);
   MOZ_ASSERT(aFactory);
@@ -303,7 +304,7 @@ IDBDatabase::CloseInternal()
       mObserver = nullptr;
     }
 
-    if (mBackgroundActor && !mInvalidated) {
+    if (mBackgroundActor && !mInvalidatedByParent) {
       mBackgroundActor->SendClose();
     }
   }
@@ -313,6 +314,8 @@ void
 IDBDatabase::InvalidateInternal()
 {
   AssertIsOnOwningThread();
+
+  mInvalidated = true;
 
   InvalidateMutableFiles();
   AbortTransactions();
@@ -774,15 +777,13 @@ IDBDatabase::AbortTransactions()
 
       MOZ_ASSERT(transactions.Length() == count);
 
+      IDB_REPORT_INTERNAL_ERR();
+
       for (uint32_t index = 0; index < count; index++) {
         nsRefPtr<IDBTransaction> transaction = transactions[index].forget();
         MOZ_ASSERT(transaction);
 
-        // This can fail, for example if the transaction is in the process of
-        // being committed. That is expected and fine, so we ignore any returned
-        // errors.
-        ErrorResult rv;
-        transaction->Abort(rv);
+        transaction->Abort(NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
       }
     }
 
@@ -1141,15 +1142,14 @@ IDBDatabase::InvalidateMutableFiles()
 }
 
 void
-IDBDatabase::Invalidate()
+IDBDatabase::InvalidateFromParent()
 {
   AssertIsOnOwningThread();
+  MOZ_ASSERT(!mInvalidatedByParent);
 
-  if (!mInvalidated) {
-    mInvalidated = true;
+  mInvalidatedByParent = true;
 
-    InvalidateInternal();
-  }
+  Invalidate();
 }
 
 NS_IMPL_ADDREF_INHERITED(IDBDatabase, IDBWrapperCache)

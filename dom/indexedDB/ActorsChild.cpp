@@ -26,7 +26,6 @@
 #include "mozilla/ipc/BackgroundUtils.h"
 #include "nsCOMPtr.h"
 #include "nsContentUtils.h"
-#include "nsIBFCacheEntry.h"
 #include "nsIDocument.h"
 #include "nsIDOMEvent.h"
 #include "nsIEventTarget.h"
@@ -605,8 +604,7 @@ DispatchSuccessEvent(ResultHelper* aResultHelper,
   if (transaction &&
       transaction->IsOpen() &&
       internalEvent->mFlags.mExceptionHasBeenRisen) {
-    MOZ_ALWAYS_TRUE(
-      NS_SUCCEEDED(transaction->Abort(NS_ERROR_DOM_INDEXEDDB_ABORT_ERR)));
+    transaction->Abort(NS_ERROR_DOM_INDEXEDDB_ABORT_ERR);
   }
 }
 
@@ -662,14 +660,13 @@ DispatchErrorEvent(IDBRequest* aRequest,
     if (internalEvent->mFlags.mExceptionHasBeenRisen &&
         transaction &&
         transaction->IsOpen()) {
-      NS_WARN_IF(NS_FAILED(
-        transaction->Abort(NS_ERROR_DOM_INDEXEDDB_ABORT_ERR)));
+      transaction->Abort(NS_ERROR_DOM_INDEXEDDB_ABORT_ERR);
     }
 
     if (doDefault &&
         transaction &&
         transaction->IsOpen()) {
-      NS_WARN_IF(NS_FAILED(transaction->Abort(request)));
+      transaction->Abort(request);
     }
   } else {
     NS_WARNING("DispatchEvent failed!");
@@ -1326,10 +1323,7 @@ BackgroundDatabaseChild::RecvVersionChange(const uint64_t& aOldVersion,
   if (owner) {
     nsCOMPtr<nsIDocument> ownerDoc = owner->GetExtantDoc();
     if ((ownerDoc && ownerDoc->GetBFCacheEntry()) || owner->IsFrozen()) {
-      // Invalidate() doesn't close the database in the parent, so we have
-      // to call Close() and AbortTransactions() manually.
-      mDatabase->Close();
-      mDatabase->AbortTransactions();
+      mDatabase->Invalidate();
       return true;
     }
   }
@@ -1354,7 +1348,7 @@ BackgroundDatabaseChild::RecvVersionChange(const uint64_t& aOldVersion,
       break;
 
     default:
-      MOZ_ASSUME_UNREACHABLE("Should never get here!");
+      MOZ_CRASH("Should never get here!");
   }
 
   if (NS_WARN_IF(!versionChangeEvent)) {
@@ -1379,7 +1373,7 @@ BackgroundDatabaseChild::RecvInvalidate()
   MaybeCollectGarbageOnIPCMessage();
 
   if (mDatabase) {
-    mDatabase->Invalidate();
+    mDatabase->InvalidateFromParent();
   }
 
   return true;
@@ -1390,7 +1384,7 @@ BackgroundDatabaseChild::RecvInvalidate()
  ******************************************************************************/
 
 BackgroundTransactionBase::BackgroundTransactionBase()
-: mTransaction(nullptr)
+  : mTransaction(nullptr)
 {
   MOZ_COUNT_CTOR(indexedDB::BackgroundTransactionBase);
 }
@@ -1930,7 +1924,7 @@ BackgroundRequestChild::Recv__delete__(const RequestResponse& aResponse)
       MOZ_CRASH("Unknown response type!");
   }
 
-  MOZ_ASSUME_UNREACHABLE("Should never get here!");
+  MOZ_CRASH("Should never get here!");
 }
 
 /*******************************************************************************
@@ -2310,7 +2304,7 @@ BackgroundCursorChild::RecvResponse(const CursorResponse& aResponse)
       break;
 
     default:
-      MOZ_ASSUME_UNREACHABLE("Should never get here!");
+      MOZ_CRASH("Should never get here!");
   }
 
   mTransaction->OnRequestFinished();

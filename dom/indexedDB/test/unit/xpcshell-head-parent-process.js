@@ -226,6 +226,42 @@ function setTimeout(fun, timeout) {
   return timer;
 }
 
+function clearAllDatabases(callback) {
+  if (!SpecialPowers.isMainProcess()) {
+    throw new Error("clearAllDatabases not implemented for child processes!");
+  }
+
+  let quotaManager = Cc["@mozilla.org/dom/quota/manager;1"]
+                       .getService(Ci.nsIQuotaManager);
+
+  const quotaPref = "dom.quotaManager.testing";
+
+  let oldPrefValue;
+  if (SpecialPowers._getPrefs().prefHasUserValue(quotaPref)) {
+    oldPrefValue = SpecialPowers.getBoolPref(quotaPref);
+  }
+
+  SpecialPowers.setBoolPref(quotaPref, true);
+
+  try {
+    quotaManager.clear();
+  } catch(e) {
+    if (oldPrefValue !== undefined) {
+      SpecialPowers.setBoolPref(quotaPref, oldPrefValue);
+    } else {
+      SpecialPowers.clearUserPref(quotaPref);
+    }
+    throw e;
+  }
+
+  let uri = Cc["@mozilla.org/network/io-service;1"]
+              .getService(Ci.nsIIOService)
+              .newURI("http://foo.com", null, null);
+  quotaManager.getUsageForURI(uri, function(usage, fileUsage) {
+    callback();
+  });
+}
+
 var SpecialPowers = {
   isMainProcess: function() {
     return Components.classes["@mozilla.org/xre/app-info;1"]

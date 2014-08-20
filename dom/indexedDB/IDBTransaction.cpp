@@ -100,11 +100,16 @@ IDBTransaction::~IDBTransaction()
   MOZ_ASSERT(!mPendingRequestCount);
   MOZ_ASSERT(!mCreating);
   MOZ_ASSERT(mSentCommitOrAbort);
-  MOZ_ASSERT(mFiredCompleteOrAbort);
+  MOZ_ASSERT_IF(mMode == VERSION_CHANGE &&
+                  mBackgroundActor.mVersionChangeBackgroundActor,
+                mFiredCompleteOrAbort);
+  MOZ_ASSERT_IF(mMode != VERSION_CHANGE &&
+                  mBackgroundActor.mNormalBackgroundActor,
+                mFiredCompleteOrAbort);
 
   mDatabase->UnregisterTransaction(this);
 
-  if (VERSION_CHANGE == mMode) {
+  if (mMode == VERSION_CHANGE) {
     if (mBackgroundActor.mVersionChangeBackgroundActor) {
       mBackgroundActor.mVersionChangeBackgroundActor->SendDeleteMeInternal();
       MOZ_ASSERT(!mBackgroundActor.mVersionChangeBackgroundActor,
@@ -478,7 +483,7 @@ IDBTransaction::DeleteIndex(IDBObjectStore* aObjectStore,
                     SendDeleteIndex(aObjectStore->Id(), aIndexId));
 }
 
-nsresult
+void
 IDBTransaction::AbortInternal(nsresult aAbortCode,
                               already_AddRefed<DOMError> aError)
 {
@@ -487,14 +492,16 @@ IDBTransaction::AbortInternal(nsresult aAbortCode,
 
   nsRefPtr<DOMError> error = aError;
 
-  if (IsFinished()) {
-    return NS_ERROR_DOM_INDEXEDDB_NOT_ALLOWED_ERR;
+  if (NS_WARN_IF(NS_FAILED(mAbortCode))) {
+    // Already aborted, nothing to do here.
+    return;
   }
 
-  bool isVersionChange = (mMode == VERSION_CHANGE);
+  const bool isVersionChange = (mMode == VERSION_CHANGE);
+  const bool isInvalidated = mDatabase->IsInvalidated();
   bool needToSendAbort = (mReadyState == INITIAL);
 
-  if (mDatabase->IsInvalidated()) {
+  if (isInvalidated) {
     needToSendAbort = false;
 #ifdef DEBUG
     mSentCommitOrAbort = true;
@@ -507,8 +514,11 @@ IDBTransaction::AbortInternal(nsresult aAbortCode,
 
   if (isVersionChange) {
     // If a version change transaction is aborted, we must revert the world
-    // back to its previous state.
-    mDatabase->RevertToPreviousState();
+    // back to its previous state unless we're being invalidated after the
+    // transaction already completed.
+    if (!isInvalidated) {
+      mDatabase->RevertToPreviousState();
+    }
 
     const nsTArray<ObjectStoreSpec>& specArray =
       mDatabase->Spec()->objectStores();
@@ -569,11 +579,9 @@ IDBTransaction::AbortInternal(nsresult aAbortCode,
   if (isVersionChange) {
     mDatabase->Close();
   }
-
-  return NS_OK;
 }
 
-nsresult
+void
 IDBTransaction::Abort(IDBRequest* aRequest)
 {
   AssertIsOnOwningThread();
@@ -582,16 +590,16 @@ IDBTransaction::Abort(IDBRequest* aRequest)
   ErrorResult rv;
   nsRefPtr<DOMError> error = aRequest->GetError(rv);
 
-  return AbortInternal(aRequest->GetErrorCode(), error.forget());
+  AbortInternal(aRequest->GetErrorCode(), error.forget());
 }
 
-nsresult
+void
 IDBTransaction::Abort(nsresult aErrorCode)
 {
   AssertIsOnOwningThread();
 
   nsRefPtr<DOMError> error = new DOMError(GetOwner(), aErrorCode);
-  return AbortInternal(aErrorCode, error.forget());
+  AbortInternal(aErrorCode, error.forget());
 }
 
 void
@@ -599,12 +607,15 @@ IDBTransaction::Abort(ErrorResult& aRv)
 {
   AssertIsOnOwningThread();
 
-  aRv = AbortInternal(NS_ERROR_DOM_INDEXEDDB_ABORT_ERR, nullptr);
-
-  if (!aRv.Failed()) {
-    MOZ_ASSERT(!mAbortedByScript);
-    mAbortedByScript = true;
+  if (IsFinished()) {
+    aRv = NS_ERROR_DOM_INDEXEDDB_NOT_ALLOWED_ERR;
+    return;
   }
+
+  AbortInternal(NS_ERROR_DOM_INDEXEDDB_ABORT_ERR, nullptr);
+
+  MOZ_ASSERT(!mAbortedByScript);
+  mAbortedByScript = true;
 }
 
 void

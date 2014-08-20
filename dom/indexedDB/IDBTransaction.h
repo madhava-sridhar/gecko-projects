@@ -225,10 +225,10 @@ public:
   void
   DeleteIndex(IDBObjectStore* aObjectStore, int64_t aIndexId);
 
-  nsresult
+  void
   Abort(IDBRequest* aRequest);
 
-  nsresult
+  void
   Abort(nsresult aAbortCode);
 
 #ifdef MOZ_ENABLE_PROFILER_SPS
@@ -291,7 +291,7 @@ private:
                  Mode aMode);
   ~IDBTransaction();
 
-  nsresult
+  void
   AbortInternal(nsresult aAbortCode, already_AddRefed<DOMError> aError);
 
   void

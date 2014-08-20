@@ -184,15 +184,12 @@ struct FullIndexMetadata
 
 public:
   FullIndexMetadata()
-    : mDeleted(false)
+    : mCommonMetadata(0, nsString(), KeyPath(0), false, false)
+    , mDeleted(false)
   {
     // This can happen either on the QuotaManager IO thread or on a
     // versionchange transaction thread. These threads can never race so this is
     // totally safe.
-
-    mCommonMetadata.id() = 0;
-    mCommonMetadata.unique() = false;
-    mCommonMetadata.multiEntry() = false;
   }
 
   NS_INLINE_DECL_THREADSAFE_REFCOUNTING(FullIndexMetadata)
@@ -217,16 +214,14 @@ struct FullObjectStoreMetadata
 
 public:
   FullObjectStoreMetadata()
-    : mNextAutoIncrementId(0)
+    : mCommonMetadata(0, nsString(), KeyPath(0), false)
+    , mNextAutoIncrementId(0)
     , mComittedAutoIncrementId(0)
     , mDeleted(false)
   {
     // This can happen either on the QuotaManager IO thread or on a
     // versionchange transaction thread. These threads can never race so this is
     // totally safe.
-
-    mCommonMetadata.id() = 0;
-    mCommonMetadata.autoIncrement() = false;
   }
 
   NS_INLINE_DECL_THREADSAFE_REFCOUNTING(FullObjectStoreMetadata);
@@ -259,6 +254,9 @@ public:
   }
 
   NS_INLINE_DECL_THREADSAFE_REFCOUNTING(FullDatabaseMetadata)
+
+  already_AddRefed<FullDatabaseMetadata>
+  Duplicate() const;
 
 private:
   ~FullDatabaseMetadata()
@@ -2572,7 +2570,10 @@ protected:
   nsCOMPtr<nsIEventTarget> mOwningThread;
   const uint64_t mSerialNumber;
   nsresult mResultCode;
-  Atomic<bool> mActorDestroyed;
+
+private:
+  Atomic<bool> mOperationMayProceed;
+  bool mActorDestroyed;
 
 public:
   NS_DECL_ISUPPORTS_INHERITED
@@ -2596,6 +2597,7 @@ public:
     AssertIsOnOwningThread();
 
     mActorDestroyed = true;
+    mOperationMayProceed = false;
   }
 
   bool
@@ -2604,6 +2606,13 @@ public:
     AssertIsOnOwningThread();
 
     return mActorDestroyed;
+  }
+
+  // May be called on any thread.
+  bool
+  OperationMayProceed() const
+  {
+    return mOperationMayProceed;
   }
 
   uint64_t
@@ -2632,6 +2641,7 @@ protected:
     : mOwningThread(NS_GetCurrentThread())
     , mSerialNumber(++sNextSerialNumber)
     , mResultCode(NS_OK)
+    , mOperationMayProceed(true)
     , mActorDestroyed(false)
   {
     AssertIsOnOwningThread();
@@ -2704,7 +2714,7 @@ class CommonDatabaseOperationBase
   : public DatabaseOperationBase
 {
   nsRefPtr<TransactionBase> mTransaction;
-  bool mTransactionIsAborted;
+  const bool mTransactionIsAborted;
 
 public:
   void
@@ -2714,6 +2724,9 @@ public:
 #else
   { }
 #endif
+
+  void
+  DispatchToTransactionThreadPool();
 
   // May be overridden by subclasses if they need to perform work on the
   // background thread before being dispatched. Returning false will kill the
@@ -2726,9 +2739,6 @@ public:
   // additional cleanup here but must always call the base class implementation.
   virtual void
   Cleanup();
-
-  void
-  DispatchToTransactionThreadPool();
 
 protected:
   CommonDatabaseOperationBase(TransactionBase* aTransaction);
@@ -2834,19 +2844,19 @@ class Database MOZ_FINAL
   nsRefPtr<FileManager> mFileManager;
   nsRefPtr<DatabaseOfflineStorage> mOfflineStorage;
   nsTHashtable<nsPtrHashKey<TransactionBase>> mTransactions;
-
   const PrincipalInfo mPrincipalInfo;
   const nsCString mGroup;
   const nsCString mOrigin;
   const nsCString mId;
   const nsString mFilePath;
+  Atomic<bool> mInvalidatedOnAnyThread;
   const PersistenceType mPersistenceType;
-
   const bool mChromeWriteAccessAllowed;
   bool mClosed;
   bool mInvalidated;
   bool mActorWasAlive;
   bool mActorDestroyed;
+  bool mMetadataCleanedUp;
 
 public:
   // Created by OpenDatabaseOp.
@@ -2909,6 +2919,7 @@ public:
   FullDatabaseMetadata*
   Metadata() const
   {
+    MOZ_ASSERT(mMetadata);
     return mMetadata;
   }
 
@@ -3096,6 +3107,7 @@ public:
 protected:
   typedef IDBTransaction::Mode Mode;
 
+private:
   nsRefPtr<Database> mDatabase;
   nsCOMPtr<mozIStorageConnection> mConnection;
   nsRefPtr<UpdateRefcountFunction> mUpdateFileRefcountFunction;
@@ -3106,13 +3118,19 @@ protected:
   const uint64_t mTransactionId;
   const nsCString mDatabaseId;
   uint64_t mActiveRequestCount;
-  Atomic<bool> mActorDestroyed;
-  nsresult mResultCode;
+  Atomic<bool> mInvalidatedOnAnyThread;
   Mode mMode;
   bool mHasBeenActive;
+  bool mActorDestroyed;
+  bool mInvalidated;
+
+protected:
+  nsresult mResultCode;
   bool mCommitOrAbortReceived;
   bool mCommittedOrAborted;
+  bool mForceAborted;
 
+private:
   DebugOnly<PRThread*> mTransactionThread;
   DebugOnly<uint32_t> mSavepointCount;
 
@@ -3130,6 +3148,23 @@ public:
     AssertIsOnBackgroundThread();
 
     return mActorDestroyed;
+  }
+
+  // Mus be called on the background thread.
+  bool
+  IsInvalidated() const
+  {
+    MOZ_ASSERT(IsOnBackgroundThread(), "Use IsInvalidatedOnAnyThread()");
+    MOZ_ASSERT_IF(mInvalidated, NS_FAILED(mResultCode));
+
+    return mInvalidated;
+  }
+
+  // May be called on any thread, but is more expensive than IsInvalidated().
+  bool
+  IsInvalidatedOnAnyThread() const
+  {
+    return mInvalidatedOnAnyThread;
   }
 
   void
@@ -3245,6 +3280,9 @@ public:
   void
   NoteFinishedRequest();
 
+  void
+  Invalidate();
+
 protected:
   TransactionBase(Database* aDatabase,
                   Mode aMode);
@@ -3261,6 +3299,15 @@ protected:
     mActorDestroyed = true;
   }
 
+#ifdef DEBUG
+  // Only called by VersionChangeTransaction.
+  void
+  FakeActorDestroyed()
+  {
+    mActorDestroyed = true;
+  }
+#endif
+
   bool
   RecvCommit();
 
@@ -3272,6 +3319,11 @@ protected:
   {
     AssertIsOnBackgroundThread();
 
+    // If we've already committed or aborted then there's nothing else to do.
+    if (mCommittedOrAborted) {
+      return;
+    }
+
     // If there are active requests then we have to wait for those requests to
     // complete (see NoteFinishedRequest).
     if (mActiveRequestCount) {
@@ -3279,13 +3331,9 @@ protected:
     }
 
     // If we haven't yet received a commit or abort message then there could be
-    // additional requests coming.
-    if (!mCommitOrAbortReceived) {
-      return;
-    }
-
-    // If we've already committed or aborted then there's nothing else to do.
-    if (mCommittedOrAborted) {
+    // additional requests coming so we should wait unless we're being forced to
+    // abort.
+    if (!mCommitOrAbortReceived && !mForceAborted) {
       return;
     }
 
@@ -3871,8 +3919,6 @@ protected:
   {
     // Normally this would be out-of-line since it is a virtual function but
     // MSVC 2010 fails to link for some reason if it is not inlined here...
-    MOZ_ASSERT_IF(!mActorDestroyed,
-                  mState == State_Initial || mState == State_Completed);
   }
 
   nsresult
@@ -4136,6 +4182,10 @@ private:
 class VersionChangeTransactionOp
   : public CommonDatabaseOperationBase
 {
+public:
+  virtual void
+  Cleanup() MOZ_OVERRIDE;
+
 protected:
   VersionChangeTransactionOp(VersionChangeTransaction* aTransaction)
     : CommonDatabaseOperationBase(aTransaction)
@@ -4151,9 +4201,6 @@ private:
 
   virtual bool
   SendFailureResult(nsresult aResultCode) MOZ_OVERRIDE;
-
-  virtual void
-  Cleanup() MOZ_OVERRIDE;
 };
 
 class CreateObjectStoreOp MOZ_FINAL
@@ -5577,6 +5624,109 @@ CreateQuotaClient()
 } // namespace mozilla
 
 /*******************************************************************************
+ * Metadata classes
+ ******************************************************************************/
+
+already_AddRefed<FullDatabaseMetadata>
+FullDatabaseMetadata::Duplicate() const
+{
+  AssertIsOnBackgroundThread();
+
+  class MOZ_STACK_CLASS IndexClosure MOZ_FINAL
+  {
+    FullObjectStoreMetadata& mNew;
+
+  public:
+    IndexClosure(FullObjectStoreMetadata& aNew)
+      : mNew(aNew)
+    { }
+
+    static PLDHashOperator
+    Copy(const uint64_t& aKey, FullIndexMetadata* aValue, void* aClosure)
+    {
+      MOZ_ASSERT(aKey);
+      MOZ_ASSERT(aValue);
+      MOZ_ASSERT(aClosure);
+
+      auto* closure = static_cast<IndexClosure*>(aClosure);
+
+      nsRefPtr<FullIndexMetadata> newMetadata = new FullIndexMetadata();
+
+      newMetadata->mCommonMetadata = aValue->mCommonMetadata;
+
+      if (NS_WARN_IF(!closure->mNew.mIndexes.Put(aKey, newMetadata,
+                                                 fallible))) {
+        return PL_DHASH_STOP;
+      }
+
+      return PL_DHASH_NEXT;
+    }
+  };
+
+  class MOZ_STACK_CLASS ObjectStoreClosure MOZ_FINAL
+  {
+    FullDatabaseMetadata& mNew;
+
+  public:
+    ObjectStoreClosure(FullDatabaseMetadata& aNew)
+      : mNew(aNew)
+    { }
+
+    static PLDHashOperator
+    Copy(const uint64_t& aKey, FullObjectStoreMetadata* aValue, void* aClosure)
+    {
+      MOZ_ASSERT(aKey);
+      MOZ_ASSERT(aValue);
+      MOZ_ASSERT(aClosure);
+
+      auto* objClosure = static_cast<ObjectStoreClosure*>(aClosure);
+
+      nsRefPtr<FullObjectStoreMetadata> newMetadata =
+        new FullObjectStoreMetadata();
+
+      newMetadata->mCommonMetadata = aValue->mCommonMetadata;
+      newMetadata->mNextAutoIncrementId = aValue->mNextAutoIncrementId;
+      newMetadata->mComittedAutoIncrementId = aValue->mComittedAutoIncrementId;
+
+      IndexClosure idxClosure(*newMetadata);
+      aValue->mIndexes.EnumerateRead(IndexClosure::Copy, &idxClosure);
+
+      if (NS_WARN_IF(aValue->mIndexes.Count() !=
+                     newMetadata->mIndexes.Count())) {
+        return PL_DHASH_STOP;
+      }
+
+      if (NS_WARN_IF(!objClosure->mNew.mObjectStores.Put(aKey, newMetadata,
+                                                         fallible))) {
+        return PL_DHASH_STOP;
+      }
+
+      return PL_DHASH_NEXT;
+    }
+  };
+
+  // FullDatabaseMetadata contains two hash tables of pointers that we need to
+  // duplicate so we can't just use the copy constructor.
+  nsRefPtr<FullDatabaseMetadata> newMetadata =
+    new FullDatabaseMetadata(mCommonMetadata);
+
+  newMetadata->mDatabaseId = mDatabaseId;
+  newMetadata->mFilePath = mFilePath;
+  newMetadata->mNextObjectStoreId = mNextObjectStoreId;
+  newMetadata->mNextIndexId = mNextIndexId;
+
+  ObjectStoreClosure closure(*newMetadata);
+  mObjectStores.EnumerateRead(ObjectStoreClosure::Copy, &closure);
+
+  if (NS_WARN_IF(mObjectStores.Count() !=
+                 newMetadata->mObjectStores.Count())) {
+    return nullptr;
+  }
+
+  return newMetadata.forget();
+}
+
+/*******************************************************************************
  * Factory
  ******************************************************************************/
 
@@ -5831,6 +5981,7 @@ Database::Database(Factory* aFactory,
   , mInvalidated(false)
   , mActorWasAlive(false)
   , mActorDestroyed(false)
+  , mMetadataCleanedUp(false)
 {
   AssertIsOnBackgroundThread();
   MOZ_ASSERT(aFactory);
@@ -5851,7 +6002,7 @@ Database::Invalidate()
   {
   public:
     static bool
-    AbortTransactions(nsTHashtable<nsPtrHashKey<TransactionBase>>& aTable)
+    InvalidateTransactions(nsTHashtable<nsPtrHashKey<TransactionBase>>& aTable)
     {
       AssertIsOnBackgroundThread();
 
@@ -5878,8 +6029,7 @@ Database::Invalidate()
           nsRefPtr<TransactionBase> transaction = transactions[index].forget();
           MOZ_ASSERT(transaction);
 
-          transaction->Abort(NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR,
-                             /* aForce */ true);
+          transaction->Invalidate();
         }
       }
 
@@ -5914,7 +6064,7 @@ Database::Invalidate()
     unused << SendInvalidate();
   }
 
-  if (!Helper::AbortTransactions(mTransactions)) {
+  if (!Helper::InvalidateTransactions(mTransactions)) {
     NS_WARNING("Failed to abort all transactions!");
   }
 
@@ -5976,12 +6126,12 @@ Database::CloseInternal()
   AssertIsOnBackgroundThread();
 
   if (mClosed) {
-    if (NS_WARN_IF(!mInvalidated)) {
-      // Kill misbehaving child.
+    if (NS_WARN_IF(!IsInvalidated())) {
+      // Kill misbehaving child for sending the close message twice.
       return false;
     }
 
-    // Ignore harmless race.
+    // Ignore harmless race when we just invalidated the database.
     return true;
   }
 
@@ -6014,7 +6164,9 @@ Database::CleanupMetadata()
 {
   AssertIsOnBackgroundThread();
 
-  if (mMetadata) {
+  if (!mMetadataCleanedUp) {
+    mMetadataCleanedUp = true;
+
     DatabaseActorInfo* info;
     MOZ_ALWAYS_TRUE(gLiveDatabaseHashtable->Get(Id(), &info));
     MOZ_ALWAYS_TRUE(info->mLiveDatabases.RemoveElement(this));
@@ -6024,7 +6176,6 @@ Database::CleanupMetadata()
                  !info->mWaitingFactoryOp->HasBlockedDatabases());
       gLiveDatabaseHashtable->Remove(Id());
     }
-    mMetadata = nullptr;
   }
 }
 
@@ -6036,7 +6187,7 @@ Database::ActorDestroy(ActorDestroyReason aWhy)
 
   mActorDestroyed = true;
 
-  if (!mInvalidated) {
+  if (!IsInvalidated()) {
     Invalidate();
   }
 }
@@ -6221,7 +6372,7 @@ Database::RecvPBackgroundIDBTransactionConstructor(
              aMode == IDBTransaction::READ_WRITE);
   MOZ_ASSERT(!mClosed);
 
-  if (NS_WARN_IF(mInvalidated)) {
+  if (IsInvalidated()) {
     // This is an expected race. We don't want the child to die here, just don't
     // actually do any work.
     return true;
@@ -6312,6 +6463,10 @@ Database::RecvBlocked()
     return false;
   }
 
+  if (IsInvalidated()) {
+    return true;
+  }
+
   DatabaseActorInfo* info;
   MOZ_ALWAYS_TRUE(gLiveDatabaseHashtable->Get(Id(), &info));
 
@@ -6388,12 +6543,15 @@ TransactionBase::TransactionBase(Database* aDatabase,
   , mTransactionId(TransactionThreadPool::NextTransactionId())
   , mDatabaseId(aDatabase->Id())
   , mActiveRequestCount(0)
-  , mActorDestroyed(false)
-  , mResultCode(NS_OK)
+  , mInvalidatedOnAnyThread(false)
   , mMode(aMode)
   , mHasBeenActive(false)
+  , mActorDestroyed(false)
+  , mInvalidated(false)
+  , mResultCode(NS_OK)
   , mCommitOrAbortReceived(false)
   , mCommittedOrAborted(false)
+  , mForceAborted(false)
   , mTransactionThread(nullptr)
   , mSavepointCount(0)
 {
@@ -6481,7 +6639,7 @@ TransactionBase::Abort(nsresult aResultCode, bool aForce)
   }
 
   if (aForce) {
-    mCommitOrAbortReceived = true;
+    mForceAborted = true;
   }
 
   MaybeCommitOrAbort();
@@ -7231,6 +7389,20 @@ TransactionBase::NoteFinishedRequest()
   MaybeCommitOrAbort();
 }
 
+void
+TransactionBase::Invalidate()
+{
+  AssertIsOnBackgroundThread();
+  MOZ_ASSERT(mInvalidated == mInvalidatedOnAnyThread);
+
+  if (!mInvalidated) {
+    mInvalidated = true;
+    mInvalidatedOnAnyThread = true;
+
+    Abort(NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR, /* aForce */ true);
+  }
+}
+
 PBackgroundIDBRequestParent*
 TransactionBase::AllocRequest(const RequestParams& aParams, bool aTrustParams)
 {
@@ -7339,6 +7511,11 @@ TransactionBase::StartRequest(PBackgroundIDBRequestParent* aActor)
   if (NS_WARN_IF(!op->Init(this))) {
     op->Cleanup();
     return false;
+  }
+
+  if (IsInvalidated()) {
+    op->Cleanup();
+    return true;
   }
 
   op->DispatchToTransactionThreadPool();
@@ -7564,7 +7741,7 @@ NormalTransaction::ActorDestroy(ActorDestroyReason aWhy)
       mResultCode = NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
     }
 
-    mCommitOrAbortReceived = true;
+    mForceAborted = true;
 
     MaybeCommitOrAbort();
   }
@@ -7576,7 +7753,7 @@ bool
 NormalTransaction::RecvDeleteMe()
 {
   AssertIsOnBackgroundThread();
-  MOZ_ASSERT(!mActorDestroyed);
+  MOZ_ASSERT(!IsActorDestroyed());
 
   return PBackgroundIDBTransactionParent::Send__delete__(this);
 }
@@ -7679,9 +7856,7 @@ VersionChangeTransaction::~VersionChangeTransaction()
 #ifdef DEBUG
   // Silence the base class' destructor assertion if we never made this actor
   // live.
-  if (!mActorWasAlive) {
-    mActorDestroyed = true;
-  }
+  FakeActorDestroyed();
 #endif
 }
 
@@ -7701,7 +7876,7 @@ VersionChangeTransaction::SetActorAlive()
 {
   AssertIsOnBackgroundThread();
   MOZ_ASSERT(!mActorWasAlive);
-  MOZ_ASSERT(!mActorDestroyed);
+  MOZ_ASSERT(!IsActorDestroyed());
 
   mActorWasAlive = true;
   AddRef();
@@ -7713,97 +7888,12 @@ VersionChangeTransaction::CopyDatabaseMetadata()
   AssertIsOnBackgroundThread();
   MOZ_ASSERT(!mOldMetadata);
 
-  class MOZ_STACK_CLASS IndexClosure MOZ_FINAL
-  {
-    FullObjectStoreMetadata& mNew;
-
-  public:
-    IndexClosure(FullObjectStoreMetadata& aNew)
-      : mNew(aNew)
-    { }
-
-    static PLDHashOperator
-    Copy(const uint64_t& aKey, FullIndexMetadata* aValue, void* aClosure)
-    {
-      MOZ_ASSERT(aKey);
-      MOZ_ASSERT(aValue);
-      MOZ_ASSERT(aClosure);
-
-      auto* closure = static_cast<IndexClosure*>(aClosure);
-
-      nsRefPtr<FullIndexMetadata> newMetadata = new FullIndexMetadata();
-
-      newMetadata->mCommonMetadata = aValue->mCommonMetadata;
-
-      if (NS_WARN_IF(!closure->mNew.mIndexes.Put(aKey, newMetadata,
-                                                 fallible))) {
-        return PL_DHASH_STOP;
-      }
-
-      return PL_DHASH_NEXT;
-    }
-  };
-
-  class MOZ_STACK_CLASS ObjectStoreClosure MOZ_FINAL
-  {
-    FullDatabaseMetadata& mNew;
-
-  public:
-    ObjectStoreClosure(FullDatabaseMetadata& aNew)
-      : mNew(aNew)
-    { }
-
-    static PLDHashOperator
-    Copy(const uint64_t& aKey, FullObjectStoreMetadata* aValue, void* aClosure)
-    {
-      MOZ_ASSERT(aKey);
-      MOZ_ASSERT(aValue);
-      MOZ_ASSERT(aClosure);
-
-      auto* objClosure = static_cast<ObjectStoreClosure*>(aClosure);
-
-      nsRefPtr<FullObjectStoreMetadata> newMetadata =
-        new FullObjectStoreMetadata();
-
-      newMetadata->mCommonMetadata = aValue->mCommonMetadata;
-      newMetadata->mNextAutoIncrementId = aValue->mNextAutoIncrementId;
-      newMetadata->mComittedAutoIncrementId = aValue->mComittedAutoIncrementId;
-
-      IndexClosure idxClosure(*newMetadata);
-      aValue->mIndexes.EnumerateRead(IndexClosure::Copy, &idxClosure);
-
-      if (NS_WARN_IF(aValue->mIndexes.Count() !=
-                     newMetadata->mIndexes.Count())) {
-        return PL_DHASH_STOP;
-      }
-
-      if (NS_WARN_IF(!objClosure->mNew.mObjectStores.Put(aKey, newMetadata,
-                                                         fallible))) {
-        return PL_DHASH_STOP;
-      }
-
-      return PL_DHASH_NEXT;
-    }
-  };
-
-  const nsRefPtr<FullDatabaseMetadata> origMetadata = mDatabase->Metadata();
+  const nsRefPtr<FullDatabaseMetadata> origMetadata =
+    GetDatabase()->Metadata();
   MOZ_ASSERT(origMetadata);
 
-  // FullDatabaseMetadata contains two hash tables of pointers that we need to
-  // duplicate so we can't just use the copy constructor.
-  nsRefPtr<FullDatabaseMetadata> newMetadata =
-    new FullDatabaseMetadata(origMetadata->mCommonMetadata);
-
-  newMetadata->mDatabaseId = origMetadata->mDatabaseId;
-  newMetadata->mFilePath = origMetadata->mFilePath;
-  newMetadata->mNextObjectStoreId = origMetadata->mNextObjectStoreId;
-  newMetadata->mNextIndexId = origMetadata->mNextIndexId;
-
-  ObjectStoreClosure closure(*newMetadata);
-  origMetadata->mObjectStores.EnumerateRead(ObjectStoreClosure::Copy, &closure);
-
-  if (NS_WARN_IF(origMetadata->mObjectStores.Count() !=
-                 newMetadata->mObjectStores.Count())) {
+  nsRefPtr<FullDatabaseMetadata> newMetadata = origMetadata->Duplicate();
+  if (NS_WARN_IF(!newMetadata)) {
     return false;
   }
 
@@ -7831,11 +7921,10 @@ void
 VersionChangeTransaction::UpdateMetadata(nsresult aResult)
 {
   AssertIsOnBackgroundThread();
-  MOZ_ASSERT(mDatabase);
+  MOZ_ASSERT(GetDatabase());
   MOZ_ASSERT(mOpenDatabaseOp);
   MOZ_ASSERT(mOpenDatabaseOp->mDatabase);
   MOZ_ASSERT(!mOpenDatabaseOp->mDatabaseId.IsEmpty());
-  MOZ_ASSERT(!mActorDestroyed);
 
   class MOZ_STACK_CLASS Helper MOZ_FINAL
   {
@@ -7877,12 +7966,15 @@ VersionChangeTransaction::UpdateMetadata(nsresult aResult)
     }
   };
 
+  if (IsActorDestroyed()) {
+    return;
+  }
+
   nsRefPtr<FullDatabaseMetadata> oldMetadata;
   mOldMetadata.swap(oldMetadata);
 
   DatabaseActorInfo* info;
   if (!gLiveDatabaseHashtable->Get(oldMetadata->mDatabaseId, &info)) {
-    MOZ_ASSERT(!mDatabase->Metadata());
     return;
   }
 
@@ -7940,7 +8032,7 @@ VersionChangeTransaction::ActorDestroy(ActorDestroyReason aWhy)
       mResultCode = NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
     }
 
-    mCommitOrAbortReceived = true;
+    mForceAborted = true;
 
     MaybeCommitOrAbort();
   }
@@ -7952,7 +8044,7 @@ bool
 VersionChangeTransaction::RecvDeleteMe()
 {
   AssertIsOnBackgroundThread();
-  MOZ_ASSERT(!mActorDestroyed);
+  MOZ_ASSERT(!IsActorDestroyed());
 
   return PBackgroundIDBVersionChangeTransactionParent::Send__delete__(this);
 }
@@ -7984,7 +8076,7 @@ VersionChangeTransaction::RecvCreateObjectStore(
     return false;
   }
 
-  const nsRefPtr<FullDatabaseMetadata> dbMetadata = mDatabase->Metadata();
+  const nsRefPtr<FullDatabaseMetadata> dbMetadata = GetDatabase()->Metadata();
   MOZ_ASSERT(dbMetadata);
 
   if (NS_WARN_IF(aMetadata.id() != dbMetadata->mNextObjectStoreId)) {
@@ -8018,9 +8110,14 @@ VersionChangeTransaction::RecvCreateObjectStore(
 
   dbMetadata->mNextObjectStoreId++;
 
+  if (IsInvalidated()) {
+    return true;
+  }
+
   nsRefPtr<CreateObjectStoreOp> op = new CreateObjectStoreOp(this, aMetadata);
 
   if (NS_WARN_IF(!op->Init(this))) {
+    op->Cleanup();
     return false;
   }
 
@@ -8039,7 +8136,7 @@ VersionChangeTransaction::RecvDeleteObjectStore(const int64_t& aObjectStoreId)
     return false;
   }
 
-  const nsRefPtr<FullDatabaseMetadata> dbMetadata = mDatabase->Metadata();
+  const nsRefPtr<FullDatabaseMetadata> dbMetadata = GetDatabase()->Metadata();
   MOZ_ASSERT(dbMetadata);
   MOZ_ASSERT(dbMetadata->mNextObjectStoreId > 0);
 
@@ -8063,10 +8160,15 @@ VersionChangeTransaction::RecvDeleteObjectStore(const int64_t& aObjectStoreId)
 
   foundMetadata->mDeleted = true;
 
+  if (IsInvalidated()) {
+    return true;
+  }
+
   nsRefPtr<DeleteObjectStoreOp> op =
     new DeleteObjectStoreOp(this, foundMetadata);
 
   if (NS_WARN_IF(!op->Init(this))) {
+    op->Cleanup();
     return false;
   }
 
@@ -8091,7 +8193,7 @@ VersionChangeTransaction::RecvCreateIndex(const int64_t& aObjectStoreId,
     return false;
   }
 
-  const nsRefPtr<FullDatabaseMetadata> dbMetadata = mDatabase->Metadata();
+  const nsRefPtr<FullDatabaseMetadata> dbMetadata = GetDatabase()->Metadata();
   MOZ_ASSERT(dbMetadata);
 
   if (NS_WARN_IF(aMetadata.id() != dbMetadata->mNextIndexId)) {
@@ -8132,10 +8234,15 @@ VersionChangeTransaction::RecvCreateIndex(const int64_t& aObjectStoreId,
 
   dbMetadata->mNextIndexId++;
 
+  if (IsInvalidated()) {
+    return true;
+  }
+
   nsRefPtr<CreateIndexOp> op =
     new CreateIndexOp(this, aObjectStoreId, aMetadata);
 
   if (NS_WARN_IF(!op->Init(this))) {
+    op->Cleanup();
     return false;
   }
 
@@ -8160,7 +8267,7 @@ VersionChangeTransaction::RecvDeleteIndex(const int64_t& aObjectStoreId,
     return false;
   }
 
-  const nsRefPtr<FullDatabaseMetadata> dbMetadata = mDatabase->Metadata();
+  const nsRefPtr<FullDatabaseMetadata> dbMetadata = GetDatabase()->Metadata();
   MOZ_ASSERT(dbMetadata);
   MOZ_ASSERT(dbMetadata->mNextObjectStoreId > 0);
   MOZ_ASSERT(dbMetadata->mNextIndexId > 0);
@@ -8198,10 +8305,14 @@ VersionChangeTransaction::RecvDeleteIndex(const int64_t& aObjectStoreId,
 
   foundIndexMetadata->mDeleted = true;
 
-  nsRefPtr<DeleteIndexOp> op =
-    new DeleteIndexOp(this, aIndexId);
+  if (IsInvalidated()) {
+    return true;
+  }
+
+  nsRefPtr<DeleteIndexOp> op = new DeleteIndexOp(this, aIndexId);
 
   if (NS_WARN_IF(!op->Init(this))) {
+    op->Cleanup();
     return false;
   }
 
@@ -8346,9 +8457,14 @@ Cursor::Start(const OpenCursorParams& aParams)
       aParams.get_IndexOpenCursorParams().optionalKeyRange() :
       aParams.get_IndexOpenKeyCursorParams().optionalKeyRange();
 
+  if (mTransaction->IsInvalidated()) {
+    return true;
+  }
+
   nsRefPtr<OpenOp> openOp = new OpenOp(this, optionalKeyRange);
 
   if (NS_WARN_IF(!openOp->Init(mTransaction))) {
+    openOp->Cleanup();
     return false;
   }
 
@@ -8500,13 +8616,17 @@ Cursor::RecvContinue(const CursorRequestParams& aParams)
     }
   }
 
+  if (mTransaction->IsInvalidated()) {
+    return true;
+  }
+
   nsRefPtr<ContinueOp> continueOp = new ContinueOp(this, aParams);
   if (NS_WARN_IF(!continueOp->Init(mTransaction))) {
+    continueOp->Cleanup();
     return false;
   }
 
   continueOp->DispatchToTransactionThreadPool();
-
   mCurrentlyRunningOp = continueOp;
 
   return true;
@@ -10234,7 +10354,12 @@ NS_IMETHODIMP
 DatabaseOperationBase::OnProgress(mozIStorageConnection* aConnection,
                                   bool* _retval)
 {
-  *_retval = mActorDestroyed;
+  MOZ_ASSERT(!IsOnBackgroundThread());
+  MOZ_ASSERT(aConnection);
+  MOZ_ASSERT(_retval);
+
+  // This is intentionally racy.
+  *_retval = !OperationMayProceed();
   return NS_OK;
 }
 
@@ -10296,7 +10421,7 @@ FactoryOp::Open()
   nsRefPtr<ContentParent> contentParent;
   mContentParent.swap(contentParent);
 
-  if (mActorDestroyed) {
+  if (!OperationMayProceed()) {
     IDB_REPORT_INTERNAL_ERR();
     return NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
   }
@@ -10374,7 +10499,7 @@ FactoryOp::RetryCheckPermission()
   nsRefPtr<ContentParent> contentParent;
   mContentParent.swap(contentParent);
 
-  if (mActorDestroyed) {
+  if (!OperationMayProceed()) {
     IDB_REPORT_INTERNAL_ERR();
     return NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
   }
@@ -10410,7 +10535,7 @@ FactoryOp::SendToIOThread()
   MOZ_ASSERT(NS_IsMainThread());
   MOZ_ASSERT(mState == State_OpenPending);
 
-  if (mActorDestroyed) {
+  if (!OperationMayProceed()) {
     IDB_REPORT_INTERNAL_ERR();
     return NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
   }
@@ -10444,13 +10569,21 @@ FactoryOp::WaitForTransactions()
              mState == State_WaitingForOtherDatabasesToClose ||
              mState == State_BlockedWaitingForOtherDatabasesToClose);
   MOZ_ASSERT(!mDatabaseId.IsEmpty());
-  MOZ_ASSERT(!mActorDestroyed);
+  MOZ_ASSERT(!IsActorDestroyed());
 
   nsTArray<nsCString> databaseIds;
   databaseIds.AppendElement(mDatabaseId);
 
-  TransactionThreadPool* threadPool = TransactionThreadPool::Get();
-  MOZ_ASSERT(threadPool);
+  TransactionThreadPool* threadPool = TransactionThreadPool::GetOrCreate();
+  if (NS_WARN_IF(!threadPool)) {
+    IDB_REPORT_INTERNAL_ERR();
+    mResultCode = NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
+
+    mState = State_SendingResults;
+    unused << Run();
+
+    return;
+  }
 
   // WaitForDatabasesToComplete() will run this op immediately if there are no
   // transactions blocking it, so be sure to set the next state here before
@@ -10747,8 +10880,10 @@ FactoryOp::FinishOpen()
     return NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
   }
 
-  QuotaManager* quotaManager = QuotaManager::GetOrCreate();
-  if (NS_WARN_IF(!quotaManager)) {
+  QuotaManager* quotaManager;
+
+  if (QuotaManager::IsShuttingDown() ||
+      !(quotaManager = QuotaManager::GetOrCreate())) {
     IDB_REPORT_INTERNAL_ERR();
     return NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
   }
@@ -10843,7 +10978,7 @@ bool
 FactoryOp::RecvPermissionRetry()
 {
   AssertIsOnOwningThread();
-  MOZ_ASSERT(!mActorDestroyed);
+  MOZ_ASSERT(!IsActorDestroyed());
   MOZ_ASSERT(mState == State_PermissionChallenge);
 
   mContentParent = BackgroundParent::GetContentParent(Manager()->Manager());
@@ -10934,8 +11069,7 @@ OpenDatabaseOp::DoDatabaseWork()
                  "OpenDatabaseHelper::DoDatabaseWork",
                  js::ProfileEntry::Category::STORAGE);
 
-  if (NS_WARN_IF(QuotaManager::IsShuttingDown()) ||
-      mActorDestroyed) {
+  if (NS_WARN_IF(QuotaManager::IsShuttingDown()) || !OperationMayProceed()) {
     IDB_REPORT_INTERNAL_ERR();
     return NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
   }
@@ -11081,9 +11215,9 @@ OpenDatabaseOp::DoDatabaseWork()
 
   // Must set mState before dispatching otherwise we will race with the owning
   // thread.
-  mState = (mMetadata->mCommonMetadata.version() != mRequestedVersion) ?
-           State_BeginVersionChange :
-           State_SendingResults;
+  mState = (mMetadata->mCommonMetadata.version() == mRequestedVersion) ?
+           State_SendingResults :
+           State_BeginVersionChange;
 
   rv = mOwningThread->Dispatch(this, NS_DISPATCH_NORMAL);
   if (NS_WARN_IF(NS_FAILED(rv))) {
@@ -11399,6 +11533,11 @@ OpenDatabaseOp::BeginVersionChange()
     return rv;
   }
 
+  if (mDatabase->IsInvalidated()) {
+    IDB_REPORT_INTERNAL_ERR();
+    return NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
+  }
+
   MOZ_ASSERT(!mDatabase->IsClosed());
 
   DatabaseActorInfo* info;
@@ -11640,7 +11779,8 @@ OpenDatabaseOp::SendResults()
     mVersionChangeTransaction = nullptr;
   }
 
-  if (!IsActorDestroyed() && (!mDatabase || !mDatabase->IsInvalidated())) {
+  if (!IsActorDestroyed() &&
+      (!mDatabase || !mDatabase->IsInvalidated())) {
     FactoryRequestResponse response;
 
     if (NS_SUCCEEDED(mResultCode)) {
@@ -12194,7 +12334,7 @@ DeleteDatabaseOp::DoDatabaseWork()
                  "DeleteDatabaseOp::DoDatabaseWork",
                  js::ProfileEntry::Category::STORAGE);
 
-  if (mActorDestroyed) {
+  if (!OperationMayProceed()) {
     IDB_REPORT_INTERNAL_ERR();
     return NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
   }
@@ -12458,7 +12598,7 @@ VersionChangeOp::RunOnIOThread()
                  "DeleteDatabaseOp::VersionChangeOp::RunOnIOThread",
                  js::ProfileEntry::Category::STORAGE);
 
-  if (mActorDestroyed) {
+  if (!OperationMayProceed()) {
     IDB_REPORT_INTERNAL_ERR();
     return NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
   }
@@ -12745,19 +12885,25 @@ CommonDatabaseOperationBase::DispatchToTransactionThreadPool()
 void
 CommonDatabaseOperationBase::RunOnTransactionThread()
 {
+  MOZ_ASSERT(!IsOnBackgroundThread());
   MOZ_ASSERT(mTransaction);
   MOZ_ASSERT(NS_SUCCEEDED(mResultCode));
 
-  if (NS_WARN_IF(mActorDestroyed)) {
-    // There's no reason to attempt any database operations if the actor was
-    // already destroyed.
+  // There are several cases where we don't actually have to to any work here.
+
+  if (mTransactionIsAborted) {
+    // This transaction is already set to be aborted.
+    mResultCode = NS_ERROR_DOM_INDEXEDDB_ABORT_ERR;
+  } else if (mTransaction->IsInvalidatedOnAnyThread()) {
+    // This transaction is being invalidated.
+    mResultCode = NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
+  } else if (!OperationMayProceed()) {
+    // The operation was canceled in some way, likely because the child process
+    // has crashed.
     IDB_REPORT_INTERNAL_ERR();
     mResultCode = NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
-  } else if (mTransactionIsAborted) {
-    // There's no reason to attempt any database operations if the transaction
-    // is already going to be aborted.
-    mResultCode = NS_ERROR_DOM_INDEXEDDB_ABORT_ERR;
   } else {
+    // Here we're actually going to perform the database operation.
     nsresult rv = mTransaction->EnsureConnection();
     if (NS_WARN_IF(NS_FAILED(rv))) {
       mResultCode = rv;
@@ -12777,11 +12923,8 @@ CommonDatabaseOperationBase::RunOnTransactionThread()
     }
   }
 
-  if (NS_WARN_IF(NS_FAILED(mOwningThread->Dispatch(this,
-                                                   NS_DISPATCH_NORMAL)))) {
-    // This should only happen if the child has crashed.
-    MOZ_ASSERT(mActorDestroyed);
-  }
+  MOZ_ALWAYS_TRUE(NS_SUCCEEDED(mOwningThread->Dispatch(this,
+                                                       NS_DISPATCH_NORMAL)));
 }
 
 void
@@ -12790,12 +12933,15 @@ CommonDatabaseOperationBase::RunOnOwningThread()
   AssertIsOnOwningThread();
   MOZ_ASSERT(mTransaction);
 
-  if (NS_WARN_IF(mActorDestroyed)) {
+  if (NS_WARN_IF(IsActorDestroyed())) {
     // Don't send any notifications if the actor was destroyed already.
     if (NS_SUCCEEDED(mResultCode)) {
       IDB_REPORT_INTERNAL_ERR();
       mResultCode = NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
     }
+  } else if (mTransaction->IsInvalidated()) {
+    // Don't send any notifications if the transaction has been invalidated.
+    mResultCode = NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
   } else {
     if (mTransaction->IsAborted()) {
       // Aborted transactions always see their requests fail with ABORT_ERR,
@@ -13011,7 +13157,7 @@ CommitOp::TransactionFinishedBeforeUnblock()
                  "CommitOp::TransactionFinishedBeforeUnblock",
                  js::ProfileEntry::Category::STORAGE);
 
-  if (!mActorDestroyed) {
+  if (!IsActorDestroyed()) {
     mTransaction->UpdateMetadata(mResultCode);
   }
 }
