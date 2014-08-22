@@ -83,7 +83,6 @@ class IDBDatabase MOZ_FINAL
 
   bool mClosed;
   bool mInvalidated;
-  bool mInvalidatedByParent;
 
 public:
   static already_AddRefed<IDBDatabase>
@@ -134,17 +133,7 @@ public:
   }
 
   void
-  InvalidateFromParent();
-
-  void
-  Invalidate()
-  {
-    AssertIsOnOwningThread();
-
-    if (!IsInvalidated()) {
-      InvalidateInternal();
-    }
-  }
+  Invalidate();
 
   // Whether or not the database has been invalidated. If it has then no further
   // transactions for this database will be allowed to run.

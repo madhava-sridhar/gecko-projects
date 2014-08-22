@@ -6463,10 +6463,6 @@ Database::RecvBlocked()
     return false;
   }
 
-  if (IsInvalidated()) {
-    return true;
-  }
-
   DatabaseActorInfo* info;
   MOZ_ALWAYS_TRUE(gLiveDatabaseHashtable->Get(Id(), &info));
 
@@ -7513,11 +7509,6 @@ TransactionBase::StartRequest(PBackgroundIDBRequestParent* aActor)
     return false;
   }
 
-  if (IsInvalidated()) {
-    op->Cleanup();
-    return true;
-  }
-
   op->DispatchToTransactionThreadPool();
   return true;
 }
@@ -8110,10 +8101,6 @@ VersionChangeTransaction::RecvCreateObjectStore(
 
   dbMetadata->mNextObjectStoreId++;
 
-  if (IsInvalidated()) {
-    return true;
-  }
-
   nsRefPtr<CreateObjectStoreOp> op = new CreateObjectStoreOp(this, aMetadata);
 
   if (NS_WARN_IF(!op->Init(this))) {
@@ -8159,10 +8146,6 @@ VersionChangeTransaction::RecvDeleteObjectStore(const int64_t& aObjectStoreId)
   }
 
   foundMetadata->mDeleted = true;
-
-  if (IsInvalidated()) {
-    return true;
-  }
 
   nsRefPtr<DeleteObjectStoreOp> op =
     new DeleteObjectStoreOp(this, foundMetadata);
@@ -8234,10 +8217,6 @@ VersionChangeTransaction::RecvCreateIndex(const int64_t& aObjectStoreId,
 
   dbMetadata->mNextIndexId++;
 
-  if (IsInvalidated()) {
-    return true;
-  }
-
   nsRefPtr<CreateIndexOp> op =
     new CreateIndexOp(this, aObjectStoreId, aMetadata);
 
@@ -8304,10 +8283,6 @@ VersionChangeTransaction::RecvDeleteIndex(const int64_t& aObjectStoreId,
   }
 
   foundIndexMetadata->mDeleted = true;
-
-  if (IsInvalidated()) {
-    return true;
-  }
 
   nsRefPtr<DeleteIndexOp> op = new DeleteIndexOp(this, aIndexId);
 
@@ -12939,11 +12914,10 @@ CommonDatabaseOperationBase::RunOnOwningThread()
       IDB_REPORT_INTERNAL_ERR();
       mResultCode = NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
     }
-  } else if (mTransaction->IsInvalidated()) {
-    // Don't send any notifications if the transaction has been invalidated.
-    mResultCode = NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
   } else {
-    if (mTransaction->IsAborted()) {
+    if (mTransaction->IsInvalidated()) {
+      mResultCode = NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
+    } else if (mTransaction->IsAborted()) {
       // Aborted transactions always see their requests fail with ABORT_ERR,
       // even if the request succeeded or failed with another error.
       mResultCode = NS_ERROR_DOM_INDEXEDDB_ABORT_ERR;

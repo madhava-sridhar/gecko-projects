@@ -197,7 +197,6 @@ IDBDatabase::IDBDatabase(IDBWrapperCache* aOwnerCache,
   , mBackgroundActor(aActor)
   , mClosed(false)
   , mInvalidated(false)
-  , mInvalidatedByParent(false)
 {
   MOZ_ASSERT(aOwnerCache);
   MOZ_ASSERT(aFactory);
@@ -304,7 +303,7 @@ IDBDatabase::CloseInternal()
       mObserver = nullptr;
     }
 
-    if (mBackgroundActor && !mInvalidatedByParent) {
+    if (mBackgroundActor && !mInvalidated) {
       mBackgroundActor->SendClose();
     }
   }
@@ -314,8 +313,6 @@ void
 IDBDatabase::InvalidateInternal()
 {
   AssertIsOnOwningThread();
-
-  mInvalidated = true;
 
   InvalidateMutableFiles();
   AbortTransactions();
@@ -1142,14 +1139,15 @@ IDBDatabase::InvalidateMutableFiles()
 }
 
 void
-IDBDatabase::InvalidateFromParent()
+IDBDatabase::Invalidate()
 {
   AssertIsOnOwningThread();
-  MOZ_ASSERT(!mInvalidatedByParent);
 
-  mInvalidatedByParent = true;
+  if (!mInvalidated) {
+    mInvalidated = true;
 
-  Invalidate();
+    InvalidateInternal();
+  }
 }
 
 NS_IMPL_ADDREF_INHERITED(IDBDatabase, IDBWrapperCache)

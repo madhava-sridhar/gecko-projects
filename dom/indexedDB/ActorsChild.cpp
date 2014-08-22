@@ -1323,7 +1323,10 @@ BackgroundDatabaseChild::RecvVersionChange(const uint64_t& aOldVersion,
   if (owner) {
     nsCOMPtr<nsIDocument> ownerDoc = owner->GetExtantDoc();
     if ((ownerDoc && ownerDoc->GetBFCacheEntry()) || owner->IsFrozen()) {
-      mDatabase->Invalidate();
+      // Invalidate() doesn't close the database in the parent, so we have
+      // to call Close() and AbortTransactions() manually.
+      mDatabase->Close();
+      mDatabase->AbortTransactions();
       return true;
     }
   }
@@ -1373,7 +1376,7 @@ BackgroundDatabaseChild::RecvInvalidate()
   MaybeCollectGarbageOnIPCMessage();
 
   if (mDatabase) {
-    mDatabase->InvalidateFromParent();
+    mDatabase->Invalidate();
   }
 
   return true;
@@ -1384,7 +1387,7 @@ BackgroundDatabaseChild::RecvInvalidate()
  ******************************************************************************/
 
 BackgroundTransactionBase::BackgroundTransactionBase()
-  : mTransaction(nullptr)
+: mTransaction(nullptr)
 {
   MOZ_COUNT_CTOR(indexedDB::BackgroundTransactionBase);
 }

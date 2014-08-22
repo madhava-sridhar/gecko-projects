@@ -492,21 +492,20 @@ IDBTransaction::AbortInternal(nsresult aAbortCode,
 
   nsRefPtr<DOMError> error = aError;
 
-  if (NS_WARN_IF(NS_FAILED(mAbortCode))) {
-    // Already aborted, nothing to do here.
+  if (IsFinished()) {
+    // Already finished, nothing to do here.
     return;
   }
 
-  const bool isVersionChange = (mMode == VERSION_CHANGE);
+  const bool isVersionChange = mMode == VERSION_CHANGE;
   const bool isInvalidated = mDatabase->IsInvalidated();
-  bool needToSendAbort = (mReadyState == INITIAL);
+  bool needToSendAbort = mReadyState == INITIAL && !isInvalidated;
 
-  if (isInvalidated) {
-    needToSendAbort = false;
 #ifdef DEBUG
+  if (isInvalidated) {
     mSentCommitOrAbort = true;
-#endif
   }
+#endif
 
   mAbortCode = aAbortCode;
   mReadyState = DONE;
