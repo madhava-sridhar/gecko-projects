@@ -334,11 +334,15 @@ TransactionThreadPool::Shutdown(nsIRunnable* aCallback)
 
     nsRefPtr<CleanupRunnable> runnable = new CleanupRunnable(aCallback);
     MOZ_ALWAYS_TRUE(NS_SUCCEEDED(NS_DispatchToCurrentThread(runnable)));
-  } else if (aCallback) {
-    MOZ_ALWAYS_TRUE(NS_SUCCEEDED(NS_DispatchToCurrentThread(aCallback)));
+
+    gUniqueTransactionId = 0;
+    return;
   }
 
-  gUniqueTransactionId = 0;
+  if (aCallback) {
+    MOZ_ASSERT(!gUniqueTransactionId);
+    MOZ_ALWAYS_TRUE(NS_SUCCEEDED(NS_DispatchToCurrentThread(aCallback)));
+  }
 }
 
 uint64_t

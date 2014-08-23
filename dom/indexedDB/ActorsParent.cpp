@@ -2780,6 +2780,8 @@ private:
 class Factory MOZ_FINAL
   : public PBackgroundIDBFactoryParent
 {
+  class ShutdownTransactionThreadPoolRunnable;
+
   // Counts the number of "live" Factory instances that have not yet had
   // ActorDestroy called.
   static uint64_t sFactoryInstanceCount;
@@ -2832,6 +2834,30 @@ private:
   virtual bool
   DeallocPBackgroundIDBDatabaseParent(PBackgroundIDBDatabaseParent* aActor)
                                       MOZ_OVERRIDE;
+};
+
+class Factory::ShutdownTransactionThreadPoolRunnable MOZ_FINAL
+  : public nsRunnable
+{
+  bool mDone;
+
+public:
+  ShutdownTransactionThreadPoolRunnable()
+    : mDone(false)
+  {
+    AssertIsOnBackgroundThread();
+  }
+
+  void
+  WaitForCompletion();
+
+  NS_DECL_ISUPPORTS_INHERITED
+
+private:
+  ~ShutdownTransactionThreadPoolRunnable()
+  { }
+
+  NS_DECL_NSIRUNNABLE
 };
 
 class Database MOZ_FINAL
@@ -4930,44 +4956,6 @@ private:
  * Other class declarations
  ******************************************************************************/
 
-#ifdef DEBUG
-
-class DEBUGStorageInfo
-{
-  DatabaseOfflineStorage* const mStorage;
-  const DatabaseMetadata mMetadata;
-
-public:
-  DEBUGStorageInfo(DatabaseOfflineStorage* aStorage,
-                   FullDatabaseMetadata* aMetadata)
-    : mStorage(aStorage)
-    , mMetadata(aMetadata->mCommonMetadata)
-  {
-    MOZ_ASSERT(aStorage);
-    MOZ_ASSERT(aMetadata);
-  }
-
-  DEBUGStorageInfo(DatabaseOfflineStorage* aStorage)
-    : mStorage(aStorage)
-  {
-    MOZ_ASSERT(aStorage);
-  }
-
-  bool
-  operator==(const DEBUGStorageInfo& aOther) const
-  {
-    return mStorage == aOther.mStorage;
-  }
-
-  bool
-  operator<(const DEBUGStorageInfo& aOther) const
-  {
-    return mStorage <= aOther.mStorage;
-  }
-};
-
-#endif // DEBUG
-
 namespace {
 
 struct DatabaseActorInfo
@@ -5037,12 +5025,7 @@ class QuotaClient MOZ_FINAL
   nsCOMPtr<nsIEventTarget> mBackgroundThread;
   nsRefPtr<ShutdownTransactionThreadPoolRunnable> mShutdownRunnable;
 
-  uint32_t mOfflineStorageCount;
   bool mShutDown;
-
-#ifdef DEBUG
-  nsAutoTArray<DEBUGStorageInfo, 10> mOfflineStorages;
-#endif
 
 public:
   QuotaClient();
@@ -5056,12 +5039,7 @@ public:
   }
 
   void
-  NoteNewStorage(DatabaseOfflineStorage* aStorage,
-                 FullDatabaseMetadata* aMetadata,
-                 nsIEventTarget* aBackgroundThread);
-
-  void
-  NoteFinishedStorage(DatabaseOfflineStorage* aStorage);
+  NoteBackgroundThread(nsIEventTarget* aBackgroundThread);
 
   bool
   HasShutDown() const
@@ -5132,25 +5110,30 @@ private:
 class QuotaClient::ShutdownTransactionThreadPoolRunnable MOZ_FINAL
   : public nsRunnable
 {
-  friend class QuotaClient;
-
-  bool mHasShutDown;
+  nsRefPtr<QuotaClient> mQuotaClient;
+  bool mHasRequestedShutDown;
 
 public:
+
+  ShutdownTransactionThreadPoolRunnable(QuotaClient* aQuotaClient)
+    : mQuotaClient(aQuotaClient)
+    , mHasRequestedShutDown(false)
+  {
+    MOZ_ASSERT(NS_IsMainThread());
+    MOZ_ASSERT(aQuotaClient);
+    MOZ_ASSERT(QuotaClient::GetInstance() == aQuotaClient);
+    MOZ_ASSERT(aQuotaClient->mShutDown);
+  }
+
   NS_DECL_ISUPPORTS_INHERITED
 
 private:
-  ShutdownTransactionThreadPoolRunnable()
-    : mHasShutDown(false)
+  ~ShutdownTransactionThreadPoolRunnable()
   {
-    MOZ_ASSERT(NS_IsMainThread());
+    MOZ_ASSERT(!mQuotaClient);
   }
 
-  ~ShutdownTransactionThreadPoolRunnable()
-  { }
-
-  NS_IMETHOD
-  Run() MOZ_OVERRIDE;
+  NS_DECL_NSIRUNNABLE
 };
 
 class QuotaClient::WaitForTransactionsRunnable MOZ_FINAL
@@ -5804,7 +5787,14 @@ Factory::ActorDestroy(ActorDestroyReason aWhy)
 
   // Clean up if there are no more instances.
   if (!(--sFactoryInstanceCount)) {
-    TransactionThreadPool::Shutdown(/* aCallback */ nullptr);
+    if (TransactionThreadPool::Get()) {
+      nsRefPtr<ShutdownTransactionThreadPoolRunnable> shutdownRunnable =
+        new ShutdownTransactionThreadPoolRunnable();
+
+      TransactionThreadPool::Shutdown(shutdownRunnable);
+
+      shutdownRunnable->WaitForCompletion();
+    }
 
     MOZ_ASSERT(gStartTransactionRunnable);
     gStartTransactionRunnable = nullptr;
@@ -5952,6 +5942,36 @@ Factory::DeallocPBackgroundIDBDatabaseParent(
 
   nsRefPtr<Database> database = dont_AddRef(static_cast<Database*>(aActor));
   return true;
+}
+
+void
+Factory::
+ShutdownTransactionThreadPoolRunnable::WaitForCompletion()
+{
+  AssertIsOnBackgroundThread();
+  MOZ_ASSERT(!mDone);
+
+  nsCOMPtr<nsIThread> currentThread = NS_GetCurrentThread();
+  MOZ_ASSERT(currentThread);
+
+  while (!mDone) {
+    MOZ_ALWAYS_TRUE(NS_ProcessNextEvent(currentThread));
+  }
+}
+
+NS_IMPL_ISUPPORTS_INHERITED0(Factory::ShutdownTransactionThreadPoolRunnable,
+                             nsRunnable)
+
+NS_IMETHODIMP
+Factory::
+ShutdownTransactionThreadPoolRunnable::Run()
+{
+  AssertIsOnBackgroundThread();
+  MOZ_ASSERT(!mDone);
+
+  mDone = true;
+
+  return NS_OK;
 }
 
 /*******************************************************************************
@@ -9147,8 +9167,7 @@ FileManager::GetUsage(nsIFile* aDirectory, uint64_t* aUsage)
 QuotaClient* QuotaClient::sInstance = nullptr;
 
 QuotaClient::QuotaClient()
-  : mOfflineStorageCount(0)
-  , mShutDown(false)
+  : mShutDown(false)
 {
   MOZ_ASSERT(NS_IsMainThread());
   MOZ_ASSERT(!sInstance, "We expect this to be a singleton!");
@@ -9160,53 +9179,20 @@ QuotaClient::~QuotaClient()
 {
   MOZ_ASSERT(NS_IsMainThread());
   MOZ_ASSERT(sInstance == this, "We expect this to be a singleton!");
-  MOZ_ASSERT(!mOfflineStorageCount);
-  MOZ_ASSERT(mOfflineStorages.IsEmpty());
 
   sInstance = nullptr;
 }
 
 void
-QuotaClient::NoteNewStorage(DatabaseOfflineStorage* aStorage,
-                            FullDatabaseMetadata* aMetadata,
-                            nsIEventTarget* aBackgroundThread)
+QuotaClient::NoteBackgroundThread(nsIEventTarget* aBackgroundThread)
 {
   MOZ_ASSERT(NS_IsMainThread());
-  MOZ_ASSERT(aStorage);
   MOZ_ASSERT(aBackgroundThread);
-  MOZ_ASSERT(mOfflineStorageCount < UINT32_MAX);
-  MOZ_ASSERT_IF(mOfflineStorageCount, mBackgroundThread == aBackgroundThread);
-  MOZ_ASSERT_IF(!mOfflineStorageCount, !mBackgroundThread);
-  MOZ_ASSERT(!mOfflineStorages.Contains(aStorage));
   MOZ_ASSERT(!mShutDown);
 
-  if (++mOfflineStorageCount == 1) {
+  if (mBackgroundThread != aBackgroundThread) {
     mBackgroundThread = aBackgroundThread;
   }
-
-#ifdef DEBUG
-  mOfflineStorages.InsertElementSorted(DEBUGStorageInfo(aStorage, aMetadata));
-  MOZ_ASSERT(mOfflineStorages.Length() == mOfflineStorageCount);
-#endif
-}
-
-void
-QuotaClient::NoteFinishedStorage(DatabaseOfflineStorage* aStorage)
-{
-  MOZ_ASSERT(NS_IsMainThread());
-  MOZ_ASSERT(aStorage);
-  MOZ_ASSERT(mBackgroundThread);
-  MOZ_ASSERT(mOfflineStorageCount);
-  MOZ_ASSERT(mOfflineStorages.Contains(aStorage));
-
-  if (--mOfflineStorageCount == 0) {
-    mBackgroundThread = nullptr;
-  }
-
-#ifdef DEBUG
-  mOfflineStorages.RemoveElementSorted(aStorage);
-  MOZ_ASSERT(mOfflineStorages.Length() == mOfflineStorageCount);
-#endif
 }
 
 mozilla::dom::quota::Client::Type
@@ -9497,18 +9483,16 @@ QuotaClient::ShutdownTransactionService()
 {
   MOZ_ASSERT(NS_IsMainThread());
   MOZ_ASSERT(!mShutdownRunnable);
-  MOZ_ASSERT_IF(mOfflineStorageCount, mBackgroundThread);
-  MOZ_ASSERT_IF(!mOfflineStorageCount, !mBackgroundThread);
   MOZ_ASSERT(!mShutDown);
 
   mShutDown = true;
 
   if (mBackgroundThread) {
     nsRefPtr<ShutdownTransactionThreadPoolRunnable> runnable = 
-      new ShutdownTransactionThreadPoolRunnable();
+      new ShutdownTransactionThreadPoolRunnable(this);
 
-    if (NS_WARN_IF(NS_FAILED(
-          mBackgroundThread->Dispatch(runnable, NS_DISPATCH_NORMAL)))) {
+    if (NS_FAILED(mBackgroundThread->Dispatch(runnable, NS_DISPATCH_NORMAL))) {
+      // This can happen if the thread has shut down already.
       return;
     }
 
@@ -9518,7 +9502,7 @@ QuotaClient::ShutdownTransactionService()
     mShutdownRunnable.swap(runnable);
 
     while (mShutdownRunnable) {
-      MOZ_ALWAYS_TRUE(NS_ProcessNextEvent(currentThread, /* aMayWait */ true));
+      MOZ_ALWAYS_TRUE(NS_ProcessNextEvent(currentThread));
     }
   }
 }
@@ -9718,24 +9702,26 @@ QuotaClient::
 ShutdownTransactionThreadPoolRunnable::Run()
 {
   if (NS_IsMainThread()) {
-    MOZ_ASSERT(mHasShutDown);
-    MOZ_ASSERT(QuotaClient::GetInstance()->mShutdownRunnable == this);
+    MOZ_ASSERT(mHasRequestedShutDown);
+    MOZ_ASSERT(QuotaClient::GetInstance() == mQuotaClient);
+    MOZ_ASSERT(mQuotaClient->mShutdownRunnable == this);
 
-    QuotaClient::GetInstance()->mShutdownRunnable = nullptr;
+    mQuotaClient->mShutdownRunnable = nullptr;
+    mQuotaClient = nullptr;
 
     return NS_OK;
   }
 
   AssertIsOnBackgroundThread();
 
-  if (mHasShutDown) {
+  if (mHasRequestedShutDown) {
     MOZ_ALWAYS_TRUE(NS_SUCCEEDED(NS_DispatchToMainThread(this)));
     return NS_OK;
   }
 
-  TransactionThreadPool::Shutdown(this);
+  mHasRequestedShutDown = true;
 
-  mHasShutDown = true;
+  TransactionThreadPool::Shutdown(this);
 
   return NS_OK;
 }
@@ -9889,7 +9875,6 @@ void
 DatabaseOfflineStorage::UnregisterOnMainThread()
 {
   MOZ_ASSERT(NS_IsMainThread());
-  MOZ_ASSERT(mStrongQuotaClient);
   MOZ_ASSERT(mOwningThread);
   MOZ_ASSERT(mRegisteredWithQuotaManager);
 
@@ -9899,7 +9884,6 @@ DatabaseOfflineStorage::UnregisterOnMainThread()
   quotaManager->UnregisterStorage(this);
   mRegisteredWithQuotaManager = false;
 
-  mStrongQuotaClient->NoteFinishedStorage(this);
   mStrongQuotaClient = nullptr;
 
   mOwningThread = nullptr;
@@ -11022,7 +11006,7 @@ OpenDatabaseOp::QuotaManagerOpen()
 
   offlineStorage->NoteRegisteredWithQuotaManager();
 
-  quotaClient->NoteNewStorage(offlineStorage, mMetadata, mOwningThread);
+  quotaClient->NoteBackgroundThread(mOwningThread);
 
   mOfflineStorage.swap(offlineStorage);
 
