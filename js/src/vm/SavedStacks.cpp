@@ -10,6 +10,7 @@
 #include "jsapi.h"
 #include "jscompartment.h"
 #include "jsfriendapi.h"
+#include "jshashutil.h"
 #include "jsnum.h"
 
 #include "gc/Marking.h"
@@ -452,8 +453,8 @@ SavedStacks::sweep(JSRuntime *rt)
 
     sweepPCLocationMap();
 
-    if (savedFrameProto && IsObjectAboutToBeFinalized(&savedFrameProto)) {
-        savedFrameProto = nullptr;
+    if (savedFrameProto && IsObjectAboutToBeFinalized(savedFrameProto.unsafeGet())) {
+        savedFrameProto.set(nullptr);
     }
 }
 
@@ -562,7 +563,7 @@ SavedStacks::insertFrames(JSContext *cx, FrameIter &iter, MutableHandleSavedFram
 SavedFrame *
 SavedStacks::getOrCreateSavedFrame(JSContext *cx, SavedFrame::HandleLookup lookup)
 {
-    SavedFrame::Set::AddPtr p = frames.lookupForAdd(lookup);
+    DependentAddPtr<SavedFrame::Set> p(cx, frames, lookup);
     if (p)
         return *p;
 
@@ -570,7 +571,7 @@ SavedStacks::getOrCreateSavedFrame(JSContext *cx, SavedFrame::HandleLookup looku
     if (!frame)
         return nullptr;
 
-    if (!frames.relookupOrAdd(p, lookup, frame))
+    if (!p.add(cx, frames, lookup, frame))
         return nullptr;
 
     return frame;
@@ -593,9 +594,11 @@ SavedStacks::getOrCreateSavedFramePrototype(JSContext *cx)
         || !JS_DefineProperties(cx, proto, SavedFrame::properties)
         || !JS_DefineFunctions(cx, proto, SavedFrame::methods)
         || !JSObject::freeze(cx, proto))
+    {
         return nullptr;
+    }
 
-    savedFrameProto = proto;
+    savedFrameProto.set(proto);
     // The only object with the SavedFrame::class_ that doesn't have a source
     // should be the prototype.
     savedFrameProto->setReservedSlot(SavedFrame::JSSLOT_SOURCE, NullValue());

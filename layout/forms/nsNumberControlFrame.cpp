@@ -290,7 +290,7 @@ nsNumberControlFrame::MakeAnonymousElement(Element** aResult,
                                            nsStyleContext* aParentContext)
 {
   // Get the NodeInfoManager and tag necessary to create the anonymous divs.
-  nsCOMPtr<nsIDocument> doc = mContent->GetDocument();
+  nsCOMPtr<nsIDocument> doc = mContent->GetComposedDoc();
   nsRefPtr<Element> resultElement = doc->CreateHTMLElement(aTagName);
 
   // If we legitimately fail this assertion and need to allow
@@ -676,11 +676,13 @@ nsNumberControlFrame::ShouldUseNativeStyleForSpinner() const
 }
 
 void
-nsNumberControlFrame::AppendAnonymousContentTo(nsBaseContentList& aElements,
+nsNumberControlFrame::AppendAnonymousContentTo(nsTArray<nsIContent*>& aElements,
                                                uint32_t aFilter)
 {
   // Only one direct anonymous child:
-  aElements.MaybeAppendElement(mOuterWrapper);
+  if (mOuterWrapper) {
+    aElements.AppendElement(mOuterWrapper);
+  }
 }
 
 void

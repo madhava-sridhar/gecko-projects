@@ -37,13 +37,13 @@ class nsComboboxDisplayFrame;
 class nsIDOMEventListener;
 class nsIScrollableFrame;
 
-class nsComboboxControlFrame : public nsBlockFrame,
-                               public nsIFormControlFrame,
-                               public nsIComboboxControlFrame,
-                               public nsIAnonymousContentCreator,
-                               public nsISelectControlFrame,
-                               public nsIRollupListener,
-                               public nsIStatefulFrame
+class nsComboboxControlFrame MOZ_FINAL : public nsBlockFrame,
+                                         public nsIFormControlFrame,
+                                         public nsIComboboxControlFrame,
+                                         public nsIAnonymousContentCreator,
+                                         public nsISelectControlFrame,
+                                         public nsIRollupListener,
+                                         public nsIStatefulFrame
 {
 public:
   friend nsContainerFrame* NS_NewComboboxControlFrame(nsIPresShell* aPresShell,
@@ -59,7 +59,7 @@ public:
 
   // nsIAnonymousContentCreator
   virtual nsresult CreateAnonymousContent(nsTArray<ContentInfo>& aElements) MOZ_OVERRIDE;
-  virtual void AppendAnonymousContentTo(nsBaseContentList& aElements,
+  virtual void AppendAnonymousContentTo(nsTArray<nsIContent*>& aElements,
                                         uint32_t aFilter) MOZ_OVERRIDE;
   virtual nsIFrame* CreateFrameFor(nsIContent* aContent) MOZ_OVERRIDE;
 

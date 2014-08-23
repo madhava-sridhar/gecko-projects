@@ -831,7 +831,13 @@ class ParseNode
 #endif
     ;
 
-    bool getConstantValue(ExclusiveContext *cx, MutableHandleValue vp);
+    enum AllowConstantObjects {
+        DontAllowObjects = 0,
+        DontAllowNestedObjects,
+        AllowObjects
+    };
+
+    bool getConstantValue(ExclusiveContext *cx, AllowConstantObjects allowObjects, MutableHandleValue vp);
     inline bool isConstant();
 
     template <class NodeType>
@@ -1274,7 +1280,7 @@ struct CallSiteNode : public ListNode {
     }
 
     bool getRawArrayValue(ExclusiveContext *cx, MutableHandleValue vp) {
-        return pn_head->getConstantValue(cx, vp);
+        return pn_head->getConstantValue(cx, AllowObjects, vp);
     }
 };
 
@@ -1514,7 +1520,7 @@ enum ParseReportKind
     ParseStrictError
 };
 
-enum FunctionSyntaxKind { Expression, Statement, Arrow };
+enum FunctionSyntaxKind { Expression, Statement, Arrow, Method };
 
 static inline ParseNode *
 FunctionArgsList(ParseNode *fn, unsigned *numFormals)

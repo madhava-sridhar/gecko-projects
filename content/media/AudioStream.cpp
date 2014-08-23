@@ -17,6 +17,7 @@
 #include "mozilla/Telemetry.h"
 #include "soundtouch/SoundTouch.h"
 #include "Latency.h"
+#include "nsPrintfCString.h"
 #ifdef XP_MACOSX
 #include <sys/sysctl.h>
 #endif
@@ -254,6 +255,7 @@ AudioStream::AudioStream()
   , mState(INITIALIZED)
   , mNeedsStart(false)
   , mShouldDropFrames(false)
+  , mPendingAudioInitTask(false)
 {
   // keep a ref in case we shut down later than nsLayoutStatics
   mLatencyLog = AsyncLatencyLogger::Get(true);
@@ -535,19 +537,24 @@ AudioStream::Init(int32_t aNumChannels, int32_t aRate,
     // cause us to move from INITIALIZED to RUNNING.  Until then, we
     // can't access any cubeb functions.
     // Use a RefPtr to avoid leaks if Dispatch fails
+    mPendingAudioInitTask = true;
     RefPtr<AudioInitTask> init = new AudioInitTask(this, aLatencyRequest, params);
-    init->Dispatch();
-    return NS_OK;
+    nsresult rv = init->Dispatch();
+    if (NS_FAILED(rv)) {
+      mPendingAudioInitTask = false;
+    }
+    return rv;
   }
   // High latency - open synchronously
   nsresult rv = OpenCubeb(params, aLatencyRequest);
+  NS_ENSURE_SUCCESS(rv, rv);
   // See if we need to start() the stream, since we must do that from this
   // thread for now (cubeb API issue)
   {
     MonitorAutoLock mon(mMonitor);
     CheckForStart();
   }
-  return rv;
+  return NS_OK;
 }
 
 // On certain MacBookPro, the microphone is located near the left speaker.
@@ -568,13 +575,13 @@ void AudioStream::PanOutputIfNeeded(bool aMicrophoneActive)
   }
 
   if (!strncmp(name, "MacBookPro", 10)) {
-    if (cubeb_stream_get_current_device(mCubebStream, &device) == CUBEB_OK) {
+    if (cubeb_stream_get_current_device(mCubebStream.get(), &device) == CUBEB_OK) {
       // Check if we are currently outputing sound on external speakers.
       if (!strcmp(device->output_name, "ispk")) {
         // Pan everything to the right speaker.
         if (aMicrophoneActive) {
           LOG(("%p Panning audio output to the right.", this));
-          if (cubeb_stream_set_panning(mCubebStream, 1.0) != CUBEB_OK) {
+          if (cubeb_stream_set_panning(mCubebStream.get(), 1.0) != CUBEB_OK) {
             NS_WARNING("Could not pan audio output to the right.");
           }
         } else {
@@ -585,11 +592,11 @@ void AudioStream::PanOutputIfNeeded(bool aMicrophoneActive)
       }
       if (panCenter) {
         LOG(("%p Panning audio output to the center.", this));
-        if (cubeb_stream_set_panning(mCubebStream, 0.0) != CUBEB_OK) {
+        if (cubeb_stream_set_panning(mCubebStream.get(), 0.0) != CUBEB_OK) {
           NS_WARNING("Could not pan audio output to the center.");
         }
       }
-      cubeb_stream_device_destroy(mCubebStream, device);
+      cubeb_stream_device_destroy(mCubebStream.get(), device);
     }
   }
 #endif
@@ -602,14 +609,14 @@ void AudioStream::ResetStreamIfNeeded()
   if (!mMicrophoneActive || mLatencyRequest != LowLatency) {
     return;
   }
-  if (cubeb_stream_get_current_device(mCubebStream, &device) == CUBEB_OK) {
+  if (cubeb_stream_get_current_device(mCubebStream.get(), &device) == CUBEB_OK) {
     // This a microphone that goes through the headphone plug, reset the
     // output to prevent echo building up.
     if (strcmp(device->input_name, "emic") == 0) {
       LOG(("Resetting audio output"));
       Reset();
     }
-    cubeb_stream_device_destroy(mCubebStream, device);
+    cubeb_stream_device_destroy(mCubebStream.get(), device);
   }
 }
 
@@ -627,15 +634,9 @@ nsresult
 AudioStream::OpenCubeb(cubeb_stream_params &aParams,
                        LatencyRequest aLatencyRequest)
 {
-  {
-    MonitorAutoLock mon(mMonitor);
-    if (mState == AudioStream::SHUTDOWN) {
-      return NS_ERROR_FAILURE;
-    }
-  }
-
   cubeb* cubebContext = GetCubebContext();
   if (!cubebContext) {
+    NS_WARNING("Can't get cubeb context!");
     MonitorAutoLock mon(mMonitor);
     mState = AudioStream::ERRORED;
     return NS_ERROR_FAILURE;
@@ -658,26 +659,20 @@ AudioStream::OpenCubeb(cubeb_stream_params &aParams,
     if (cubeb_stream_init(cubebContext, &stream, "AudioStream", aParams,
                           latency, DataCallback_S, StateCallback_S, this) == CUBEB_OK) {
       MonitorAutoLock mon(mMonitor);
-      mCubebStream.own(stream);
-      // Make sure we weren't shut down while in flight!
-      if (mState == SHUTDOWN) {
-        mCubebStream.reset();
-        LOG(("AudioStream::OpenCubeb() %p Shutdown while opening cubeb", this));
-        return NS_ERROR_FAILURE;
-      }
-
+      MOZ_ASSERT(mState != SHUTDOWN);
+      mCubebStream.reset(stream);
       // We can't cubeb_stream_start() the thread from a transient thread due to
       // cubeb API requirements (init can be called from another thread, but
       // not start/stop/destroy/etc)
     } else {
       MonitorAutoLock mon(mMonitor);
       mState = ERRORED;
-      LOG(("AudioStream::OpenCubeb() %p failed to init cubeb", this));
+      NS_WARNING(nsPrintfCString("AudioStream::OpenCubeb() %p failed to init cubeb", this).get());
       return NS_ERROR_FAILURE;
     }
   }
 
-  cubeb_stream_register_device_changed_callback(mCubebStream,
+  cubeb_stream_register_device_changed_callback(mCubebStream.get(),
                                                 AudioStream::DeviceChangedCallback_s);
 
   mState = INITIALIZED;
@@ -691,6 +686,14 @@ AudioStream::OpenCubeb(cubeb_stream_params &aParams,
   }
 
   return NS_OK;
+}
+
+void
+AudioStream::AudioInitTaskFinished()
+{
+  MonitorAutoLock mon(mMonitor);
+  mPendingAudioInitTask = false;
+  mon.NotifyAll();
 }
 
 void
@@ -731,6 +734,7 @@ AudioInitTask::Run()
   }
 
   nsresult rv = mAudioStream->OpenCubeb(mParams, mLatencyRequest);
+  mAudioStream->AudioInitTaskFinished();
 
   // and now kill this thread
   NS_DispatchToMainThread(this);
@@ -840,7 +844,7 @@ AudioStream::SetVolume(double aVolume)
 {
   NS_ABORT_IF_FALSE(aVolume >= 0.0 && aVolume <= 1.0, "Invalid volume");
 
-  if (cubeb_stream_set_volume(mCubebStream, aVolume * GetVolumeScale()) != CUBEB_OK) {
+  if (cubeb_stream_set_volume(mCubebStream.get(), aVolume * GetVolumeScale()) != CUBEB_OK) {
     NS_WARNING("Could not change volume on cubeb stream.");
   }
 }
@@ -898,7 +902,7 @@ AudioStream::StartUnlocked()
     int r;
     {
       MonitorAutoUnlock mon(mMonitor);
-      r = cubeb_stream_start(mCubebStream);
+      r = cubeb_stream_start(mCubebStream.get());
 
       PanOutputIfNeeded(mMicrophoneActive);
     }
@@ -920,7 +924,7 @@ AudioStream::Pause()
   int r;
   {
     MonitorAutoUnlock mon(mMonitor);
-    r = cubeb_stream_stop(mCubebStream);
+    r = cubeb_stream_stop(mCubebStream.get());
   }
   if (mState != ERRORED && r == CUBEB_OK) {
     mState = STOPPED;
@@ -938,7 +942,7 @@ AudioStream::Resume()
   int r;
   {
     MonitorAutoUnlock mon(mMonitor);
-    r = cubeb_stream_start(mCubebStream);
+    r = cubeb_stream_start(mCubebStream.get());
   }
   if (mState != ERRORED && r == CUBEB_OK) {
     mState = STARTED;
@@ -951,10 +955,14 @@ AudioStream::Shutdown()
   MonitorAutoLock mon(mMonitor);
   LOG(("AudioStream: Shutdown %p, state %d", this, mState));
 
+  while (mPendingAudioInitTask) {
+    mon.Wait();
+  }
+
   if (mCubebStream) {
     MonitorAutoUnlock mon(mMonitor);
     // Force stop to put the cubeb stream in a stable state before deletion.
-    cubeb_stream_stop(mCubebStream);
+    cubeb_stream_stop(mCubebStream.get());
     // Must not try to shut down cubeb from within the lock!  wasapi may still
     // call our callback after Pause()/stop()!?! Bug 996162
     mCubebStream.reset();
@@ -996,7 +1004,7 @@ AudioStream::GetPositionInFramesUnlocked()
   uint64_t position = 0;
   {
     MonitorAutoUnlock mon(mMonitor);
-    if (cubeb_stream_get_position(mCubebStream, &position) != CUBEB_OK) {
+    if (cubeb_stream_get_position(mCubebStream.get(), &position) != CUBEB_OK) {
       return -1;
     }
   }
@@ -1008,7 +1016,7 @@ int64_t
 AudioStream::GetLatencyInFrames()
 {
   uint32_t latency;
-  if (cubeb_stream_get_latency(mCubebStream, &latency)) {
+  if (cubeb_stream_get_latency(mCubebStream.get(), &latency)) {
     NS_WARNING("Could not get cubeb latency.");
     return 0;
   }
@@ -1283,7 +1291,7 @@ AudioStream::DataCallback(void* aBuffer, long aFrames)
       mState != SHUTDOWN &&
       insertTime != INT64_MAX && servicedFrames > underrunFrames) {
     uint32_t latency = UINT32_MAX;
-    if (cubeb_stream_get_latency(mCubebStream, &latency)) {
+    if (cubeb_stream_get_latency(mCubebStream.get(), &latency)) {
       NS_WARNING("Could not get latency from cubeb.");
     }
     TimeStamp now = TimeStamp::Now();

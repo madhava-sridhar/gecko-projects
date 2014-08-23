@@ -100,6 +100,10 @@ prefpane {
 
 /* General Pane */
 
+#isNotDefaultLabel {
+  font-weight: bold;
+}
+
 #downloadFolder {
   -moz-margin-start: 0;
 }
@@ -167,7 +171,7 @@ prefpane {
 #typeColumn > .treecol-sortdirection[sortDirection=descending],
 #actionColumn > .treecol-sortdirection[sortDirection=descending] {
   -moz-appearance: none;
-  list-style-image: url("chrome://browser/skin/preferences/in-content/sorter.png");
+  list-style-image: url("chrome://global/skin/in-content/sorter.png");
 }
 
 #typeColumn > .treecol-sortdirection[sortDirection=descending],
@@ -182,7 +186,7 @@ prefpane {
   #actionColumn > .treecol-sortdirection[sortDirection=descending] {
     width: 12px;
     height: 8px;
-    list-style-image: url("chrome://browser/skin/preferences/in-content/sorter@2x.png");
+    list-style-image: url("chrome://global/skin/in-content/sorter@2x.png");
   }
 }
 
@@ -308,11 +312,6 @@ description > html|a {
   /* Default dialog dimensions */
   height: 30em;
   width: 66ch;
-}
-
-/* needs to be removed with bug 1035625 */
-:-moz-any(dialog, window, prefwindow) resizer {
-  display: none;
 }
 
 tree:not(#rejectsTree) {

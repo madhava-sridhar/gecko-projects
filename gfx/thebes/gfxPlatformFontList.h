@@ -25,7 +25,7 @@ public:
     typedef gfxCharacterMap* KeyType;
     typedef const gfxCharacterMap* KeyTypePointer;
 
-    CharMapHashKey(const gfxCharacterMap *aCharMap) :
+    explicit CharMapHashKey(const gfxCharacterMap *aCharMap) :
         mCharMap(const_cast<gfxCharacterMap*>(aCharMap))
     {
         MOZ_COUNT_CTOR(CharMapHashKey);
@@ -125,8 +125,8 @@ public:
                           int32_t aRunScript,
                           const gfxFontStyle* aStyle);
 
-    // TODO: make this virtual, for lazily adding to the font list
-    virtual gfxFontFamily* FindFamily(const nsAString& aFamily);
+    virtual gfxFontFamily* FindFamily(const nsAString& aFamily,
+                                      bool aUseSystemFonts = false);
 
     gfxFontEntry* FindFontForFamily(const nsAString& aFamily, const gfxFontStyle* aStyle, bool& aNeedsBold);
 
@@ -197,7 +197,7 @@ protected:
         NS_DECL_NSIMEMORYREPORTER
     };
 
-    gfxPlatformFontList(bool aNeedFullnamePostscriptNames = true);
+    explicit gfxPlatformFontList(bool aNeedFullnamePostscriptNames = true);
 
     static gfxPlatformFontList *sPlatformFontList;
 
@@ -291,6 +291,11 @@ protected:
 
     // canonical family name ==> family entry (unique, one name per family entry)
     nsRefPtrHashtable<nsStringHashKey, gfxFontFamily> mFontFamilies;
+
+#if defined(XP_MACOSX)
+    // hidden system fonts used within UI elements
+    nsRefPtrHashtable<nsStringHashKey, gfxFontFamily> mSystemFontFamilies;
+#endif
 
     // other family name ==> family entry (not unique, can have multiple names per
     // family entry, only names *other* than the canonical names are stored here)

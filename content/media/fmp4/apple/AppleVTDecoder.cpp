@@ -7,7 +7,6 @@
 #include <CoreFoundation/CFString.h>
 
 #include "AppleUtils.h"
-#include "mozilla/SHA1.h"
 #include "mp4_demuxer/DecoderData.h"
 #include "MP4Reader.h"
 #include "MP4Decoder.h"
@@ -21,11 +20,15 @@
 #include "VideoUtils.h"
 
 #ifdef PR_LOGGING
-PRLogModuleInfo* GetDemuxerLog();
-#define LOG(...) PR_LOG(GetDemuxerLog(), PR_LOG_DEBUG, (__VA_ARGS__))
-#define LOG_MEDIA_SHA1
+PRLogModuleInfo* GetAppleMediaLog();
+#define LOG(...) PR_LOG(GetAppleMediaLog(), PR_LOG_DEBUG, (__VA_ARGS__))
+//#define LOG_MEDIA_SHA1
 #else
 #define LOG(...)
+#endif
+
+#ifdef LOG_MEDIA_SHA1
+#include "mozilla/SHA1.h"
 #endif
 
 namespace mozilla {
@@ -111,6 +114,7 @@ AppleVTDecoder::Input(mp4_demuxer::MP4Sample* aSample)
 nsresult
 AppleVTDecoder::Flush()
 {
+  mTaskQueue->Flush();
   nsresult rv = WaitForAsynchronousFrames();
   if (NS_FAILED(rv)) {
     LOG("AppleVTDecoder::Drain failed waiting for platform decoder.");
@@ -297,6 +301,12 @@ AppleVTDecoder::OutputFrame(CVPixelBufferRef aImage,
                       visible);
   // Unlock the returned image data.
   CVPixelBufferUnlockBaseAddress(aImage, kCVPixelBufferLock_ReadOnly);
+
+  if (!data) {
+    NS_ERROR("Couldn't create VideoData for frame");
+    mCallback->Error();
+    return NS_ERROR_FAILURE;
+  }
 
   // Frames come out in DTS order but we need to output them
   // in composition order.

@@ -894,7 +894,12 @@ class MOZ_STACK_CLASS SourceBufferHolder MOZ_FINAL
 
 /************************************************************************/
 
-/* Property attributes, set in JSPropertySpec and passed to API functions. */
+/* Property attributes, set in JSPropertySpec and passed to API functions.
+ *
+ * NB: The data structure in which some of these values are stored only uses
+ *     a uint8_t to store the relevant information. Proceed with caution if
+ *     trying to reorder or change the the first byte worth of flags.
+ */
 #define JSPROP_ENUMERATE        0x01    /* property is visible to for/in loop */
 #define JSPROP_READONLY         0x02    /* not settable: assignment is no-op.
                                            This flag is only valid when neither
@@ -918,6 +923,18 @@ class MOZ_STACK_CLASS SourceBufferHolder MOZ_FINAL
 
 #define JSFUN_CONSTRUCTOR      0x400    /* native that can be called as a ctor */
 
+#define JSPROP_IGNORE_ENUMERATE 0x1000  /* ignore the value in JSPROP_ENUMERATE.
+                                           This flag only valid when defining over
+                                           an existing property. */
+#define JSPROP_IGNORE_READONLY  0x2000  /* ignore the value in JSPROP_READONLY.
+                                           This flag only valid when defining over
+                                           an existing property. */
+#define JSPROP_IGNORE_PERMANENT 0x4000  /* ignore the value in JSPROP_PERMANENT.
+                                           This flag only valid when defining over
+                                           an existing property. */
+#define JSPROP_IGNORE_VALUE     0x8000  /* ignore the Value in the descriptor. Nothing was
+                                           specified when passed to Object.defineProperty
+                                           from script. */
 
 /*
  * Specify a generic native prototype methods, i.e., methods of a class
@@ -1186,9 +1203,6 @@ ToUint64(JSContext *cx, JS::HandleValue v, uint64_t *out)
 extern JS_PUBLIC_API(JSType)
 JS_TypeOfValue(JSContext *cx, JS::Handle<JS::Value> v);
 
-extern JS_PUBLIC_API(const char *)
-JS_GetTypeName(JSContext *cx, JSType type);
-
 extern JS_PUBLIC_API(bool)
 JS_StrictlyEqual(JSContext *cx, jsval v1, jsval v2, bool *equal);
 
@@ -1323,8 +1337,8 @@ class JSAutoRequest
 
 #if 0
   private:
-    static void *operator new(size_t) CPP_THROW_NEW { return 0; };
-    static void operator delete(void *, size_t) { };
+    static void *operator new(size_t) CPP_THROW_NEW { return 0; }
+    static void operator delete(void *, size_t) { }
 #endif
 };
 
@@ -1516,8 +1530,7 @@ class JS_PUBLIC_API(ContextOptions) {
   public:
     ContextOptions()
       : privateIsNSISupports_(false),
-        dontReportUncaught_(false),
-        noDefaultCompartmentObject_(false)
+        dontReportUncaught_(false)
     {
     }
 
@@ -1541,20 +1554,9 @@ class JS_PUBLIC_API(ContextOptions) {
         return *this;
     }
 
-    bool noDefaultCompartmentObject() const { return noDefaultCompartmentObject_; }
-    ContextOptions &setNoDefaultCompartmentObject(bool flag) {
-        noDefaultCompartmentObject_ = flag;
-        return *this;
-    }
-    ContextOptions &toggleNoDefaultCompartmentObject() {
-        noDefaultCompartmentObject_ = !noDefaultCompartmentObject_;
-        return *this;
-    }
-
   private:
     bool privateIsNSISupports_ : 1;
     bool dontReportUncaught_ : 1;
-    bool noDefaultCompartmentObject_ : 1;
 };
 
 JS_PUBLIC_API(ContextOptions &)
@@ -1861,7 +1863,7 @@ extern JS_PUBLIC_API(void *)
 JS_malloc(JSContext *cx, size_t nbytes);
 
 extern JS_PUBLIC_API(void *)
-JS_realloc(JSContext *cx, void *p, size_t nbytes);
+JS_realloc(JSContext *cx, void *p, size_t oldBytes, size_t newBytes);
 
 /*
  * A wrapper for js_free(p) that may delay js_free(p) invocation as a
@@ -2521,11 +2523,11 @@ class JS_PUBLIC_API(CompartmentOptions)
             if (mode_ == Default)
                 return defaultValue;
             return mode_ == ForceTrue;
-        };
+        }
 
         void set(bool overrideValue) {
             mode_ = overrideValue ? ForceTrue : ForceFalse;
-        };
+        }
 
         void reset() {
             mode_ = Default;
@@ -2613,7 +2615,7 @@ class JS_PUBLIC_API(CompartmentOptions)
     }
     bool getSingletonsAsTemplates() const {
         return singletonsAsTemplates_;
-    };
+    }
 
     // A null add-on ID means that the compartment is not associated with an
     // add-on.
@@ -3219,8 +3221,9 @@ JS_PUBLIC_API(void)
 JS_SetAllNonReservedSlotsToUndefined(JSContext *cx, JSObject *objArg);
 
 /*
- * Create a new array buffer with the given contents. On success, the ownership
- * is transferred to the new array buffer.
+ * Create a new array buffer with the given contents. It must be legal to pass
+ * these contents to free(). On success, the ownership is transferred to the
+ * new array buffer.
  */
 extern JS_PUBLIC_API(JSObject *)
 JS_NewArrayBufferWithContents(JSContext *cx, size_t nbytes, void *contents);
@@ -3235,25 +3238,9 @@ extern JS_PUBLIC_API(void *)
 JS_StealArrayBufferContents(JSContext *cx, JS::HandleObject obj);
 
 /*
- * Allocate memory that may be eventually passed to
- * JS_NewArrayBufferWithContents. |maybecx| is optional; if a non-nullptr cx is
- * given, it will be used for memory accounting and OOM reporting. |nbytes| is
- * the number of payload bytes required.
- */
-extern JS_PUBLIC_API(void *)
-JS_AllocateArrayBufferContents(JSContext *maybecx, uint32_t nbytes);
-
-/*
- * Reallocate memory allocated by JS_AllocateArrayBufferContents, growing or
- * shrinking it as appropriate. If oldContents is null then this behaves like
- * JS_AllocateArrayBufferContents.
- */
-extern JS_PUBLIC_API(void *)
-JS_ReallocateArrayBufferContents(JSContext *cx, uint32_t nbytes, void *oldContents, uint32_t oldNbytes);
-
-/*
- * Create a new mapped array buffer with the given memory mapped contents. On success,
- * the ownership is transferred to the new mapped array buffer.
+ * Create a new mapped array buffer with the given memory mapped contents. It
+ * must be legal to free the contents pointer by unmapping it. On success,
+ * ownership is transferred to the new mapped array buffer.
  */
 extern JS_PUBLIC_API(JSObject *)
 JS_NewMappedArrayBufferWithContents(JSContext *cx, size_t nbytes, void *contents);

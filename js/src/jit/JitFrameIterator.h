@@ -258,6 +258,12 @@ class JitFrameIterator
     void dump() const;
 
     inline BaselineFrame *baselineFrame() const;
+
+#ifdef DEBUG
+    bool verifyReturnAddressUsingNativeToBytecodeMap();
+#else
+    inline bool verifyReturnAddressUsingNativeToBytecodeMap() { return true; }
+#endif
 };
 
 class IonJSFrameLayout;
@@ -586,7 +592,7 @@ class InlineFrameIterator
                     parent_s.readCommonFrameSlots(nullptr, nullptr);
                     parent_s.readFunctionFrameArgs(argOp, nullptr, nullptr,
                                                    nformal, nactual, it.script(),
-                                                   unreadablePlaceholder);
+                                                   unreadablePlaceholder, silentFailure);
                 } else {
                     // There is no parent frame to this inlined frame, we can read
                     // from the frame's Value vector directly.

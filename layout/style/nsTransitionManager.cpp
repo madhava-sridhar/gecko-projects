@@ -105,13 +105,6 @@ nsTransitionManager::StyleContextChanged(dom::Element *aElement,
   NS_PRECONDITION(aOldStyleContext->GetPseudo() ==
                       aNewStyleContext->GetPseudo(),
                   "pseudo type mismatch");
-  // If we were called from ReparentStyleContext, this assertion would
-  // actually fire.  If we need to be called from there, we can probably
-  // just remove it; the condition probably isn't critical, although
-  // it's worth thinking about some more.
-  NS_PRECONDITION(aOldStyleContext->HasPseudoElementData() ==
-                      aNewStyleContext->HasPseudoElementData(),
-                  "pseudo type mismatch");
 
   if (mInAnimationOnlyStyleUpdate) {
     // If we're doing an animation-only style update, return, since the
@@ -124,6 +117,26 @@ nsTransitionManager::StyleContextChanged(dom::Element *aElement,
 
   if (!mPresContext->IsDynamic()) {
     // For print or print preview, ignore transitions.
+    return nullptr;
+  }
+
+  if (aOldStyleContext->HasPseudoElementData() !=
+      aNewStyleContext->HasPseudoElementData()) {
+    // If the old style context and new style context differ in terms of
+    // whether they're inside ::first-letter, ::first-line, or similar,
+    // bail.  We can't hit this codepath for normal style changes
+    // involving moving frames around the boundaries of these
+    // pseudo-elements since we don't call StyleContextChanged from
+    // ReparentStyleContext.  However, we can hit this codepath during
+    // the handling of transitions that start across reframes.
+    //
+    // While there isn't an easy *perfect* way to handle this case, err
+    // on the side of missing some transitions that we ought to have
+    // rather than having bogus transitions that we shouldn't.
+    //
+    // We could consider changing this handling, although it's worth
+    // thinking about whether the code below could do anything weird in
+    // this case.
     return nullptr;
   }
 
@@ -328,7 +341,9 @@ nsTransitionManager::StyleContextChanged(dom::Element *aElement,
     }
   }
 
-  collection->mStyleRule = nullptr;
+  // Set the style rule refresh time to null so that EnsureStyleRuleFor
+  // creates a new style rule.
+  collection->mStyleRuleRefreshTime = TimeStamp();
 
   return coverRule.forget();
 }
@@ -516,8 +531,6 @@ nsTransitionManager::ConsiderStartingTransition(
 
   nsRefPtr<dom::AnimationPlayer> player = new dom::AnimationPlayer(timeline);
   player->mStartTime = timeline->GetCurrentTimeStamp();
-  player->mPlayState = NS_STYLE_ANIMATION_PLAY_STATE_RUNNING;
-  player->mPauseStart = TimeStamp();
   player->SetSource(pt);
 
   if (!aElementTransitions) {

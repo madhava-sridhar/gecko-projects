@@ -28,6 +28,12 @@
 #include "vm/ProxyObject.h"
 #include "vm/Shape.h"
 
+#ifdef IS_LITTLE_ENDIAN
+#define IMM32_16ADJ(X) X << 16
+#else
+#define IMM32_16ADJ(X) X
+#endif
+
 namespace js {
 namespace jit {
 
@@ -210,7 +216,7 @@ class MacroAssembler : public MacroAssemblerSpecific
 
         if (!icx->temp) {
             JS_ASSERT(cx);
-            alloc_.construct(cx);
+            alloc_.emplace(cx);
         }
 
         moveResolver_.setAllocator(*icx->temp);
@@ -228,9 +234,9 @@ class MacroAssembler : public MacroAssemblerSpecific
         sps_(nullptr)
     {
         constructRoot(cx);
-        ionContext_.construct(cx, (js::jit::TempAllocator *)nullptr);
-        alloc_.construct(cx);
-        moveResolver_.setAllocator(*ionContext_.ref().temp);
+        ionContext_.emplace(cx, (js::jit::TempAllocator *)nullptr);
+        alloc_.emplace(cx);
+        moveResolver_.setAllocator(*ionContext_->temp);
 #ifdef JS_CODEGEN_ARM
         initWithAllocator();
         m_buffer.id = GetIonContext()->getNextAssemblerId();
@@ -241,8 +247,8 @@ class MacroAssembler : public MacroAssemblerSpecific
                 // We have to update the SPS pc when this IC stub calls into
                 // the VM.
                 spsPc_ = pc;
-                spsInstrumentation_.construct(&cx->runtime()->spsProfiler, &spsPc_);
-                sps_ = spsInstrumentation_.addr();
+                spsInstrumentation_.emplace(&cx->runtime()->spsProfiler, &spsPc_);
+                sps_ = spsInstrumentation_.ptr();
                 sps_->setPushed(script);
             }
         }
@@ -271,7 +277,7 @@ class MacroAssembler : public MacroAssemblerSpecific
     }
 
     void constructRoot(JSContext *cx) {
-        autoRooter_.construct(cx, this);
+        autoRooter_.emplace(cx, this);
     }
 
     MoveResolver &moveResolver() {
@@ -523,9 +529,8 @@ class MacroAssembler : public MacroAssemblerSpecific
         // perform an aligned 32-bit load and adjust the bitmask accordingly.
         JS_ASSERT(JSFunction::offsetOfNargs() % sizeof(uint32_t) == 0);
         JS_ASSERT(JSFunction::offsetOfFlags() == JSFunction::offsetOfNargs() + 2);
-        JS_STATIC_ASSERT(IS_LITTLE_ENDIAN);
         Address address(fun, JSFunction::offsetOfNargs());
-        uint32_t bit = JSFunction::INTERPRETED << 16;
+        int32_t bit = IMM32_16ADJ(JSFunction::INTERPRETED);
         branchTest32(Assembler::Zero, address, Imm32(bit), label);
     }
     void branchIfInterpreted(Register fun, Label *label) {
@@ -533,9 +538,8 @@ class MacroAssembler : public MacroAssemblerSpecific
         // perform an aligned 32-bit load and adjust the bitmask accordingly.
         JS_ASSERT(JSFunction::offsetOfNargs() % sizeof(uint32_t) == 0);
         JS_ASSERT(JSFunction::offsetOfFlags() == JSFunction::offsetOfNargs() + 2);
-        JS_STATIC_ASSERT(IS_LITTLE_ENDIAN);
         Address address(fun, JSFunction::offsetOfNargs());
-        uint32_t bit = JSFunction::INTERPRETED << 16;
+        int32_t bit = IMM32_16ADJ(JSFunction::INTERPRETED);
         branchTest32(Assembler::NonZero, address, Imm32(bit), label);
     }
 

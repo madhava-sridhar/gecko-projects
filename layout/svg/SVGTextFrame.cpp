@@ -39,6 +39,7 @@
 #include "SVGPathElement.h"
 #include "SVGTextPathElement.h"
 #include "nsLayoutUtils.h"
+#include "nsFrameSelection.h"
 #include <algorithm>
 #include <cmath>
 #include <limits>
@@ -3527,7 +3528,7 @@ SVGTextFrame::NotifySVGChanged(uint32_t aFlags)
 static int32_t
 GetCaretOffset(nsCaret* aCaret)
 {
-  nsCOMPtr<nsISelection> selection = aCaret->GetCaretDOMSelection();
+  nsCOMPtr<nsISelection> selection = aCaret->GetSelection();
   if (!selection) {
     return -1;
   }
@@ -3639,7 +3640,8 @@ SVGTextFrame::PaintSVG(nsRenderingContext* aContext,
   gfxMatrix currentMatrix = gfx->CurrentMatrix();
 
   nsRefPtr<nsCaret> caret = presContext->PresShell()->GetCaret();
-  nsIFrame* caretFrame = caret->GetCaretFrame();
+  nsRect caretRect;
+  nsIFrame* caretFrame = caret->GetPaintGeometry(&caretRect);
 
   TextRenderedRunIterator it(this, TextRenderedRunIterator::eVisibleFrames);
   TextRenderedRun run = it.Current();
@@ -4050,7 +4052,7 @@ SVGTextFrame::SelectSubString(nsIContent* aContent,
   nsRefPtr<nsFrameSelection> frameSelection = GetFrameSelection();
 
   frameSelection->HandleClick(content, charnum, charnum + nchars,
-                              false, false, false);
+                              false, false, CARET_ASSOCIATE_BEFORE);
   return NS_OK;
 }
 
@@ -5347,8 +5349,8 @@ SVGTextFrame::GetFontSizeScaleFactor() const
  * it to the appropriate frame user space of aChildFrame according to
  * which rendered run the point hits.
  */
-gfxPoint
-SVGTextFrame::TransformFramePointToTextChild(const gfxPoint& aPoint,
+Point
+SVGTextFrame::TransformFramePointToTextChild(const Point& aPoint,
                                              nsIFrame* aChildFrame)
 {
   NS_ASSERTION(aChildFrame &&
@@ -5366,9 +5368,9 @@ SVGTextFrame::TransformFramePointToTextChild(const gfxPoint& aPoint,
   float cssPxPerDevPx = presContext->
     AppUnitsToFloatCSSPixels(presContext->AppUnitsPerDevPixel());
   float factor = presContext->AppUnitsPerCSSPixel();
-  gfxPoint framePosition(NSAppUnitsToFloatPixels(mRect.x, factor),
-                         NSAppUnitsToFloatPixels(mRect.y, factor));
-  gfxPoint pointInUserSpace = aPoint * cssPxPerDevPx + framePosition;
+  Point framePosition(NSAppUnitsToFloatPixels(mRect.x, factor),
+                      NSAppUnitsToFloatPixels(mRect.y, factor));
+  Point pointInUserSpace = aPoint * cssPxPerDevPx + framePosition;
 
   // Find the closest rendered run for the text frames beneath aChildFrame.
   TextRenderedRunIterator it(this, TextRenderedRunIterator::eAllFrames,
@@ -5387,7 +5389,7 @@ SVGTextFrame::TransformFramePointToTextChild(const gfxPoint& aPoint,
     if (!m.Invert()) {
       return aPoint;
     }
-    gfxPoint pointInRunUserSpace = m.Transform(pointInUserSpace);
+    gfxPoint pointInRunUserSpace = m.Transform(ThebesPoint(pointInUserSpace));
 
     if (Inside(runRect, pointInRunUserSpace)) {
       // The point was inside the rendered run's rect, so we choose it.
@@ -5416,7 +5418,7 @@ SVGTextFrame::TransformFramePointToTextChild(const gfxPoint& aPoint,
   // but taking into account mFontSizeScaleFactor.
   gfxMatrix m = hit.GetTransformFromRunUserSpaceToFrameUserSpace(presContext);
   m.Scale(mFontSizeScaleFactor, mFontSizeScaleFactor);
-  return m.Transform(pointInRun) / cssPxPerDevPx;
+  return ToPoint(m.Transform(pointInRun) / cssPxPerDevPx);
 }
 
 /**

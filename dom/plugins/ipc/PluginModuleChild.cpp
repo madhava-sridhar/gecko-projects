@@ -143,6 +143,11 @@ PluginModuleChild::Init(const std::string& aPluginFilename,
 
     GetIPCChannel()->SetAbortOnError(true);
 
+    // Request Windows message deferral behavior on our channel. This
+    // applies to the top level and all sub plugin protocols since they
+    // all share the same channel.
+    GetIPCChannel()->SetChannelFlags(MessageChannel::REQUIRE_DEFERRED_MESSAGE_PROTECTION);
+
 #ifdef XP_WIN
     COMMessageFilter::Initialize(this);
 #endif
@@ -157,6 +162,9 @@ PluginModuleChild::Init(const std::string& aPluginFilename,
     NS_NewLocalFile(NS_ConvertUTF8toUTF16(mPluginFilename),
                     true,
                     getter_AddRefs(localFile));
+
+    if (!localFile)
+        return false;
 
     bool exists;
     localFile->Exists(&exists);

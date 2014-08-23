@@ -35,7 +35,7 @@ user_pref("dom.min_background_timeout_value", 1000);
 user_pref("test.mousescroll", true);
 user_pref("security.default_personal_cert", "Select Automatically"); // Need to client auth test be w/o any dialogs
 user_pref("network.http.prompt-temp-redirect", false);
-user_pref("media.cache_size", 100);
+user_pref("media.cache_size", 1000);
 user_pref("media.volume_scale", "0.01");
 user_pref("security.warn_viewing_mixed", false);
 user_pref("app.update.enabled", false);
@@ -104,6 +104,12 @@ user_pref("extensions.getAddons.search.browseURL", "http://%(server)s/extensions
 user_pref("extensions.getAddons.search.url", "http://%(server)s/extensions-dummy/repositorySearchURL");
 // Make sure that opening the plugins check page won't hit the network
 user_pref("plugins.update.url", "http://%(server)s/plugins-dummy/updateCheckURL");
+// Make sure SNTP requests don't hit the network
+user_pref("network.sntp.pools", "%(server)s");
+// We know the SNTP request will fail, since localhost isn't listening on
+// port 135. The default number of retries (10) is excessive, but retrying
+// at least once will mean that codepath is still tested in automation.
+user_pref("network.sntp.maxRetryCount", 1);
 
 // Existing tests don't wait for the notification button security delay
 user_pref("security.notification_enable_delay", 0);
@@ -122,8 +128,10 @@ user_pref("dom.use_xbl_scopes_for_remote_xul", true);
 // Get network events.
 user_pref("network.activity.blipIntervalMilliseconds", 250);
 
-// Don't allow the Data Reporting service to prompt for policy acceptance.
-user_pref("datareporting.policy.dataSubmissionPolicyBypassAcceptance", true);
+// We do not wish to display datareporting policy notifications as it might
+// cause other tests to fail. Tests that wish to test the notification functionality
+// should explicitly disable this pref.
+user_pref("datareporting.policy.dataSubmissionPolicyBypassNotification", true);
 
 // Point Firefox Health Report at a local server. We don't care if it actually
 // works. It just can't hit the default production endpoint.
@@ -187,9 +195,6 @@ user_pref("general.useragent.updates.enabled", false);
 // Disable webapp updates.  Yes, it is supposed to be an integer.
 user_pref("browser.webapps.checkForUpdates", 0);
 
-// Do not turn HTTP cache v2 for our infra tests (some tests are failing)
-user_pref("browser.cache.use_new_backend_temp", false);
-
 // Don't connect to Yahoo! for RSS feed tests.
 // en-US only uses .types.0.uri, but set all of them just to be sure.
 user_pref('browser.contentHandlers.types.0.uri', 'http://test1.example.org/rss?url=%%s')
@@ -225,3 +230,6 @@ user_pref("browser.aboutHomeSnippets.updateUrl", "nonexistent://test");
 
 // Enable debug logging in the mozApps implementation.
 user_pref("dom.mozApps.debug", true);
+
+// Enable Loop
+user_pref("loop.enabled", true);

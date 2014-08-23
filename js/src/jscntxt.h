@@ -49,6 +49,14 @@ struct CallsiteCloneKey {
 
     CallsiteCloneKey(JSFunction *f, JSScript *s, uint32_t o) : original(f), script(s), offset(o) {}
 
+    bool operator==(const CallsiteCloneKey& other) {
+        return original == other.original && script == other.script && offset == other.offset;
+    }
+
+    bool operator!=(const CallsiteCloneKey& other) {
+        return !(*this == other);
+    }
+
     typedef CallsiteCloneKey Lookup;
 
     static inline uint32_t hash(CallsiteCloneKey key) {
@@ -57,6 +65,12 @@ struct CallsiteCloneKey {
 
     static inline bool match(const CallsiteCloneKey &a, const CallsiteCloneKey &b) {
         return a.script == b.script && a.offset == b.offset && a.original == b.original;
+    }
+
+    static void rekey(CallsiteCloneKey &k, const CallsiteCloneKey &newKey) {
+        k.original = newKey.original;
+        k.script = newKey.script;
+        k.offset = newKey.offset;
     }
 };
 
@@ -441,21 +455,7 @@ struct JSContext : public js::ExclusiveContext,
     bool saveFrameChain();
     void restoreFrameChain();
 
-    /*
-     * When no compartments have been explicitly entered, the context's
-     * compartment will be set to the compartment of the "default compartment
-     * object".
-     */
-  private:
-    JSObject *defaultCompartmentObject_;
   public:
-    inline void setDefaultCompartmentObject(JSObject *obj);
-    inline void setDefaultCompartmentObjectIfUnset(JSObject *obj);
-    JSObject *maybeDefaultCompartmentObject() const {
-        JS_ASSERT(!options().noDefaultCompartmentObject());
-        return defaultCompartmentObject_;
-    }
-
     /* State for object and array toSource conversion. */
     js::ObjectSet       cycleDetectorSet;
 
@@ -548,6 +548,14 @@ struct JSContext : public js::ExclusiveContext,
     }
 #endif
 
+    void minorGC(JS::gcreason::Reason reason) {
+        runtime_->gc.minorGC(this, reason);
+    }
+
+    void gcIfNeeded() {
+        runtime_->gc.gcIfNeeded(this);
+    }
+
   private:
     /* Innermost-executing generator or null if no generator are executing. */
     JSGenerator *innermostGenerator_;
@@ -580,7 +588,7 @@ struct JSContext : public js::ExclusiveContext,
      * See JS_SetTrustedPrincipals in jsapi.h.
      * Note: !cx->compartment is treated as trusted.
      */
-    bool runningWithTrustedPrincipals() const;
+    inline bool runningWithTrustedPrincipals() const;
 
     JS_FRIEND_API(size_t) sizeOfIncludingThis(mozilla::MallocSizeOf mallocSizeOf) const;
 
@@ -969,23 +977,6 @@ class AutoAssertNoException
     {
         JS_ASSERT_IF(!hadException, !cx->isExceptionPending());
     }
-};
-
-/*
- * FIXME bug 647103 - replace these *AllocPolicy names.
- */
-class ContextAllocPolicy
-{
-    ThreadSafeContext *const cx_;
-
-  public:
-    MOZ_IMPLICIT ContextAllocPolicy(ThreadSafeContext *cx) : cx_(cx) {}
-    ThreadSafeContext *context() const { return cx_; }
-    void *malloc_(size_t bytes) { return cx_->malloc_(bytes); }
-    void *calloc_(size_t bytes) { return cx_->calloc_(bytes); }
-    void *realloc_(void *p, size_t oldBytes, size_t bytes) { return cx_->realloc_(p, oldBytes, bytes); }
-    void free_(void *p) { js_free(p); }
-    void reportAllocOverflow() const { js_ReportAllocationOverflow(cx_); }
 };
 
 /* Exposed intrinsics so that Ion may inline them. */

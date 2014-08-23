@@ -13,6 +13,7 @@
 #include "jit/IonAnalysis.h"
 #include "jit/IonLinker.h"
 #include "jit/IonSpewer.h"
+#include "jit/JitcodeMap.h"
 #ifdef JS_ION_PERF
 # include "jit/PerfSpewer.h"
 #endif
@@ -177,7 +178,7 @@ BaselineCompiler::compile()
     // Note: There is an extra entry in the bytecode type map for the search hint, see below.
     size_t bytecodeTypeMapEntries = script->nTypeSets() + 1;
 
-    BaselineScript *baselineScript = BaselineScript::New(cx, prologueOffset_.offset(),
+    BaselineScript *baselineScript = BaselineScript::New(script, prologueOffset_.offset(),
                                                          epilogueOffset_.offset(),
                                                          spsPushToggleOffset_.offset(),
                                                          postDebugPrologueOffset_.offset(),
@@ -243,6 +244,21 @@ BaselineCompiler::compile()
 
     if (script->compartment()->debugMode())
         baselineScript->setDebugMode();
+
+    // Register a native => bytecode mapping entry for this script if needed.
+    if (cx->runtime()->jitRuntime()->isNativeToBytecodeMapEnabled(cx->runtime())) {
+        IonSpew(IonSpew_Profiling, "Added JitcodeGlobalEntry for baseline script %s:%d (%p)",
+                    script->filename(), script->lineno(), baselineScript);
+        JitcodeGlobalEntry::BaselineEntry entry;
+        entry.init(code->raw(), code->raw() + code->instructionsSize(), script);
+
+        JitcodeGlobalTable *globalTable = cx->runtime()->jitRuntime()->getJitcodeGlobalTable();
+        if (!globalTable->addEntry(entry))
+            return Method_Error;
+
+        // Mark the jitcode as having a bytecode map.
+        code->setHasBytecodeMap();
+    }
 
     script->setBaselineScript(cx, baselineScript);
 
@@ -1629,6 +1645,32 @@ BaselineCompiler::emit_JSOP_NEWARRAY()
     if (!emitOpIC(stubCompiler.getStub(&stubSpace_)))
         return false;
 
+    frame.push(R0);
+    return true;
+}
+
+typedef JSObject *(*NewArrayCopyOnWriteFn)(JSContext *, HandleObject, gc::InitialHeap);
+const VMFunction jit::NewArrayCopyOnWriteInfo =
+    FunctionInfo<NewArrayCopyOnWriteFn>(js::NewDenseCopyOnWriteArray);
+
+bool
+BaselineCompiler::emit_JSOP_NEWARRAY_COPYONWRITE()
+{
+    RootedScript scriptRoot(cx, script);
+    JSObject *obj = types::GetOrFixupCopyOnWriteObject(cx, scriptRoot, pc);
+    if (!obj)
+        return false;
+
+    prepareVMCall();
+
+    pushArg(Imm32(gc::DefaultHeap));
+    pushArg(ImmGCPtr(obj));
+
+    if (!callVM(NewArrayCopyOnWriteInfo))
+        return false;
+
+    // Box and push return value.
+    masm.tagValue(JSVAL_TYPE_OBJECT, ReturnReg, R0);
     frame.push(R0);
     return true;
 }

@@ -143,6 +143,7 @@ MOZ_MAKE_ENUM_CLASS_BITWISE_OPERATORS(DiagnosticFlags)
 MOZ_BEGIN_ENUM_CLASS(EffectTypes, uint8_t)
   MASK,
   BLEND_MODE,
+  COLOR_MATRIX,
   MAX_SECONDARY, // sentinel for the count of secondary effect types
   RGB,
   YCBCR,
@@ -168,6 +169,7 @@ MOZ_BEGIN_ENUM_CLASS(CompositableType, uint8_t)
   BUFFER_SIMPLE_TILED,
   // the new compositable types
   IMAGE,     // image with single buffering
+  IMAGE_OVERLAY, // image without buffer
   CONTENT_SINGLE,  // thebes layer interface, single buffering
   CONTENT_DOUBLE,  // thebes layer interface, double buffering
   BUFFER_COUNT

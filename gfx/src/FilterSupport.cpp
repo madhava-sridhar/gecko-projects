@@ -401,6 +401,35 @@ ComputeColorMatrix(uint32_t aColorMatrixType, const nsTArray<float>& aValues,
       break;
     }
 
+    case SVG_FECOLORMATRIX_TYPE_SEPIA:
+    {
+      if (aValues.Length() != 1)
+        return NS_ERROR_FAILURE;
+
+      float amount = aValues[0];
+
+      if (amount < 0 || amount > 1)
+        return NS_ERROR_FAILURE;
+
+      PodCopy(aOutMatrix, identityMatrix, 20);
+
+      float s = 1 - amount;
+
+      aOutMatrix[0] = 0.393f + 0.607f * s;
+      aOutMatrix[1] = 0.769f - 0.769f * s;
+      aOutMatrix[2] = 0.189f - 0.189f * s;
+
+      aOutMatrix[5] = 0.349f - 0.349f * s;
+      aOutMatrix[6] = 0.686f + 0.314f * s;
+      aOutMatrix[7] = 0.168f - 0.168f * s;
+
+      aOutMatrix[10] = 0.272f - 0.272f * s;
+      aOutMatrix[11] = 0.534f - 0.534f * s;
+      aOutMatrix[12] = 0.131f + 0.869f * s;
+
+      break;
+    }
+
     default:
       return NS_ERROR_FAILURE;
 
@@ -1630,7 +1659,7 @@ struct FilterAttribute {
   AttributeType Type() const { return mType; }
 
 #define MAKE_CONSTRUCTOR_AND_ACCESSOR_BASIC(type, typeLabel)   \
-  FilterAttribute(type aValue)                                 \
+  explicit FilterAttribute(type aValue)                        \
    : mType(AttributeType::e##typeLabel), m##typeLabel(aValue)  \
   {}                                                           \
   type As##typeLabel() {                                       \
@@ -1639,7 +1668,7 @@ struct FilterAttribute {
   }
 
 #define MAKE_CONSTRUCTOR_AND_ACCESSOR_CLASS(className)         \
-  FilterAttribute(const className& aValue)                     \
+  explicit FilterAttribute(const className& aValue)            \
    : mType(AttributeType::e##className), m##className(new className(aValue)) \
   {}                                                           \
   className As##className() {                                  \

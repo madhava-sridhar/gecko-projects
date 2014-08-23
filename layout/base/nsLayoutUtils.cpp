@@ -84,6 +84,8 @@
 #include "nsIContentViewer.h"
 #include "LayersLogging.h"
 #include "mozilla/Preferences.h"
+#include "nsFrameSelection.h"
+#include "FrameLayerBuilder.h"
 
 #ifdef MOZ_XUL
 #include "nsXULPopupManager.h"
@@ -2245,11 +2247,11 @@ nsLayoutUtils::MatrixTransformPoint(const nsPoint &aPoint,
                  NSFloatPixelsToAppUnits(float(image.y), aFactor));
 }
 
-gfx3DMatrix
+Matrix4x4
 nsLayoutUtils::GetTransformToAncestor(nsIFrame *aFrame, const nsIFrame *aAncestor)
 {
   nsIFrame* parent;
-  gfx3DMatrix ctm;
+  Matrix4x4 ctm;
   if (aFrame == aAncestor) {
     return ctm;
   }
@@ -2299,12 +2301,12 @@ nsLayoutUtils::TransformPoints(nsIFrame* aFromFrame, nsIFrame* aToFrame,
   if (!nearestCommonAncestor) {
     return NO_COMMON_ANCESTOR;
   }
-  gfx3DMatrix downToDest = GetTransformToAncestor(aToFrame, nearestCommonAncestor);
+  Matrix4x4 downToDest = GetTransformToAncestor(aToFrame, nearestCommonAncestor);
   if (downToDest.IsSingular()) {
     return NONINVERTIBLE_TRANSFORM;
   }
   downToDest.Invert();
-  gfx3DMatrix upToAncestor = GetTransformToAncestor(aFromFrame, nearestCommonAncestor);
+  Matrix4x4 upToAncestor = GetTransformToAncestor(aFromFrame, nearestCommonAncestor);
   CSSToLayoutDeviceScale devPixelsPerCSSPixelFromFrame(
     double(nsPresContext::AppUnitsPerCSSPixel())/
       aFromFrame->PresContext()->AppUnitsPerDevPixel());
@@ -2315,8 +2317,8 @@ nsLayoutUtils::TransformPoints(nsIFrame* aFromFrame, nsIFrame* aToFrame,
     LayoutDevicePoint devPixels = aPoints[i] * devPixelsPerCSSPixelFromFrame;
     // What should the behaviour be if some of the points aren't invertible
     // and others are? Just assume all points are for now.
-    gfxPoint toDevPixels = downToDest.ProjectPoint(
-        upToAncestor.Transform(gfxPoint(devPixels.x, devPixels.y))).As2DPoint();
+    Point toDevPixels = downToDest.ProjectPoint(
+        (upToAncestor * Point(devPixels.x, devPixels.y))).As2DPoint();
     // Divide here so that when the devPixelsPerCSSPixels are the same, we get the correct
     // answer instead of some inaccuracy multiplying a number by its reciprocal.
     aPoints[i] = LayoutDevicePoint(toDevPixels.x, toDevPixels.y) /
@@ -2333,21 +2335,20 @@ nsLayoutUtils::TransformPoint(nsIFrame* aFromFrame, nsIFrame* aToFrame,
   if (!nearestCommonAncestor) {
     return NO_COMMON_ANCESTOR;
   }
-  gfx3DMatrix downToDest = GetTransformToAncestor(aToFrame, nearestCommonAncestor);
+  Matrix4x4 downToDest = GetTransformToAncestor(aToFrame, nearestCommonAncestor);
   if (downToDest.IsSingular()) {
     return NONINVERTIBLE_TRANSFORM;
   }
   downToDest.Invert();
-  gfx3DMatrix upToAncestor = GetTransformToAncestor(aFromFrame, nearestCommonAncestor);
+  Matrix4x4 upToAncestor = GetTransformToAncestor(aFromFrame, nearestCommonAncestor);
 
   float devPixelsPerAppUnitFromFrame =
     1.0f / aFromFrame->PresContext()->AppUnitsPerDevPixel();
   float devPixelsPerAppUnitToFrame =
     1.0f / aToFrame->PresContext()->AppUnitsPerDevPixel();
-  gfxPointH3D toDevPixels = downToDest.ProjectPoint(
-      upToAncestor.Transform(
-        gfxPoint(aPoint.x * devPixelsPerAppUnitFromFrame,
-                 aPoint.y * devPixelsPerAppUnitFromFrame)));
+  Point4D toDevPixels = downToDest.ProjectPoint(
+      upToAncestor * Point(aPoint.x * devPixelsPerAppUnitFromFrame,
+                           aPoint.y * devPixelsPerAppUnitFromFrame));
   if (!toDevPixels.HasPositiveWCoord()) {
     // Not strictly true, but we failed to get a valid point in this
     // coordinate space.
@@ -2366,23 +2367,23 @@ nsLayoutUtils::TransformRect(nsIFrame* aFromFrame, nsIFrame* aToFrame,
   if (!nearestCommonAncestor) {
     return NO_COMMON_ANCESTOR;
   }
-  gfx3DMatrix downToDest = GetTransformToAncestor(aToFrame, nearestCommonAncestor);
+  Matrix4x4 downToDest = GetTransformToAncestor(aToFrame, nearestCommonAncestor);
   if (downToDest.IsSingular()) {
     return NONINVERTIBLE_TRANSFORM;
   }
   downToDest.Invert();
-  gfx3DMatrix upToAncestor = GetTransformToAncestor(aFromFrame, nearestCommonAncestor);
+  Matrix4x4 upToAncestor = GetTransformToAncestor(aFromFrame, nearestCommonAncestor);
 
   float devPixelsPerAppUnitFromFrame =
     1.0f / aFromFrame->PresContext()->AppUnitsPerDevPixel();
   float devPixelsPerAppUnitToFrame =
     1.0f / aToFrame->PresContext()->AppUnitsPerDevPixel();
-  gfxRect toDevPixels = downToDest.ProjectRectBounds(
+  gfx::Rect toDevPixels = downToDest.ProjectRectBounds(
     upToAncestor.ProjectRectBounds(
-      gfxRect(aRect.x * devPixelsPerAppUnitFromFrame,
-              aRect.y * devPixelsPerAppUnitFromFrame,
-              aRect.width * devPixelsPerAppUnitFromFrame,
-              aRect.height * devPixelsPerAppUnitFromFrame)));
+      gfx::Rect(aRect.x * devPixelsPerAppUnitFromFrame,
+                aRect.y * devPixelsPerAppUnitFromFrame,
+                aRect.width * devPixelsPerAppUnitFromFrame,
+                aRect.height * devPixelsPerAppUnitFromFrame)));
   aRect.x = toDevPixels.x / devPixelsPerAppUnitToFrame;
   aRect.y = toDevPixels.y / devPixelsPerAppUnitToFrame;
   aRect.width = toDevPixels.width / devPixelsPerAppUnitToFrame;
@@ -2392,7 +2393,7 @@ nsLayoutUtils::TransformRect(nsIFrame* aFromFrame, nsIFrame* aToFrame,
 
 bool
 nsLayoutUtils::GetLayerTransformForFrame(nsIFrame* aFrame,
-                                         gfx3DMatrix* aTransform)
+                                         Matrix4x4* aTransform)
 {
   // FIXME/bug 796690: we can sometimes compute a transform in these
   // cases, it just increases complexity considerably.  Punt for now.
@@ -2418,8 +2419,7 @@ nsLayoutUtils::GetLayerTransformForFrame(nsIFrame* aFrame,
   nsDisplayTransform* item =
     new (&builder) nsDisplayTransform(&builder, aFrame, &list, nsRect());
 
-  *aTransform =
-    To3DMatrix(item->GetTransform());
+  *aTransform = item->GetTransform();
   item->~nsDisplayTransform();
 
   return true;
@@ -2427,19 +2427,13 @@ nsLayoutUtils::GetLayerTransformForFrame(nsIFrame* aFrame,
 
 static bool
 TransformGfxPointFromAncestor(nsIFrame *aFrame,
-                              const gfxPoint &aPoint,
+                              const Point &aPoint,
                               nsIFrame *aAncestor,
-                              gfxPoint* aOut)
+                              Point* aOut)
 {
-  gfx3DMatrix ctm = nsLayoutUtils::GetTransformToAncestor(aFrame, aAncestor);
-
-  float factor = aFrame->PresContext()->AppUnitsPerDevPixel();
-  nsRect childBounds = aFrame->GetVisualOverflowRectRelativeToSelf();
-  gfxRect childGfxBounds(NSAppUnitsToFloatPixels(childBounds.x, factor),
-                         NSAppUnitsToFloatPixels(childBounds.y, factor),
-                         NSAppUnitsToFloatPixels(childBounds.width, factor),
-                         NSAppUnitsToFloatPixels(childBounds.height, factor));
-  gfxPointH3D point = ctm.Inverse().ProjectPoint(aPoint);
+  Matrix4x4 ctm = nsLayoutUtils::GetTransformToAncestor(aFrame, aAncestor);
+  ctm.Invert();
+  Point4D point = ctm.ProjectPoint(aPoint);
   if (!point.HasPositiveWCoord()) {
     return false;
   }
@@ -2447,15 +2441,15 @@ TransformGfxPointFromAncestor(nsIFrame *aFrame,
   return true;
 }
 
-static gfxRect
+static Rect
 TransformGfxRectToAncestor(nsIFrame *aFrame,
-                           const gfxRect &aRect,
+                           const Rect &aRect,
                            const nsIFrame *aAncestor,
                            bool* aPreservesAxisAlignedRectangles = nullptr)
 {
-  gfx3DMatrix ctm = nsLayoutUtils::GetTransformToAncestor(aFrame, aAncestor);
+  Matrix4x4 ctm = nsLayoutUtils::GetTransformToAncestor(aFrame, aAncestor);
   if (aPreservesAxisAlignedRectangles) {
-    gfxMatrix matrix2d;
+    Matrix matrix2d;
     *aPreservesAxisAlignedRectangles =
       ctm.Is2D(&matrix2d) && matrix2d.PreservesAxisAlignedRectangles();
   }
@@ -2482,8 +2476,8 @@ nsLayoutUtils::TransformAncestorPointToFrame(nsIFrame* aFrame,
     SVGTextFrame* text = GetContainingSVGTextFrame(aFrame);
 
     float factor = aFrame->PresContext()->AppUnitsPerDevPixel();
-    gfxPoint result(NSAppUnitsToFloatPixels(aPoint.x, factor),
-                    NSAppUnitsToFloatPixels(aPoint.y, factor));
+    Point result(NSAppUnitsToFloatPixels(aPoint.x, factor),
+                 NSAppUnitsToFloatPixels(aPoint.y, factor));
 
     if (text) {
         if (!TransformGfxPointFromAncestor(text, result, aAncestor, &result)) {
@@ -2509,20 +2503,20 @@ nsLayoutUtils::TransformFrameRectToAncestor(nsIFrame* aFrame,
   SVGTextFrame* text = GetContainingSVGTextFrame(aFrame);
 
   float srcAppUnitsPerDevPixel = aFrame->PresContext()->AppUnitsPerDevPixel();
-  gfxRect result;
+  Rect result;
 
   if (text) {
-    result = text->TransformFrameRectFromTextChild(aRect, aFrame);
+    result = ToRect(text->TransformFrameRectFromTextChild(aRect, aFrame));
     result = TransformGfxRectToAncestor(text, result, aAncestor);
     // TransformFrameRectFromTextChild could involve any kind of transform, we
     // could drill down into it to get an answer out of it but we don't yet.
     if (aPreservesAxisAlignedRectangles)
       *aPreservesAxisAlignedRectangles = false;
   } else {
-    result = gfxRect(NSAppUnitsToFloatPixels(aRect.x, srcAppUnitsPerDevPixel),
-                     NSAppUnitsToFloatPixels(aRect.y, srcAppUnitsPerDevPixel),
-                     NSAppUnitsToFloatPixels(aRect.width, srcAppUnitsPerDevPixel),
-                     NSAppUnitsToFloatPixels(aRect.height, srcAppUnitsPerDevPixel));
+    result = Rect(NSAppUnitsToFloatPixels(aRect.x, srcAppUnitsPerDevPixel),
+                  NSAppUnitsToFloatPixels(aRect.y, srcAppUnitsPerDevPixel),
+                  NSAppUnitsToFloatPixels(aRect.width, srcAppUnitsPerDevPixel),
+                  NSAppUnitsToFloatPixels(aRect.height, srcAppUnitsPerDevPixel));
     result = TransformGfxRectToAncestor(aFrame, result, aAncestor, aPreservesAxisAlignedRectangles);
   }
 
@@ -2615,36 +2609,6 @@ nsLayoutUtils::CombineBreakType(uint8_t aOrigBreakType,
 static bool gDumpEventList = false;
 int gPaintCount = 0;
 #endif
-
-nsresult
-nsLayoutUtils::GetRemoteContentIds(nsIFrame* aFrame,
-                                   const nsRect& aTarget,
-                                   nsTArray<ViewID> &aOutIDs,
-                                   bool aIgnoreRootScrollFrame)
-{
-  nsDisplayListBuilder builder(aFrame, nsDisplayListBuilder::EVENT_DELIVERY,
-                               false);
-  nsDisplayList list;
-
-  if (aIgnoreRootScrollFrame) {
-    nsIFrame* rootScrollFrame =
-      aFrame->PresContext()->PresShell()->GetRootScrollFrame();
-    if (rootScrollFrame) {
-      builder.SetIgnoreScrollFrame(rootScrollFrame);
-    }
-  }
-
-  builder.EnterPresShell(aFrame, aTarget);
-  aFrame->BuildDisplayListForStackingContext(&builder, aTarget, &list);
-  builder.LeavePresShell(aFrame, aTarget);
-
-  nsAutoTArray<nsIFrame*,8> outFrames;
-  nsDisplayItem::HitTestState hitTestState(&aOutIDs);
-  list.HitTest(&builder, aTarget, &hitTestState, &outFrames);
-  list.DeleteAll();
-
-  return NS_OK;
-}
 
 nsIFrame*
 nsLayoutUtils::GetFrameForPoint(nsIFrame* aFrame, nsPoint aPt, uint32_t aFlags)
@@ -6931,4 +6895,40 @@ nsLayoutUtils::IsOutlineStyleAutoEnabled()
                                  false);
   }
   return sOutlineStyleAutoEnabled;
+}
+
+/* static */ void
+nsLayoutUtils::SetBSizeFromFontMetrics(const nsIFrame* aFrame,
+                                       nsHTMLReflowMetrics& aMetrics,
+                                       const nsHTMLReflowState& aReflowState,
+                                       LogicalMargin aFramePadding, 
+                                       WritingMode aLineWM,
+                                       WritingMode aFrameWM)
+{
+  nsRefPtr<nsFontMetrics> fm;
+  float inflation = nsLayoutUtils::FontSizeInflationFor(aFrame);
+  nsLayoutUtils::GetFontMetricsForFrame(aFrame, getter_AddRefs(fm), inflation);
+  aReflowState.rendContext->SetFont(fm);
+
+  if (fm) {
+    // Compute final height of the frame.
+    //
+    // Do things the standard css2 way -- though it's hard to find it
+    // in the css2 spec! It's actually found in the css1 spec section
+    // 4.4 (you will have to read between the lines to really see
+    // it).
+    //
+    // The height of our box is the sum of our font size plus the top
+    // and bottom border and padding. The height of children do not
+    // affect our height.
+    aMetrics.SetBlockStartAscent(fm->MaxAscent());
+    aMetrics.BSize(aLineWM) = fm->MaxHeight();
+  } else {
+    NS_WARNING("Cannot get font metrics - defaulting sizes to 0");
+    aMetrics.SetBlockStartAscent(aMetrics.BSize(aLineWM) = 0);
+  }
+  aMetrics.SetBlockStartAscent(aMetrics.BlockStartAscent() +
+                               aFramePadding.BStart(aFrameWM));
+  aMetrics.BSize(aLineWM) +=
+    aReflowState.ComputedLogicalBorderPadding().BStartEnd(aFrameWM);
 }

@@ -290,6 +290,7 @@ toolbarpaletteitem > #personal-bookmarks > #bookmarks-toolbar-placeholder,
   display: -moz-box;
 }
 
+#nav-bar-customization-target > #personal-bookmarks,
 toolbar:not(#TabsToolbar) > #wrapper-personal-bookmarks,
 toolbar:not(#TabsToolbar) > #personal-bookmarks {
   -moz-box-flex: 1;
@@ -318,6 +319,14 @@ toolbar:not(#TabsToolbar) > #personal-bookmarks {
 
 #search-container {
   min-width: 25ch;
+}
+
+/* Apply crisp rendering for favicons at exactly 2dppx resolution */
+@media (resolution: 2dppx) {
+  .searchbar-engine-image,
+  .searchbar-engine-menuitem > .menu-iconic-left > .menu-iconic-icon {
+    image-rendering: -moz-crisp-edges;
+  }
 }
 
 #urlbar,
@@ -470,6 +479,20 @@ panel[noactions] > richlistbox > richlistitem[type~="action"] > .ac-url-box > .a
 
 toolbarbutton.bookmark-item {
   max-width: 13em;
+}
+
+/* Apply crisp rendering for favicons at exactly 2dppx resolution */
+@media (resolution: 2dppx) {
+  .alltabs-popup > .menuitem-iconic > .menu-iconic-left > .menu-iconic-icon,
+  .menuitem-with-favicon > .menu-iconic-left > .menu-iconic-icon {
+    image-rendering: -moz-crisp-edges;
+  }
+
+  .bookmark-item > .toolbarbutton-icon,
+  .bookmark-item > .menu-iconic-left > .menu-iconic-icon,
+  #personal-bookmarks[cui-areatype="toolbar"] > #bookmarks-toolbar-placeholder > .toolbarbutton-icon {
+    image-rendering: -moz-crisp-edges;
+  }
 }
 
 #editBMPanel_tagsSelector {
@@ -629,6 +652,13 @@ window[chromehidden~="toolbar"] toolbar:not(.toolbar-primary):not(.chromeclass-m
   height: 16px;
 }
 
+/* Apply crisp rendering for favicons at exactly 2dppx resolution */
+@media (resolution: 2dppx) {
+  .ctrlTab-favicon {
+    image-rendering: -moz-crisp-edges;
+  }
+}
+
 .ctrlTab-preview {
   -moz-binding: url("chrome://browser/content/browser-tabPreviews.xml#ctrlTab-preview");
 }
@@ -651,6 +681,13 @@ window[chromehidden~="toolbar"] toolbar:not(.toolbar-primary):not(.chromeclass-m
 
 #invalid-form-popup > description {
   max-width: 280px;
+}
+
+.form-validation-anchor {
+  /* should occupy space but not be visible */
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
 }
 
 #addon-progress-notification {
@@ -832,6 +869,15 @@ chatbar {
   max-height: 0;
 }
 
+/* Apply crisp rendering for favicons at exactly 2dppx resolution */
+@media (resolution: 2dppx) {
+  #social-sidebar-favico,
+  .social-status-button,
+  .chat-status-icon {
+    image-rendering: -moz-crisp-edges;
+  }
+}
+
 /** See bug 872317 for why the following rule is necessary. */
 
 #downloads-button {
@@ -998,6 +1044,15 @@ chatbox:-moz-full-screen-ancestor > .chat-titlebar {
 
 #PanelUI-contents > .panel-customization-placeholder > .panel-customization-placeholder-child {
   list-style-image: none;
+}
+
+/* Apply crisp rendering for favicons at exactly 2dppx resolution */
+@media (resolution: 2dppx) {
+  #PanelUI-recentlyClosedWindows > toolbarbutton > .toolbarbutton-icon,
+  #PanelUI-recentlyClosedTabs > toolbarbutton > .toolbarbutton-icon,
+  #PanelUI-historyItems > toolbarbutton > .toolbarbutton-icon {
+    image-rendering: -moz-crisp-edges;
+  }
 }
 
 #customization-panelHolder {

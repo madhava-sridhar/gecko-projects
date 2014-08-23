@@ -8,6 +8,9 @@
 
 #include "nsFrame.h"
 
+#include <stdarg.h>
+#include <algorithm>
+
 #include "mozilla/Attributes.h"
 #include "mozilla/DebugOnly.h"
 
@@ -30,9 +33,9 @@
 #include "nsIPresShell.h"
 #include "prlog.h"
 #include "prprf.h"
-#include <stdarg.h>
 #include "nsFrameManager.h"
 #include "nsLayoutUtils.h"
+#include "RestyleManager.h"
 
 #include "nsIDOMNode.h"
 #include "nsISelection.h"
@@ -47,7 +50,7 @@
 #include "nsNameSpaceManager.h"
 #include "nsIPercentHeightObserver.h"
 #include "nsStyleStructInlines.h"
-#include <algorithm>
+#include "FrameLayerBuilder.h"
 
 #include "nsBidiPresUtils.h"
 
@@ -93,6 +96,7 @@
 using namespace mozilla;
 using namespace mozilla::css;
 using namespace mozilla::dom;
+using namespace mozilla::gfx;
 using namespace mozilla::layers;
 using namespace mozilla::layout;
 
@@ -651,11 +655,21 @@ nsFrame::DestroyFrom(nsIFrame* aDestructRoot)
     }
   }
 
-  // This needs to happen before shell->NotifyDestroyingFrame because that
-  // clears our Properties() table.
   bool isPrimaryFrame = (mContent && mContent->GetPrimaryFrame() == this);
   if (isPrimaryFrame) {
+    // This needs to happen before shell->NotifyDestroyingFrame because
+    // that clears our Properties() table.
     ActiveLayerTracker::TransferActivityToContent(this, mContent);
+
+    // Unfortunately, we need to do this for all frames being reframed
+    // and not only those whose current style involves CSS transitions,
+    // because what matters is whether the new style (not the old)
+    // specifies CSS transitions.
+    RestyleManager::ReframingStyleContexts* rsc =
+      presContext->RestyleManager()->GetReframingStyleContexts();
+    if (rsc) {
+      rsc->Put(mContent, mStyleContext);
+    }
   }
 
   shell->NotifyDestroyingFrame(this);
@@ -1540,8 +1554,7 @@ nsIFrame::DisplayCaret(nsDisplayListBuilder* aBuilder,
   if (!IsVisibleForPainting(aBuilder))
     return;
 
-  aList->AppendNewToTop(
-    new (aBuilder) nsDisplayCaret(aBuilder, this, aBuilder->GetCaret()));
+  aList->AppendNewToTop(new (aBuilder) nsDisplayCaret(aBuilder, this));
 }
 
 nscolor
@@ -2804,7 +2817,7 @@ nsFrame::HandlePress(nsPresContext* aPresContext,
 
     return fc->HandleClick(offsets.content, offsets.StartOffset(),
                            offsets.EndOffset(), false, false,
-                           offsets.associateWithNext);
+                           offsets.associate);
   }
 
   // Let Ctrl/Cmd+mouse down do table selection instead of drag initiation
@@ -2877,7 +2890,7 @@ nsFrame::HandlePress(nsPresContext* aPresContext,
   // weakFrame checks.
   rv = fc->HandleClick(offsets.content, offsets.StartOffset(),
                        offsets.EndOffset(), mouseEvent->IsShift(), control,
-                       offsets.associateWithNext);
+                       offsets.associate);
 
   if (NS_FAILED(rv))
     return rv;
@@ -2935,8 +2948,7 @@ nsFrame::SelectByTypeAtPoint(nsPresContext* aPresContext,
     PresContext()->GetPresShell()->ConstFrameSelection();
   nsIFrame* theFrame = frameSelection->
     GetFrameForNodeOffset(offsets.content, offsets.offset,
-                          nsFrameSelection::HINT(offsets.associateWithNext),
-                          &offset);
+                          offsets.associate, &offset);
   if (!theFrame)
     return NS_ERROR_FAILURE;
 
@@ -3058,14 +3070,14 @@ nsFrame::PeekBackwardAndForward(nsSelectionAmount aAmountBack,
   rv = frameSelection->HandleClick(startpos.mResultContent,
                                    startpos.mContentOffset, startpos.mContentOffset,
                                    false, (aSelectFlags & SELECT_ACCUMULATE),
-                                   nsFrameSelection::HINTRIGHT);
+                                   CARET_ASSOCIATE_AFTER);
   if (NS_FAILED(rv))
     return rv;
 
   rv = frameSelection->HandleClick(endpos.mResultContent,
                                    endpos.mContentOffset, endpos.mContentOffset,
                                    true, false,
-                                   nsFrameSelection::HINTLEFT);
+                                   CARET_ASSOCIATE_BEFORE);
   if (NS_FAILED(rv))
     return rv;
 
@@ -3185,7 +3197,7 @@ HandleFrameSelection(nsFrameSelection*         aFrameSelection,
                                         aOffsets.EndOffset(),
                                         aFrameSelection->IsShiftDownInDelayedCaretData(),
                                         false,
-                                        aOffsets.associateWithNext);
+                                        aOffsets.associate);
       if (NS_FAILED(rv)) {
         return rv;
       }
@@ -3620,7 +3632,7 @@ nsIFrame::ContentOffsets OffsetsForSingleFrame(nsIFrame* aFrame, nsPoint aPoint)
   if (aFrame->GetNextContinuation() || aFrame->GetPrevContinuation()) {
     offsets.offset = range.start;
     offsets.secondaryOffset = range.end;
-    offsets.associateWithNext = true;
+    offsets.associate = CARET_ASSOCIATE_AFTER;
     return offsets;
   }
 
@@ -3644,7 +3656,8 @@ nsIFrame::ContentOffsets OffsetsForSingleFrame(nsIFrame* aFrame, nsPoint aPoint)
     else
       offsets.secondaryOffset = range.start;
   }
-  offsets.associateWithNext = (offsets.offset == range.start);
+  offsets.associate =
+      offsets.offset == range.start ? CARET_ASSOCIATE_AFTER : CARET_ASSOCIATE_BEFORE;
   return offsets;
 }
 
@@ -3704,7 +3717,7 @@ nsIFrame::ContentOffsets nsIFrame::GetContentOffsetsFromPoint(nsPoint aPoint,
     offsets.content = closest.frame->GetContent();
     offsets.offset = 0;
     offsets.secondaryOffset = 0;
-    offsets.associateWithNext = true;
+    offsets.associate = CARET_ASSOCIATE_AFTER;
     return offsets;
   }
 
@@ -3719,7 +3732,8 @@ nsIFrame::ContentOffsets nsIFrame::GetContentOffsetsFromPoint(nsPoint aPoint,
     else
       offsets.offset = range.start;
     offsets.secondaryOffset = offsets.offset;
-    offsets.associateWithNext = (offsets.offset == range.start);
+    offsets.associate = offsets.offset == range.start ?
+        CARET_ASSOCIATE_AFTER : CARET_ASSOCIATE_BEFORE;
     return offsets;
   }
 
@@ -4341,6 +4355,18 @@ nsFrame::ReflowAbsoluteFrames(nsPresContext*           aPresContext,
   }
 }
 
+void
+nsFrame::PushDirtyBitToAbsoluteFrames()
+{
+  if (!(GetStateBits() & NS_FRAME_IS_DIRTY)) {
+    return;  // No dirty bit to push.
+  }
+  if (!HasAbsolutelyPositionedChildren()) {
+    return;  // No absolute children to push to.
+  }
+  GetAbsoluteContainingBlock()->MarkAllFramesDirty();
+}
+
 /* virtual */ bool
 nsFrame::CanContinueTextRun() const
 {
@@ -4706,7 +4732,7 @@ nsIFrame::IsLeaf() const
   return true;
 }
 
-gfx3DMatrix
+Matrix4x4
 nsIFrame::GetTransformMatrix(const nsIFrame* aStopAtAncestor,
                              nsIFrame** aOutAncestor)
 {
@@ -4724,12 +4750,12 @@ nsIFrame::GetTransformMatrix(const nsIFrame* aStopAtAncestor,
                  "Cannot transform the viewport frame!");
     int32_t scaleFactor = PresContext()->AppUnitsPerDevPixel();
 
-    gfx3DMatrix result =
-      nsDisplayTransform::GetResultingTransformMatrix(this, nsPoint(0, 0), scaleFactor, nullptr, aOutAncestor);
+    Matrix4x4 result = ToMatrix4x4(
+      nsDisplayTransform::GetResultingTransformMatrix(this, nsPoint(0, 0), scaleFactor, nullptr, aOutAncestor));
     // XXXjwatt: seems like this will double count offsets in the face of preserve-3d:
     nsPoint delta = GetOffsetToCrossDoc(*aOutAncestor);
     /* Combine the raw transform with a translation to our parent. */
-    result *= gfx3DMatrix::Translation
+    result = result * Matrix4x4().Translate
       (NSAppUnitsToFloatPixels(delta.x, scaleFactor),
        NSAppUnitsToFloatPixels(delta.y, scaleFactor),
        0.0f);
@@ -4759,18 +4785,18 @@ nsIFrame::GetTransformMatrix(const nsIFrame* aStopAtAncestor,
         toplevel->GetClientBounds(toplevelScreenBounds);
         nsIntPoint translation = screenBounds.TopLeft() - toplevelScreenBounds.TopLeft();
 
-        gfx3DMatrix transformToTop;
+        Matrix4x4 transformToTop;
         transformToTop._41 = translation.x;
         transformToTop._42 = translation.y;
 
         *aOutAncestor = docRootFrame;
-        gfx3DMatrix docRootTransformToTop =
+        Matrix4x4 docRootTransformToTop =
           nsLayoutUtils::GetTransformToAncestor(docRootFrame, nullptr);
         if (docRootTransformToTop.IsSingular()) {
           NS_WARNING("Containing document is invisible, we can't compute a valid transform");
         } else {
-          gfx3DMatrix topToDocRootTransform = docRootTransformToTop.Inverse();
-          return transformToTop*topToDocRootTransform;
+          docRootTransformToTop.Invert();
+          return transformToTop * docRootTransformToTop;
         }
       }
     }
@@ -4787,8 +4813,8 @@ nsIFrame::GetTransformMatrix(const nsIFrame* aStopAtAncestor,
    * the identity matrix.
    */
   if (!*aOutAncestor)
-    return gfx3DMatrix();
-  
+    return Matrix4x4();
+
   /* Keep iterating while the frame can't possibly be transformed. */
   while (!(*aOutAncestor)->IsTransformed() &&
          !nsLayoutUtils::IsPopup(*aOutAncestor) &&
@@ -4808,7 +4834,7 @@ nsIFrame::GetTransformMatrix(const nsIFrame* aStopAtAncestor,
    */
   nsPoint delta = GetOffsetToCrossDoc(*aOutAncestor);
   int32_t scaleFactor = PresContext()->AppUnitsPerDevPixel();
-  return gfx3DMatrix().Translation
+  return Matrix4x4().Translate
     (NSAppUnitsToFloatPixels(delta.x, scaleFactor),
      NSAppUnitsToFloatPixels(delta.y, scaleFactor),
      0.0f);
@@ -4953,14 +4979,14 @@ nsIFrame::TryUpdateTransformOnly(Layer** aLayerResult)
     return false;
   }
 
-  gfx3DMatrix transform3d;
+  gfx::Matrix4x4 transform3d;
   if (!nsLayoutUtils::GetLayerTransformForFrame(this, &transform3d)) {
     // We're not able to compute a layer transform that we know would
     // be used at the next layers transaction, so we can't only update
     // the transform and will need to schedule an invalidating paint.
     return false;
   }
-  gfxMatrix transform;
+  gfx::Matrix transform;
   gfx::Matrix previousTransform;
   // FIXME/bug 796690 and 796705: in general, changes to 3D
   // transforms, or transform changes to properties other than
@@ -4978,7 +5004,7 @@ nsIFrame::TryUpdateTransformOnly(Layer** aLayerResult)
       !gfx::FuzzyEqual(transform._12, previousTransform._12, kError)) {
     return false;
   }
-  layer->SetBaseTransformForNextTransaction(gfx::ToMatrix4x4(transform3d));
+  layer->SetBaseTransformForNextTransaction(transform3d);
   *aLayerResult = layer;
   return true;
 }
@@ -5879,7 +5905,8 @@ nsFrame::GetNextPrevLineFromeBlockFrame(nsPresContext* aPresContext,
 
   aPos->mResultFrame = nullptr;
   aPos->mResultContent = nullptr;
-  aPos->mAttachForward = (aPos->mDirection == eDirNext);
+  aPos->mAttach =
+      aPos->mDirection == eDirNext ? CARET_ASSOCIATE_AFTER : CARET_ASSOCIATE_BEFORE;
 
   nsAutoLineIterator it = aBlockFrame->GetLineIterator();
   if (!it)
@@ -6011,11 +6038,11 @@ nsFrame::GetNextPrevLineFromeBlockFrame(nsPresContext* aPresContext,
                 {
                   aPos->mResultContent = parent;
                   aPos->mContentOffset = parent->IndexOf(content);
-                  aPos->mAttachForward = false;
+                  aPos->mAttach = CARET_ASSOCIATE_BEFORE;
                   if ((point.x - offset.x+ tempRect.x)>tempRect.width)
                   {
                     aPos->mContentOffset++;//go to end of this frame
-                    aPos->mAttachForward = true;
+                    aPos->mAttach = CARET_ASSOCIATE_AFTER;
                   }
                   //result frame is the result frames parent.
                   aPos->mResultFrame = resultFrame->GetParent();
@@ -6035,7 +6062,7 @@ nsFrame::GetNextPrevLineFromeBlockFrame(nsPresContext* aPresContext,
               resultFrame->GetContentOffsetsFromPoint(point - offset);
           aPos->mResultContent = offsets.content;
           aPos->mContentOffset = offsets.offset;
-          aPos->mAttachForward = offsets.associateWithNext;
+          aPos->mAttach = offsets.associate;
           if (offsets.content)
           {
             bool selectable;
@@ -6079,7 +6106,7 @@ nsFrame::GetNextPrevLineFromeBlockFrame(nsPresContext* aPresContext,
             resultFrame->GetContentOffsetsFromPoint(point - offset);
         aPos->mResultContent = offsets.content;
         aPos->mContentOffset = offsets.offset;
-        aPos->mAttachForward = offsets.associateWithNext;
+        aPos->mAttach = offsets.associate;
         if (offsets.content)
         {
           bool selectable;
@@ -6088,9 +6115,9 @@ nsFrame::GetNextPrevLineFromeBlockFrame(nsPresContext* aPresContext,
           {
             found = true;
             if (resultFrame == farStoppingFrame)
-              aPos->mAttachForward = false;
+              aPos->mAttach = CARET_ASSOCIATE_BEFORE;
             else
-              aPos->mAttachForward = true;
+              aPos->mAttach = CARET_ASSOCIATE_AFTER;
             break;
           }
         }
@@ -6111,7 +6138,8 @@ nsFrame::GetNextPrevLineFromeBlockFrame(nsPresContext* aPresContext,
         //we need to jump to new block frame.
       aPos->mAmount = eSelectLine;
       aPos->mStartOffset = 0;
-      aPos->mAttachForward = !(aPos->mDirection == eDirNext);
+      aPos->mAttach = aPos->mDirection == eDirNext ?
+          CARET_ASSOCIATE_BEFORE : CARET_ASSOCIATE_AFTER;
       if (aPos->mDirection == eDirPrevious)
         aPos->mStartOffset = -1;//start from end
      return aBlockFrame->PeekOffset(aPos);
@@ -6594,7 +6622,8 @@ nsIFrame::PeekOffset(nsPeekOffsetStruct* aPos)
         --aPos->mContentOffset;
       }
       aPos->mResultFrame = targetFrame.frame;
-      aPos->mAttachForward = (aPos->mContentOffset == range.start);
+      aPos->mAttach = aPos->mContentOffset == range.start ?
+          CARET_ASSOCIATE_AFTER : CARET_ASSOCIATE_BEFORE;
       if (!range.content)
         return NS_ERROR_FAILURE;
       return NS_OK;
@@ -8581,7 +8610,7 @@ nsIFrame::ContentOffsets::ContentOffsets(const ContentOffsets& rhs)
   : content(rhs.content),
     offset(rhs.offset),
     secondaryOffset(rhs.secondaryOffset),
-    associateWithNext(rhs.associateWithNext)
+    associate(rhs.associate)
 {
 }
 

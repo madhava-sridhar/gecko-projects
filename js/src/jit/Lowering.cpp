@@ -156,6 +156,13 @@ LIRGenerator::visitNewArray(MNewArray *ins)
 }
 
 bool
+LIRGenerator::visitNewArrayCopyOnWrite(MNewArrayCopyOnWrite *ins)
+{
+    LNewArrayCopyOnWrite *lir = new(alloc()) LNewArrayCopyOnWrite(temp());
+    return define(lir, ins) && assignSafepoint(lir, ins);
+}
+
+bool
 LIRGenerator::visitNewObject(MNewObject *ins)
 {
     LNewObject *lir = new(alloc()) LNewObject(temp());
@@ -1741,7 +1748,6 @@ LIRGenerator::visitToDouble(MToDouble *convert)
         return lowerConstantDouble(0, convert);
 
       case MIRType_Undefined:
-      case MIRType_Symbol:
         JS_ASSERT(conversion != MToDouble::NumbersOnly);
         return lowerConstantDouble(GenericNaN(), convert);
 
@@ -1765,7 +1771,7 @@ LIRGenerator::visitToDouble(MToDouble *convert)
         return redefine(convert, opd);
 
       default:
-        // Objects might be effectful.
+        // Objects might be effectful. Symbols will throw.
         // Strings are complicated - we don't handle them yet.
         MOZ_ASSUME_UNREACHABLE("unexpected type");
     }
@@ -1791,7 +1797,6 @@ LIRGenerator::visitToFloat32(MToFloat32 *convert)
         return lowerConstantFloat32(0, convert);
 
       case MIRType_Undefined:
-      case MIRType_Symbol:
         JS_ASSERT(conversion != MToFloat32::NumbersOnly);
         return lowerConstantFloat32(GenericNaN(), convert);
 
@@ -1815,7 +1820,7 @@ LIRGenerator::visitToFloat32(MToFloat32 *convert)
         return redefine(convert, opd);
 
       default:
-        // Objects might be effectful.
+        // Objects might be effectful. Symbols will throw.
         // Strings are complicated - we don't handle them yet.
         MOZ_ASSUME_UNREACHABLE("unexpected type");
         return false;
@@ -1862,7 +1867,7 @@ LIRGenerator::visitToInt32(MToInt32 *convert)
       case MIRType_Symbol:
       case MIRType_Object:
       case MIRType_Undefined:
-        // Objects might be effectful. Undefined and symbols coerce to NaN, not int32.
+        // Objects might be effectful. Symbols throw. Undefined coerces to NaN, not int32.
         MOZ_ASSUME_UNREACHABLE("ToInt32 invalid input type");
         return false;
 
@@ -1890,7 +1895,6 @@ LIRGenerator::visitTruncateToInt32(MTruncateToInt32 *truncate)
 
       case MIRType_Null:
       case MIRType_Undefined:
-      case MIRType_Symbol:
         return define(new(alloc()) LInteger(0), truncate);
 
       case MIRType_Int32:
@@ -1904,7 +1908,7 @@ LIRGenerator::visitTruncateToInt32(MTruncateToInt32 *truncate)
         return lowerTruncateFToInt32(truncate);
 
       default:
-        // Objects might be effectful.
+        // Objects might be effectful. Symbols throw.
         // Strings are complicated - we don't handle them yet.
         MOZ_ASSUME_UNREACHABLE("unexpected type");
     }
@@ -2166,6 +2170,13 @@ LIRGenerator::visitMaybeToDoubleElement(MMaybeToDoubleElement *ins)
                                                                     useRegisterAtStart(ins->value()),
                                                                     tempDouble());
     return defineBox(lir, ins);
+}
+
+bool
+LIRGenerator::visitMaybeCopyElementsForWrite(MMaybeCopyElementsForWrite *ins)
+{
+    LInstruction *check = new(alloc()) LMaybeCopyElementsForWrite(useRegister(ins->object()), temp());
+    return add(check, ins) && assignSafepoint(check, ins);
 }
 
 bool
@@ -2577,8 +2588,6 @@ LIRGenerator::visitInArray(MInArray *ins)
     LAllocation object;
     if (ins->needsNegativeIntCheck())
         object = useRegister(ins->object());
-    else
-        object = LConstantIndex::Bogus();
 
     LInArray *lir = new(alloc()) LInArray(useRegister(ins->elements()),
                                           useRegisterOrConstant(ins->index()),
@@ -2758,6 +2767,18 @@ LIRGenerator::visitArrayConcat(MArrayConcat *ins)
                                                   useFixed(ins->rhs(), CallTempReg2),
                                                   tempFixed(CallTempReg3),
                                                   tempFixed(CallTempReg4));
+    return defineReturn(lir, ins) && assignSafepoint(lir, ins);
+}
+
+bool
+LIRGenerator::visitArrayJoin(MArrayJoin *ins)
+{
+    JS_ASSERT(ins->type() == MIRType_String);
+    JS_ASSERT(ins->array()->type() == MIRType_Object);
+    JS_ASSERT(ins->sep()->type() == MIRType_String);
+
+    LArrayJoin *lir = new(alloc()) LArrayJoin(useRegisterAtStart(ins->array()),
+                                              useRegisterAtStart(ins->sep()));
     return defineReturn(lir, ins) && assignSafepoint(lir, ins);
 }
 
@@ -3641,6 +3662,72 @@ LIRGenerator::visitRecompileCheck(MRecompileCheck *ins)
     return assignSafepoint(lir, ins);
 }
 
+bool
+LIRGenerator::visitSimdValueX4(MSimdValueX4 *ins)
+{
+    LAllocation x = useRegisterAtStart(ins->getOperand(0));
+    LAllocation y = useRegisterAtStart(ins->getOperand(1));
+    LAllocation z = useRegisterAtStart(ins->getOperand(2));
+    LAllocation w = useRegisterAtStart(ins->getOperand(3));
+
+    return define(new(alloc()) LSimdValueX4(x, y, z, w), ins);
+}
+
+bool
+LIRGenerator::visitSimdConstant(MSimdConstant *ins)
+{
+    JS_ASSERT(IsSimdType(ins->type()));
+
+    if (ins->type() == MIRType_Int32x4)
+        return define(new(alloc()) LInt32x4(), ins);
+    if (ins->type() == MIRType_Float32x4)
+        return define(new(alloc()) LFloat32x4(), ins);
+
+    MOZ_ASSUME_UNREACHABLE("Unknown SIMD kind when generating constant");
+    return false;
+}
+
+bool
+LIRGenerator::visitSimdExtractElement(MSimdExtractElement *ins)
+{
+    JS_ASSERT(IsSimdType(ins->input()->type()));
+    JS_ASSERT(!IsSimdType(ins->type()));
+
+    if (ins->input()->type() == MIRType_Int32x4) {
+        // Note: there could be int16x8 in the future, which doesn't use the
+        // same instruction. We either need to pass the arity or create new LIns.
+        LUse use = useRegisterAtStart(ins->input());
+        return define(new(alloc()) LSimdExtractElementI(use, ins->lane()), ins);
+    }
+
+    if (ins->input()->type() == MIRType_Float32x4) {
+        LUse use = useRegisterAtStart(ins->input());
+        return define(new(alloc()) LSimdExtractElementF(use, ins->lane()), ins);
+    }
+
+    MOZ_ASSUME_UNREACHABLE("Unknown SIMD kind when extracting element");
+    return false;
+}
+
+bool
+LIRGenerator::visitSimdBinaryArith(MSimdBinaryArith *ins)
+{
+    JS_ASSERT(IsSimdType(ins->type()));
+
+    if (ins->type() == MIRType_Int32x4) {
+        LSimdBinaryArithIx4 *add = new(alloc()) LSimdBinaryArithIx4();
+        return lowerForFPU(add, ins, ins->lhs(), ins->rhs());
+    }
+
+    if (ins->type() == MIRType_Float32x4) {
+        LSimdBinaryArithFx4 *add = new(alloc()) LSimdBinaryArithFx4();
+        return lowerForFPU(add, ins, ins->lhs(), ins->rhs());
+    }
+
+    MOZ_ASSUME_UNREACHABLE("Unknown SIMD kind when adding values");
+    return false;
+}
+
 static void
 SpewResumePoint(MBasicBlock *block, MInstruction *ins, MResumePoint *resumePoint)
 {
@@ -3809,4 +3896,33 @@ LIRGenerator::generate()
 
     lirGraph_.setArgumentSlotCount(maxargslots_);
     return true;
+}
+
+bool
+LIRGenerator::visitPhi(MPhi *phi)
+{
+    // Phi nodes are not lowered because they are only meaningful for the register allocator.
+    MOZ_ASSUME_UNREACHABLE("Unexpected Phi node during Lowering.");
+}
+
+bool
+LIRGenerator::visitBeta(MBeta *beta)
+{
+    // Beta nodes are supposed to be removed before because they are
+    // only used to carry the range information for Range analysis
+    MOZ_ASSUME_UNREACHABLE("Unexpected Beta node during Lowering.");
+}
+
+bool
+LIRGenerator::visitObjectState(MObjectState *objState)
+{
+    // ObjectState nodes are always recovered on bailouts
+    MOZ_ASSUME_UNREACHABLE("Unexpected ObjectState node during Lowering.");
+}
+
+bool
+LIRGenerator::visitArrayState(MArrayState *objState)
+{
+    // ArrayState nodes are always recovered on bailouts
+    MOZ_ASSUME_UNREACHABLE("Unexpected ArrayState node during Lowering.");
 }

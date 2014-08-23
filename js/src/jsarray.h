@@ -81,6 +81,10 @@ NewDenseCopiedArray(JSContext *cx, uint32_t length, const Value *values, JSObjec
 extern ArrayObject *
 NewDenseAllocatedArrayWithTemplate(JSContext *cx, uint32_t length, JSObject *templateObject);
 
+/* Create a dense array with the same copy-on-write elements as another object. */
+extern JSObject *
+NewDenseCopyOnWriteArray(JSContext *cx, HandleObject templateObject, gc::InitialHeap heap);
+
 /*
  * Determines whether a write to the given element on |obj| should fail because
  * |obj| is an Array with a non-writable length, and writing that element would
@@ -140,9 +144,19 @@ array_splice_impl(JSContext *cx, unsigned argc, js::Value *vp, bool pop);
 extern bool
 array_concat(JSContext *cx, unsigned argc, js::Value *vp);
 
+template <bool Locale>
+JSString *
+ArrayJoin(JSContext *cx, HandleObject obj, HandleLinearString sepstr, uint32_t length);
+
 extern bool
 array_concat_dense(JSContext *cx, Handle<ArrayObject*> arr1, Handle<ArrayObject*> arr2,
                    Handle<ArrayObject*> result);
+
+bool
+array_join(JSContext *cx, unsigned argc, js::Value *vp);
+
+extern JSString *
+array_join_impl(JSContext *cx, HandleValue array, HandleString sep);
 
 extern void
 ArrayShiftMoveElements(JSObject *obj);

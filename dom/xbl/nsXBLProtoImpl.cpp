@@ -9,7 +9,6 @@
 #include "nsIContent.h"
 #include "nsIDocument.h"
 #include "nsContentUtils.h"
-#include "nsCxPusher.h"
 #include "nsIXPConnect.h"
 #include "nsIServiceManager.h"
 #include "nsIDOMNode.h"
@@ -241,8 +240,7 @@ nsXBLProtoImpl::CompilePrototypeMembers(nsXBLPrototypeBinding* aBinding)
   // bind the prototype to a real xbl instance, we'll clone the pre-compiled JS into the real instance's 
   // context.
   AutoSafeJSContext cx;
-  JS::Rooted<JSObject*> compilationGlobal(cx, xpc::GetCompilationScope());
-  NS_ENSURE_TRUE(compilationGlobal, NS_ERROR_UNEXPECTED);
+  JS::Rooted<JSObject*> compilationGlobal(cx, xpc::CompilationScope());
   JSAutoCompartment ac(cx, compilationGlobal);
 
   mPrecompiledMemberHolder = JS_NewObjectWithGivenProto(cx, nullptr, JS::NullPtr(), compilationGlobal);

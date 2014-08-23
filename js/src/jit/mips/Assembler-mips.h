@@ -14,6 +14,7 @@
 #include "jit/CompactBuffer.h"
 #include "jit/IonCode.h"
 #include "jit/IonSpewer.h"
+#include "jit/JitCompartment.h"
 #include "jit/mips/Architecture-mips.h"
 #include "jit/shared/Assembler-shared.h"
 #include "jit/shared/IonAssemblerBuffer.h"
@@ -115,8 +116,6 @@ static MOZ_CONSTEXPR_VAR FloatRegister ReturnFloatReg = { FloatRegisters::f0 };
 static MOZ_CONSTEXPR_VAR FloatRegister ScratchFloatReg = { FloatRegisters::f18 };
 static MOZ_CONSTEXPR_VAR FloatRegister SecondScratchFloatReg = { FloatRegisters::f16 };
 
-static MOZ_CONSTEXPR_VAR FloatRegister NANReg = { FloatRegisters::f30 };
-
 // Registers used in the GenerateFFIIonExit Enable Activation block.
 static MOZ_CONSTEXPR_VAR Register AsmJSIonExitRegCallee = t0;
 static MOZ_CONSTEXPR_VAR Register AsmJSIonExitRegE0 = a0;
@@ -160,6 +159,9 @@ static const bool StackKeptAligned = true;
 // here such that it is accessible from the entire codebase. Once full support
 // for SIMD is reached on all tier-1 platforms, this constant can be deleted.
 static const bool SupportsSimd = false;
+// TODO this is just a filler to prevent a build failure. The MIPS SIMD
+// alignment requirements still need to be explored.
+static const uint32_t SimdStackAlignment = 8;
 
 static const Scale ScalePointer = TimesFour;
 
@@ -616,6 +618,10 @@ class Operand
 
 void
 PatchJump(CodeLocationJump &jump_, CodeLocationLabel label);
+
+void
+PatchBackedge(CodeLocationJump &jump_, CodeLocationLabel label, JitRuntime::BackedgeTarget target);
+
 class Assembler;
 typedef js::jit::AssemblerBuffer<1024, Instruction> MIPSBuffer;
 
@@ -808,6 +814,7 @@ class Assembler : public AssemblerShared
 
     // Branch and jump instructions
     BufferOffset as_bal(BOffImm16 off);
+    BufferOffset as_b(BOffImm16 off);
 
     InstImm getBranchCode(JumpOrCall jumpOrCall);
     InstImm getBranchCode(Register s, Register t, Condition c);
@@ -992,6 +999,14 @@ class Assembler : public AssemblerShared
   public:
     static void TraceJumpRelocations(JSTracer *trc, JitCode *code, CompactBufferReader &reader);
     static void TraceDataRelocations(JSTracer *trc, JitCode *code, CompactBufferReader &reader);
+
+    static bool SupportsFloatingPoint() {
+#if (defined(__mips_hard_float) && !defined(__mips_single_float)) || defined(JS_MIPS_SIMULATOR)
+        return true;
+#else
+        return false;
+#endif
+    }
 
   protected:
     InstImm invertBranch(InstImm branch, BOffImm16 skipOffset);

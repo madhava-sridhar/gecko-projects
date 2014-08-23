@@ -14,11 +14,11 @@
 #include "mozilla/dom/ContentParent.h"
 #include "mozilla/dom/mobilemessage/Constants.h" // For MessageType
 #include "mozilla/dom/mobilemessage/SmsTypes.h"
+#include "mozilla/dom/ScriptSettings.h"
 #include "mozilla/dom/ToJSValue.h"
 #include "mozilla/dom/ipc/BlobChild.h"
 #include "mozilla/dom/ipc/BlobParent.h"
 #include "nsDOMFile.h"
-#include "nsCxPusher.h"
 
 using namespace mozilla::dom::mobilemessage;
 

@@ -59,7 +59,7 @@ nsresult
 nsProgressFrame::CreateAnonymousContent(nsTArray<ContentInfo>& aElements)
 {
   // Create the progress bar div.
-  nsCOMPtr<nsIDocument> doc = mContent->GetDocument();
+  nsCOMPtr<nsIDocument> doc = mContent->GetComposedDoc();
   mBarDiv = doc->CreateHTMLElement(nsGkAtoms::div);
 
   // Associate ::-moz-progress-bar pseudo-element to the anonymous child.
@@ -76,10 +76,12 @@ nsProgressFrame::CreateAnonymousContent(nsTArray<ContentInfo>& aElements)
 }
 
 void
-nsProgressFrame::AppendAnonymousContentTo(nsBaseContentList& aElements,
+nsProgressFrame::AppendAnonymousContentTo(nsTArray<nsIContent*>& aElements,
                                           uint32_t aFilter)
 {
-  aElements.MaybeAppendElement(mBarDiv);
+  if (mBarDiv) {
+    aElements.AppendElement(mBarDiv);
+  }
 }
 
 NS_QUERYFRAME_HEAD(nsProgressFrame)

@@ -127,6 +127,9 @@ class DebuggerWeakMap : private WeakMap<Key, Value, DefaultHasher<Key> >
             if (gc::IsAboutToBeFinalized(&k)) {
                 e.removeFront();
                 decZoneCount(k->zone());
+            } else {
+                // markKeys() should have done any necessary relocation.
+                JS_ASSERT(k == e.front().key());
             }
         }
         Base::assertEntriesNotAboutToBeFinalized();
@@ -199,7 +202,7 @@ class Debugger : private mozilla::LinkedListElement<Debugger>
     struct AllocationSite : public mozilla::LinkedListElement<AllocationSite>
     {
         AllocationSite(HandleObject frame) : frame(frame) {
-            JS_ASSERT(UncheckedUnwrap(frame)->is<SavedFrame>());
+            JS_ASSERT_IF(frame, UncheckedUnwrap(frame)->is<SavedFrame>());
         };
         RelocatablePtrObject frame;
     };
@@ -787,7 +790,7 @@ Debugger::onNewGlobalObject(JSContext *cx, Handle<GlobalObject *> global)
 bool
 Debugger::onLogAllocationSite(JSContext *cx, HandleSavedFrame frame)
 {
-    GlobalObject::DebuggerVector *dbgs = frame->global().getDebuggers();
+    GlobalObject::DebuggerVector *dbgs = cx->global()->getDebuggers();
     if (!dbgs || dbgs->empty())
         return true;
     return Debugger::slowPathOnLogAllocationSite(cx, frame, *dbgs);

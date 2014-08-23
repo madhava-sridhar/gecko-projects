@@ -14143,8 +14143,6 @@ ThreadLocalJSRuntime::Init()
     return false;
   }
 
-  js::SetDefaultObjectForContext(mContext, mGlobal);
-
   return true;
 }
 

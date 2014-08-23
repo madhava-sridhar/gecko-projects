@@ -733,6 +733,16 @@ var ProjectEditor = Class({
   },
 
   /**
+   * Are there any unsaved resources in the Project?
+   */
+  get hasUnsavedResources() {
+    return this.project.allResources().some(resource=> {
+      let editor = this.editorFor(resource);
+      return editor && !editor.isClean();
+    });
+  },
+
+  /**
    * Check with the user about navigating away with unsaved changes.
    *
    * @returns Boolean
@@ -740,12 +750,8 @@ var ProjectEditor = Class({
    *          Otherwise, ask the user to confirm and return the outcome.
    */
   confirmUnsaved: function() {
-    let anyUnsaved = this.project.allResources().some(resource=> {
-      let editor = this.editorFor(resource);
-      return editor && !editor.isClean();
-    });
 
-    if (anyUnsaved) {
+    if (this.hasUnsavedResources) {
       return confirm(
         getLocalizedString("projecteditor.confirmUnsavedTitle"),
         getLocalizedString("projecteditor.confirmUnsavedLabel")

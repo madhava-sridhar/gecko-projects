@@ -14,6 +14,7 @@
 #include "jit/arm/Architecture-arm.h"
 #include "jit/CompactBuffer.h"
 #include "jit/IonCode.h"
+#include "jit/JitCompartment.h"
 #include "jit/shared/Assembler-shared.h"
 #include "jit/shared/IonAssemblerBufferWithConstantPools.h"
 
@@ -100,8 +101,6 @@ static MOZ_CONSTEXPR_VAR FloatRegister ScratchDoubleReg = { FloatRegisters::d15,
 static MOZ_CONSTEXPR_VAR FloatRegister ScratchSimdReg = InvalidFloatReg;
 static MOZ_CONSTEXPR_VAR FloatRegister ScratchUIntReg = { FloatRegisters::d15, VFPRegister::UInt };
 static MOZ_CONSTEXPR_VAR FloatRegister ScratchIntReg = { FloatRegisters::d15, VFPRegister::Int };
-
-static MOZ_CONSTEXPR_VAR FloatRegister NANReg = { FloatRegisters::d14, VFPRegister::Double };
 
 // Registers used in the GenerateFFIIonExit Enable Activation block.
 static MOZ_CONSTEXPR_VAR Register AsmJSIonExitRegCallee = r4;
@@ -1035,6 +1034,12 @@ class Operand
 
 void
 PatchJump(CodeLocationJump &jump_, CodeLocationLabel label);
+static inline void
+PatchBackedge(CodeLocationJump &jump_, CodeLocationLabel label, JitRuntime::BackedgeTarget target)
+{
+    PatchJump(jump_, label);
+}
+
 class InstructionIterator;
 class Assembler;
 typedef js::jit::AssemblerBufferWithConstantPools<1024, 4, Instruction, Assembler> ARMBuffer;
@@ -1537,6 +1542,10 @@ class Assembler : public AssemblerShared
   public:
     static void TraceJumpRelocations(JSTracer *trc, JitCode *code, CompactBufferReader &reader);
     static void TraceDataRelocations(JSTracer *trc, JitCode *code, CompactBufferReader &reader);
+
+    static bool SupportsFloatingPoint() {
+        return HasVFP();
+    }
 
   protected:
     void addPendingJump(BufferOffset src, ImmPtr target, Relocation::Kind kind) {

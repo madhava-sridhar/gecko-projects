@@ -29,6 +29,8 @@ const unsigned short SVG_FECOLORMATRIX_TYPE_MATRIX = 1;
 const unsigned short SVG_FECOLORMATRIX_TYPE_SATURATE = 2;
 const unsigned short SVG_FECOLORMATRIX_TYPE_HUE_ROTATE = 3;
 const unsigned short SVG_FECOLORMATRIX_TYPE_LUMINANCE_TO_ALPHA = 4;
+// ColorMatrix types for CSS filters
+const unsigned short SVG_FECOLORMATRIX_TYPE_SEPIA = 5;
 
 // ComponentTransfer types
 const unsigned short SVG_FECOMPONENTTRANSFER_TYPE_UNKNOWN  = 0;
@@ -293,7 +295,7 @@ public:
   };
 
   FilterPrimitiveDescription();
-  FilterPrimitiveDescription(PrimitiveType aType);
+  explicit FilterPrimitiveDescription(PrimitiveType aType);
   FilterPrimitiveDescription(const FilterPrimitiveDescription& aOther);
   FilterPrimitiveDescription& operator=(const FilterPrimitiveDescription& aOther);
 
@@ -377,7 +379,7 @@ private:
  */
 struct FilterDescription MOZ_FINAL {
   FilterDescription() {}
-  FilterDescription(const nsTArray<FilterPrimitiveDescription>& aPrimitives)
+  explicit FilterDescription(const nsTArray<FilterPrimitiveDescription>& aPrimitives)
    : mPrimitives(aPrimitives)
   {}
 

@@ -154,7 +154,7 @@ private:
   Transaction& operator=(const Transaction&);
 };
 struct AutoTxnEnd {
-  AutoTxnEnd(Transaction* aTxn) : mTxn(aTxn) {}
+  explicit AutoTxnEnd(Transaction* aTxn) : mTxn(aTxn) {}
   ~AutoTxnEnd() { mTxn->End(); }
   Transaction* mTxn;
 };
@@ -432,6 +432,16 @@ ShadowLayerForwarder::UseComponentAlphaTextures(CompositableClient* aCompositabl
                                             nullptr, aTextureOnWhite->GetIPDLActor()));
 }
 
+#ifdef MOZ_WIDGET_GONK
+void
+ShadowLayerForwarder::UseOverlaySource(CompositableClient* aCompositable,
+                                       const OverlaySource& aOverlay)
+{
+  MOZ_ASSERT(aCompositable);
+  mTxn->AddEdit(OpUseOverlaySource(nullptr, aCompositable->GetIPDLActor(), aOverlay));
+}
+#endif
+
 void
 ShadowLayerForwarder::SendFenceHandle(AsyncTransactionTracker* aTracker,
                                         PTextureChild* aTexture,
@@ -597,6 +607,10 @@ ShadowLayerForwarder::EndTransaction(InfallibleTArray<EditReply>* aReplies,
     common.maskLayerParent() = nullptr;
     common.animations() = mutant->GetAnimations();
     common.invalidRegion() = mutant->GetInvalidRegion();
+    common.metrics() = mutant->GetFrameMetrics();
+    common.scrollParentId() = mutant->GetScrollHandoffParentId();
+    common.backgroundColor() = mutant->GetBackgroundColor();
+    common.contentDescription() = mutant->GetContentDescription();
     attrs.specific() = null_t();
     mutant->FillSpecificAttributes(attrs.specific());
 

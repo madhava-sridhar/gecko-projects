@@ -34,7 +34,7 @@
 #include "mozilla/unused.h"
 #include "mozIApplication.h"
 #include "nsContentUtils.h"
-#include "nsCxPusher.h"
+#include "nsDocShell.h"
 #include "nsEmbedCID.h"
 #include <algorithm>
 #ifdef MOZ_CRASHREPORTER
@@ -326,6 +326,13 @@ TabChildBase::HandlePossibleViewportChange(const ScreenIntSize& aOldScreenSize)
     metrics.SetZoom(defaultZoom);
 
     metrics.SetScrollId(viewId);
+  }
+
+  if (nsIPresShell* shell = document->GetShell()) {
+    if (nsPresContext* context = shell->GetPresContext()) {
+      metrics.mDevPixelsPerCSSPixel = CSSToLayoutDeviceScale(
+        (float)nsPresContext::AppUnitsPerCSSPixel() / context->AppUnitsPerDevPixel());
+    }
   }
 
   metrics.mCumulativeResolution = metrics.GetZoom() / metrics.mDevPixelsPerCSSPixel * ScreenToLayerScale(1);
@@ -756,6 +763,8 @@ TabChild::HandleEvent(nsIDOMEvent* aEvent)
   if (eventType.EqualsLiteral("DOMMetaAdded")) {
     // This meta data may or may not have been a meta viewport tag. If it was,
     // we should handle it immediately.
+    HandlePossibleViewportChange(mInnerSize);
+  } else if (eventType.EqualsLiteral("FullZoomChange")) {
     HandlePossibleViewportChange(mInnerSize);
   }
 
@@ -1452,12 +1461,6 @@ TabChild::DestroyWindow()
     }
 }
 
-bool
-TabChild::UseDirectCompositor()
-{
-    return !!CompositorChild::Get();
-}
-
 void
 TabChild::ActorDestroy(ActorDestroyReason why)
 {
@@ -1468,6 +1471,7 @@ TabChild::ActorDestroy(ActorDestroyReason why)
       (mTabChildGlobal->mMessageManager.get())->Disconnect();
     mTabChildGlobal->mMessageManager = nullptr;
   }
+
   if (Id() != 0) {
     NestedTabChildMap().erase(Id());
   }
@@ -1879,6 +1883,15 @@ TabChild::RecvNotifyAPZStateChange(const ViewID& aViewId,
     if (scrollbarOwner) {
       scrollbarOwner->ScrollbarActivityStarted();
     }
+
+    nsCOMPtr<nsIDocument> doc = GetDocument();
+    if (doc) {
+      nsCOMPtr<nsIDocShell> docshell(doc->GetDocShell());
+      if (docshell) {
+        nsDocShell* nsdocshell = static_cast<nsDocShell*>(docshell.get());
+        nsdocshell->NotifyAsyncPanZoomStarted();
+      }
+    }
     break;
   }
   case APZStateChange::TransformEnd:
@@ -1887,6 +1900,15 @@ TabChild::RecvNotifyAPZStateChange(const ViewID& aViewId,
     nsIScrollbarOwner* scrollbarOwner = do_QueryFrame(sf);
     if (scrollbarOwner) {
       scrollbarOwner->ScrollbarActivityStopped();
+    }
+
+    nsCOMPtr<nsIDocument> doc = GetDocument();
+    if (doc) {
+      nsCOMPtr<nsIDocShell> docshell(doc->GetDocShell());
+      if (docshell) {
+        nsDocShell* nsdocshell = static_cast<nsDocShell*>(docshell.get());
+        nsdocshell->NotifyAsyncPanZoomStopped();
+      }
     }
     break;
   }
@@ -2545,6 +2567,7 @@ TabChild::InitTabChildGlobal(FrameScriptLoading aScriptLoading)
     root->SetParentTarget(scope);
 
     chromeHandler->AddEventListener(NS_LITERAL_STRING("DOMMetaAdded"), this, false);
+    chromeHandler->AddEventListener(NS_LITERAL_STRING("FullZoomChange"), this, false);
   }
 
   if (aScriptLoading != DONT_LOAD_SCRIPTS && !mTriedBrowserInit) {
@@ -2581,28 +2604,23 @@ TabChild::InitRenderingState()
         return false;
     }
 
-    PLayerTransactionChild* shadowManager = nullptr;
-    if (id != 0) {
-        // Pushing layers transactions directly to a separate
-        // compositor context.
-        PCompositorChild* compositorChild = CompositorChild::Get();
-        if (!compositorChild) {
-          NS_WARNING("failed to get CompositorChild instance");
-          return false;
-        }
-        nsTArray<LayersBackend> backends;
-        backends.AppendElement(mTextureFactoryIdentifier.mParentBackend);
-        bool success;
-        shadowManager =
-            compositorChild->SendPLayerTransactionConstructor(backends,
-                                                              id, &mTextureFactoryIdentifier, &success);
-        if (!success) {
-          NS_WARNING("failed to properly allocate layer transaction");
-          return false;
-        }
-    } else {
-        // Pushing transactions to the parent content.
-        shadowManager = remoteFrame->SendPLayerTransactionConstructor();
+    MOZ_ASSERT(id != 0);
+
+    // Pushing layers transactions directly to a separate
+    // compositor context.
+    PCompositorChild* compositorChild = CompositorChild::Get();
+    if (!compositorChild) {
+      NS_WARNING("failed to get CompositorChild instance");
+      return false;
+    }
+    nsTArray<LayersBackend> backends;
+    backends.AppendElement(mTextureFactoryIdentifier.mParentBackend);
+    PLayerTransactionChild* shadowManager =
+        compositorChild->SendPLayerTransactionConstructor(backends,
+                                                          id, &mTextureFactoryIdentifier, &success);
+    if (!success) {
+      NS_WARNING("failed to properly allocate layer transaction");
+      return false;
     }
 
     if (!shadowManager) {
@@ -2684,7 +2702,7 @@ TabChild::GetDefaultScale(double* aScale)
 void
 TabChild::NotifyPainted()
 {
-    if (UseDirectCompositor() && !mNotified) {
+    if (!mNotified) {
         mRemoteFrame->SendNotifyCompositorTransaction();
         mNotified = true;
     }

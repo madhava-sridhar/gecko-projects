@@ -29,7 +29,6 @@
 #include "mozilla/dom/ipc/BlobChild.h"
 #include "mozilla/dom/ipc/BlobParent.h"
 #include "nsContentUtils.h"
-#include "nsCxPusher.h"
 #include "nsIObserverService.h"
 #include "nsISettingsService.h"
 #include "nsISystemMessagesInternal.h"

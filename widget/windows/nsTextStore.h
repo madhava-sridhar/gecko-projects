@@ -24,6 +24,9 @@
 #ifdef INPUTSCOPE_INIT_GUID
 #include <initguid.h>
 #endif
+#ifdef TEXTATTRS_INIT_GUID
+#include <tsattrs.h>
+#endif
 #include <inputscope.h>
 
 // TSF InputScope, for earlier SDK 8
@@ -135,7 +138,7 @@ public:
 
   static nsresult OnFocusChange(bool aGotFocus,
                                 nsWindowBase* aFocusedWidget,
-                                IMEState::Enabled aIMEEnabled);
+                                const IMEState& aIMEState);
   static nsresult OnTextChange(const IMENotification& aIMENotification)
   {
     NS_ENSURE_TRUE(sTsfTextStore, NS_ERROR_NOT_AVAILABLE);
@@ -284,9 +287,9 @@ protected:
   void     FlushPendingActions();
 
   nsresult OnLayoutChangeInternal();
-  HRESULT  ProcessScopeRequest(DWORD dwFlags,
-                               ULONG cFilterAttrs,
-                               const TS_ATTRID *paFilterAttrs);
+  HRESULT  HandleRequestAttrs(DWORD aFlags,
+                              ULONG aFilterCount,
+                              const TS_ATTRID* aFilterAttrs);
   void     SetInputScope(const nsString& aHTMLInputType);
 
   // Creates native caret over our caret.  This method only works on desktop
@@ -663,8 +666,28 @@ protected:
 
   // The input scopes for this context, defaults to IS_DEFAULT.
   nsTArray<InputScope>         mInputScopes;
-  bool                         mInputScopeDetected;
-  bool                         mInputScopeRequested;
+
+  // Support retrieving attributes.
+  // TODO: We should support RightToLeft, perhaps.
+  enum
+  {
+    // Used for result of GetRequestedAttrIndex()
+    eNotSupported = -1,
+
+    // Supported attributes
+    eInputScope = 0,
+    eTextVerticalWriting,
+
+    // Count of the supported attributes
+    NUM_OF_SUPPORTED_ATTRS
+  };
+  bool mRequestedAttrs[NUM_OF_SUPPORTED_ATTRS];
+
+  int32_t GetRequestedAttrIndex(const TS_ATTRID& aAttrID);
+  TS_ATTRID GetAttrID(int32_t aIndex);
+
+  bool mRequestedAttrValues;
+
   // If edit actions are being recorded without document lock, this is true.
   // Otherwise, false.
   bool                         mIsRecordingActionsWithoutLock;
@@ -716,6 +739,8 @@ protected:
 
   // Enables/Disables hack for specific TIP.
   static bool sCreateNativeCaretForATOK;
+  static bool sDoNotReturnNoLayoutErrorToFreeChangJie;
+  static bool sDoNotReturnNoLayoutErrorToEasyChangjei;
 
   // Message the Tablet Input Panel uses to flush text during blurring.
   // See comments in Destroy

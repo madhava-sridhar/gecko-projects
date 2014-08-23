@@ -15,6 +15,7 @@
 #include "WebGLVertexArray.h"
 #include "GLContext.h"
 #include "CanvasUtils.h"
+#include "WebGLContextUtils.h"
 
 #include "mozilla/CheckedInt.h"
 #include "mozilla/Preferences.h"
@@ -160,12 +161,7 @@ IsTexImageCubemapTarget(GLenum target)
 bool
 WebGLProgram::UpdateInfo()
 {
-    mIdentifierMap = nullptr;
-    mIdentifierReverseMap = nullptr;
-    mUniformInfoMap = nullptr;
-
     mAttribMaxNameLength = 0;
-
     for (size_t i = 0; i < mAttachedShaders.Length(); i++)
         mAttribMaxNameLength = std::max(mAttribMaxNameLength, mAttachedShaders[i]->mAttribMaxNameLength);
 
@@ -199,14 +195,28 @@ WebGLProgram::UpdateInfo()
         }
     }
 
-    if (!mUniformInfoMap) {
-        mUniformInfoMap = new CStringToUniformInfoMap;
-        for (size_t i = 0; i < mAttachedShaders.Length(); i++) {
-            for (size_t j = 0; j < mAttachedShaders[i]->mUniforms.Length(); j++) {
-                const WebGLMappedIdentifier& uniform = mAttachedShaders[i]->mUniforms[j];
-                const WebGLUniformInfo& info = mAttachedShaders[i]->mUniformInfos[j];
-                mUniformInfoMap->Put(uniform.mapped, info);
-            }
+    // nsAutoPtr will delete old version first
+    mIdentifierMap = new CStringMap;
+    mIdentifierReverseMap = new CStringMap;
+    mUniformInfoMap = new CStringToUniformInfoMap;
+    for (size_t i = 0; i < mAttachedShaders.Length(); i++) {
+        // Loop through ATTRIBUTES
+        for (size_t j = 0; j < mAttachedShaders[i]->mAttributes.Length(); j++) {
+            const WebGLMappedIdentifier& attrib = mAttachedShaders[i]->mAttributes[j];
+            mIdentifierMap->Put(attrib.original, attrib.mapped); // FORWARD MAPPING
+            mIdentifierReverseMap->Put(attrib.mapped, attrib.original); // REVERSE MAPPING
+        }
+
+        // Loop through UNIFORMS
+        for (size_t j = 0; j < mAttachedShaders[i]->mUniforms.Length(); j++) {
+            // Add the uniforms name mapping to mIdentifier[Reverse]Map
+            const WebGLMappedIdentifier& uniform = mAttachedShaders[i]->mUniforms[j];
+            mIdentifierMap->Put(uniform.original, uniform.mapped); // FOWARD MAPPING
+            mIdentifierReverseMap->Put(uniform.mapped, uniform.original); // REVERSE MAPPING
+
+            // Add uniform info to mUniformInfoMap
+            const WebGLUniformInfo& info = mAttachedShaders[i]->mUniformInfos[j];
+            mUniformInfoMap->Put(uniform.mapped, info);
         }
     }
 
@@ -1245,6 +1255,51 @@ WebGLContext::ValidateTexInputData(GLenum type, int jsArrayType, WebGLTexImageFu
         ErrorInvalidOperation(invalidTypedArray, InfoFrom(func));
 
     return validInput;
+}
+
+/**
+ * Checks specific for the CopyTex[Sub]Image2D functions.
+ * Verifies:
+ * - Framebuffer is complete and has valid read planes
+ * - Copy format is a subset of framebuffer format (i.e. all required components are available)
+ */
+bool
+WebGLContext::ValidateCopyTexImage(GLenum format, WebGLTexImageFunc func)
+{
+    MOZ_ASSERT(IsCopyFunc(func));
+
+    // Default framebuffer format
+    GLenum fboFormat = bool(gl->GetPixelFormat().alpha > 0) ? LOCAL_GL_RGBA : LOCAL_GL_RGB;
+
+    if (mBoundFramebuffer) {
+        if (!mBoundFramebuffer->CheckAndInitializeAttachments()) {
+            ErrorInvalidFramebufferOperation("%s: incomplete framebuffer", InfoFrom(func));
+            return false;
+        }
+
+        GLenum readPlaneBits = LOCAL_GL_COLOR_BUFFER_BIT;
+        if (!mBoundFramebuffer->HasCompletePlanes(readPlaneBits)) {
+            ErrorInvalidOperation("%s: Read source attachment doesn't have the"
+                                  " correct color/depth/stencil type.", InfoFrom(func));
+            return false;
+        }
+
+        // Get the correct format for the framebuffer, as it's not the default one
+        const WebGLFramebuffer::Attachment& color0 = mBoundFramebuffer->GetAttachment(LOCAL_GL_COLOR_ATTACHMENT0);
+        fboFormat = mBoundFramebuffer->GetFormatForAttachment(color0);
+    }
+
+    // Make sure the format of the framebuffer is a superset of
+    // the format requested by the CopyTex[Sub]Image2D functions.
+    const GLComponents formatComps = GLComponents(format);
+    const GLComponents fboComps = GLComponents(fboFormat);
+    if (!formatComps.IsSubsetOf(fboComps)) {
+        ErrorInvalidOperation("%s: format %s is not a subset of the current framebuffer format, which is %s.",
+                              InfoFrom(func), EnumName(format), EnumName(fboFormat));
+        return false;
+    }
+
+    return true;
 }
 
 /**

@@ -3316,8 +3316,10 @@ EffectlesslyLookupProperty(JSContext *cx, HandleObject obj, HandlePropertyName n
     shape.set(nullptr);
     holder.set(nullptr);
 
-    if (checkDOMProxy)
+    if (checkDOMProxy) {
         *checkDOMProxy = false;
+        *shadowsResult = ShadowCheckFailed;
+    }
 
     // Check for list base if asked to.
     RootedObject checkObj(cx, obj);
@@ -3888,9 +3890,9 @@ static bool
 TypedArrayRequiresFloatingPoint(TypedArrayObject *tarr)
 {
     uint32_t type = tarr->type();
-    return (type == Scalar::Uint32 ||
-            type == Scalar::Float32 ||
-            type == Scalar::Float64);
+    return type == Scalar::Uint32 ||
+           type == Scalar::Float32 ||
+           type == Scalar::Float64;
 }
 
 static bool
@@ -5254,6 +5256,20 @@ ICSetElem_Dense::Compiler::generateStubCode(MacroAssembler &masm)
     BaseIndex element(scratchReg, key, TimesEight);
     masm.branchTestMagic(Assembler::Equal, element, &failure);
 
+    // Perform a single test to see if we either need to convert double
+    // elements or clone the copy on write elements in the object.
+    Label noSpecialHandling;
+    Address elementsFlags(scratchReg, ObjectElements::offsetOfFlags());
+    masm.branchTest32(Assembler::Zero, elementsFlags,
+                      Imm32(ObjectElements::CONVERT_DOUBLE_ELEMENTS |
+                            ObjectElements::COPY_ON_WRITE),
+                      &noSpecialHandling);
+
+    // Fail if we need to clone copy on write elements.
+    masm.branchTest32(Assembler::NonZero, elementsFlags,
+                      Imm32(ObjectElements::COPY_ON_WRITE),
+                      &failure);
+
     // Failure is not possible now.  Free up registers.
     regs.add(R0);
     regs.add(R1);
@@ -5261,21 +5277,17 @@ ICSetElem_Dense::Compiler::generateStubCode(MacroAssembler &masm)
     regs.takeUnchecked(key);
     Address valueAddr(BaselineStackReg, ICStackValueOffset);
 
-    // Convert int32 values to double if convertDoubleElements is set. In this
-    // case the heap typeset is guaranteed to contain both int32 and double, so
-    // it's okay to store a double.
-    Label dontConvertDoubles;
-    Address elementsFlags(scratchReg, ObjectElements::offsetOfFlags());
-    masm.branchTest32(Assembler::Zero, elementsFlags,
-                      Imm32(ObjectElements::CONVERT_DOUBLE_ELEMENTS),
-                      &dontConvertDoubles);
-    // Note that double arrays are only created by IonMonkey, so if we have no
-    // floating-point support Ion is disabled and there should be no double arrays.
+    // We need to convert int32 values being stored into doubles. In this case
+    // the heap typeset is guaranteed to contain both int32 and double, so it's
+    // okay to store a double. Note that double arrays are only created by
+    // IonMonkey, so if we have no floating-point support Ion is disabled and
+    // there should be no double arrays.
     if (cx->runtime()->jitSupportsFloatingPoint)
-        masm.convertInt32ValueToDouble(valueAddr, regs.getAny(), &dontConvertDoubles);
+        masm.convertInt32ValueToDouble(valueAddr, regs.getAny(), &noSpecialHandling);
     else
         masm.assumeUnreachable("There shouldn't be double arrays when there is no FP support.");
-    masm.bind(&dontConvertDoubles);
+
+    masm.bind(&noSpecialHandling);
 
     // Don't overwrite R0 becuase |obj| might overlap with it, and it's needed
     // for post-write barrier later.
@@ -5427,6 +5439,12 @@ ICSetElemDenseAddCompiler::generateStubCode(MacroAssembler &masm)
     Address capacity(scratchReg, ObjectElements::offsetOfCapacity());
     masm.branch32(Assembler::BelowOrEqual, capacity, key, &failure);
 
+    // Check for copy on write elements.
+    Address elementsFlags(scratchReg, ObjectElements::offsetOfFlags());
+    masm.branchTest32(Assembler::NonZero, elementsFlags,
+                      Imm32(ObjectElements::COPY_ON_WRITE),
+                      &failure);
+
     // Failure is not possible now.  Free up registers.
     regs.add(R0);
     regs.add(R1);
@@ -5449,7 +5467,6 @@ ICSetElemDenseAddCompiler::generateStubCode(MacroAssembler &masm)
     // case the heap typeset is guaranteed to contain both int32 and double, so
     // it's okay to store a double.
     Label dontConvertDoubles;
-    Address elementsFlags(scratchReg, ObjectElements::offsetOfFlags());
     masm.branchTest32(Assembler::Zero, elementsFlags,
                       Imm32(ObjectElements::CONVERT_DOUBLE_ELEMENTS),
                       &dontConvertDoubles);
@@ -8521,8 +8538,12 @@ ICCallStubCompiler::guardSpreadCall(MacroAssembler &masm, Register argcReg, Labe
     masm.loadPtr(Address(argcReg, JSObject::offsetOfElements()), argcReg);
     masm.load32(Address(argcReg, ObjectElements::offsetOfLength()), argcReg);
 
-    // Ensure actual argc <= ARGS_LENGTH_MAX
-    masm.branch32(Assembler::Above, argcReg, Imm32(ARGS_LENGTH_MAX), failure);
+    // Limit actual argc to something reasonable (huge number of arguments can
+    // blow the stack limit).
+    static_assert(ICCall_Scripted::MAX_ARGS_SPREAD_LENGTH <= ARGS_LENGTH_MAX,
+                  "maximum arguments length for optimized stub should be <= ARGS_LENGTH_MAX");
+    masm.branch32(Assembler::Above, argcReg, Imm32(ICCall_Scripted::MAX_ARGS_SPREAD_LENGTH),
+                  failure);
 }
 
 void

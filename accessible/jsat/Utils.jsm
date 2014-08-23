@@ -255,15 +255,6 @@ this.Utils = { // jshint ignore:line
     }
   },
 
-  getViewport: function getViewport(aWindow) {
-    switch (this.MozBuildApp) {
-      case 'mobile/android':
-        return aWindow.BrowserApp.selectedTab.getViewport();
-      default:
-        return null;
-    }
-  },
-
   getState: function getState(aAccessibleOrEvent) {
     if (aAccessibleOrEvent instanceof Ci.nsIAccessibleStateChangeEvent) {
       return new State(
@@ -302,18 +293,37 @@ this.Utils = { // jshint ignore:line
     return doc.QueryInterface(Ci.nsIAccessibleDocument).virtualCursor;
   },
 
-  getBounds: function getBounds(aAccessible) {
-      let objX = {}, objY = {}, objW = {}, objH = {};
-      aAccessible.getBounds(objX, objY, objW, objH);
-      return new Rect(objX.value, objY.value, objW.value, objH.value);
+  getContentResolution: function _getContentResolution(aAccessible) {
+    let resX = { value: 1 }, resY = { value: 1 };
+    aAccessible.document.window.QueryInterface(
+      Ci.nsIInterfaceRequestor).getInterface(
+      Ci.nsIDOMWindowUtils).getResolution(resX, resY);
+    return [resX.value, resY.value];
   },
 
-  getTextBounds: function getTextBounds(aAccessible, aStart, aEnd) {
-      let accText = aAccessible.QueryInterface(Ci.nsIAccessibleText);
-      let objX = {}, objY = {}, objW = {}, objH = {};
-      accText.getRangeExtents(aStart, aEnd, objX, objY, objW, objH,
-        Ci.nsIAccessibleCoordinateType.COORDTYPE_SCREEN_RELATIVE);
-      return new Rect(objX.value, objY.value, objW.value, objH.value);
+  getBounds: function getBounds(aAccessible, aPreserveContentScale) {
+    let objX = {}, objY = {}, objW = {}, objH = {};
+    aAccessible.getBounds(objX, objY, objW, objH);
+
+    let [scaleX, scaleY] = aPreserveContentScale ? [1, 1] :
+      this.getContentResolution(aAccessible);
+
+    return new Rect(objX.value, objY.value, objW.value, objH.value).scale(
+      scaleX, scaleY);
+  },
+
+  getTextBounds: function getTextBounds(aAccessible, aStart, aEnd,
+                                        aPreserveContentScale) {
+    let accText = aAccessible.QueryInterface(Ci.nsIAccessibleText);
+    let objX = {}, objY = {}, objW = {}, objH = {};
+    accText.getRangeExtents(aStart, aEnd, objX, objY, objW, objH,
+      Ci.nsIAccessibleCoordinateType.COORDTYPE_SCREEN_RELATIVE);
+
+    let [scaleX, scaleY] = aPreserveContentScale ? [1, 1] :
+      this.getContentResolution(aAccessible);
+
+    return new Rect(objX.value, objY.value, objW.value, objH.value).scale(
+      scaleX, scaleY);
   },
 
   /**
@@ -422,6 +432,28 @@ this.Utils = { // jshint ignore:line
 
     return parent.role === Roles.LISTITEM && parent.childCount > 1 &&
       aStaticText.indexInParent === 0;
+  },
+
+  dispatchChromeEvent: function dispatchChromeEvent(aType, aDetails) {
+    let details = {
+      type: aType,
+      details: JSON.stringify(
+        typeof aDetails === 'string' ? { eventType : aDetails } : aDetails)
+    };
+    let window = this.win;
+    if (window.shell) {
+      // On B2G device.
+      window.shell.sendChromeEvent(details);
+    } else {
+      // Dispatch custom event to have support for desktop and screen reader
+      // emulator add-on.
+      window.dispatchEvent(new window.CustomEvent(aType, {
+        bubbles: true,
+        cancelable: true,
+        detail: details
+      }));
+    }
+
   }
 };
 
@@ -451,11 +483,12 @@ State.prototype = {
 };
 
 this.Logger = { // jshint ignore:line
+  GESTURE: -1,
   DEBUG: 0,
   INFO: 1,
   WARNING: 2,
   ERROR: 3,
-  _LEVEL_NAMES: ['DEBUG', 'INFO', 'WARNING', 'ERROR'],
+  _LEVEL_NAMES: ['GESTURE', 'DEBUG', 'INFO', 'WARNING', 'ERROR'],
 
   logLevel: 1, // INFO;
 
@@ -468,7 +501,7 @@ this.Logger = { // jshint ignore:line
 
     let args = Array.prototype.slice.call(arguments, 1);
     let message = (typeof(args[0]) === 'function' ? args[0]() : args).join(' ');
-    message = '[' + Utils.ScriptName + '] ' + this._LEVEL_NAMES[aLogLevel] +
+    message = '[' + Utils.ScriptName + '] ' + this._LEVEL_NAMES[aLogLevel + 1] +
       ' ' + message + '\n';
     dump(message);
     // Note: used for testing purposes. If |this.test| is true, also log to
@@ -485,6 +518,11 @@ this.Logger = { // jshint ignore:line
   info: function info() {
     this.log.apply(
       this, [this.INFO].concat(Array.prototype.slice.call(arguments)));
+  },
+
+  gesture: function gesture() {
+    this.log.apply(
+      this, [this.GESTURE].concat(Array.prototype.slice.call(arguments)));
   },
 
   debug: function debug() {
@@ -530,14 +568,16 @@ this.Logger = { // jshint ignore:line
   },
 
   accessibleToString: function accessibleToString(aAccessible) {
-    let str = '[ defunct ]';
-    try {
-      str = '[ ' + Utils.AccRetrieval.getStringRole(aAccessible.role) +
-        ' | ' + aAccessible.name + ' ]';
-    } catch (x) {
+    if (!aAccessible) {
+      return '[ null ]';
     }
 
-    return str;
+    try {
+      return'[ ' + Utils.AccRetrieval.getStringRole(aAccessible.role) +
+        ' | ' + aAccessible.name + ' ]';
+    } catch (x) {
+      return '[ defunct ]';
+    }
   },
 
   eventToString: function eventToString(aEvent) {

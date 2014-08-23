@@ -401,6 +401,21 @@ bool
 ArrayPushDense(JSContext *cx, HandleObject obj, HandleValue v, uint32_t *length)
 {
     JS_ASSERT(obj->is<ArrayObject>());
+    JS_ASSERT(obj->as<ArrayObject>().lengthIsWritable());
+    JS_ASSERT(!ObjectMayHaveExtraIndexedProperties(obj));
+
+    uint32_t idx = obj->as<ArrayObject>().length();
+    JSObject::EnsureDenseResult result = obj->ensureDenseElements(cx, idx, 1);
+    if (result == JSObject::ED_FAILED)
+        return false;
+
+    if (result == JSObject::ED_OK) {
+        obj->setDenseElement(idx, v);
+        MOZ_ASSERT(idx < INT32_MAX);
+        *length = idx + 1;
+        obj->as<ArrayObject>().setLengthInt32(*length);
+        return true;
+    }
 
     JS::AutoValueArray<3> argv(cx);
     argv[0].setUndefined();
@@ -456,6 +471,44 @@ ArrayConcatDense(JSContext *cx, HandleObject obj1, HandleObject obj2, HandleObje
         return nullptr;
     return &argv[0].toObject();
 }
+
+JSString *
+ArrayJoin(JSContext *cx, HandleObject array, HandleString sep)
+{
+    // The annotations in this function follow the first steps of join
+    // specified in ES5.
+
+    // Step 1
+    RootedObject obj(cx, array);
+    if (!obj)
+        return nullptr;
+
+    AutoCycleDetector detector(cx, obj);
+    if (!detector.init())
+        return nullptr;
+
+    if (detector.foundCycle())
+        return nullptr;
+
+    // Steps 2 and 3
+    uint32_t length;
+    if (!GetLengthProperty(cx, obj, &length))
+        return nullptr;
+
+    // Steps 4 and 5
+    RootedLinearString sepstr(cx);
+    if (sep) {
+        sepstr = sep->ensureLinear(cx);
+        if (!sepstr)
+            return nullptr;
+    } else {
+        sepstr = cx->names().comma;
+    }
+
+    // Step 6 to 11
+    return js::ArrayJoin<false>(cx, obj, sepstr, length);
+}
+
 
 bool
 CharCodeAt(JSContext *cx, HandleString str, int32_t index, uint32_t *code)

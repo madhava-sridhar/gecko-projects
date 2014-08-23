@@ -8,28 +8,30 @@
 
 #include "AudioSampleFormat.h"
 #include "nsAutoPtr.h"
-#include "nsAutoRef.h"
 #include "nsCOMPtr.h"
 #include "nsThreadUtils.h"
 #include "Latency.h"
 #include "mozilla/dom/AudioChannelBinding.h"
-#include "mozilla/StaticMutex.h"
 #include "mozilla/RefPtr.h"
+#include "mozilla/StaticMutex.h"
+#include "mozilla/UniquePtr.h"
 
 #include "cubeb/cubeb.h"
-
-template <>
-class nsAutoRefTraits<cubeb_stream> : public nsPointerRefTraits<cubeb_stream>
-{
-public:
-  static void Release(cubeb_stream* aStream) { cubeb_stream_destroy(aStream); }
-};
 
 namespace soundtouch {
 class SoundTouch;
 }
 
 namespace mozilla {
+
+template<>
+struct DefaultDelete<cubeb_stream>
+{
+  void operator()(cubeb_stream* aStream) const
+  {
+    cubeb_stream_destroy(aStream);
+  }
+};
 
 class AudioStream;
 class FrameHistory;
@@ -299,6 +301,7 @@ private:
   // So we can call it asynchronously from AudioInitTask
   nsresult OpenCubeb(cubeb_stream_params &aParams,
                      LatencyRequest aLatencyRequest);
+  void AudioInitTaskFinished();
 
   void CheckForStart();
 
@@ -386,9 +389,8 @@ private:
   // frames.
   CircularByteBuffer mBuffer;
 
-  // Owning reference to a cubeb_stream.  cubeb_stream_destroy is called by
-  // nsAutoRef's destructor.
-  nsAutoRef<cubeb_stream> mCubebStream;
+  // Owning reference to a cubeb_stream.
+  UniquePtr<cubeb_stream> mCubebStream;
 
   uint32_t mBytesPerFrame;
 
@@ -425,6 +427,9 @@ private:
   // is not going to be called for a little while, simply drop incoming frames.
   // This is only on OSX for now, because other systems handle this gracefully.
   bool mShouldDropFrames;
+  // True if there is a pending AudioInitTask. Shutdown() will wait until the
+  // pending AudioInitTask is finished.
+  bool mPendingAudioInitTask;
 
   // This mutex protects the static members below.
   static StaticMutex sMutex;

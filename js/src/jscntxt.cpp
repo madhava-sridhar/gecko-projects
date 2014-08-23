@@ -87,10 +87,11 @@ void
 js::TraceCycleDetectionSet(JSTracer *trc, js::ObjectSet &set)
 {
     for (js::ObjectSet::Enum e(set); !e.empty(); e.popFront()) {
-        JSObject *prior = e.front();
-        MarkObjectRoot(trc, const_cast<JSObject **>(&e.front()), "cycle detector table entry");
-        if (prior != e.front())
-            e.rekeyFront(e.front());
+        JSObject *key = e.front();
+        trc->setTracingLocation((void *)&e.front());
+        MarkObjectRoot(trc, &key, "cycle detector table entry");
+        if (key != e.front())
+            e.rekeyFront(key);
     }
 }
 
@@ -100,9 +101,13 @@ JSCompartment::sweepCallsiteClones()
     if (callsiteClones.initialized()) {
         for (CallsiteCloneTable::Enum e(callsiteClones); !e.empty(); e.popFront()) {
             CallsiteCloneKey key = e.front().key();
-            JSFunction *fun = e.front().value();
-            if (!IsScriptMarked(&key.script) || !IsObjectMarked(&fun))
+            if (IsObjectAboutToBeFinalized(&key.original) || IsScriptAboutToBeFinalized(&key.script) ||
+                IsObjectAboutToBeFinalized(e.front().value().unsafeGet()))
+            {
                 e.removeFront();
+            } else if (key != e.front().key()) {
+                e.rekeyFront(key);
+            }
         }
     }
 }
@@ -136,6 +141,10 @@ js::CloneFunctionAtCallsite(JSContext *cx, HandleFunction fun, HandleScript scri
 {
     if (JSFunction *clone = ExistingCloneFunctionAtCallsite(cx->compartment()->callsiteClones, fun, script, pc))
         return clone;
+
+    MOZ_ASSERT(fun->isSelfHostedBuiltin(),
+               "only self-hosted builtin functions may be cloned at call sites, and "
+               "Function.prototype.caller relies on this");
 
     RootedObject parent(cx, fun->environment());
     JSFunction *clone = CloneFunctionObject(cx, fun, parent);
@@ -251,7 +260,7 @@ js::DestroyContext(JSContext *cx, DestroyContextMode mode)
     if (mode == DCM_FORCE_GC) {
         JS_ASSERT(!rt->isHeapBusy());
         JS::PrepareForFullGC(rt);
-        GC(rt, GC_NORMAL, JS::gcreason::DESTROY_CONTEXT);
+        rt->gc.gc(GC_NORMAL, JS::gcreason::DESTROY_CONTEXT);
     }
     js_delete_poison(cx);
 }
@@ -955,7 +964,7 @@ js_ReportValueErrorFlags(JSContext *cx, unsigned flags, const unsigned errorNumb
 }
 
 const JSErrorFormatString js_ErrorFormatString[JSErr_Limit] = {
-#define MSG_DEF(name, number, count, exception, format) \
+#define MSG_DEF(name, count, exception, format) \
     { format, count, exception } ,
 #include "js.msg"
 #undef MSG_DEF
@@ -986,7 +995,7 @@ js::InvokeInterruptCallback(JSContext *cx)
     // callbacks.
     rt->resetJitStackLimit();
 
-    js::gc::GCIfNeeded(cx);
+    cx->gcIfNeeded();
 
     rt->interruptPar = false;
 
@@ -1098,7 +1107,6 @@ JSContext::JSContext(JSRuntime *rt)
     resolvingList(nullptr),
     generatingError(false),
     savedFrameChains_(),
-    defaultCompartmentObject_(nullptr),
     cycleDetectorSet(MOZ_THIS_IN_INITIALIZER_LIST()),
     errorReporter(nullptr),
     data(nullptr),
@@ -1158,12 +1166,6 @@ JSContext::leaveGenerator(JSGenerator *gen)
     gen->prevGenerator = nullptr;
 }
 
-
-bool
-JSContext::runningWithTrustedPrincipals() const
-{
-    return !compartment() || compartment()->principals == runtime()->trustedPrincipals();
-}
 
 bool
 JSContext::saveFrameChain()
@@ -1301,8 +1303,6 @@ JSContext::mark(JSTracer *trc)
     /* Stack frames and slots are traced by StackSpace::mark. */
 
     /* Mark other roots-by-definition in the JSContext. */
-    if (defaultCompartmentObject_)
-        MarkObjectRoot(trc, &defaultCompartmentObject_, "default compartment object");
     if (isExceptionPending())
         MarkValueRoot(trc, &unwrappedException_, "unwrapped exception");
 

@@ -9,6 +9,8 @@
 #include "jit/IonSpewer.h"
 
 #include "jit/Ion.h"
+#include "jit/MIR.h"
+
 #include "vm/HelperThreads.h"
 
 #ifndef ION_SPEW_DIR
@@ -234,6 +236,7 @@ jit::CheckLogging()
             "  aborts     Compilation abort messages\n"
             "  scripts    Compiled scripts\n"
             "  mir        MIR information\n"
+            "  escape     Escape analysis\n"
             "  alias      Alias analysis\n"
             "  gvn        Global Value Numbering\n"
             "  licm       Loop invariant code motion\n"
@@ -250,6 +253,7 @@ jit::CheckLogging()
             "  range      Range Analysis\n"
             "  unroll     Loop unrolling\n"
             "  logs       C1 and JSON visualization logging\n"
+            "  profiling  Profiling-related information\n"
             "  all        Everything\n"
             "\n"
             "  bl-aborts  Baseline compiler abort messages\n"
@@ -268,6 +272,8 @@ jit::CheckLogging()
     }
     if (ContainsFlag(env, "aborts"))
         EnableChannel(IonSpew_Abort);
+    if (ContainsFlag(env, "escape"))
+        EnableChannel(IonSpew_Escape);
     if (ContainsFlag(env, "alias"))
         EnableChannel(IonSpew_Alias);
     if (ContainsFlag(env, "scripts"))
@@ -304,6 +310,8 @@ jit::CheckLogging()
         EnableChannel(IonSpew_CacheFlush);
     if (ContainsFlag(env, "logs"))
         EnableIonDebugLogging();
+    if (ContainsFlag(env, "profiling"))
+        EnableChannel(IonSpew_Profiling);
     if (ContainsFlag(env, "all"))
         LoggingBits = uint32_t(-1);
 
@@ -379,6 +387,18 @@ jit::IonSpew(IonSpewChannel channel, const char *fmt, ...)
     va_start(ap, fmt);
     IonSpewVA(channel, fmt, ap);
     va_end(ap);
+}
+
+void
+jit::IonSpewDef(IonSpewChannel channel, const char *str, MDefinition *def)
+{
+    if (!IonSpewEnabled(channel))
+        return;
+
+    IonSpewHeader(channel);
+    fprintf(IonSpewFile, "%s", str);
+    def->dump(IonSpewFile);
+    def->dumpLocation(IonSpewFile);
 }
 
 void

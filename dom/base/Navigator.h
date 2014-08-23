@@ -36,6 +36,7 @@ struct MediaStreamConstraints;
 class WakeLock;
 class ArrayBufferViewOrBlobOrStringOrFormData;
 struct MobileIdOptions;
+class ServiceWorkerContainer;
 }
 }
 
@@ -104,13 +105,9 @@ class AudioChannelManager;
 #endif
 } // namespace system
 
-namespace workers {
-class ServiceWorkerContainer;
-} // namespace workers
-
-class Navigator : public nsIDOMNavigator
-                , public nsIMozNavigatorNetwork
-                , public nsWrapperCache
+class Navigator MOZ_FINAL : public nsIDOMNavigator
+                          , public nsIMozNavigatorNetwork
+                          , public nsWrapperCache
 {
 public:
   Navigator(nsPIDOMWindow *aInnerWindow);
@@ -170,6 +167,9 @@ public:
 
   // Feature Detection API
   already_AddRefed<Promise> GetFeature(const nsAString& aName,
+                                       ErrorResult& aRv);
+
+  already_AddRefed<Promise> HasFeature(const nsAString &aName,
                                        ErrorResult& aRv);
 
   bool Vibrate(uint32_t aDuration);
@@ -259,7 +259,7 @@ public:
                               ErrorResult& aRv);
 #endif // MOZ_MEDIA_NAVIGATOR
 
-  already_AddRefed<workers::ServiceWorkerContainer> ServiceWorker();
+  already_AddRefed<ServiceWorkerContainer> ServiceWorker();
 
   bool DoNewResolve(JSContext* aCx, JS::Handle<JSObject*> aObject,
                     JS::Handle<jsid> aId,
@@ -337,7 +337,7 @@ private:
   nsCOMPtr<nsIDOMNavigatorSystemMessages> mMessagesManager;
   nsTArray<nsRefPtr<nsDOMDeviceStorage> > mDeviceStorageStores;
   nsRefPtr<time::TimeManager> mTimeManager;
-  nsRefPtr<workers::ServiceWorkerContainer> mServiceWorkerContainer;
+  nsRefPtr<ServiceWorkerContainer> mServiceWorkerContainer;
   nsCOMPtr<nsPIDOMWindow> mWindow;
 
   // Hashtable for saving cached objects newresolve created, so we don't create

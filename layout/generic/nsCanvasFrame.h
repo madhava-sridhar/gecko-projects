@@ -25,9 +25,9 @@ class nsRenderingContext;
  * It only supports having a single child frame which must be an area
  * frame
  */
-class nsCanvasFrame : public nsContainerFrame,
-                      public nsIScrollPositionListener,
-                      public nsIAnonymousContentCreator
+class nsCanvasFrame MOZ_FINAL : public nsContainerFrame,
+                                public nsIScrollPositionListener,
+                                public nsIAnonymousContentCreator
 {
 public:
   nsCanvasFrame(nsStyleContext* aContext)
@@ -68,7 +68,7 @@ public:
 
   // nsIAnonymousContentCreator
   virtual nsresult CreateAnonymousContent(nsTArray<ContentInfo>& aElements) MOZ_OVERRIDE;
-  virtual void AppendAnonymousContentTo(nsBaseContentList& aElements, uint32_t aFilter) MOZ_OVERRIDE;
+  virtual void AppendAnonymousContentTo(nsTArray<nsIContent*>& aElements, uint32_t aFilter) MOZ_OVERRIDE;
 
   // Touch caret handle function
   mozilla::dom::Element* GetTouchCaretElement() const

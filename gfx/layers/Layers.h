@@ -343,7 +343,8 @@ public:
 
   /**
    * Returns a list of all descendant layers for which
-   * GetFrameMetrics().IsScrollable() is true.
+   * GetFrameMetrics().IsScrollable() is true and that
+   * do not already have an ancestor in the return list.
    */
   void GetScrollableLayers(nsTArray<Layer*>& aArray);
 
@@ -814,6 +815,36 @@ public:
     }
   }
 
+  /**
+   * CONSTRUCTION PHASE ONLY
+   * Set the (sub)document metrics used to render the Layer subtree
+   * rooted at this.
+   */
+  void SetFrameMetrics(const FrameMetrics& aFrameMetrics)
+  {
+    if (mFrameMetrics != aFrameMetrics) {
+      MOZ_LAYERS_LOG_IF_SHADOWABLE(this, ("Layer::Mutated(%p) FrameMetrics", this));
+      mFrameMetrics = aFrameMetrics;
+      Mutated();
+    }
+  }
+
+  /**
+   * CONSTRUCTION PHASE ONLY
+   * Set the ViewID of the ContainerLayer to which overscroll should be handed
+   * off. A value of NULL_SCROLL_ID means that the default handoff-parent-finding
+   * behaviour should be used (i.e. walk up the layer tree to find the next
+   * scrollable ancestor layer).
+   */
+  void SetScrollHandoffParentId(FrameMetrics::ViewID aScrollParentId)
+  {
+    if (mScrollHandoffParentId != aScrollParentId) {
+      MOZ_LAYERS_LOG_IF_SHADOWABLE(this, ("Layer::Mutated(%p) ScrollHandoffParentId", this));
+      mScrollHandoffParentId = aScrollParentId;
+      Mutated();
+    }
+  }
+
   /*
    * Compositor event handling
    * =========================
@@ -1114,12 +1145,36 @@ public:
     }
   }
 
+  void SetBackgroundColor(const gfxRGBA& aColor)
+  {
+    if (mBackgroundColor == aColor) {
+      return;
+    }
+
+    MOZ_LAYERS_LOG_IF_SHADOWABLE(this, ("Layer::Mutated(%p) BackgroundColor", this));
+    mBackgroundColor = aColor;
+    Mutated();
+  }
+
+  void SetContentDescription(const std::string& aContentDescription)
+  {
+    if (mContentDescription == aContentDescription) {
+      return;
+    }
+
+    MOZ_LAYERS_LOG_IF_SHADOWABLE(this, ("Layer::Mutated(%p) ContentDescription", this));
+    mContentDescription = aContentDescription;
+    Mutated();
+  }
+
   // These getters can be used anytime.
   float GetOpacity() { return mOpacity; }
   gfx::CompositionOp GetMixBlendMode() const { return mMixBlendMode; }
   const nsIntRect* GetClipRect() { return mUseClipRect ? &mClipRect : nullptr; }
   uint32_t GetContentFlags() { return mContentFlags; }
-  const nsIntRegion& GetVisibleRegion() { return mVisibleRegion; }
+  const nsIntRegion& GetVisibleRegion() const { return mVisibleRegion; }
+  const FrameMetrics& GetFrameMetrics() const { return mFrameMetrics; }
+  FrameMetrics::ViewID GetScrollHandoffParentId() const { return mScrollHandoffParentId; }
   const EventRegions& GetEventRegions() const { return mEventRegions; }
   ContainerLayer* GetParent() { return mParent; }
   Layer* GetNextSibling() { return mNextSibling; }
@@ -1142,6 +1197,9 @@ public:
   FrameMetrics::ViewID GetScrollbarTargetContainerId() { return mScrollbarTargetId; }
   ScrollDirection GetScrollbarDirection() { return mScrollbarDirection; }
   Layer* GetMaskLayer() const { return mMaskLayer; }
+  gfxRGBA GetBackgroundColor() const { return mBackgroundColor; }
+  const std::string& GetContentDescription() const { return mContentDescription; }
+
 
   // Note that all lengths in animation data are either in CSS pixels or app
   // units and must be converted to device pixels by the compositor.
@@ -1331,8 +1389,8 @@ public:
    * by aWorldTransform before being combined with aCurrentScissorRect, if
    * aWorldTransform is non-null.
    */
-  nsIntRect CalculateScissorRect(const nsIntRect& aCurrentScissorRect,
-                                 const gfx::Matrix* aWorldTransform);
+  RenderTargetIntRect CalculateScissorRect(const RenderTargetIntRect& aCurrentScissorRect,
+                                           const gfx::Matrix* aWorldTransform);
 
   virtual const char* Name() const =0;
   virtual LayerType GetType() const =0;
@@ -1414,6 +1472,12 @@ public:
    */
   void ClearInvalidRect() { mInvalidRegion.SetEmpty(); }
 
+  // These functions allow attaching an AsyncPanZoomController to this layer,
+  // and can be used anytime.
+  // A layer has an APZC only-if GetFrameMetrics().IsScrollable()
+  void SetAsyncPanZoomController(AsyncPanZoomController *controller);
+  AsyncPanZoomController* GetAsyncPanZoomController() const;
+
   void ApplyPendingUpdatesForThisTransaction();
 
 #ifdef DEBUG
@@ -1422,7 +1486,6 @@ public:
 #endif
 
   virtual LayerRenderState GetRenderState() { return LayerRenderState(); }
-
 
   void Mutated()
   {
@@ -1438,6 +1501,8 @@ public:
    * transaction.
    */
   bool MayResample();
+
+  RenderTargetRect TransformRectToRenderTarget(const LayerIntRect& aRect);
 
 protected:
   Layer(LayerManager* aManager, void* aImplData);
@@ -1495,6 +1560,8 @@ protected:
   nsRefPtr<Layer> mMaskLayer;
   gfx::UserData mUserData;
   nsIntRegion mVisibleRegion;
+  FrameMetrics mFrameMetrics;
+  FrameMetrics::ViewID mScrollHandoffParentId;
   EventRegions mEventRegions;
   gfx::Matrix4x4 mTransform;
   // A mutation of |mTransform| that we've queued to be applied at the
@@ -1514,6 +1581,7 @@ protected:
   nsIntRect mClipRect;
   nsIntRect mTileSourceRect;
   nsIntRegion mInvalidRegion;
+  nsRefPtr<AsyncPanZoomController> mAPZC;
   uint32_t mContentFlags;
   bool mUseClipRect;
   bool mUseTileSourceRect;
@@ -1532,6 +1600,12 @@ protected:
   // If this layer is used for OMTA, then this counter is used to ensure we
   // stay in sync with the animation manager
   uint64_t mAnimationGeneration;
+  // This is currently set and used only for scrollable container layers.
+  gfxRGBA mBackgroundColor;
+  // A description of the content element corresponding to this frame.
+  // This is empty unless this is a scrollable ContainerLayer and the
+  // apz.printtree pref is turned on.
+  std::string mContentDescription;
 };
 
 /**
@@ -1681,42 +1755,6 @@ public:
    */
   virtual bool RepositionChild(Layer* aChild, Layer* aAfter);
 
-  /**
-   * CONSTRUCTION PHASE ONLY
-   * Set the (sub)document metrics used to render the Layer subtree
-   * rooted at this.
-   */
-  void SetFrameMetrics(const FrameMetrics& aFrameMetrics)
-  {
-    if (mFrameMetrics != aFrameMetrics) {
-      MOZ_LAYERS_LOG_IF_SHADOWABLE(this, ("Layer::Mutated(%p) FrameMetrics", this));
-      mFrameMetrics = aFrameMetrics;
-      Mutated();
-    }
-  }
-
-  // These functions allow attaching an AsyncPanZoomController to this layer,
-  // and can be used anytime.
-  // A container layer has an APZC only-if GetFrameMetrics().IsScrollable()
-  void SetAsyncPanZoomController(AsyncPanZoomController *controller);
-  AsyncPanZoomController* GetAsyncPanZoomController() const;
-
-  /**
-   * CONSTRUCTION PHASE ONLY
-   * Set the ViewID of the ContainerLayer to which overscroll should be handed
-   * off. A value of NULL_SCROLL_ID means that the default handoff-parent-finding
-   * behaviour should be used (i.e. walk up the layer tree to find the next
-   * scrollable ancestor layer).
-   */
-  void SetScrollHandoffParentId(FrameMetrics::ViewID aScrollParentId)
-  {
-    if (mScrollHandoffParentId != aScrollParentId) {
-      MOZ_LAYERS_LOG_IF_SHADOWABLE(this, ("Layer::Mutated(%p) ScrollHandoffParentId", this));
-      mScrollHandoffParentId = aScrollParentId;
-      Mutated();
-    }
-  }
-
   void SetPreScale(float aXScale, float aYScale)
   {
     if (mPreXScale == aXScale && mPreYScale == aYScale) {
@@ -1741,28 +1779,6 @@ public:
     Mutated();
   }
 
-  void SetBackgroundColor(const gfxRGBA& aColor)
-  {
-    if (mBackgroundColor == aColor) {
-      return;
-    }
-
-    MOZ_LAYERS_LOG_IF_SHADOWABLE(this, ("Layer::Mutated(%p) BackgroundColor", this));
-    mBackgroundColor = aColor;
-    Mutated();
-  }
-
-  void SetContentDescription(const std::string& aContentDescription)
-  {
-    if (mContentDescription == aContentDescription) {
-      return;
-    }
-
-    MOZ_LAYERS_LOG_IF_SHADOWABLE(this, ("Layer::Mutated(%p) ContentDescription", this));
-    mContentDescription = aContentDescription;
-    Mutated();
-  }
-
   virtual void FillSpecificAttributes(SpecificLayerAttributes& aAttrs);
 
   void SortChildrenBy3DZOrder(nsTArray<Layer*>& aArray);
@@ -1774,15 +1790,10 @@ public:
 
   virtual Layer* GetFirstChild() const { return mFirstChild; }
   virtual Layer* GetLastChild() const { return mLastChild; }
-  const FrameMetrics& GetFrameMetrics() const { return mFrameMetrics; }
-  FrameMetrics::ViewID GetScrollHandoffParentId() const { return mScrollHandoffParentId; }
   float GetPreXScale() const { return mPreXScale; }
   float GetPreYScale() const { return mPreYScale; }
   float GetInheritedXScale() const { return mInheritedXScale; }
   float GetInheritedYScale() const { return mInheritedYScale; }
-
-  gfxRGBA GetBackgroundColor() const { return mBackgroundColor; }
-  const std::string& GetContentDescription() const { return mContentDescription; }
 
   MOZ_LAYER_DECL_NAME("ContainerLayer", TYPE_CONTAINER)
 
@@ -1804,12 +1815,15 @@ public:
 
   /**
    * Returns the rectangle covered by the intermediate surface,
-   * in this layer's coordinate system
+   * in this layer's coordinate system.
+   *
+   * NOTE: Since this layer has an intermediate surface it follows
+   *       that LayerPixel == RenderTargetPixel
    */
-  nsIntRect GetIntermediateSurfaceRect()
+  RenderTargetIntRect GetIntermediateSurfaceRect()
   {
     NS_ASSERTION(mUseIntermediateSurface, "Must have intermediate surface");
-    return mVisibleRegion.GetBounds();
+    return RenderTargetPixel::FromUntyped(mVisibleRegion.GetBounds());
   }
 
   /**
@@ -1862,23 +1876,12 @@ protected:
 
   Layer* mFirstChild;
   Layer* mLastChild;
-  FrameMetrics mFrameMetrics;
-  nsRefPtr<AsyncPanZoomController> mAPZC;
-  FrameMetrics::ViewID mScrollHandoffParentId;
   float mPreXScale;
   float mPreYScale;
   // The resolution scale inherited from the parent layer. This will already
   // be part of mTransform.
   float mInheritedXScale;
   float mInheritedYScale;
-  // This is currently set and used only for scrollable container layers.
-  // When multi-layer-apz (bug 967844) is implemented, this is likely to move
-  // elsewhere (e.g. to Layer).
-  gfxRGBA mBackgroundColor;
-  // A description of the content element corresponding to this frame.
-  // This is empty unless this ContainerLayer is scrollable and the
-  // apz.printtree pref is turned on.
-  std::string mContentDescription;
   bool mUseIntermediateSurface;
   bool mSupportsComponentAlphaChildren;
   bool mMayHaveReadbackChild;
@@ -2156,7 +2159,7 @@ private:
   virtual bool RepositionChild(Layer* aChild, Layer* aAfter)
   { MOZ_CRASH(); return false; }
 
-  using ContainerLayer::SetFrameMetrics;
+  using Layer::SetFrameMetrics;
 
 public:
   /**
@@ -2233,6 +2236,9 @@ void WriteSnapshotToDumpFile(Layer* aLayer, gfx::DataSourceSurface* aSurf);
 void WriteSnapshotToDumpFile(LayerManager* aManager, gfx::DataSourceSurface* aSurf);
 void WriteSnapshotToDumpFile(Compositor* aCompositor, gfx::DrawTarget* aTarget);
 #endif
+
+// A utility function used by different LayerManager implementations.
+nsIntRect ToOutsideIntRect(const gfxRect &aRect);
 
 }
 }

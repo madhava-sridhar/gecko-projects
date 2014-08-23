@@ -277,7 +277,9 @@ Tools.jsprofiler = {
   inMenu: true,
 
   isTargetSupported: function (target) {
-    return !target.isAddon;
+    // Hide the profiler when debugging devices pre bug 1046394,
+    // that don't expose profiler actor in content processes.
+    return !target.isAddon && (!target.isApp || target.form.profilerActor);
   },
 
   build: function (frame, target) {
@@ -355,12 +357,40 @@ for (let definition of defaultTools) {
   gDevTools.registerTool(definition);
 }
 
+Tools.darkTheme = {
+  id: "dark",
+  label: l10n("options.darkTheme.label", toolboxStrings),
+  ordinal: 1,
+  stylesheets: ["chrome://browser/skin/devtools/dark-theme.css"],
+  classList: ["theme-dark"],
+};
+
+Tools.lightTheme = {
+  id: "light",
+  label: l10n("options.lightTheme.label", toolboxStrings),
+  ordinal: 2,
+  stylesheets: ["chrome://browser/skin/devtools/light-theme.css"],
+  classList: ["theme-light"],
+};
+
+let defaultThemes = [
+  Tools.darkTheme,
+  Tools.lightTheme,
+];
+
+for (let definition of defaultThemes) {
+  gDevTools.registerTheme(definition);
+}
+
 var unloadObserver = {
   observe: function(subject, topic, data) {
     if (subject.wrappedJSObject === require("@loader/unload")) {
       Services.obs.removeObserver(unloadObserver, "sdk:loader:destroy");
       for (let definition of gDevTools.getToolDefinitionArray()) {
         gDevTools.unregisterTool(definition.id);
+      }
+      for (let definition of gDevTools.getThemeDefinitionArray()) {
+        gDevTools.unregisterTheme(definition.id);
       }
     }
   }

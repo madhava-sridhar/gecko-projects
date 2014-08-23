@@ -58,7 +58,7 @@ public:
 
   nsresult CreateAnonymousContent(
     nsTArray<nsIAnonymousContentCreator::ContentInfo>& aElements);
-  void AppendAnonymousContentTo(nsBaseContentList& aElements, uint32_t aFilter);
+  void AppendAnonymousContentTo(nsTArray<nsIContent*>& aElements, uint32_t aFilter);
   nsresult FireScrollPortEvent();
   void PostOverflowEvent();
   void Destroy();
@@ -544,7 +544,7 @@ public:
 
   // nsIAnonymousContentCreator
   virtual nsresult CreateAnonymousContent(nsTArray<ContentInfo>& aElements) MOZ_OVERRIDE;
-  virtual void AppendAnonymousContentTo(nsBaseContentList& aElements,
+  virtual void AppendAnonymousContentTo(nsTArray<nsIContent*>& aElements,
                                         uint32_t aFilter) MOZ_OVERRIDE;
 
   // nsIScrollbarOwner
@@ -767,10 +767,10 @@ private:
  * Scroll frames don't support incremental changes, i.e. you can't replace
  * or remove the scrolled frame
  */
-class nsXULScrollFrame : public nsBoxFrame,
-                         public nsIScrollableFrame,
-                         public nsIAnonymousContentCreator,
-                         public nsIStatefulFrame {
+class nsXULScrollFrame MOZ_FINAL : public nsBoxFrame,
+                                   public nsIScrollableFrame,
+                                   public nsIAnonymousContentCreator,
+                                   public nsIStatefulFrame {
 public:
   typedef mozilla::ScrollFrameHelper ScrollFrameHelper;
   typedef mozilla::CSSIntPoint CSSIntPoint;
@@ -833,7 +833,7 @@ public:
 
   // nsIAnonymousContentCreator
   virtual nsresult CreateAnonymousContent(nsTArray<ContentInfo>& aElements) MOZ_OVERRIDE;
-  virtual void AppendAnonymousContentTo(nsBaseContentList& aElements,
+  virtual void AppendAnonymousContentTo(nsTArray<nsIContent*>& aElements,
                                         uint32_t aFilter) MOZ_OVERRIDE;
 
   virtual nsSize GetMinSize(nsBoxLayoutState& aBoxLayoutState) MOZ_OVERRIDE;

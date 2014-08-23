@@ -16,17 +16,20 @@ let test = asyncTest(function*() {
   let editor = projecteditor.currentEditor;
   let originalText = editor.editor.getText();
 
+  ok (!projecteditor.hasUnsavedResources, "There are no unsaved resources");
   ok (projecteditor.confirmUnsaved(), "When there are no unsaved changes, confirmUnsaved() is true");
   editor.editor.setText("bar");
   editor.editor.setText(originalText);
+  ok (!projecteditor.hasUnsavedResources, "There are no unsaved resources");
   ok (projecteditor.confirmUnsaved(), "When an editor has changed but is still the original text, confirmUnsaved() is true");
 
   editor.editor.setText("bar");
 
-  checkConfirm(projecteditor);
+  checkConfirmYes(projecteditor);
+  checkConfirmNo(projecteditor);
 });
 
-function checkConfirm(projecteditor, container) {
+function checkConfirmYes(projecteditor, container) {
   function confirmYes(aSubject) {
     info("confirm dialog observed as expected, going to click OK");
     Services.obs.removeObserver(confirmYes, "common-dialog-loaded");
@@ -34,6 +37,14 @@ function checkConfirm(projecteditor, container) {
     aSubject.Dialog.ui.button0.click();
   }
 
+  Services.obs.addObserver(confirmYes, "common-dialog-loaded", false);
+  Services.obs.addObserver(confirmYes, "tabmodal-dialog-loaded", false);
+
+  ok (projecteditor.hasUnsavedResources, "There are unsaved resources");
+  ok (projecteditor.confirmUnsaved(), "When there are unsaved changes, clicking OK makes confirmUnsaved() true");
+}
+
+function checkConfirmNo(projecteditor, container) {
   function confirmNo(aSubject) {
     info("confirm dialog observed as expected, going to click cancel");
     Services.obs.removeObserver(confirmNo, "common-dialog-loaded");
@@ -41,13 +52,9 @@ function checkConfirm(projecteditor, container) {
     aSubject.Dialog.ui.button1.click();
   }
 
-  Services.obs.addObserver(confirmYes, "common-dialog-loaded", false);
-  Services.obs.addObserver(confirmYes, "tabmodal-dialog-loaded", false);
-
-  ok (projecteditor.confirmUnsaved(), "When there are no unsaved changes, clicking OK makes confirmUnsaved() true");
-
   Services.obs.addObserver(confirmNo, "common-dialog-loaded", false);
   Services.obs.addObserver(confirmNo, "tabmodal-dialog-loaded", false);
 
-  ok (!projecteditor.confirmUnsaved(), "When there are no unsaved changes, clicking cancel makes confirmUnsaved() false");
+  ok (projecteditor.hasUnsavedResources, "There are unsaved resources");
+  ok (!projecteditor.confirmUnsaved(), "When there are unsaved changes, clicking cancel makes confirmUnsaved() false");
 }
