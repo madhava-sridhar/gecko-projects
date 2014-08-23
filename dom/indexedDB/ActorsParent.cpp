@@ -3645,11 +3645,11 @@ public:
   void
   Reset()
   {
-    MOZ_ASSERT_IF(mStatement, !mScoper.empty());
+    MOZ_ASSERT_IF(mStatement, mScoper);
 
     if (mStatement) {
-      mScoper.destroy();
-      mScoper.construct(mStatement);
+      mScoper.reset();
+      mScoper.emplace(mStatement);
     }
   }
 
@@ -3658,12 +3658,12 @@ private:
   void
   Assign(already_AddRefed<mozIStorageStatement> aStatement)
   {
-    mScoper.destroyIfConstructed();
+    mScoper.reset();
 
     mStatement = aStatement;
 
     if (mStatement) {
-      mScoper.construct(mStatement);
+      mScoper.emplace(mStatement);
     }
   }
 
@@ -11257,8 +11257,8 @@ OpenDatabaseOp::LoadDatabaseInformation(mozIStorageConnection* aConnection)
       return rv;
     }
 
-    if (usedIds.empty()) {
-      usedIds.construct();
+    if (!usedIds) {
+      usedIds.emplace();
     }
 
     if (NS_WARN_IF(objectStoreId <= 0) ||
@@ -11276,8 +11276,8 @@ OpenDatabaseOp::LoadDatabaseInformation(mozIStorageConnection* aConnection)
       return rv;
     }
 
-    if (usedNames.empty()) {
-      usedNames.construct();
+    if (!usedNames) {
+      usedNames.emplace();
     }
 
     if (NS_WARN_IF(usedNames.ref().Contains(name))) {
@@ -11337,8 +11337,8 @@ OpenDatabaseOp::LoadDatabaseInformation(mozIStorageConnection* aConnection)
     return rv;
   }
 
-  usedIds.destroyIfConstructed();
-  usedNames.destroyIfConstructed();
+  usedIds.reset();
+  usedNames.reset();
 
   // Load index information
   rv = aConnection->CreateStatement(NS_LITERAL_CSTRING(
@@ -11372,8 +11372,8 @@ OpenDatabaseOp::LoadDatabaseInformation(mozIStorageConnection* aConnection)
       return rv;
     }
 
-    if (usedIds.empty()) {
-      usedIds.construct();
+    if (!usedIds) {
+      usedIds.emplace();
     }
 
     if (NS_WARN_IF(indexId <= 0) ||
@@ -11396,8 +11396,8 @@ OpenDatabaseOp::LoadDatabaseInformation(mozIStorageConnection* aConnection)
     hashName.Append(':');
     hashName.Append(name);
 
-    if (usedNames.empty()) {
-      usedNames.construct();
+    if (!usedNames) {
+      usedNames.emplace();
     }
 
     if (NS_WARN_IF(usedNames.ref().Contains(hashName))) {
@@ -13792,15 +13792,15 @@ CreateIndexOp::CreateIndexOp(VersionChangeTransaction* aTransaction,
     CopyUniqueValues(const IndexTable& aIndexes,
                      Maybe<UniqueIndexTable>& aMaybeUniqueIndexTable)
     {
-      aMaybeUniqueIndexTable.construct();
+      aMaybeUniqueIndexTable.emplace();
 
       const uint32_t indexCount = aIndexes.Count();
       MOZ_ASSERT(indexCount);
 
-      aIndexes.EnumerateRead(Enumerate, aMaybeUniqueIndexTable.addr());
+      aIndexes.EnumerateRead(Enumerate, aMaybeUniqueIndexTable.ptr());
 
       if (NS_WARN_IF(aMaybeUniqueIndexTable.ref().Count() != indexCount)) {
-        aMaybeUniqueIndexTable.destroy();
+        aMaybeUniqueIndexTable.reset();
         return;
       }
 
@@ -13871,7 +13871,7 @@ CreateIndexOp::InsertDataFromObjectStore(TransactionBase* aTransaction)
 {
   MOZ_ASSERT(aTransaction);
   MOZ_ASSERT(!IndexedDatabaseManager::InLowDiskSpaceMode());
-  MOZ_ASSERT(!mMaybeUniqueIndexTable.empty());
+  MOZ_ASSERT(mMaybeUniqueIndexTable);
 
   PROFILER_LABEL("IndexedDB",
                  "CreateIndexOp::InsertDataFromObjectStore",
@@ -13971,7 +13971,7 @@ CreateIndexOp::Init(TransactionBase* aTransaction)
   AssertIsOnBackgroundThread();
   MOZ_ASSERT(aTransaction);
 
-  if (NS_WARN_IF(mMaybeUniqueIndexTable.empty()) ||
+  if (NS_WARN_IF(!mMaybeUniqueIndexTable) ||
       NS_WARN_IF(sThreadLocalIndex == kBadThreadLocalIndex)) {
     return false;
   }
@@ -14338,7 +14338,7 @@ ObjectStoreAddOrPutRequestOp::Init(TransactionBase* aTransaction)
   if (!indexUpdateInfos.IsEmpty()) {
     const uint32_t count = indexUpdateInfos.Length();
 
-    mUniqueIndexTable.construct();
+    mUniqueIndexTable.emplace();
 
     for (uint32_t index = 0; index < count; index++) {
       const IndexUpdateInfo& updateInfo = indexUpdateInfos[index];
@@ -14360,16 +14360,16 @@ ObjectStoreAddOrPutRequestOp::Init(TransactionBase* aTransaction)
         return false;
       }
     }
-#ifdef DEBUG
-    mUniqueIndexTable.ref().MarkImmutable();
-#endif
   } else if (mOverwrite) {
     // Kinda lame...
-    mUniqueIndexTable.construct();
-#ifdef DEBUG
-    mUniqueIndexTable.ref().MarkImmutable();
-#endif
+    mUniqueIndexTable.emplace();
   }
+
+#ifdef DEBUG
+  if (mUniqueIndexTable) {
+    mUniqueIndexTable.ref().MarkImmutable();
+  }
+#endif
 
   const nsTArray<DatabaseFileOrMutableFileId>& files = mParams.files();
 
@@ -14738,7 +14738,7 @@ ObjectStoreAddOrPutRequestOp::DoDatabaseWork(TransactionBase* aTransaction)
 
   // Update our indexes if needed.
   if (mOverwrite || !mParams.indexUpdateInfos().IsEmpty()) {
-    MOZ_ASSERT(!mUniqueIndexTable.empty());
+    MOZ_ASSERT(mUniqueIndexTable);
 
     rv = UpdateIndexes(aTransaction,
                        mUniqueIndexTable.ref(),

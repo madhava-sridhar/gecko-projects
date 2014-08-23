@@ -20,7 +20,6 @@
 #include "mozilla/dom/indexedDB/IDBTransaction.h"
 #include "nsComponentManagerUtils.h"
 #include "nsContentUtils.h"
-#include "nsCxPusher.h"
 #include "nsIDOMEvent.h"
 #include "nsIPrincipal.h"
 #include "nsIXPConnect.h"

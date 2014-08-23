@@ -644,7 +644,7 @@ DispatchErrorEvent(IDBRequest* aRequest,
 
   Maybe<AutoSetCurrentTransaction> asct;
   if (aTransaction) {
-    asct.construct(aTransaction);
+    asct.emplace(aTransaction);
   }
 
   bool doDefault;
@@ -2124,12 +2124,11 @@ BackgroundCursorChild::HandleResponse(
   if (mCursor) {
     mCursor->Reset(Move(response.key()), Move(cloneReadInfo));
   } else {
-    newCursor.construct();
-    newCursor.ref() = IDBCursor::Create(mObjectStore,
+    newCursor.emplace(IDBCursor::Create(mObjectStore,
                                         this,
                                         mDirection,
                                         Move(response.key()),
-                                        Move(cloneReadInfo));
+                                        Move(cloneReadInfo)));
     mCursor = newCursor.ref();
   }
 
@@ -2156,11 +2155,10 @@ BackgroundCursorChild::HandleResponse(
   if (mCursor) {
     mCursor->Reset(Move(response.key()));
   } else {
-    newCursor.construct();
-    newCursor.ref() = IDBCursor::Create(mObjectStore,
+    newCursor.emplace(IDBCursor::Create(mObjectStore,
                                         this,
                                         mDirection,
-                                        Move(response.key()));
+                                        Move(response.key())));
     mCursor = newCursor.ref();
   }
 
@@ -2194,13 +2192,12 @@ BackgroundCursorChild::HandleResponse(const IndexCursorResponse& aResponse)
                    Move(response.objectKey()),
                    Move(cloneReadInfo));
   } else {
-    newCursor.construct();
-    newCursor.ref() = IDBCursor::Create(mIndex,
+    newCursor.emplace(IDBCursor::Create(mIndex,
                                         this,
                                         mDirection,
                                         Move(response.key()),
                                         Move(response.objectKey()),
-                                        Move(cloneReadInfo));
+                                        Move(cloneReadInfo)));
     mCursor = newCursor.ref();
   }
 
@@ -2226,12 +2223,11 @@ BackgroundCursorChild::HandleResponse(const IndexKeyCursorResponse& aResponse)
   if (mCursor) {
     mCursor->Reset(Move(response.key()), Move(response.objectKey()));
   } else {
-    newCursor.construct();
-    newCursor.ref() = IDBCursor::Create(mIndex,
+    newCursor.emplace(IDBCursor::Create(mIndex,
                                         this,
                                         mDirection,
                                         Move(response.key()),
-                                        Move(response.objectKey()));
+                                        Move(response.objectKey())));
     mCursor = newCursor.ref();
   }
 
