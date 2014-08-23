@@ -255,7 +255,7 @@ private:
   void
   SendDeleteMeInternal();
 
-  bool
+  void
   EnsureDOMObject();
 
   void

@@ -924,10 +924,7 @@ BackgroundFactoryRequestChild::HandleResponse(
     static_cast<BackgroundDatabaseChild*>(aResponse.databaseChild());
   MOZ_ASSERT(databaseActor);
 
-  if (!databaseActor->EnsureDOMObject()) {
-    DispatchErrorEvent(mRequest, NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
-    return false;
-  }
+  databaseActor->EnsureDOMObject();
 
   IDBDatabase* database = databaseActor->GetDOMObject();
   MOZ_ASSERT(database);
@@ -1123,7 +1120,7 @@ BackgroundDatabaseChild::SendDeleteMeInternal()
   }
 }
 
-bool
+void
 BackgroundDatabaseChild::EnsureDOMObject()
 {
   AssertIsOnOwningThread();
@@ -1131,7 +1128,7 @@ BackgroundDatabaseChild::EnsureDOMObject()
 
   if (mTemporaryStrongDatabase) {
     MOZ_ASSERT(!mSpec);
-    return true;
+    return;
   }
 
   MOZ_ASSERT(mSpec);
@@ -1151,8 +1148,6 @@ BackgroundDatabaseChild::EnsureDOMObject()
 
   mDatabase = mTemporaryStrongDatabase;
   mSpec.forget();
-
-  return true;
 }
 
 void
@@ -1253,9 +1248,7 @@ BackgroundDatabaseChild::RecvPBackgroundIDBVersionChangeTransactionConstructor(
 
   MaybeCollectGarbageOnIPCMessage();
 
-  if (!EnsureDOMObject()) {
-    return false;
-  }
+  EnsureDOMObject();
 
   auto actor = static_cast<BackgroundVersionChangeTransactionChild*>(aActor);
 

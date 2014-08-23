@@ -57,13 +57,15 @@
 #define LOW_DISK_SPACE_DATA_FULL "full"
 #define LOW_DISK_SPACE_DATA_FREE "free"
 
-USING_INDEXEDDB_NAMESPACE
 using namespace mozilla;
 using namespace mozilla::ipc;
 using namespace mozilla::dom;
+using namespace mozilla::dom::indexedDB;
 USING_QUOTA_NAMESPACE
 
-BEGIN_INDEXEDDB_NAMESPACE
+namespace mozilla {
+namespace dom {
+namespace indexedDB {
 
 class FileManagerInfo
 {
@@ -108,7 +110,9 @@ private:
   nsTArray<nsRefPtr<FileManager> > mTemporaryStorageFileManagers;
 };
 
-END_INDEXEDDB_NAMESPACE
+} // namespace indexedDB
+} // namespace dom
+} // namespace mozilla
 
 namespace {
 

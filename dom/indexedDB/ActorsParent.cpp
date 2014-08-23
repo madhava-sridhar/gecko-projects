@@ -5,12 +5,10 @@
 #include "ActorsParent.h"
 
 #include <algorithm>
-#include "DatabaseInfo.h"
 #include "FileInfo.h"
 #include "FileManager.h"
 #include "IDBObjectStore.h"
 #include "IDBTransaction.h"
-#include "IndexedDatabaseInlines.h"
 #include "IndexedDatabaseManager.h"
 #include "js/StructuredClone.h"
 #include "js/Value.h"
@@ -3882,10 +3880,10 @@ protected:
     // complete. Next state is State_DatabaseWorkVersionChange.
     State_WaitingForTransactionsToComplete,
 
-    // Waiting to do/doing work on the "work thread". For the OpenDatabaseOp the
-    // next step is State_SendUpgradeNeeded if the database work succeeds,
-    // otherwise skip to State_SendingResults. The DeleteDatabaseOp jumps to
-    // State_SendingResults.
+    // Waiting to do/doing work on the "work thread". This involves waiting for
+    // the VersionChangeOp (OpenDatabaseOp and DeleteDatabaseOp each have a
+    // different implementation) to do its work. Eventually the state will
+    // transition to State_SendingResults.
     State_DatabaseWorkVersionChange,
 
     // Waiting to send/sending results on the PBackground thread. Next step is

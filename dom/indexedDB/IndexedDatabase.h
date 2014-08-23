@@ -14,15 +14,6 @@
 #include "nsCOMPtr.h"
 #include "nsTArray.h"
 
-#define BEGIN_INDEXEDDB_NAMESPACE \
-  namespace mozilla { namespace dom { namespace indexedDB {
-
-#define END_INDEXEDDB_NAMESPACE \
-  } /* namespace indexedDB */ } /* namepsace dom */ } /* namespace mozilla */
-
-#define USING_INDEXEDDB_NAMESPACE \
-  using namespace mozilla::dom::indexedDB;
-
 class nsIDOMBlob;
 class nsIInputStream;
 

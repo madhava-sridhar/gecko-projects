@@ -19,7 +19,6 @@ XPCSHELL_TESTS_MANIFESTS += [
 
 EXPORTS.mozilla.dom.indexedDB += [
     'ActorsParent.h',
-    'DatabaseInfo.h',
     'FileInfo.h',
     'FileManager.h',
     'FileSnapshot.h',
@@ -46,7 +45,6 @@ EXPORTS.mozilla.dom.indexedDB += [
 SOURCES += [
     'ActorsChild.cpp',
     'ActorsParent.cpp',
-    'DatabaseInfo.cpp',
     'FileInfo.cpp',
     'FileSnapshot.cpp',
     'IDBCursor.cpp',

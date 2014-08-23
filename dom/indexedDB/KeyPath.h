@@ -7,8 +7,6 @@
 #ifndef mozilla_dom_indexeddb_keypath_h__
 #define mozilla_dom_indexeddb_keypath_h__
 
-#include "mozilla/dom/indexedDB/IndexedDatabase.h"
-
 #include "mozilla/dom/BindingDeclarations.h"
 
 namespace mozilla {
@@ -123,4 +121,4 @@ public:
 } // namespace dom
 } // namespace mozilla
 
-#endif /* mozilla_dom_indexeddb_keypath_h__ */
+#endif // mozilla_dom_indexeddb_keypath_h__

@@ -15,7 +15,7 @@
 
 #include "mozilla/dom/BindingDeclarations.h"
 
-USING_INDEXEDDB_NAMESPACE
+using namespace mozilla::dom::indexedDB;
 
 namespace {
 
