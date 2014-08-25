@@ -3827,6 +3827,9 @@ class FactoryOp
   : public DatabaseOperationBase
   , public PBackgroundIDBFactoryRequestParent
 {
+public:
+  struct MaybeBlockedDatabaseInfo;
+
 protected:
   enum State
   {
@@ -3900,7 +3903,7 @@ protected:
   // Must be released on the main thread!
   nsRefPtr<ContentParent> mContentParent;
 
-  nsTArray<Database*> mMaybeBlockedDatabases;
+  nsTArray<MaybeBlockedDatabaseInfo> mMaybeBlockedDatabases;
 
   const CommonFactoryRequestParams mCommonParams;
   nsCString mGroup;
@@ -3913,11 +3916,11 @@ protected:
   bool mChromeWriteAccessAllowed;
 
 public:
-  virtual void
-  NoteDatabaseClosed(Database* aDatabase) = 0;
+  void
+  NoteDatabaseBlocked(Database* aDatabase);
 
   virtual void
-  NoteDatabaseBlocked(Database* aDatabase) = 0;
+  NoteDatabaseClosed(Database* aDatabase) = 0;
 
 #ifdef DEBUG
   bool
@@ -3995,6 +3998,9 @@ protected:
   virtual bool
   RecvPermissionRetry() MOZ_OVERRIDE;
 
+  virtual void
+  SendBlockedNotification() = 0;
+
 private:
   nsresult
   CheckPermission(ContentParent* aContentParent,
@@ -4006,6 +4012,44 @@ private:
 
   nsresult
   FinishOpen();
+};
+
+struct FactoryOp::MaybeBlockedDatabaseInfo MOZ_FINAL
+{
+  nsRefPtr<Database> mDatabase;
+  bool mBlocked;
+
+  MaybeBlockedDatabaseInfo(Database* aDatabase)
+    : mDatabase(aDatabase)
+    , mBlocked(false)
+  {
+    MOZ_ASSERT(aDatabase);
+
+    MOZ_COUNT_CTOR(FactoryOp::MaybeBlockedDatabaseInfo);
+  }
+
+  ~MaybeBlockedDatabaseInfo()
+  {
+    MOZ_COUNT_DTOR(FactoryOp::MaybeBlockedDatabaseInfo);
+  }
+
+  bool
+  operator==(const MaybeBlockedDatabaseInfo& aOther) const
+  {
+    return mDatabase == aOther.mDatabase;
+  }
+
+  bool
+  operator<(const MaybeBlockedDatabaseInfo& aOther) const
+  {
+    return mDatabase < aOther.mDatabase;
+  }
+
+  Database*
+  operator->()
+  {
+    return mDatabase;
+  }
 };
 
 class OpenDatabaseOp MOZ_FINAL
@@ -4083,7 +4127,7 @@ private:
   NoteDatabaseClosed(Database* aDatabase) MOZ_OVERRIDE;
 
   virtual void
-  NoteDatabaseBlocked(Database* aDatabase) MOZ_OVERRIDE;
+  SendBlockedNotification() MOZ_OVERRIDE;
 
   virtual nsresult
   DispatchToWorkThread() MOZ_OVERRIDE;
@@ -4164,7 +4208,7 @@ private:
   NoteDatabaseClosed(Database* aDatabase) MOZ_OVERRIDE;
 
   virtual void
-  NoteDatabaseBlocked(Database* aDatabase) MOZ_OVERRIDE;
+  SendBlockedNotification() MOZ_OVERRIDE;
 
   virtual nsresult
   DispatchToWorkThread() MOZ_OVERRIDE;
@@ -6476,8 +6520,6 @@ bool
 Database::RecvBlocked()
 {
   AssertIsOnBackgroundThread();
-
-  // XXX Harden this against being called out of order.
 
   if (NS_WARN_IF(mClosed)) {
     return false;
@@ -10863,6 +10905,43 @@ FactoryOp::FinishOpen()
   return NS_OK;
 }
 
+void
+FactoryOp::NoteDatabaseBlocked(Database* aDatabase)
+{
+  AssertIsOnOwningThread();
+  MOZ_ASSERT(mState == State_WaitingForOtherDatabasesToClose ||
+             mState == State_BlockedWaitingForOtherDatabasesToClose);
+  MOZ_ASSERT(!mMaybeBlockedDatabases.IsEmpty());
+  MOZ_ASSERT(mMaybeBlockedDatabases.Contains(aDatabase));
+
+  // Don't send the blocked notification twice.
+  if (mState == State_WaitingForOtherDatabasesToClose) {
+    // Only send the blocked event if all databases have reported back. If the
+    // database was closed then it will have been removed from the array.
+    // Otherwise if it was blocked its |mBlocked| flag will be true.
+    bool sendBlockedEvent = true;
+
+    for (uint32_t count = mMaybeBlockedDatabases.Length(), index = 0;
+         index < count;
+         index++) {
+      MaybeBlockedDatabaseInfo& info = mMaybeBlockedDatabases[index];
+      if (info == aDatabase) {
+        // This database was blocked, mark accordingly.
+        info.mBlocked = true;
+      } else if (!info.mBlocked) {
+        // A database has not yet reported back yet, don't send the event yet.
+        sendBlockedEvent = false;
+      }
+    }
+
+    if (sendBlockedEvent) {
+      SendBlockedNotification();
+
+      // Change state so that we don't attempt to send the blocked event again.
+      mState = State_BlockedWaitingForOtherDatabasesToClose;
+    }
+  }
+}
 NS_IMETHODIMP
 FactoryOp::Run()
 {
@@ -11518,7 +11597,7 @@ OpenDatabaseOp::BeginVersionChange()
 
   const uint32_t liveCount = info->mLiveDatabases.Length();
   if (liveCount > 1) {
-    FallibleTArray<Database*> maybeBlockedDatabases;
+    FallibleTArray<MaybeBlockedDatabaseInfo> maybeBlockedDatabases;
     for (uint32_t index = 0; index < liveCount; index++) {
       Database* database = info->mLiveDatabases[index];
       if (database != mDatabase &&
@@ -11606,20 +11685,13 @@ OpenDatabaseOp::NoteDatabaseClosed(Database* aDatabase)
 }
 
 void
-OpenDatabaseOp::NoteDatabaseBlocked(Database* aDatabase)
+OpenDatabaseOp::SendBlockedNotification()
 {
   AssertIsOnOwningThread();
-  MOZ_ASSERT(mState == State_WaitingForOtherDatabasesToClose ||
-             mState == State_BlockedWaitingForOtherDatabasesToClose);
-  MOZ_ASSERT(!mMaybeBlockedDatabases.IsEmpty());
-  MOZ_ASSERT(mMaybeBlockedDatabases.Contains(aDatabase));
+  MOZ_ASSERT(mState == State_WaitingForOtherDatabasesToClose);
 
-  // Don't send the blocked notification twice.
-  if (mState == State_WaitingForOtherDatabasesToClose) {
-    if (!IsActorDestroyed()) {
-      unused << SendBlocked(mMetadata->mCommonMetadata.version());
-    }
-    mState = State_BlockedWaitingForOtherDatabasesToClose;
+  if (!IsActorDestroyed()) {
+    unused << SendBlocked(mMetadata->mCommonMetadata.version());
   }
 }
 
@@ -12382,7 +12454,7 @@ DeleteDatabaseOp::BeginVersionChange()
     MOZ_ASSERT(!info->mWaitingFactoryOp);
 
     if (const uint32_t liveCount = info->mLiveDatabases.Length()) {
-      FallibleTArray<Database*> maybeBlockedDatabases;
+      FallibleTArray<MaybeBlockedDatabaseInfo> maybeBlockedDatabases;
       for (uint32_t index = 0; index < liveCount; index++) {
         Database* database = info->mLiveDatabases[index];
         if (!database->IsClosed() &&
@@ -12488,20 +12560,13 @@ DeleteDatabaseOp::NoteDatabaseClosed(Database* aDatabase)
 }
 
 void
-DeleteDatabaseOp::NoteDatabaseBlocked(Database* aDatabase)
+DeleteDatabaseOp::SendBlockedNotification()
 {
   AssertIsOnOwningThread();
-  MOZ_ASSERT(mState == State_WaitingForOtherDatabasesToClose ||
-             mState == State_BlockedWaitingForOtherDatabasesToClose);
-  MOZ_ASSERT(!mMaybeBlockedDatabases.IsEmpty());
-  MOZ_ASSERT(mMaybeBlockedDatabases.Contains(aDatabase));
+  MOZ_ASSERT(mState == State_WaitingForOtherDatabasesToClose);
 
-  // Don't send the blocked notification twice.
-  if (mState == State_WaitingForOtherDatabasesToClose) {
-    if (!IsActorDestroyed()) {
-      unused << SendBlocked(0);
-    }
-    mState = State_BlockedWaitingForOtherDatabasesToClose;
+  if (!IsActorDestroyed()) {
+    unused << SendBlocked(0);
   }
 }
 

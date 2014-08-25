@@ -83,7 +83,11 @@ function continueToNextStep()
 
 function errorHandler(event)
 {
-  dump("indexedDB error: " + event.target.error.name);
+  try {
+    dump("indexedDB error: " + event.target.error.name);
+  } catch(e) {
+    dump("indexedDB error: " + e);
+  }
   do_check_true(false);
   finishTest();
 }
