@@ -15,10 +15,7 @@
 interface ServiceWorkerGlobalScope : WorkerGlobalScope {
   readonly attribute CacheStorage caches;
 
-  // FIXME(nsm): Bug 982726
-  // A container for a list of window objects, identifiable by ID, that
-  // correspond to windows (or workers) that are "controlled" by this SW
-  // readonly attribute ServiceWorkerClients clients;
+  readonly attribute ServiceWorkerClients clients;
 
   [Unforgeable] readonly attribute DOMString scope;
 
