@@ -542,10 +542,14 @@ MConstant::MConstant(JSObject *obj)
 HashNumber
 MConstant::valueHash() const
 {
-    // This disregards some state, since values are 64 bits. But for a hash,
-    // it's completely acceptable.
-    return (HashNumber)JSVAL_TO_IMPL(value_).asBits;
+    // Fold all 64 bits into the 32-bit result. It's tempting to just discard
+    // half of the bits, as this is just a hash, however there are many common
+    // patterns of values where only the low or the high bits vary, so
+    // discarding either side would lead to excessive hash collisions.
+    uint64_t bits = JSVAL_TO_IMPL(value_).asBits;
+    return (HashNumber)bits ^ (HashNumber)(bits >> 32);
 }
+
 bool
 MConstant::congruentTo(const MDefinition *ins) const
 {
@@ -3422,6 +3426,19 @@ MSqrt::trySpecializeFloat32(TempAllocator &alloc) {
 
     setResultType(MIRType_Float32);
     setPolicyType(MIRType_Float32);
+}
+
+MDefinition *
+MClz::foldsTo(TempAllocator &alloc)
+{
+    if (num()->isConstant()) {
+        int32_t n = num()->toConstant()->value().toInt32();
+        if (n == 0)
+            return MConstant::New(alloc, Int32Value(32));
+        return MConstant::New(alloc, Int32Value(mozilla::CountLeadingZeroes32(n)));
+    }
+
+    return this;
 }
 
 MDefinition *

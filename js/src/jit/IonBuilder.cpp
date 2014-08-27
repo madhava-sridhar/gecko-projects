@@ -33,9 +33,9 @@
 using namespace js;
 using namespace js::jit;
 
+using mozilla::AssertedCast;
 using mozilla::DebugOnly;
 using mozilla::Maybe;
-using mozilla::SafeCast;
 
 class jit::BaselineFrameInspector
 {
@@ -1370,7 +1370,7 @@ IonBuilder::snoopControlFlow(JSOp op)
 
           default:
             // Hard assert for now - make an error later.
-            MOZ_ASSUME_UNREACHABLE("unknown goto case");
+            MOZ_CRASH("unknown goto case");
         }
         break;
       }
@@ -1381,7 +1381,7 @@ IonBuilder::snoopControlFlow(JSOp op)
       case JSOP_IFNE:
         // We should never reach an IFNE, it's a stopAt point, which will
         // trigger closing the loop.
-        MOZ_ASSUME_UNREACHABLE("we should never reach an ifne!");
+        MOZ_CRASH("we should never reach an ifne!");
 
       default:
         break;
@@ -1661,7 +1661,7 @@ IonBuilder::inspectOpcode(JSOp op)
 
       case JSOP_LOOPHEAD:
         // JSOP_LOOPHEAD is handled when processing the loop header.
-        MOZ_ASSUME_UNREACHABLE("JSOP_LOOPHEAD outside loop");
+        MOZ_CRASH("JSOP_LOOPHEAD outside loop");
 
       case JSOP_GETELEM:
       case JSOP_CALLELEM:
@@ -1873,7 +1873,7 @@ IonBuilder::processCfgEntry(CFGState &state)
         return processTryEnd(state);
 
       default:
-        MOZ_ASSUME_UNREACHABLE("unknown cfgstate");
+        MOZ_CRASH("unknown cfgstate");
     }
 }
 
@@ -2581,7 +2581,7 @@ IonBuilder::processSwitchBreak(JSOp op)
         breaks = &state.condswitch.breaks;
         break;
       default:
-        MOZ_ASSUME_UNREACHABLE("Unexpected switch state.");
+        MOZ_CRASH("Unexpected switch state.");
     }
 
     *breaks = new(alloc()) DeferredEdge(current, *breaks);
@@ -2660,7 +2660,7 @@ IonBuilder::maybeLoop(JSOp op, jssrcnote *sn)
         break;
 
       default:
-        MOZ_ASSUME_UNREACHABLE("unexpected opcode");
+        MOZ_CRASH("unexpected opcode");
     }
 
     return ControlStatus_None;
@@ -2690,7 +2690,7 @@ IonBuilder::assertValidLoopHeadOp(jsbytecode *pc)
             break;
 
           default:
-            MOZ_ASSUME_UNREACHABLE("JSOP_LOOPHEAD unexpected source note");
+            MOZ_CRASH("JSOP_LOOPHEAD unexpected source note");
         }
 
         // Make sure this loop goes to the same ifne as the loop header's
@@ -3587,7 +3587,7 @@ IonBuilder::jsop_ifeq(JSOp op)
       }
 
       default:
-        MOZ_ASSUME_UNREACHABLE("unexpected source note type");
+        MOZ_CRASH("unexpected source note type");
     }
 
     // Switch to parsing the true branch. Note that no PC update is needed,
@@ -3709,7 +3709,7 @@ IonBuilder::processReturn(JSOp op)
 
       default:
         def = nullptr;
-        MOZ_ASSUME_UNREACHABLE("unknown return op");
+        MOZ_CRASH("unknown return op");
     }
 
     if (instrumentedProfiling() && inliningDepth_ == 0) {
@@ -3828,7 +3828,7 @@ IonBuilder::jsop_bitop(JSOp op)
         break;
 
       default:
-        MOZ_ASSUME_UNREACHABLE("unexpected bitop");
+        MOZ_CRASH("unexpected bitop");
     }
 
     current->add(ins);
@@ -3885,7 +3885,7 @@ IonBuilder::jsop_binary(JSOp op, MDefinition *left, MDefinition *right)
         break;
 
       default:
-        MOZ_ASSUME_UNREACHABLE("unexpected binary opcode");
+        MOZ_CRASH("unexpected binary opcode");
     }
 
     current->add(ins);
@@ -4232,7 +4232,7 @@ IonBuilder::selectInliningTargets(ObjectVector &targets, CallInfo &callInfo, Boo
             inlineable = true;
             break;
           default:
-            MOZ_ASSUME_UNREACHABLE("Unhandled InliningDecision value!");
+            MOZ_CRASH("Unhandled InliningDecision value!");
         }
 
         // Enforce a maximum inlined bytecode limit at the callsite.
@@ -5982,7 +5982,6 @@ IonBuilder::newOsrPreheader(MBasicBlock *predecessor, jsbytecode *loopEntry)
     // Create an MStart to hold the first valid MResumePoint.
     MStart *start = MStart::New(alloc(), MStart::StartType_Osr);
     osrBlock->add(start);
-    graph().setOsrStart(start);
 
     // MOsrValue instructions are infallible, so the first MResumePoint must
     // occur after they execute, at the point of the MStart.
@@ -6610,7 +6609,7 @@ jit::TypeSetIncludes(types::TypeSet *types, MIRType input, types::TypeSet *input
         return types->unknown() || (inputTypes && inputTypes->isSubset(types));
 
       default:
-        MOZ_ASSUME_UNREACHABLE("Bad input type");
+        MOZ_CRASH("Bad input type");
     }
 }
 
@@ -6894,10 +6893,10 @@ IonBuilder::getElemTryTypedObject(bool *emitted, MDefinition *obj, MDefinition *
         return true;
 
       case type::UnsizedArray:
-        MOZ_ASSUME_UNREACHABLE("Unsized arrays cannot be element types");
+        MOZ_CRASH("Unsized arrays cannot be element types");
     }
 
-    MOZ_ASSUME_UNREACHABLE("Bad kind");
+    MOZ_CRASH("Bad kind");
 }
 
 static MIRType
@@ -7543,7 +7542,7 @@ IonBuilder::addTypedArrayLengthAndData(MDefinition *obj,
 #else
         bool isTenured = true;
 #endif
-        if (isTenured) {
+        if (isTenured && tarr->hasSingletonType()) {
             // The 'data' pointer can change in rare circumstances
             // (ArrayBufferObject::changeContents).
             types::TypeObjectKey *tarrType = types::TypeObjectKey::get(tarr);
@@ -7552,7 +7551,7 @@ IonBuilder::addTypedArrayLengthAndData(MDefinition *obj,
 
                 obj->setImplicitlyUsedUnchecked();
 
-                int32_t len = SafeCast<int32_t>(tarr->length());
+                int32_t len = AssertedCast<int32_t>(tarr->length());
                 *length = MConstant::New(alloc(), Int32Value(len));
                 current->add(*length);
 
@@ -7639,7 +7638,7 @@ MIRTypeForTypedArrayRead(Scalar::Type arrayType, bool observedDouble)
       default:
         break;
     }
-    MOZ_ASSUME_UNREACHABLE("Unknown typed array type");
+    MOZ_CRASH("Unknown typed array type");
 }
 
 bool
@@ -7707,7 +7706,7 @@ IonBuilder::jsop_getelem_typed(MDefinition *obj, MDefinition *index,
                 barrier = BarrierKind::NoBarrier;
             break;
           default:
-            MOZ_ASSUME_UNREACHABLE("Unknown typed array type");
+            MOZ_CRASH("Unknown typed array type");
         }
 
         // Assume we will read out-of-bound values. In this case the
@@ -7805,7 +7804,7 @@ IonBuilder::setElemTryTypedObject(bool *emitted, MDefinition *obj,
                                                  elemSize);
     }
 
-    MOZ_ASSUME_UNREACHABLE("Bad kind");
+    MOZ_CRASH("Bad kind");
 }
 
 bool
@@ -8074,7 +8073,7 @@ IonBuilder::jsop_setelem_dense(types::TemporaryTypeSet::DoubleConversion convers
         break;
 
       default:
-        MOZ_ASSUME_UNREACHABLE("Unknown double conversion");
+        MOZ_CRASH("Unknown double conversion");
     }
 
     bool writeHole = false;
@@ -8678,6 +8677,10 @@ IonBuilder::jsop_getprop(PropertyName *name)
 
     MDefinition *obj = current->pop();
 
+    // Try to optimize to a specific constant.
+    if (!getPropTryInferredConstant(&emitted, obj, name) || emitted)
+        return emitted;
+
     // Try to optimize arguments.length.
     if (!getPropTryArgumentsLength(&emitted, obj) || emitted)
         return emitted;
@@ -8764,6 +8767,28 @@ IonBuilder::checkIsDefinitelyOptimizedArguments(MDefinition *obj, bool *isOptimi
     }
 
     *isOptimizedArgs = true;
+    return true;
+}
+
+bool
+IonBuilder::getPropTryInferredConstant(bool *emitted, MDefinition *obj, PropertyName *name)
+{
+    JS_ASSERT(*emitted == false);
+
+    // Need a result typeset to optimize.
+    types::TemporaryTypeSet *objTypes = obj->resultTypeSet();
+    if (!objTypes)
+        return true;
+
+    Value constVal = UndefinedValue();
+    if (objTypes->propertyIsConstant(constraints(), NameToId(name), &constVal)) {
+        spew("Optimized constant property");
+        obj->setImplicitlyUsedUnchecked();
+        if (!pushConstant(constVal))
+            return false;
+        *emitted = true;
+    }
+
     return true;
 }
 
@@ -8885,10 +8910,10 @@ IonBuilder::getPropTryTypedObject(bool *emitted,
                                                  resultTypes);
 
       case type::UnsizedArray:
-        MOZ_ASSUME_UNREACHABLE("Field of unsized array type");
+        MOZ_CRASH("Field of unsized array type");
     }
 
-    MOZ_ASSUME_UNREACHABLE("Bad kind");
+    MOZ_CRASH("Bad kind");
 }
 
 bool
@@ -9381,13 +9406,16 @@ IonBuilder::jsop_setprop(PropertyName *name)
     if (!setPropTryTypedObject(&emitted, obj, name, value) || emitted)
         return emitted;
 
-    // Try to emit store from definite slots.
-    if (!setPropTryDefiniteSlot(&emitted, obj, name, value, barrier, objTypes) || emitted)
-        return emitted;
+    // Do not emit optimized stores to slots that may be constant.
+    if (objTypes && !objTypes->propertyMightBeConstant(constraints(), NameToId(name))) {
+        // Try to emit store from definite slots.
+        if (!setPropTryDefiniteSlot(&emitted, obj, name, value, barrier, objTypes) || emitted)
+            return emitted;
 
-    // Try to emit a monomorphic/polymorphic store based on baseline caches.
-    if (!setPropTryInlineAccess(&emitted, obj, name, value, barrier, objTypes) || emitted)
-        return emitted;
+        // Try to emit a monomorphic/polymorphic store based on baseline caches.
+        if (!setPropTryInlineAccess(&emitted, obj, name, value, barrier, objTypes) || emitted)
+            return emitted;
+    }
 
     // Emit a polymorphic cache.
     return setPropTryCache(&emitted, obj, name, value, barrier, objTypes);
@@ -9535,7 +9563,7 @@ IonBuilder::setPropTryTypedObject(bool *emitted, MDefinition *obj,
                                                  value, fieldPrediction);
     }
 
-    MOZ_ASSUME_UNREACHABLE("Unknown kind");
+    MOZ_CRASH("Unknown kind");
 }
 
 bool

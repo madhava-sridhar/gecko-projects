@@ -54,7 +54,7 @@ pref("browser.cache.memory_limit", 2048); // 2 MB
 /* image cache prefs */
 pref("image.cache.size", 1048576); // bytes
 pref("image.high_quality_downscaling.enabled", false);
-pref("canvas.image.cache.limit", 10485760); // 10 MB
+pref("canvas.image.cache.limit", 20971520); // 20 MB
 
 /* offline cache prefs */
 pref("browser.offline-apps.notify", false);
@@ -1013,3 +1013,6 @@ pref("services.mobileid.server.uri", "https://msisdn.services.mozilla.com");
 #ifndef XP_WIN
 pref("dom.mapped_arraybuffer.enabled", true);
 #endif
+
+// UDPSocket API
+pref("dom.udpsocket.enabled", true);

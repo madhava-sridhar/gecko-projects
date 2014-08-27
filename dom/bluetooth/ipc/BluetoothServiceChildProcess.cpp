@@ -247,6 +247,14 @@ BluetoothServiceChildProcess::Disconnect(
 }
 
 void
+BluetoothServiceChildProcess::IsConnected(
+  const uint16_t aServiceUuid,
+  BluetoothReplyRunnable* aRunnable)
+{
+  SendRequest(aRunnable, IsConnectedRequest(aServiceUuid));
+}
+
+void
 BluetoothServiceChildProcess::SendFile(
   const nsAString& aDeviceAddress,
   BlobParent* aBlobParent,
@@ -386,12 +394,6 @@ BluetoothServiceChildProcess::StartInternal()
 
 nsresult
 BluetoothServiceChildProcess::StopInternal()
-{
-  MOZ_CRASH("This should never be called!");
-}
-
-bool
-BluetoothServiceChildProcess::IsConnected(uint16_t aServiceUuid)
 {
   MOZ_CRASH("This should never be called!");
 }

@@ -52,6 +52,7 @@
 #include "mozilla/EventStates.h"
 #include "mozilla/LookAndFeel.h"
 #include "mozilla/Preferences.h"
+#include "mozilla/UniquePtr.h"
 #include "ActiveLayerTracker.h"
 #include "nsContentUtils.h"
 #include "nsPrintfCString.h"
@@ -659,7 +660,7 @@ static void RecordFrameMetrics(nsIFrame* aForFrame,
 
   nsIPresShell* presShell = presContext->GetPresShell();
   FrameMetrics metrics;
-  metrics.mViewport = CSSRect::FromAppUnits(aViewport);
+  metrics.SetViewport(CSSRect::FromAppUnits(aViewport));
 
   ViewID scrollId = FrameMetrics::NULL_SCROLL_ID;
   nsIContent* content = aScrollFrame ? aScrollFrame->GetContent() : nullptr;
@@ -704,7 +705,7 @@ static void RecordFrameMetrics(nsIFrame* aForFrame,
   }
 
   metrics.SetScrollId(scrollId);
-  metrics.mIsRoot = aIsRoot;
+  metrics.SetIsRoot(aIsRoot);
 
   // Only the root scrollable frame for a given presShell should pick up
   // the presShell's resolution. All the other frames are 1.0.
@@ -1258,9 +1259,10 @@ void nsDisplayList::PaintForFrame(nsDisplayListBuilder* aBuilder,
                              (!layerManager->IsCompositingCheap() && layerManager->NeedsWidgetInvalidation())) &&
                             widgetTransaction;
 
-  nsAutoPtr<LayerProperties> props(computeInvalidRect ? 
-                                     LayerProperties::CloneFrom(layerManager->GetRoot()) : 
-                                     nullptr);
+  UniquePtr<LayerProperties> props;
+  if (computeInvalidRect) {
+    props = Move(LayerProperties::CloneFrom(layerManager->GetRoot()));
+  }
 
   ContainerLayerParameters containerParameters
     (presShell->GetXResolution(), presShell->GetYResolution());

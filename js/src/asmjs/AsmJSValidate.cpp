@@ -5934,7 +5934,7 @@ static const RegisterSet NonVolatileRegs =
 // Mips is using one more double slot due to stack alignment for double values.
 // Look at MacroAssembler::PushRegsInMask(RegisterSet set)
 static const unsigned FramePushedAfterSave = NonVolatileRegs.gprs().size() * sizeof(intptr_t) +
-                                             NonVolatileRegs.fpus().size() * sizeof(double) +
+                                             NonVolatileRegs.fpus().getPushSizeInBytes() +
                                              sizeof(double);
 #else
 static const unsigned FramePushedAfterSave = NonVolatileRegs.gprs().size() * sizeof(intptr_t) +
@@ -5965,9 +5965,11 @@ GenerateEntry(ModuleCompiler &m, unsigned exportIndex)
     JS_ASSERT(masm.framePushed() == FramePushedAfterSave);
 
     // ARM and MIPS have a globally-pinned GlobalReg (x64 uses RIP-relative
-    // addressing, x86 uses immediates in effective addresses).
+    // addressing, x86 uses immediates in effective addresses). For the
+    // AsmJSGlobalRegBias addition, see Assembler-(mips,arm).h.
 #if defined(JS_CODEGEN_ARM) || defined(JS_CODEGEN_MIPS)
     masm.movePtr(IntArgReg1, GlobalReg);
+    masm.addPtr(Imm32(AsmJSGlobalRegBias), GlobalReg);
 #endif
 
     // ARM, MIPS and x64 have a globally-pinned HeapReg (x86 uses immediates in
@@ -6010,16 +6012,24 @@ GenerateEntry(ModuleCompiler &m, unsigned exportIndex)
             masm.load32(src, iter->gpr());
             break;
           case ABIArg::FPU:
-            masm.loadDouble(src, iter->fpu());
+            if (iter.mirType() == MIRType_Double) {
+                masm.loadDouble(src, iter->fpu());
+            } else {
+                JS_ASSERT(iter.mirType() == MIRType_Float32);
+                masm.loadFloat32(src, iter->fpu());
+            }
             break;
           case ABIArg::Stack:
             if (iter.mirType() == MIRType_Int32) {
                 masm.load32(src, scratch);
                 masm.storePtr(scratch, Address(StackPointer, iter->offsetFromArgBase()));
-            } else {
-                JS_ASSERT(iter.mirType() == MIRType_Double || iter.mirType() == MIRType_Float32);
+            } else if (iter.mirType() == MIRType_Double) {
                 masm.loadDouble(src, ScratchDoubleReg);
                 masm.storeDouble(ScratchDoubleReg, Address(StackPointer, iter->offsetFromArgBase()));
+            } else {
+                JS_ASSERT(iter.mirType() == MIRType_Float32);
+                masm.loadFloat32(src, ScratchFloat32Reg);
+                masm.storeFloat32(ScratchFloat32Reg, Address(StackPointer, iter->offsetFromArgBase()));
             }
             break;
         }
@@ -6254,7 +6264,7 @@ GenerateFFIIonExit(ModuleCompiler &m, const ModuleCompiler::ExitDescriptor &exit
 #elif defined(JS_CODEGEN_X86)
     m.masm().append(AsmJSGlobalAccess(masm.movlWithPatch(Imm32(0), callee), globalDataOffset));
 #else
-    masm.computeEffectiveAddress(Address(GlobalReg, globalDataOffset), callee);
+    masm.computeEffectiveAddress(Address(GlobalReg, globalDataOffset - AsmJSGlobalRegBias), callee);
 #endif
 
     // 2.2. Get callee

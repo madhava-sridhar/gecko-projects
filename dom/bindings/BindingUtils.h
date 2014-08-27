@@ -2301,7 +2301,8 @@ bool
 XrayResolveOwnProperty(JSContext* cx, JS::Handle<JSObject*> wrapper,
                        JS::Handle<JSObject*> obj,
                        JS::Handle<jsid> id,
-                       JS::MutableHandle<JSPropertyDescriptor> desc);
+                       JS::MutableHandle<JSPropertyDescriptor> desc,
+                       bool& cacheOnHolder);
 
 /**
  * This resolves operations, attributes and constants of the interfaces for obj.
@@ -2313,7 +2314,8 @@ XrayResolveOwnProperty(JSContext* cx, JS::Handle<JSObject*> wrapper,
 bool
 XrayResolveNativeProperty(JSContext* cx, JS::Handle<JSObject*> wrapper,
                           JS::Handle<JSObject*> obj,
-                          JS::Handle<jsid> id, JS::MutableHandle<JSPropertyDescriptor> desc);
+                          JS::Handle<jsid> id, JS::MutableHandle<JSPropertyDescriptor> desc,
+                          bool& cacheOnHolder);
 
 /**
  * Define a property on obj through an Xray wrapper.
@@ -2951,6 +2953,29 @@ CallerSubsumes(JS::Handle<JS::Value> aValue)
     return true;
   }
   return CallerSubsumes(&aValue.toObject());
+}
+
+template<class T>
+inline bool
+WrappedJSToDictionary(nsISupports* aObject, T& aDictionary)
+{
+  nsCOMPtr<nsIXPConnectWrappedJS> wrappedObj = do_QueryInterface(aObject);
+  if (!wrappedObj) {
+    return false;
+  }
+
+  AutoJSAPI jsapi;
+  jsapi.Init();
+
+  JSContext* cx = jsapi.cx();
+  JS::Rooted<JSObject*> obj(cx, wrappedObj->GetJSObject());
+  if (!obj) {
+    return false;
+  }
+
+  JSAutoCompartment ac(cx, obj);
+  JS::Rooted<JS::Value> v(cx, OBJECT_TO_JSVAL(obj));
+  return aDictionary.Init(cx, v);
 }
 
 } // namespace dom

@@ -399,6 +399,7 @@ class IonBuilder : public MIRGenerator
 
     // jsop_getprop() helpers.
     bool checkIsDefinitelyOptimizedArguments(MDefinition *obj, bool *isOptimizedArgs);
+    bool getPropTryInferredConstant(bool *emitted, MDefinition *obj, PropertyName *name);
     bool getPropTryArgumentsLength(bool *emitted, MDefinition *obj);
     bool getPropTryArgumentsCallee(bool *emitted, MDefinition *obj, PropertyName *name);
     bool getPropTryConstant(bool *emitted, MDefinition *obj, PropertyName *name,
@@ -684,6 +685,7 @@ class IonBuilder : public MIRGenerator
     InliningStatus inlineMathAbs(CallInfo &callInfo);
     InliningStatus inlineMathFloor(CallInfo &callInfo);
     InliningStatus inlineMathCeil(CallInfo &callInfo);
+    InliningStatus inlineMathClz32(CallInfo &callInfo);
     InliningStatus inlineMathRound(CallInfo &callInfo);
     InliningStatus inlineMathSqrt(CallInfo &callInfo);
     InliningStatus inlineMathAtan2(CallInfo &callInfo);

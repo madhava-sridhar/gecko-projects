@@ -29,7 +29,7 @@ class MediaSource;
 class MediaSourceReader : public MediaDecoderReader
 {
 public:
-  MediaSourceReader(MediaSourceDecoder* aDecoder, dom::MediaSource* aSource);
+  MediaSourceReader(MediaSourceDecoder* aDecoder);
 
   nsresult Init(MediaDecoderReader* aCloneDonor) MOZ_OVERRIDE
   {
@@ -87,6 +87,12 @@ public:
   // Return true if any of the active decoders contain data for the given time
   bool DecodersContainTime(double aTime);
 
+  // Mark the reader to indicate that EndOfStream has been called on our MediaSource
+  void Ended();
+
+  // Return true if the Ended method has been called
+  bool IsEnded();
+
 private:
   enum SwitchType {
     SWITCH_OPTIONAL,
@@ -97,8 +103,6 @@ private:
 
   bool SwitchAudioReader(MediaDecoderReader* aTargetReader);
   bool SwitchVideoReader(MediaDecoderReader* aTargetReader);
-
-  void SetMediaSourceDuration(double aDuration) ;
 
   // These are read and written on the decode task queue threads.
   int64_t mTimeThreshold;
@@ -111,7 +115,7 @@ private:
   nsRefPtr<MediaDecoderReader> mAudioReader;
   nsRefPtr<MediaDecoderReader> mVideoReader;
 
-  dom::MediaSource* mMediaSource;
+  bool mEnded;
 };
 
 } // namespace mozilla
