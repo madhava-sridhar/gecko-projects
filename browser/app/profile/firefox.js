@@ -970,6 +970,13 @@ pref("gecko.handlerService.allowRegisterFromDifferentHost", false);
 #ifdef MOZ_SAFE_BROWSING
 pref("browser.safebrowsing.enabled", true);
 pref("browser.safebrowsing.malware.enabled", true);
+pref("browser.safebrowsing.downloads.enabled", true);
+// Remote lookups are only enabled for Windows in Nightly and Aurora
+#if defined(XP_WIN) && !defined(RELEASE_BUILD)
+pref("browser.safebrowsing.downloads.remote.enabled", true);
+#else
+pref("browser.safebrowsing.downloads.remote.enabled", false);
+#endif
 pref("browser.safebrowsing.debug", false);
 
 pref("browser.safebrowsing.updateURL", "https://safebrowsing.google.com/safebrowsing/downloads?client=SAFEBROWSING_ID&appver=%VERSION%&pver=2.2&key=%GOOGLE_API_KEY%");
@@ -983,10 +990,7 @@ pref("browser.safebrowsing.reportMalwareErrorURL", "http://%LOCALE%.malware-erro
 
 pref("browser.safebrowsing.malware.reportURL", "https://safebrowsing.google.com/safebrowsing/diagnostic?client=%NAME%&hl=%LOCALE%&site=");
 
-// Turn off remote lookups in beta and stable channel.
-#ifndef RELEASE_BUILD
 pref("browser.safebrowsing.appRepURL", "https://sb-ssl.google.com/safebrowsing/clientreport/download?key=%GOOGLE_API_KEY%");
-#endif
 
 #ifdef MOZILLA_OFFICIAL
 // Normally the "client ID" sent in updates is appinfo.name, but for
@@ -1302,6 +1306,7 @@ pref("devtools.toolbox.splitconsoleHeight", 100);
 
 // Toolbox Button preferences
 pref("devtools.command-button-pick.enabled", true);
+pref("devtools.command-button-frames.enabled", false);
 pref("devtools.command-button-splitconsole.enabled", true);
 pref("devtools.command-button-paintflashing.enabled", false);
 pref("devtools.command-button-tilt.enabled", false);
@@ -1531,10 +1536,10 @@ pref("browser.newtabpage.rows", 3);
 pref("browser.newtabpage.columns", 5);
 
 // directory tiles download URL
-pref("browser.newtabpage.directory.source", "https://tiles.up.mozillalabs.com/v2/links/fetch");
+pref("browser.newtabpage.directory.source", "https://tiles.services.mozilla.com/v2/links/fetch");
 
 // endpoint to send newtab click and view pings
-pref("browser.newtabpage.directory.ping", "https://tiles.up.mozillalabs.com/v2/links/");
+pref("browser.newtabpage.directory.ping", "https://tiles.services.mozilla.com/v2/links/");
 
 // Enable the DOM fullscreen API.
 pref("full-screen-api.enabled", true);

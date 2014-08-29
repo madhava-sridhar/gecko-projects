@@ -474,8 +474,8 @@ DecomposeIntoNoRepeatRects(const Rect& aRect,
 
   // If we are dealing with wrapping br.x and br.y are greater than 1.0 so
   // wrap them here as well.
-  br = Point(xwrap ? WrapTexCoord(br.x) : br.x.value,
-             ywrap ? WrapTexCoord(br.y) : br.y.value);
+  br = Point(xwrap ? WrapTexCoord(br.x) : br.x,
+             ywrap ? WrapTexCoord(br.y) : br.y);
 
   // If we wrap around along the x axis, we will draw first from
   // tl.x .. 1.0 and then from 0.0 .. br.x (which we just wrapped above).
@@ -1493,8 +1493,7 @@ CompositorOGL::CopyToTarget(DrawTarget* aTarget, const nsIntPoint& aTopLeft, con
 
   RefPtr<DataSourceSurface> source =
         Factory::CreateDataSourceSurface(rect.Size(), gfx::SurfaceFormat::B8G8R8A8);
-  if (!source) {
-    NS_WARNING("Failed to create SourceSurface.");
+  if (NS_WARN_IF(!source)) {
     return;
   }
 
