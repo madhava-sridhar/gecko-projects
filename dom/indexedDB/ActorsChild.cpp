@@ -26,6 +26,7 @@
 #include "mozilla/ipc/BackgroundUtils.h"
 #include "nsCOMPtr.h"
 #include "nsContentUtils.h"
+#include "nsIBFCacheEntry.h"
 #include "nsIDocument.h"
 #include "nsIDOMEvent.h"
 #include "nsIEventTarget.h"
@@ -1317,16 +1318,25 @@ BackgroundDatabaseChild::RecvVersionChange(const uint64_t& aOldVersion,
 
   nsRefPtr<IDBDatabase> kungFuDeathGrip = mDatabase;
 
-  // Check if the document the IDBDatabase is part of is bfcached or if it's in
-  // the process of being bfcached.
-  nsPIDOMWindow* owner = mDatabase->GetOwner();
-  if (owner) {
-    nsCOMPtr<nsIDocument> ownerDoc = owner->GetExtantDoc();
-    if ((ownerDoc && ownerDoc->GetBFCacheEntry()) || owner->IsFrozen()) {
+  // Handle bfcache'd windows.
+  if (nsPIDOMWindow* owner = mDatabase->GetOwner()) {
+    // The database must be closed if the window is already frozen.
+    bool shouldAbortAndClose = owner->IsFrozen();
+
+    // Anything in the bfcache has to be evicted and then we have to close the
+    // database also.
+    if (nsCOMPtr<nsIDocument> doc = owner->GetExtantDoc()) {
+      if (nsCOMPtr<nsIBFCacheEntry> bfCacheEntry = doc->GetBFCacheEntry()) {
+        bfCacheEntry->RemoveFromBFCacheSync();
+        shouldAbortAndClose = true;
+      }
+    }
+
+    if (shouldAbortAndClose) {
       // Invalidate() doesn't close the database in the parent, so we have
       // to call Close() and AbortTransactions() manually.
-      mDatabase->Close();
       mDatabase->AbortTransactions();
+      mDatabase->Close();
       return true;
     }
   }
