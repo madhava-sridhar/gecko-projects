@@ -4396,12 +4396,12 @@ private:
     , mContext(nullptr)
     , mGlobal(nullptr)
   {
-    MOZ_COUNT_CTOR(indexedDB::CreateIndexOp::ThreadLocalJSRuntime);
+    MOZ_COUNT_CTOR(CreateIndexOp::ThreadLocalJSRuntime);
   }
 
   ~ThreadLocalJSRuntime()
   {
-    MOZ_COUNT_DTOR(indexedDB::CreateIndexOp::ThreadLocalJSRuntime);
+    MOZ_COUNT_DTOR(CreateIndexOp::ThreadLocalJSRuntime);
 
     if (mContext) {
       JS_DestroyContext(mContext);
@@ -5016,7 +5016,7 @@ struct DatabaseActorInfo
   {
     MOZ_ASSERT(aDatabase);
 
-    MOZ_COUNT_CTOR(indexedDB::DatabaseActorInfo);
+    MOZ_COUNT_CTOR(DatabaseActorInfo);
 
     mLiveDatabases.AppendElement(aDatabase);
   }
@@ -5028,7 +5028,7 @@ private:
     MOZ_ASSERT(!mWaitingFactoryOp ||
                !mWaitingFactoryOp->HasBlockedDatabases());
 
-    MOZ_COUNT_DTOR(indexedDB::DatabaseActorInfo);
+    MOZ_COUNT_DTOR(DatabaseActorInfo);
   }
 };
 
