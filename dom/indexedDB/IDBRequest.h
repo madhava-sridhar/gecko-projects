@@ -65,10 +65,7 @@ protected:
   bool mHaveResultOrErrorCode;
 
 public:
-  typedef nsresult
-    (*GetResultCallback)(JSContext* aCx,
-                         void* aUserData,
-                         JS::MutableHandle<JS::Value> aResult);
+  class ResultCallback;
 
   static already_AddRefed<IDBRequest>
   Create(IDBDatabase* aDatabase, IDBTransaction* aTransaction);
@@ -97,7 +94,7 @@ public:
   DispatchNonTransactionError(nsresult aErrorCode);
 
   void
-  SetResult(GetResultCallback aCallback, void* aUserData);
+  SetResultCallback(ResultCallback* aCallback);
 
   void
   SetError(nsresult aRv);
@@ -194,6 +191,17 @@ protected:
 
   void
   CaptureCaller();
+};
+
+class NS_NO_VTABLE IDBRequest::ResultCallback
+{
+public:
+  virtual nsresult
+  GetResult(JSContext* aCx, JS::MutableHandle<JS::Value> aResult) = 0;
+
+protected:
+  ResultCallback()
+  { }
 };
 
 class IDBOpenDBRequest MOZ_FINAL

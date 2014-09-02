@@ -112,9 +112,6 @@ public:
     , mPreviousTransaction(nullptr)
     , mThreadLocalSlot(nullptr)
   {
-#ifdef MOZ_ENABLE_PROFILER_SPS
-    // This is currently only needed so that we can get useful serial numbers in
-    // the profiler.
     if (aTransaction) {
       BackgroundChildImpl::ThreadLocal* threadLocal =
         BackgroundChildImpl::GetThreadLocalForCurrentThread();
@@ -129,7 +126,6 @@ public:
       // Set the new value.
       *mThreadLocalSlot = aTransaction;
     }
-#endif // MOZ_ENABLE_PROFILER_SPS
   }
 
   ~AutoSetCurrentTransaction()
@@ -152,6 +148,7 @@ public:
 };
 
 class MOZ_STACK_CLASS ResultHelper MOZ_FINAL
+  : public IDBRequest::ResultCallback
 {
   IDBRequest* mRequest;
   AutoSetCurrentTransaction mAutoTransaction;
@@ -186,6 +183,7 @@ public:
     , mAutoTransaction(aTransaction)
     , mResultType(ResultTypeISupports)
   {
+    MOZ_ASSERT(NS_IsMainThread(), "This won't work off the main thread!");
     MOZ_ASSERT(aRequest);
     MOZ_ASSERT(aResult);
 
@@ -281,41 +279,34 @@ public:
     return mAutoTransaction.Transaction();
   }
 
-  static nsresult
-  GetResult(JSContext* aCx,
-            void* aUserData,
-            JS::MutableHandle<JS::Value> aResult)
+  virtual nsresult
+  GetResult(JSContext* aCx, JS::MutableHandle<JS::Value> aResult) MOZ_OVERRIDE
   {
     MOZ_ASSERT(aCx);
+    MOZ_ASSERT(mRequest);
 
-    auto helper = static_cast<ResultHelper*>(aUserData);
-    MOZ_ASSERT(helper);
-    MOZ_ASSERT(helper->mRequest);
-
-    switch (helper->mResultType) {
+    switch (mResultType) {
       case ResultTypeISupports:
-        return helper->GetResult(aCx, helper->mResult.mISupports, aResult);
+        return GetResult(aCx, mResult.mISupports, aResult);
 
       case ResultTypeStructuredClone:
-        return helper->GetResult(aCx, helper->mResult.mStructuredClone,
-                                 aResult);
+        return GetResult(aCx, mResult.mStructuredClone, aResult);
 
       case ResultTypeStructuredCloneArray:
-        return helper->GetResult(aCx, helper->mResult.mStructuredCloneArray,
-                                 aResult);
+        return GetResult(aCx, mResult.mStructuredCloneArray, aResult);
 
       case ResultTypeKey:
-        return helper->GetResult(aCx, helper->mResult.mKey, aResult);
+        return GetResult(aCx, mResult.mKey, aResult);
 
       case ResultTypeKeyArray:
-        return helper->GetResult(aCx, helper->mResult.mKeyArray, aResult);
+        return GetResult(aCx, mResult.mKeyArray, aResult);
 
       case ResultTypeJSVal:
-        aResult.set(*helper->mResult.mJSVal);
+        aResult.set(*mResult.mJSVal);
         return NS_OK;
 
       case ResultTypeJSValHandle:
-        aResult.set(*helper->mResult.mJSValHandle);
+        aResult.set(*mResult.mJSValHandle);
         return NS_OK;
 
       default:
@@ -328,15 +319,17 @@ public:
 private:
   nsresult
   GetResult(JSContext* aCx,
-            nsISupports* aUserData,
+            nsISupports* aSupports,
             JS::MutableHandle<JS::Value> aResult)
   {
-    if (!aUserData) {
+    MOZ_ASSERT(NS_IsMainThread(), "This won't work off the main thread!");
+
+    if (!aSupports) {
       aResult.setNull();
       return NS_OK;
     }
 
-    nsresult rv = nsContentUtils::WrapNative(aCx, aUserData, aResult);
+    nsresult rv = nsContentUtils::WrapNative(aCx, aSupports, aResult);
     if (NS_WARN_IF(NS_FAILED(rv))) {
       IDB_REPORT_INTERNAL_ERR();
       return NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
@@ -347,12 +340,12 @@ private:
 
   nsresult
   GetResult(JSContext* aCx,
-            StructuredCloneReadInfo* aUserData,
+            StructuredCloneReadInfo* aCloneInfo,
             JS::MutableHandle<JS::Value> aResult)
   {
-    bool ok = IDBObjectStore::DeserializeValue(aCx, *aUserData, aResult);
+    bool ok = IDBObjectStore::DeserializeValue(aCx, *aCloneInfo, aResult);
 
-    aUserData->mCloneBuffer.clear();
+    aCloneInfo->mCloneBuffer.clear();
 
     if (NS_WARN_IF(!ok)) {
       return NS_ERROR_DOM_DATA_CLONE_ERR;
@@ -363,7 +356,7 @@ private:
 
   nsresult
   GetResult(JSContext* aCx,
-            const nsTArray<StructuredCloneReadInfo>* aUserData,
+            const nsTArray<StructuredCloneReadInfo>* aCloneInfos,
             JS::MutableHandle<JS::Value> aResult)
   {
     JS::Rooted<JSObject*> array(aCx, JS_NewArrayObject(aCx, 0));
@@ -372,8 +365,8 @@ private:
       return NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
     }
 
-    if (!aUserData->IsEmpty()) {
-      const uint32_t count = aUserData->Length();
+    if (!aCloneInfos->IsEmpty()) {
+      const uint32_t count = aCloneInfos->Length();
 
       if (NS_WARN_IF(!JS_SetArrayLength(aCx, array, count))) {
         IDB_REPORT_INTERNAL_ERR();
@@ -382,15 +375,13 @@ private:
 
       for (uint32_t index = 0; index < count; index++) {
         auto& cloneInfo =
-          const_cast<StructuredCloneReadInfo&>(aUserData->ElementAt(index));
+          const_cast<StructuredCloneReadInfo&>(aCloneInfos->ElementAt(index));
 
         JS::Rooted<JS::Value> value(aCx);
-        bool ok = IDBObjectStore::DeserializeValue(aCx, cloneInfo, &value);
 
-        cloneInfo.mData.Clear();
-
-        if (NS_WARN_IF(!ok)) {
-          return NS_ERROR_DOM_DATA_CLONE_ERR;
+        nsresult rv = GetResult(aCx, &cloneInfo, &value);
+        if (NS_WARN_IF(NS_FAILED(rv))) {
+          return rv;
         }
 
         if (NS_WARN_IF(!JS_SetElement(aCx, array, index, value))) {
@@ -406,10 +397,10 @@ private:
 
   nsresult
   GetResult(JSContext* aCx,
-            const Key* aUserData,
+            const Key* aKey,
             JS::MutableHandle<JS::Value> aResult)
   {
-    nsresult rv = aUserData->ToJSVal(aCx, aResult);
+    nsresult rv = aKey->ToJSVal(aCx, aResult);
     if (NS_WARN_IF(NS_FAILED(rv))) {
       return rv;
     }
@@ -418,7 +409,7 @@ private:
 
   nsresult
   GetResult(JSContext* aCx,
-            const nsTArray<Key>* aUserData,
+            const nsTArray<Key>* aKeys,
             JS::MutableHandle<JS::Value> aResult)
   {
     JS::Rooted<JSObject*> array(aCx, JS_NewArrayObject(aCx, 0));
@@ -427,8 +418,8 @@ private:
       return NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
     }
 
-    if (!aUserData->IsEmpty()) {
-      const uint32_t count = aUserData->Length();
+    if (!aKeys->IsEmpty()) {
+      const uint32_t count = aKeys->Length();
 
       if (NS_WARN_IF(!JS_SetArrayLength(aCx, array, count))) {
         IDB_REPORT_INTERNAL_ERR();
@@ -436,11 +427,12 @@ private:
       }
 
       for (uint32_t index = 0; index < count; index++) {
-        const Key& key = aUserData->ElementAt(index);
+        const Key& key = aKeys->ElementAt(index);
         MOZ_ASSERT(!key.IsUnset());
 
         JS::Rooted<JS::Value> value(aCx);
-        nsresult rv = key.ToJSVal(aCx, &value);
+
+        nsresult rv = GetResult(aCx, &key, &value);
         if (NS_WARN_IF(NS_FAILED(rv))) {
           return rv;
         }
@@ -585,7 +577,7 @@ DispatchSuccessEvent(ResultHelper* aResultHelper,
     aEvent = successEvent;
   }
 
-  request->SetResult(&ResultHelper::GetResult, aResultHelper);
+  request->SetResultCallback(aResultHelper);
 
   MOZ_ASSERT(aEvent);
   MOZ_ASSERT_IF(transaction, transaction->IsOpen());
@@ -650,27 +642,21 @@ DispatchErrorEvent(IDBRequest* aRequest,
 
   bool doDefault;
   nsresult rv = request->DispatchEvent(aEvent, &doDefault);
-  if (NS_SUCCEEDED(rv)) {
-    MOZ_ASSERT(!transaction ||
-               transaction->IsOpen() ||
-               transaction->IsAborted());
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return;
+  }
 
+  MOZ_ASSERT(!transaction || transaction->IsOpen() || transaction->IsAborted());
+
+  if (transaction && transaction->IsOpen()) {
     WidgetEvent* internalEvent = aEvent->GetInternalNSEvent();
     MOZ_ASSERT(internalEvent);
 
-    if (internalEvent->mFlags.mExceptionHasBeenRisen &&
-        transaction &&
-        transaction->IsOpen()) {
+    if (internalEvent->mFlags.mExceptionHasBeenRisen) {
       transaction->Abort(NS_ERROR_DOM_INDEXEDDB_ABORT_ERR);
-    }
-
-    if (doDefault &&
-        transaction &&
-        transaction->IsOpen()) {
+    } else if (doDefault) {
       transaction->Abort(request);
     }
-  } else {
-    NS_WARNING("DispatchEvent failed!");
   }
 }
 
@@ -1053,22 +1039,23 @@ bool
 BackgroundFactoryRequestChild::RecvBlocked(const uint64_t& aCurrentVersion)
 {
   AssertIsOnOwningThread();
+  MOZ_ASSERT(mRequest);
 
   MaybeCollectGarbageOnIPCMessage();
 
-  if (!mRequest) {
-    return true;
-  }
-
   const nsDependentString type(kBlockedEventType);
 
-  nsCOMPtr<nsIDOMEvent> blockedEvent =
-    mIsDeleteOp ?
-    IDBVersionChangeEvent::Create(mRequest, type, aCurrentVersion) :
-    IDBVersionChangeEvent::Create(mRequest,
-                                  type,
-                                  aCurrentVersion,
-                                  mRequestedVersion);
+  nsCOMPtr<nsIDOMEvent> blockedEvent;
+  if (mIsDeleteOp) {
+    blockedEvent =
+      IDBVersionChangeEvent::Create(mRequest, type, aCurrentVersion);
+  } else {
+    blockedEvent =
+      IDBVersionChangeEvent::Create(mRequest,
+                                    type,
+                                    aCurrentVersion,
+                                    mRequestedVersion);
+  }
 
   if (NS_WARN_IF(!blockedEvent)) {
     return false;
@@ -1516,12 +1503,9 @@ bool
 BackgroundTransactionChild::RecvComplete(const nsresult& aResult)
 {
   AssertIsOnOwningThread();
+  MOZ_ASSERT(mTransaction);
 
   MaybeCollectGarbageOnIPCMessage();
-
-  if (!mTransaction) {
-    return true;
-  }
 
   mTransaction->FireCompleteOrAbortEvents(aResult);
 
@@ -1714,10 +1698,7 @@ BackgroundRequestChild::~BackgroundRequestChild()
 
   MOZ_COUNT_DTOR(indexedDB::BackgroundRequestChild);
 
-  if (mTransaction) {
-    mTransaction->AssertIsOnOwningThread();
-    mTransaction->OnRequestFinished();
-  }
+  MaybeFinishTransactionEarly();
 }
 
 void
@@ -1728,6 +1709,19 @@ BackgroundRequestChild::HoldFileInfosUntilComplete(
   MOZ_ASSERT(mFileInfos.IsEmpty());
 
   mFileInfos.SwapElements(aFileInfos);
+}
+
+void
+BackgroundRequestChild::MaybeFinishTransactionEarly()
+{
+  AssertIsOnOwningThread();
+
+  if (mTransaction) {
+    mTransaction->AssertIsOnOwningThread();
+
+    mTransaction->OnRequestFinished();
+    mTransaction = nullptr;
+  }
 }
 
 bool
@@ -1856,12 +1850,7 @@ BackgroundRequestChild::ActorDestroy(ActorDestroyReason aWhy)
 
   MaybeCollectGarbageOnIPCMessage();
 
-  if (mTransaction) {
-    mTransaction->AssertIsOnOwningThread();
-    mTransaction->OnRequestFinished();
-
-    mTransaction = nullptr;
-  }
+  MaybeFinishTransactionEarly();
 
   NoteActorDestroyed();
 }
@@ -2122,17 +2111,17 @@ BackgroundCursorChild::HandleResponse(
                        response.cloneInfo(),
                        cloneReadInfo.mFiles);
 
-  Maybe<nsRefPtr<IDBCursor>> newCursor;
+  nsRefPtr<IDBCursor> newCursor;
 
   if (mCursor) {
     mCursor->Reset(Move(response.key()), Move(cloneReadInfo));
   } else {
-    newCursor.emplace(IDBCursor::Create(mObjectStore,
-                                        this,
-                                        mDirection,
-                                        Move(response.key()),
-                                        Move(cloneReadInfo)));
-    mCursor = newCursor.ref();
+    newCursor = IDBCursor::Create(mObjectStore,
+                                  this,
+                                  mDirection,
+                                  Move(response.key()),
+                                  Move(cloneReadInfo));
+    mCursor = newCursor;
   }
 
   ResultHelper helper(mRequest, mTransaction, mCursor);
@@ -2153,16 +2142,16 @@ BackgroundCursorChild::HandleResponse(
   // XXX Fix this somehow...
   auto& response = const_cast<ObjectStoreKeyCursorResponse&>(aResponse);
 
-  Maybe<nsRefPtr<IDBCursor>> newCursor;
+  nsRefPtr<IDBCursor> newCursor;
 
   if (mCursor) {
     mCursor->Reset(Move(response.key()));
   } else {
-    newCursor.emplace(IDBCursor::Create(mObjectStore,
-                                        this,
-                                        mDirection,
-                                        Move(response.key())));
-    mCursor = newCursor.ref();
+    newCursor = IDBCursor::Create(mObjectStore,
+                                  this,
+                                  mDirection,
+                                  Move(response.key()));
+    mCursor = newCursor;
   }
 
   ResultHelper helper(mRequest, mTransaction, mCursor);
@@ -2188,20 +2177,20 @@ BackgroundCursorChild::HandleResponse(const IndexCursorResponse& aResponse)
                        aResponse.cloneInfo(),
                        cloneReadInfo.mFiles);
 
-  Maybe<nsRefPtr<IDBCursor>> newCursor;
+  nsRefPtr<IDBCursor> newCursor;
 
   if (mCursor) {
     mCursor->Reset(Move(response.key()),
                    Move(response.objectKey()),
                    Move(cloneReadInfo));
   } else {
-    newCursor.emplace(IDBCursor::Create(mIndex,
-                                        this,
-                                        mDirection,
-                                        Move(response.key()),
-                                        Move(response.objectKey()),
-                                        Move(cloneReadInfo)));
-    mCursor = newCursor.ref();
+    newCursor = IDBCursor::Create(mIndex,
+                                  this,
+                                  mDirection,
+                                  Move(response.key()),
+                                  Move(response.objectKey()),
+                                  Move(cloneReadInfo));
+    mCursor = newCursor;
   }
 
   ResultHelper helper(mRequest, mTransaction, mCursor);
@@ -2221,17 +2210,17 @@ BackgroundCursorChild::HandleResponse(const IndexKeyCursorResponse& aResponse)
   // XXX Fix this somehow...
   auto& response = const_cast<IndexKeyCursorResponse&>(aResponse);
 
-  Maybe<nsRefPtr<IDBCursor>> newCursor;
+  nsRefPtr<IDBCursor> newCursor;
 
   if (mCursor) {
     mCursor->Reset(Move(response.key()), Move(response.objectKey()));
   } else {
-    newCursor.emplace(IDBCursor::Create(mIndex,
-                                        this,
-                                        mDirection,
-                                        Move(response.key()),
-                                        Move(response.objectKey())));
-    mCursor = newCursor.ref();
+    newCursor = IDBCursor::Create(mIndex,
+                                  this,
+                                  mDirection,
+                                  Move(response.key()),
+                                  Move(response.objectKey()));
+    mCursor = newCursor;
   }
 
   ResultHelper helper(mRequest, mTransaction, mCursor);

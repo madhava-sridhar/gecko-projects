@@ -288,7 +288,7 @@ IDBRequest::GetResult(JS::MutableHandle<JS::Value> aResult,
 }
 
 void
-IDBRequest::SetResult(GetResultCallback aCallback, void* aUserData)
+IDBRequest::SetResultCallback(ResultCallback* aCallback)
 {
   AssertIsOnOwningThread();
   MOZ_ASSERT(aCallback);
@@ -326,7 +326,7 @@ IDBRequest::SetResult(GetResultCallback aCallback, void* aUserData)
   AssertIsRooted();
 
   JS::Rooted<JS::Value> result(cx);
-  nsresult rv = aCallback(cx, aUserData, &result);
+  nsresult rv = aCallback->GetResult(cx, &result);
   if (NS_WARN_IF(NS_FAILED(rv))) {
     SetError(rv);
     mResultVal.setUndefined();

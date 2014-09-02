@@ -12,13 +12,12 @@
 #include "nsClassHashtable.h"
 #include "nsCOMPtr.h"
 #include "nsHashKeys.h"
+#include "nsISupportsImpl.h"
 #include "nsTArray.h"
 
-template <typename> class nsAutoPtr;
 class nsIEventTarget;
 class nsIRunnable;
 class nsIThreadPool;
-struct PRThread;
 
 namespace mozilla {
 namespace dom {
@@ -26,51 +25,43 @@ namespace indexedDB {
 
 class TransactionThreadPool MOZ_FINAL
 {
-  friend class nsAutoPtr<TransactionThreadPool>;
-
   class FinishTransactionRunnable;
   friend class FinishTransactionRunnable;
 
   class TransactionQueue;
   friend class TransactionQueue;
 
-  class CleanupRunnable;
   struct DatabaseTransactionInfo;
   struct DatabasesCompleteCallback;
   struct TransactionInfo;
   struct TransactionInfoPair;
 
   nsCOMPtr<nsIThreadPool> mThreadPool;
+  nsCOMPtr<nsIEventTarget> mOwningThread;
 
   nsClassHashtable<nsCStringHashKey, DatabaseTransactionInfo>
     mTransactionsInProgress;
 
   nsTArray<nsAutoPtr<DatabasesCompleteCallback>> mCompleteCallbacks;
 
-#ifdef DEBUG
-  PRThread* mDEBUGOwningPRThread;
-#endif
+  uint64_t mNextTransactionId;
+  bool mShutdownRequested;
+  bool mShutdownComplete;
 
 public:
   class FinishCallback;
 
-  // returns a non-owning ref!
-  static TransactionThreadPool* GetOrCreate();
+  static already_AddRefed<TransactionThreadPool> Create();
 
-  // returns a non-owning ref!
-  static TransactionThreadPool* Get();
+  uint64_t NextTransactionId();
 
-  static void Shutdown(nsIRunnable* aCallback);
-
-  static uint64_t NextTransactionId();
-
-  nsresult Dispatch(uint64_t aTransactionId,
-                    const nsACString& aDatabaseId,
-                    const nsTArray<nsString>& aObjectStoreNames,
-                    uint16_t aMode,
-                    nsIRunnable* aRunnable,
-                    bool aFinish,
-                    FinishCallback* aFinishCallback);
+  void Dispatch(uint64_t aTransactionId,
+                const nsACString& aDatabaseId,
+                const nsTArray<nsString>& aObjectStoreNames,
+                uint16_t aMode,
+                nsIRunnable* aRunnable,
+                bool aFinish,
+                FinishCallback* aFinishCallback);
 
   void Dispatch(uint64_t aTransactionId,
                 const nsACString& aDatabaseId,
@@ -83,6 +74,13 @@ public:
 
   // Returns true if there are running or pending transactions for aDatabase.
   bool HasTransactionsForDatabase(const nsACString& aDatabaseId);
+
+  NS_INLINE_DECL_REFCOUNTING(TransactionThreadPool)
+
+  void ShutdownAndSpin();
+  void ShutdownAsync();
+
+  bool HasCompletedShutdown() const;
 
   void AssertIsOnOwningThread() const
 #ifdef DEBUG
@@ -107,10 +105,12 @@ private:
                           void* aUserArg);
 
   TransactionThreadPool();
+
+  // Reference counted.
   ~TransactionThreadPool();
 
   nsresult Init();
-  nsresult Cleanup();
+  void Cleanup();
 
   void FinishTransaction(uint64_t aTransactionId,
                          const nsACString& aDatabaseId,
@@ -150,10 +150,6 @@ public:
 
 protected:
   FinishCallback()
-  { }
-
-  virtual
-  ~FinishCallback()
   { }
 };
 

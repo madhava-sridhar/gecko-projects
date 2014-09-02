@@ -381,7 +381,7 @@ class BackgroundTransactionChild MOZ_FINAL
 public:
 #ifdef DEBUG
   virtual void
-  AssertIsOnOwningThread() const;
+  AssertIsOnOwningThread() const MOZ_OVERRIDE;
 #endif
 
   void
@@ -430,7 +430,7 @@ class BackgroundVersionChangeTransactionChild MOZ_FINAL
 public:
 #ifdef DEBUG
   virtual void
-  AssertIsOnOwningThread() const;
+  AssertIsOnOwningThread() const MOZ_OVERRIDE;
 #endif
 
   void
@@ -495,6 +495,9 @@ private:
   // Only destroyed by BackgroundTransactionChild or
   // BackgroundVersionChangeTransactionChild.
   ~BackgroundRequestChild();
+
+  void
+  MaybeFinishTransactionEarly();
 
   bool
   HandleResponse(nsresult aResponse);

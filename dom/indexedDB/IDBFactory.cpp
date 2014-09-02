@@ -159,11 +159,6 @@ IDBFactory::CreateForWindow(nsPIDOMWindow* aWindow,
     return NS_ERROR_DOM_INDEXEDDB_NOT_ALLOWED_ERR;
   }
 
-  if (aWindow->IsOuterWindow()) {
-    aWindow = aWindow->GetCurrentInnerWindow();
-    IDB_ENSURE_TRUE(aWindow, NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
-  }
-
   nsCOMPtr<nsIScriptObjectPrincipal> sop = do_QueryInterface(aWindow);
   if (NS_WARN_IF(!sop)) {
     IDB_REPORT_INTERNAL_ERR();
