@@ -10599,9 +10599,6 @@ FactoryOp::SendToIOThread()
 
   nsresult rv = quotaManager->IOThread()->Dispatch(this, NS_DISPATCH_NORMAL);
   if (NS_WARN_IF(NS_FAILED(rv))) {
-#ifdef DEBUG
-    mState = State_OpenPending;
-#endif
     IDB_REPORT_INTERNAL_ERR();
     return NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
   }
@@ -11345,9 +11342,6 @@ OpenDatabaseOp::DoDatabaseWork()
 
   rv = mOwningThread->Dispatch(this, NS_DISPATCH_NORMAL);
   if (NS_WARN_IF(NS_FAILED(rv))) {
-#ifdef DEBUG
-    mState = State_DatabaseWorkOpen;
-#endif
     return rv;
   }
 
@@ -12485,9 +12479,6 @@ DeleteDatabaseOp::DoDatabaseWork()
 
   rv = mOwningThread->Dispatch(this, NS_DISPATCH_NORMAL);
   if (NS_WARN_IF(NS_FAILED(rv))) {
-#ifdef DEBUG
-    mState = State_DatabaseWorkVersionChange;
-#endif
     return rv;
   }
 

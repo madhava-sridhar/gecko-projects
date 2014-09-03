@@ -2411,15 +2411,17 @@ BlobParent::Create(PBackgroundParent* aManager,
 }
 
 // static
-template <class ParentManagerType>
 BlobParent*
-BlobParent::CreateFromParams(ParentManagerType* aManager,
+BlobParent::CreateFromParams(nsIContentParent* aManager,
                              const ParentBlobConstructorParams& aParams)
 {
   AssertCorrectThreadForManager(aManager);
   MOZ_ASSERT(aManager);
 
   const ChildBlobConstructorParams& blobParams = aParams.blobParams();
+
+  MOZ_ASSERT(blobParams.type() !=
+             ChildBlobConstructorParams::TMysteryBlobConstructorParams);
 
   switch (blobParams.type()) {
     case ChildBlobConstructorParams::TMysteryBlobConstructorParams:
@@ -2449,6 +2451,55 @@ BlobParent::CreateFromParams(ParentManagerType* aManager,
       NS_ENSURE_SUCCESS(rv, nullptr);
 
       nsRefPtr<DOMFile> slice = new DOMFile(slicedImpl);
+
+      return new BlobParent(aManager, slice);
+    }
+
+    default:
+      MOZ_CRASH("Unknown params!");
+  }
+
+  MOZ_CRASH("Should never get here!");
+}
+
+BlobParent*
+BlobParent::CreateFromParams(PBackgroundParent* aManager,
+                             const ParentBlobConstructorParams& aParams)
+{
+  AssertCorrectThreadForManager(aManager);
+  MOZ_ASSERT(aManager);
+
+  const ChildBlobConstructorParams& blobParams = aParams.blobParams();
+
+  MOZ_ASSERT(blobParams.type() !=
+             ChildBlobConstructorParams::TMysteryBlobConstructorParams);
+
+  switch (blobParams.type()) {
+    case ChildBlobConstructorParams::TMysteryBlobConstructorParams:
+      ASSERT_UNLESS_FUZZING();
+      return nullptr;
+
+    case ChildBlobConstructorParams::TNormalBlobConstructorParams:
+    case ChildBlobConstructorParams::TFileBlobConstructorParams:
+      return new BlobParent(aManager, aParams);
+
+    case ChildBlobConstructorParams::TSlicedBlobConstructorParams: {
+      const SlicedBlobConstructorParams& params =
+        blobParams.get_SlicedBlobConstructorParams();
+
+      auto* actor =
+        const_cast<BlobParent*>(
+          static_cast<const BlobParent*>(params.sourceParent()));
+      MOZ_ASSERT(actor);
+
+      nsRefPtr<DOMFileImpl> source = actor->GetBlobImpl();
+      MOZ_ASSERT(source);
+
+      nsRefPtr<DOMFileImpl> slice;
+      nsresult rv =
+        source->Slice(params.begin(), params.end(), params.contentType(), 3,
+                      getter_AddRefs(slice));
+      NS_ENSURE_SUCCESS(rv, nullptr);
 
       return new BlobParent(aManager, slice);
     }
