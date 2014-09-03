@@ -709,8 +709,9 @@ TransactionThreadPool::CollectTransactions(const uint64_t& aTransactionId,
 
 struct MOZ_STACK_CLASS TransactionSearchInfo
 {
-  TransactionSearchInfo(const nsACString& aDatabaseId)
-    : databaseId(aDatabaseId), found(false)
+  explicit TransactionSearchInfo(const nsACString& aDatabaseId)
+    : databaseId(aDatabaseId)
+    , found(false)
   {
   }
 

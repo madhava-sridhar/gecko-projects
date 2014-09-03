@@ -3555,6 +3555,25 @@ JSObject::CopyElementsForWrite(ThreadSafeContext *cx, JSObject *obj)
     return true;
 }
 
+void
+JSObject::fixupAfterMovingGC()
+{
+    /*
+     * If this is a copy-on-write elements we may need to fix up both the
+     * elements' pointer back to the owner object, and the elements pointer
+     * itself if it points to inline elements in another object.
+     */
+    if (hasDynamicElements()) {
+        ObjectElements *header = getElementsHeader();
+        if (header->isCopyOnWrite()) {
+            HeapPtrObject &owner = header->ownerObject();
+            if (IsForwarded(owner.get()))
+                owner = Forwarded(owner.get());
+            elements = owner->getElementsHeader()->elements();
+        }
+    }
+}
+
 bool
 js::SetClassAndProto(JSContext *cx, HandleObject obj,
                      const Class *clasp, Handle<js::TaggedProto> proto,
@@ -4279,6 +4298,9 @@ js::DefineNativeProperty(ExclusiveContext *cx, HandleObject obj, HandleId id, Ha
          * a data property.
          * FIXME: All this logic should be removed when Proxies use PropDesc, but we need to
          *        remove JSPropertyOp getters and setters first.
+         * FIXME: This is still wrong for various array types, and will set the wrong attributes
+         *        by accident, but we can't use NativeLookupOwnProperty in this case, because of resolve
+         *        loops.
          */
         shape = obj->nativeLookup(cx, id);
         if (shape && shape->isDataDescriptor())
@@ -4293,6 +4315,21 @@ js::DefineNativeProperty(ExclusiveContext *cx, HandleObject obj, HandleId id, Ha
             return false;
 
         if (shape) {
+            // Don't forget about arrays.
+            if (IsImplicitDenseOrTypedArrayElement(shape)) {
+                if (obj->is<TypedArrayObject>()) {
+                    /*
+                     * Silently ignore attempts to change individial index attributes.
+                     * FIXME: Uses the same broken behavior as for accessors. This should
+                     *        probably throw.
+                     */
+                    return true;
+                }
+                if (!JSObject::sparsifyDenseElement(cx, obj, JSID_TO_INT(id)))
+                    return false;
+                shape = obj->nativeLookup(cx, id);
+            }
+
             attrs = ApplyOrDefaultAttributes(attrs, shape);
 
             /* Keep everything from the shape that isn't the things we're changing */

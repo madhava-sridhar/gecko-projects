@@ -303,10 +303,16 @@ pref("media.peerconnection.enabled", true);
 pref("media.peerconnection.video.enabled", true);
 pref("media.navigator.video.max_fs", 1200); // 640x480 == 1200mb
 pref("media.navigator.video.max_fr", 30);
+pref("media.navigator.video.h264.level", 12); // 0x42E00C - level 1.2
 pref("media.navigator.video.h264.max_br", 700); // 8x10
 pref("media.navigator.video.h264.max_mbps", 11880); // CIF@30fps
 pref("media.peerconnection.video.h264_enabled", false);
 pref("media.getusermedia.aec", 4);
+// Gonk typically captures at QVGA, and so min resolution is QQVGA or
+// 160x120; 100Kbps is plenty for that.
+pref("media.peerconnection.video.min_bitrate", 100);
+pref("media.peerconnection.video.start_bitrate", 220);
+pref("media.peerconnection.video.max_bitrate", 1000);
 #else
 pref("media.navigator.video.default_width",0);  // adaptive default
 pref("media.navigator.video.default_height",0); // adaptive default
@@ -314,15 +320,18 @@ pref("media.peerconnection.enabled", true);
 pref("media.peerconnection.video.enabled", true);
 pref("media.navigator.video.max_fs", 0); // unrestricted
 pref("media.navigator.video.max_fr", 0); // unrestricted
+pref("media.navigator.video.h264.level", 31); // 0x42E01f - level 3.1
 pref("media.navigator.video.h264.max_br", 0);
 pref("media.navigator.video.h264.max_mbps", 0);
 pref("media.peerconnection.video.h264_enabled", false);
 pref("media.getusermedia.aec", 1);
 pref("media.getusermedia.browser.enabled", true);
-#endif
+// Desktop is typically VGA capture or more; and qm_select will not drop resolution
+// below 1/2 in each dimension (or so), so QVGA (320x200) is the lowest here usually.
 pref("media.peerconnection.video.min_bitrate", 200);
 pref("media.peerconnection.video.start_bitrate", 300);
 pref("media.peerconnection.video.max_bitrate", 2000);
+#endif
 pref("media.navigator.permission.disabled", false);
 pref("media.peerconnection.default_iceservers", "[{\"url\": \"stun:stun.services.mozilla.com\"}]");
 pref("media.peerconnection.trickle_ice", true);
@@ -371,7 +380,12 @@ pref("media.navigator.enabled", true);
 #endif
 
 pref("media.getusermedia.screensharing.enabled", true);
+#ifdef RELEASE_BUILD
 pref("media.getusermedia.screensharing.allowed_domains", "");
+#else
+ // temporary value, not intended for release - bug 1049087
+pref("media.getusermedia.screensharing.allowed_domains", "mozilla.github.io");
+#endif
 // OS/X 10.6 and XP have screen/window sharing off by default due to various issues - Caveat emptor
 pref("media.getusermedia.screensharing.allow_on_old_platforms", false);
 
@@ -412,6 +426,9 @@ pref("media.audio_data.enabled", false);
 // Whether to use async panning and zooming
 pref("layers.async-pan-zoom.enabled", false);
 
+// Whether to enable containerless async scrolling
+pref("layout.async-containerless-scrolling.enabled", true);
+
 // APZ preferences. For documentation/details on what these prefs do, check 
 // gfx/layers/apz/src/AsyncPanZoomController.cpp.
 pref("apz.allow_checkerboarding", true);
@@ -442,8 +459,7 @@ pref("apz.num_paint_duration_samples", 3);
 pref("apz.overscroll.enabled", false);
 pref("apz.overscroll.fling_friction", "0.02");
 pref("apz.overscroll.fling_stopped_threshold", "0.4");
-pref("apz.overscroll.clamping", "0.5");
-pref("apz.overscroll.z_effect", "0.2");
+pref("apz.overscroll.stretch_factor", "0.5");
 pref("apz.overscroll.snap_back.spring_stiffness", "0.6");
 pref("apz.overscroll.snap_back.spring_friction", "0.1");
 pref("apz.overscroll.snap_back.mass", "1000.0");
@@ -1950,11 +1966,7 @@ pref("layout.css.dpi", -1);
 pref("layout.css.devPixelsPerPx", "-1.0");
 
 // Is support for CSS Masking features enabled?
-#ifdef RELEASE_BUILD
-pref("layout.css.masking.enabled", false);
-#else
 pref("layout.css.masking.enabled", true);
-#endif
 
 // Is support for mix-blend-mode enabled?
 pref("layout.css.mix-blend-mode.enabled", true);

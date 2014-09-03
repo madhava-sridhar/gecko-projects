@@ -3833,6 +3833,7 @@ MOZ_ANDROID_BEAM=
 MOZ_LOCALE_SWITCHER=
 MOZ_ANDROID_SEARCH_ACTIVITY=
 MOZ_ANDROID_MLS_STUMBLER=
+MOZ_ANDROID_SHARE_OVERLAY=
 ACCESSIBILITY=1
 MOZ_TIME_MANAGER=
 MOZ_PAY=
@@ -4856,6 +4857,13 @@ if test -n "$MOZ_ANDROID_MLS_STUMBLER"; then
 fi
 
 dnl ========================================================
+dnl = Include share overlay on Android
+dnl ========================================================
+if test -n "$MOZ_ANDROID_SHARE_OVERLAY"; then
+    AC_DEFINE(MOZ_ANDROID_SHARE_OVERLAY)
+fi
+
+dnl ========================================================
 dnl = Enable IPDL's "expensive" unit tests
 dnl ========================================================
 MOZ_IPDL_TESTS=
@@ -5621,6 +5629,24 @@ if test -n "${JAVA_BIN_PATH}" -o \
   fi
   if test -z "$KEYTOOL" -o "$KEYTOOL" = ":"; then
     AC_MSG_ERROR([The program keytool was not found.  Set \$JAVA_HOME to your Java SDK directory or use --with-java-bin-path={java-bin-dir}])
+  fi
+
+  AC_MSG_CHECKING([for minimum required javac version = 1.7])
+
+  dnl Javac spits out something like `javac 1.7.0`. This line cuts off the 'javac'
+  _javac_version=$($JAVAC -version 2>&1 | cut -d ' ' -f 2)
+
+  dnl Here, we extract the major (1) and minor (7) version numbers from the
+  dnl acquired version string.
+  _javac_major_version=$(echo $_javac_version | cut -d '.' -f 1)
+  _javac_minor_version=$(echo $_javac_version | cut -d '.' -f 2)
+
+  AC_MSG_RESULT([$_javac_version])
+
+  dnl Fail if we have a version other than 1.7.X
+  if test "$_javac_major_version" -ne "1" -o \
+      \( "$_javac_minor_version" -ne "7" \); then
+      AC_MSG_ERROR([javac 1.7 is required.])
   fi
 fi
 
@@ -8429,6 +8455,7 @@ AC_SUBST(MOZ_ANDROID_BEAM)
 AC_SUBST(MOZ_LOCALE_SWITCHER)
 AC_SUBST(MOZ_DISABLE_GECKOVIEW)
 AC_SUBST(MOZ_ANDROID_SEARCH_ACTIVITY)
+AC_SUBST(MOZ_ANDROID_SHARE_OVERLAY)
 AC_SUBST(MOZ_ANDROID_MLS_STUMBLER)
 AC_SUBST(ENABLE_STRIP)
 AC_SUBST(PKG_SKIP_STRIP)

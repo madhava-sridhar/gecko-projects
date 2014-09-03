@@ -13,6 +13,7 @@
 #include "nsWindowBase.h"
 #include "WinUtils.h"
 #include "mozilla/Attributes.h"
+#include "mozilla/StaticPtr.h"
 #include "mozilla/TextRange.h"
 #include "mozilla/WindowsVersion.h"
 
@@ -51,10 +52,11 @@ struct MSGResult;
  * Text Services Framework text store
  */
 
-class nsTextStore MOZ_FINAL : public ITextStoreACP,
-                              public ITfContextOwnerCompositionSink,
-                              public ITfActiveLanguageProfileNotifySink,
-                              public ITfInputProcessorProfileActivationSink
+class nsTextStore MOZ_FINAL : public ITextStoreACP
+                            , public ITfContextOwnerCompositionSink
+                            , public ITfActiveLanguageProfileNotifySink
+                            , public ITfInputProcessorProfileActivationSink
+                            , public ITfMouseTrackerACP
 {
 public: /*IUnknown*/
   STDMETHODIMP          QueryInterface(REFIID, void**);
@@ -107,6 +109,10 @@ public: /*ITfInputProcessorProfileActivationSink*/
   STDMETHODIMP OnActivated(DWORD, LANGID, REFCLSID, REFGUID, REFGUID,
                            HKL, DWORD);
 
+public: /*ITfMouseTrackerACP*/
+  STDMETHODIMP AdviseMouseSink(ITfRangeACP*, ITfMouseSink*, DWORD*);
+  STDMETHODIMP UnadviseMouseSink(DWORD);
+
 protected:
   typedef mozilla::widget::IMENotification IMENotification;
   typedef mozilla::widget::IMEState IMEState;
@@ -128,8 +134,8 @@ public:
 
   static void     CommitComposition(bool aDiscard)
   {
-    NS_ENSURE_TRUE_VOID(sTsfTextStore);
-    sTsfTextStore->CommitCompositionInternal(aDiscard);
+    NS_ENSURE_TRUE_VOID(sEnabledTextStore);
+    sEnabledTextStore->CommitCompositionInternal(aDiscard);
   }
 
   static void SetInputContext(nsWindowBase* aWidget,
@@ -141,20 +147,28 @@ public:
                                 const IMEState& aIMEState);
   static nsresult OnTextChange(const IMENotification& aIMENotification)
   {
-    NS_ENSURE_TRUE(sTsfTextStore, NS_ERROR_NOT_AVAILABLE);
-    return sTsfTextStore->OnTextChangeInternal(aIMENotification);
+    NS_ENSURE_TRUE(sEnabledTextStore, NS_ERROR_NOT_AVAILABLE);
+    return sEnabledTextStore->OnTextChangeInternal(aIMENotification);
   }
 
   static nsresult OnSelectionChange(void)
   {
-    NS_ENSURE_TRUE(sTsfTextStore, NS_ERROR_NOT_AVAILABLE);
-    return sTsfTextStore->OnSelectionChangeInternal();
+    NS_ENSURE_TRUE(sEnabledTextStore, NS_ERROR_NOT_AVAILABLE);
+    return sEnabledTextStore->OnSelectionChangeInternal();
   }
 
   static nsresult OnLayoutChange()
   {
-    NS_ENSURE_TRUE(sTsfTextStore, NS_ERROR_NOT_AVAILABLE);
-    return sTsfTextStore->OnLayoutChangeInternal();
+    NS_ENSURE_TRUE(sEnabledTextStore, NS_ERROR_NOT_AVAILABLE);
+    return sEnabledTextStore->OnLayoutChangeInternal();
+  }
+
+  static nsresult OnMouseButtonEvent(const IMENotification& aIMENotification)
+  {
+    if (NS_WARN_IF(!sEnabledTextStore)) {
+      return NS_ERROR_NOT_AVAILABLE;
+    }
+    return sEnabledTextStore->OnMouseButtonEventInternal(aIMENotification);
   }
 
   static nsIMEUpdatePreference GetIMEUpdatePreference();
@@ -183,12 +197,12 @@ public:
 
   static void*    GetTextStore()
   {
-    return static_cast<void*>(sTsfTextStore);
+    return static_cast<void*>(sEnabledTextStore);
   }
 
   static bool     ThinksHavingFocus()
   {
-    return (sTsfTextStore && sTsfTextStore->mContext);
+    return (sEnabledTextStore && sEnabledTextStore->mContext);
   }
 
   static bool     IsInTSFMode()
@@ -198,20 +212,21 @@ public:
 
   static bool     IsComposing()
   {
-    return (sTsfTextStore && sTsfTextStore->mComposition.IsComposing());
+    return (sEnabledTextStore && sEnabledTextStore->mComposition.IsComposing());
   }
 
   static bool     IsComposingOn(nsWindowBase* aWidget)
   {
-    return (IsComposing() && sTsfTextStore->mWidget == aWidget);
+    return (IsComposing() && sEnabledTextStore->mWidget == aWidget);
   }
 
   static bool     IsIMM_IME()
   {
-    if (!sTsfTextStore || !sTsfTextStore->EnsureInitActiveTIPKeyboard()) {
+    if (!sEnabledTextStore ||
+        !sEnabledTextStore->EnsureInitActiveTIPKeyboard()) {
       return IsIMM_IME(::GetKeyboardLayout(0));
     }
-    return sTsfTextStore->mIsIMM_IME;
+    return sEnabledTextStore->mIsIMM_IME;
   }
 
   static bool     IsIMM_IME(HKL aHKL)
@@ -269,6 +284,7 @@ protected:
   void     CommitCompositionInternal(bool);
   nsresult OnTextChangeInternal(const IMENotification& aIMENotification);
   nsresult OnSelectionChangeInternal(void);
+  nsresult OnMouseButtonEventInternal(const IMENotification& aIMENotification);
   HRESULT  GetDisplayAttribute(ITfProperty* aProperty,
                                ITfRange* aRange,
                                TF_DISPLAYATTRIBUTE* aResult);
@@ -671,6 +687,42 @@ protected:
   // mLockedContent.  Otherwise, return the current text content.
   bool GetCurrentText(nsAString& aTextContent);
 
+  class MouseTracker MOZ_FINAL
+  {
+  public:
+    static const DWORD kInvalidCookie = static_cast<DWORD>(-1);
+
+    MouseTracker();
+
+    HRESULT Init(nsTextStore* aTextStore);
+    HRESULT AdviseSink(nsTextStore* aTextStore,
+                       ITfRangeACP* aTextRange, ITfMouseSink* aMouseSink);
+    void UnadviseSink();
+
+    bool IsUsing() const { return mSink != nullptr; }
+    bool InRange(uint32_t aOffset) const
+    {
+      if (NS_WARN_IF(mStart < 0) ||
+          NS_WARN_IF(mLength <= 0)) {
+        return false;
+      }
+      return aOffset >= static_cast<uint32_t>(mStart) &&
+             aOffset < static_cast<uint32_t>(mStart + mLength);
+    }
+    DWORD Cookie() const { return mCookie; }
+    bool OnMouseButtonEvent(ULONG aEdge, ULONG aQuadrant, DWORD aButtonStatus);
+    LONG RangeStart() const { return mStart; }
+  
+  private:
+    nsRefPtr<ITfMouseSink> mSink;
+    LONG mStart;
+    LONG mLength;
+    DWORD mCookie;
+  };
+  // mMouseTrackers is an array to store each information of installed
+  // ITfMouseSink instance.
+  nsTArray<MouseTracker> mMouseTrackers;
+
   // The input scopes for this context, defaults to IS_DEFAULT.
   nsTArray<InputScope>         mInputScopes;
 
@@ -733,10 +785,11 @@ protected:
 
   // TSF client ID for the current application
   static DWORD          sTsfClientId;
-  // Current text store. Currently only ONE nsTextStore instance is ever used,
+  // Current text store which is managing a keyboard enabled editor (i.e.,
+  // editable editor).  Currently only ONE nsTextStore instance is ever used,
   // although Create is called when an editor is focused and Destroy called
   // when the focused editor is blurred.
-  static nsTextStore*   sTsfTextStore;
+  static mozilla::StaticRefPtr<nsTextStore> sEnabledTextStore;
 
   // For IME (keyboard) disabled state:
   static ITfDocumentMgr* sTsfDisabledDocumentMgr;

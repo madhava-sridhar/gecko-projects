@@ -184,7 +184,7 @@ loop.shared.views = (function(_, OT, l10n) {
           React.DOM.li({className: "conversation-toolbar-btn-box"}, 
             React.DOM.button({className: "btn btn-hangup", onClick: this.handleClickHangup, 
                     title: l10n.get("hangup_button_title")}, 
-              l10n.get("hangup_button_caption")
+              l10n.get("hangup_button_caption2")
             )
           ), 
           React.DOM.li({className: "conversation-toolbar-btn-box"}, 
@@ -278,13 +278,7 @@ loop.shared.views = (function(_, OT, l10n) {
      */
     _streamCreated: function(event) {
       var incoming = this.getDOMNode().querySelector(".remote");
-      event.streams.forEach(function(stream) {
-        if (stream.connection.connectionId !==
-            this.props.model.session.connection.connectionId) {
-          this.props.model.session.subscribe(stream, incoming,
-                                             this.publisherConfig);
-        }
-      }, this);
+      this.props.model.subscribe(event.stream, incoming, this.publisherConfig);
     },
 
     /**
@@ -321,7 +315,7 @@ loop.shared.views = (function(_, OT, l10n) {
         });
       }.bind(this));
 
-      this.props.model.session.publish(this.publisher);
+      this.props.model.publish(this.publisher);
     },
 
     /**
@@ -549,7 +543,7 @@ loop.shared.views = (function(_, OT, l10n) {
       return (
         FeedbackLayout({title: l10n.get("feedback_thank_you_heading")}, 
           React.DOM.p({className: "info thank-you"}, 
-            l10n.get("feedback_window_will_close_in", {
+            l10n.get("feedback_window_will_close_in2", {
               countdown: this.state.countdown,
               num: this.state.countdown
             }))
@@ -617,7 +611,7 @@ loop.shared.views = (function(_, OT, l10n) {
         default:
           return (
             FeedbackLayout({title: 
-              l10n.get("feedback_call_experience_heading")}, 
+              l10n.get("feedback_call_experience_heading2")}, 
               React.DOM.div({className: "faces"}, 
                 React.DOM.button({className: "face face-happy", 
                         onClick: this.handleHappyClick}), 

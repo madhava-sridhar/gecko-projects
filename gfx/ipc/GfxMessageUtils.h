@@ -17,7 +17,6 @@
 #include "mozilla/gfx/Matrix.h"
 #include "GraphicsFilter.h"
 #include "gfxPoint.h"
-#include "gfxPoint3D.h"
 #include "gfxRect.h"
 #include "nsRect.h"
 #include "nsRegion.h"
@@ -152,26 +151,6 @@ struct ParamTraits<gfxPoint>
     return (ReadParam(aMsg, aIter, &aResult->x) &&
             ReadParam(aMsg, aIter, &aResult->y));
  }
-};
-
-template<>
-struct ParamTraits<gfxPoint3D>
-{
-  typedef gfxPoint3D paramType;
-
-  static void Write(Message* aMsg, const paramType& aParam)
-  {
-    WriteParam(aMsg, aParam.x);
-    WriteParam(aMsg, aParam.y);
-    WriteParam(aMsg, aParam.z);
-  }
-
-  static bool Read(const Message* aMsg, void** aIter, paramType* aResult)
-  {
-    return (ReadParam(aMsg, aIter, &aResult->x) &&
-            ReadParam(aMsg, aIter, &aResult->y) &&
-            ReadParam(aMsg, aIter, &aResult->z));
-  }
 };
 
 template<>
@@ -774,6 +753,18 @@ struct ParamTraits<mozilla::layers::FrameMetrics>
     WriteParam(aMsg, aParam.mUpdateScrollOffset);
     WriteParam(aMsg, aParam.mScrollGeneration);
     WriteParam(aMsg, aParam.mTransformScale);
+    WriteParam(aMsg, aParam.mBackgroundColor);
+    WriteParam(aMsg, aParam.GetContentDescription());
+  }
+
+  static bool ReadContentDescription(const Message* aMsg, void** aIter, paramType* aResult)
+  {
+    nsCString str;
+    if (!ReadParam(aMsg, aIter, &str)) {
+      return false;
+    }
+    aResult->SetContentDescription(str);
+    return true;
   }
 
   static bool Read(const Message* aMsg, void** aIter, paramType* aResult)
@@ -800,7 +791,9 @@ struct ParamTraits<mozilla::layers::FrameMetrics>
             ReadParam(aMsg, aIter, &aResult->mHasScrollgrab) &&
             ReadParam(aMsg, aIter, &aResult->mUpdateScrollOffset) &&
             ReadParam(aMsg, aIter, &aResult->mScrollGeneration) &&
-            ReadParam(aMsg, aIter, &aResult->mTransformScale));
+            ReadParam(aMsg, aIter, &aResult->mTransformScale) &&
+            ReadParam(aMsg, aIter, &aResult->mBackgroundColor) &&
+            ReadContentDescription(aMsg, aIter, aResult));
   }
 };
 

@@ -73,7 +73,7 @@ loop.webapp = (function($, _, OT, webL10n) {
           React.DOM.div({className: "info-panel"}, 
             React.DOM.div({className: "firefox-logo"}), 
             React.DOM.h1(null, __("call_url_unavailable_notification_heading")), 
-            React.DOM.h4(null, __("call_url_unavailable_notification_message"))
+            React.DOM.h4(null, __("call_url_unavailable_notification_message2"))
           ), 
           PromoteFirefoxView({helper: this.props.helper})
         )
@@ -250,7 +250,7 @@ loop.webapp = (function($, _, OT, webL10n) {
               urlCreationDateString: this.state.urlCreationDateString}), 
 
             React.DOM.p({className: "standalone-call-btn-label"}, 
-              __("initiate_call_button_label")
+              __("initiate_call_button_label2")
             ), 
 
             React.DOM.div({id: "messages"}), 
@@ -264,9 +264,9 @@ loop.webapp = (function($, _, OT, webL10n) {
                     React.DOM.button({className: btnClassStartCall, 
                             onClick: this._initiateOutgoingCall("audio-video"), 
                             disabled: this.state.disableCallButton, 
-                            title: __("initiate_audio_video_call_tooltip")}, 
+                            title: __("initiate_audio_video_call_tooltip2")}, 
                       React.DOM.span({className: "standalone-call-btn-text"}, 
-                        __("initiate_audio_video_call_button")
+                        __("initiate_audio_video_call_button2")
                       ), 
                       React.DOM.span({className: "standalone-call-btn-video-icon"})
                     ), 
@@ -285,7 +285,7 @@ loop.webapp = (function($, _, OT, webL10n) {
                       React.DOM.button({className: "start-audio-only-call", 
                               onClick: this._initiateOutgoingCall("audio"), 
                               disabled: this.state.disableCallButton}, 
-                        __("initiate_audio_call_button")
+                        __("initiate_audio_call_button2")
                       )
                     )
                   )
@@ -411,6 +411,18 @@ loop.webapp = (function($, _, OT, webL10n) {
     },
 
     /**
+     * Checks if the streams have been connected, and notifies the
+     * websocket that the media is now connected.
+     */
+    _checkConnected: function() {
+      // Check we've had both local and remote streams connected before
+      // sending the media up message.
+      if (this._conversation.streamsConnected()) {
+        this._websocket.mediaUp();
+      }
+    },
+
+    /**
      * Used to receive websocket progress and to determine how to handle
      * it if appropraite.
      */
@@ -495,6 +507,8 @@ loop.webapp = (function($, _, OT, webL10n) {
         client: this._client
       });
       this._conversation.once("call:outgoing:setup", this.setupOutgoingCall, this);
+      this._conversation.once("change:publishedStream", this._checkConnected, this);
+      this._conversation.once("change:subscribedStream", this._checkConnected, this);
       this.loadReactComponent(startView);
     },
 

@@ -56,7 +56,7 @@ public:
   NS_DECL_THREADSAFE_ISUPPORTS
   NS_DECL_NSIRUNNABLE
 
-  CloseRunnable(FileHelper* aFileHelper)
+  explicit CloseRunnable(FileHelper* aFileHelper)
   : mFileHelper(aFileHelper)
   { }
 
@@ -72,7 +72,7 @@ public:
   NS_DECL_THREADSAFE_ISUPPORTS
   NS_DECL_NSIRUNNABLE
 
-  DestroyRunnable(FileHelper* aFileHelper)
+  explicit DestroyRunnable(FileHelper* aFileHelper)
   : mFileHelper(aFileHelper)
   { }
 

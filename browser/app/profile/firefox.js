@@ -1395,6 +1395,9 @@ pref("devtools.scratchpad.showTrailingSpace", false);
 pref("devtools.scratchpad.enableCodeFolding", true);
 pref("devtools.scratchpad.enableAutocompletion", true);
 
+// Enable the Storage Inspector
+pref("devtools.storage.enabled", false);
+
 // Enable the Style Editor.
 pref("devtools.styleeditor.enabled", true);
 pref("devtools.styleeditor.source-maps-enabled", false);
@@ -1576,8 +1579,8 @@ pref("shumway.disabled", true);
 // (This is intentionally on the high side; see bug 746055.)
 pref("image.mem.max_decoded_image_kb", 256000);
 
-// Enable by default on nightly and aurora.
-#ifndef RELEASE_BUILD
+// Enable by default development builds up until early beta
+#ifdef EARLY_BETA_OR_EARLIER
 pref("loop.enabled", true);
 #else
 pref("loop.enabled", false);

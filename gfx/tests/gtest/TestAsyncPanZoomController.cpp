@@ -160,11 +160,11 @@ public:
 
   bool SampleContentTransformForFrame(const TimeStamp& aSampleTime,
                                       ViewTransform* aOutTransform,
-                                      ScreenPoint& aScrollOffset,
-                                      ViewTransform* aOutOverscrollTransform = nullptr) {
+                                      ScreenPoint& aScrollOffset) {
+    Matrix4x4 aOverscrollTransform;  // ignored
     bool ret = AdvanceAnimations(aSampleTime);
     AsyncPanZoomController::SampleContentTransformForFrame(
-      aOutTransform, aScrollOffset, aOutOverscrollTransform);
+      aOutTransform, aScrollOffset, &aOverscrollTransform);
     return ret;
   }
 };
@@ -187,7 +187,7 @@ TestFrameMetrics()
 
 class APZCBasicTester : public ::testing::Test {
 public:
-  APZCBasicTester(AsyncPanZoomController::GestureBehavior aGestureBehavior = AsyncPanZoomController::DEFAULT_GESTURES)
+  explicit APZCBasicTester(AsyncPanZoomController::GestureBehavior aGestureBehavior = AsyncPanZoomController::DEFAULT_GESTURES)
     : mGestureBehavior(aGestureBehavior)
   {
   }
@@ -489,7 +489,7 @@ ApzcPinchWithTouchInputAndCheckStatus(AsyncPanZoomController* aApzc,
 
 class APZCPinchTester : public APZCBasicTester {
 public:
-  APZCPinchTester(AsyncPanZoomController::GestureBehavior aGestureBehavior = AsyncPanZoomController::DEFAULT_GESTURES)
+  explicit APZCPinchTester(AsyncPanZoomController::GestureBehavior aGestureBehavior = AsyncPanZoomController::DEFAULT_GESTURES)
     : APZCBasicTester(aGestureBehavior)
   {
   }
@@ -1979,7 +1979,7 @@ private:
 
 class MockTask : public CancelableTask {
 public:
-  MockTask(TaskRunMetrics& aMetrics)
+  explicit MockTask(TaskRunMetrics& aMetrics)
     : mMetrics(aMetrics)
   {}
 

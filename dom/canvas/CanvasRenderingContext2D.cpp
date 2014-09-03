@@ -9,6 +9,7 @@
 
 #include "nsIServiceManager.h"
 #include "nsMathUtils.h"
+#include "SVGImageContext.h"
 
 #include "nsContentUtils.h"
 
@@ -297,7 +298,7 @@ class AdjustedTarget
 public:
   typedef CanvasRenderingContext2D::ContextState ContextState;
 
-  AdjustedTarget(CanvasRenderingContext2D *ctx,
+  explicit AdjustedTarget(CanvasRenderingContext2D* ctx,
                  mgfx::Rect *aBounds = nullptr)
     : mCtx(nullptr)
   {
@@ -437,7 +438,7 @@ NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE(CanvasPattern, mContext)
 
 class CanvasRenderingContext2DUserData : public LayerUserData {
 public:
-    CanvasRenderingContext2DUserData(CanvasRenderingContext2D *aContext)
+  explicit CanvasRenderingContext2DUserData(CanvasRenderingContext2D *aContext)
     : mContext(aContext)
   {
     aContext->mUserDatas.AppendElement(this);
@@ -3484,11 +3485,13 @@ CanvasRenderingContext2D::DrawDirectlyToCanvas(
   // FLAG_CLAMP is added for increased performance, since we never tile here.
   uint32_t modifiedFlags = image.mDrawingFlags | imgIContainer::FLAG_CLAMP;
 
+  SVGImageContext svgContext(scaledImageSize, Nothing(), CurrentState().globalAlpha);
+
   nsresult rv = image.mImgContainer->
     Draw(context, scaledImageSize,
          ImageRegion::Create(gfxRect(src.x, src.y, src.width, src.height)),
          image.mWhichFrame, GraphicsFilter::FILTER_GOOD,
-         Nothing(), modifiedFlags);
+         Some(svgContext), modifiedFlags);
 
   NS_ENSURE_SUCCESS_VOID(rv);
 }

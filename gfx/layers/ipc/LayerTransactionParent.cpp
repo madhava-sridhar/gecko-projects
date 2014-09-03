@@ -11,7 +11,6 @@
 #include "ImageLayers.h"                // for ImageLayer
 #include "Layers.h"                     // for Layer, ContainerLayer, etc
 #include "ShadowLayerParent.h"          // for ShadowLayerParent
-#include "gfxPoint3D.h"                 // for gfxPoint3D
 #include "CompositableTransactionParent.h"  // for EditReplyVector
 #include "ShadowLayersManager.h"        // for ShadowLayersManager
 #include "mozilla/gfx/BasePoint3D.h"    // for BasePoint3D
@@ -322,8 +321,6 @@ LayerTransactionParent::RecvUpdate(const InfallibleTArray<Edit>& cset,
       layer->SetAnimations(common.animations());
       layer->SetInvalidRegion(common.invalidRegion());
       layer->SetFrameMetrics(common.metrics());
-      layer->SetBackgroundColor(common.backgroundColor().value());
-      layer->SetContentDescription(common.contentDescription());
 
       typedef SpecificLayerAttributes Specific;
       const SpecificLayerAttributes& specific = attrs.specific();
@@ -651,16 +648,16 @@ LayerTransactionParent::RecvGetAnimationTransform(PLayerParent* aParent,
                         1.0f);
   }
   float scale = 1;
-  gfxPoint3D scaledOrigin;
-  gfxPoint3D transformOrigin;
+  Point3D scaledOrigin;
+  Point3D transformOrigin;
   for (uint32_t i=0; i < layer->GetAnimations().Length(); i++) {
     if (layer->GetAnimations()[i].data().type() == AnimationData::TTransformData) {
       const TransformData& data = layer->GetAnimations()[i].data().get_TransformData();
       scale = data.appUnitsPerDevPixel();
       scaledOrigin =
-        gfxPoint3D(NS_round(NSAppUnitsToFloatPixels(data.origin().x, scale)),
-                   NS_round(NSAppUnitsToFloatPixels(data.origin().y, scale)),
-                   0.0f);
+        Point3D(NS_round(NSAppUnitsToFloatPixels(data.origin().x, scale)),
+                NS_round(NSAppUnitsToFloatPixels(data.origin().y, scale)),
+                0.0f);
       double cssPerDev =
         double(nsDeviceContext::AppUnitsPerCSSPixel()) / double(scale);
       transformOrigin = data.transformOrigin() * cssPerDev;
@@ -674,7 +671,7 @@ LayerTransactionParent::RecvGetAnimationTransform(PLayerParent* aParent,
 
   // Undo the rebasing applied by
   // nsDisplayTransform::GetResultingTransformMatrixInternal
-  gfxPoint3D basis = -scaledOrigin - transformOrigin;
+  Point3D basis = -scaledOrigin - transformOrigin;
   transform.ChangeBasis(basis.x, basis.y, basis.z);
 
   // Convert to CSS pixels (this undoes the operations performed by
@@ -690,26 +687,35 @@ LayerTransactionParent::RecvGetAnimationTransform(PLayerParent* aParent,
   return true;
 }
 
+static AsyncPanZoomController*
+GetAPZCForViewID(Layer* aLayer, FrameMetrics::ViewID aScrollID)
+{
+  for (uint32_t i = 0; i < aLayer->GetFrameMetricsCount(); i++) {
+    if (aLayer->GetFrameMetrics(i).GetScrollId() == aScrollID) {
+      return aLayer->GetAsyncPanZoomController(i);
+    }
+  }
+  ContainerLayer* container = aLayer->AsContainerLayer();
+  if (container) {
+    for (Layer* l = container->GetFirstChild(); l; l = l->GetNextSibling()) {
+      AsyncPanZoomController* c = GetAPZCForViewID(l, aScrollID);
+      if (c) {
+        return c;
+      }
+    }
+  }
+  return nullptr;
+}
+
 bool
-LayerTransactionParent::RecvSetAsyncScrollOffset(PLayerParent* aLayer,
-                                                 const FrameMetrics::ViewID& aId,
+LayerTransactionParent::RecvSetAsyncScrollOffset(const FrameMetrics::ViewID& aScrollID,
                                                  const int32_t& aX, const int32_t& aY)
 {
   if (mDestroyed || !layer_manager() || layer_manager()->IsDestroyed()) {
     return false;
   }
 
-  Layer* layer = cast(aLayer)->AsLayer();
-  if (!layer) {
-    return false;
-  }
-  AsyncPanZoomController* controller = nullptr;
-  for (uint32_t i = 0; i < layer->GetFrameMetricsCount(); i++) {
-    if (layer->GetFrameMetrics(i).GetScrollId() == aId) {
-      controller = layer->GetAsyncPanZoomController(i);
-      break;
-    }
-  }
+  AsyncPanZoomController* controller = GetAPZCForViewID(mRoot, aScrollID);
   if (!controller) {
     return false;
   }
