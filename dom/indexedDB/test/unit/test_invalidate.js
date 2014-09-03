@@ -25,7 +25,7 @@ function testSteps()
 
   request.onupgradeneeded = unexpectedSuccessHandler;
 
-  let objStore = 
+  let objStore =
     request.result.createObjectStore("foo", { autoIncrement: true });
   objStore.createIndex("fooIndex", "fooIndex", { unique: true });
   objStore.put({ foo: 1 });

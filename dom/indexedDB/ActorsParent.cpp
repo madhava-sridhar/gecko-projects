@@ -95,7 +95,9 @@ using namespace mozilla::dom::indexedDB;
 using namespace mozilla::dom::quota;
 using namespace mozilla::ipc;
 
-#ifdef DISABLE_ASSERTS_FOR_FUZZING
+#define DISABLE_ASSERTS_FOR_FUZZING 0
+
+#if DISABLE_ASSERTS_FOR_FUZZING
 #define ASSERT_UNLESS_FUZZING(...) do { } while (0)
 #else
 #define ASSERT_UNLESS_FUZZING(...) MOZ_ASSERT(false, __VA_ARGS__)
@@ -3171,7 +3173,7 @@ public:
     return mActorDestroyed;
   }
 
-  // Mus be called on the background thread.
+  // Must be called on the background thread.
   bool
   IsInvalidated() const
   {
@@ -3847,12 +3849,12 @@ protected:
     // State_DatabaseWorkOpen if permission is granted.
     State_OpenPending,
 
-    // Sending a permission challenge message to the child. Next step is
-    // State_PermissionRetryReady.
+    // Sending a permission challenge message to the child on the PBackground
+    // thread. Next step is State_PermissionRetryReady.
     State_PermissionChallenge,
 
-    // Retrying permission check after a challenge. Next step is either
-    // State_SendingResults if permission is denied or
+    // Retrying permission check after a challenge on the main thread. Next step
+    // is either State_SendingResults if permission is denied or
     // State_DatabaseWorkOpen if permission is granted.
     State_PermissionRetry,
 
@@ -3862,28 +3864,22 @@ protected:
     // match.
     State_DatabaseWorkOpen,
 
-    // Starting a version change transaction or deleting a database. Need to
-    // notify other databases that a version change is about to happen, and
-    // maybe tell the request that a version change has been blocked. If
-    // databases are notified then the next step is
+    // Starting a version change transaction or deleting a database on the
+    // PBackground thread. We need to notify other databases that a version
+    // change is about to happen, and maybe tell the request that a version
+    // change has been blocked. If databases are notified then the next step is
     // State_WaitingForOtherDatabasesToClose. Otherwise the next step is
     // State_DispatchToWorkThread.
     State_BeginVersionChange,
 
-    // Waiting for other databases to close. This state may persist until all
-    // databases are closed. If a database is blocked then the next state is
-    // State_BlockedWaitingForOtherDatabasesToClose. If all databases close then
-    // the next state is State_WaitingForTransactionsToComplete.
+    // Waiting for other databases to close on the PBackground thread. This
+    // state may persist until all databases are closed. The next state is
+    // State_WaitingForTransactionsToComplete.
     State_WaitingForOtherDatabasesToClose,
 
-    // Waiting for other databases to close after sending the blocked
-    // notification. This state will  persist until all databases are closed.
-    // Once all databases close then the next state is
-    // State_WaitingForTransactionsToComplete.
-    State_BlockedWaitingForOtherDatabasesToClose,
-
     // Waiting for all transactions that could interfere with this operation to
-    // complete. Next state is State_DatabaseWorkVersionChange.
+    // complete on the PBackground thread. Next state is
+    // State_DatabaseWorkVersionChange.
     State_WaitingForTransactionsToComplete,
 
     // Waiting to do/doing work on the "work thread". This involves waiting for
@@ -3896,8 +3892,8 @@ protected:
     // UnblockingQuotaManager.
     State_SendingResults,
 
-    // Notifying the QuotaManager that it can proceed to the next operation.
-    // Next step is Completed.
+    // Notifying the QuotaManager that it can proceed to the next operation on
+    // the main thread. Next step is Completed.
     State_UnblockingQuotaManager,
 
     // All done.
@@ -3960,6 +3956,8 @@ protected:
   {
     // Normally this would be out-of-line since it is a virtual function but
     // MSVC 2010 fails to link for some reason if it is not inlined here...
+    MOZ_ASSERT_IF(OperationMayProceed(),
+                  mState == State_Initial || mState == State_Completed);
   }
 
   nsresult
@@ -3982,6 +3980,12 @@ protected:
 
   void
   UnblockQuotaManager();
+
+  nsresult
+  SendVersionChangeMessages(DatabaseActorInfo* aDatabaseActorInfo,
+                            Database* aOpeningDatabase,
+                            uint64_t aOldVersion,
+                            const NullableVersion& aNewVersion);
 
   // Methods that subclasses must implement.
   virtual nsresult
@@ -4585,6 +4589,10 @@ private:
 
   ~ObjectStoreGetRequestOp()
   { }
+
+  nsresult
+  ConvertResponse(uint32_t aIndex,
+                  SerializedStructuredCloneReadInfo& aSerializedInfo);
 
   virtual nsresult
   DoDatabaseWork(TransactionBase* aTransaction) MOZ_OVERRIDE;
@@ -6201,6 +6209,9 @@ Database::SetActorAlive()
   MOZ_ASSERT(!mActorDestroyed);
 
   mActorWasAlive = true;
+
+  // This reference will be absorbed by IPDL and released when the actor is
+  // destroyed.
   AddRef();
 }
 
@@ -6385,6 +6396,9 @@ Database::AllocPBackgroundIDBTransactionParent(
 
   // Once a database is closed it must not try to open new transactions.
   if (NS_WARN_IF(mClosed)) {
+    if (!mInvalidated) {
+      ASSERT_UNLESS_FUZZING();
+    }
     return nullptr;
   }
 
@@ -7501,9 +7515,6 @@ TransactionBase::AllocRequest(const RequestParams& aParams, bool aTrustParams)
 
   switch (aParams.type()) {
     case RequestParams::TObjectStoreAddParams:
-      actor = new ObjectStoreAddOrPutRequestOp(this, aParams);
-      break;
-
     case RequestParams::TObjectStorePutParams:
       actor = new ObjectStoreAddOrPutRequestOp(this, aParams);
       break;
@@ -7947,6 +7958,9 @@ VersionChangeTransaction::SetActorAlive()
   MOZ_ASSERT(!IsActorDestroyed());
 
   mActorWasAlive = true;
+
+  // This reference will be absorbed by IPDL and released when the actor is
+  // destroyed.
   AddRef();
 }
 
@@ -8497,8 +8511,12 @@ Cursor::Start(const OpenCursorParams& aParams)
 {
   AssertIsOnBackgroundThread();
   MOZ_ASSERT(aParams.type() == mType);
-  MOZ_ASSERT(!mCurrentlyRunningOp);
   MOZ_ASSERT(!mActorDestroyed);
+
+  if (NS_WARN_IF(mCurrentlyRunningOp)) {
+    ASSERT_UNLESS_FUZZING();
+    return false;
+  }
 
   const OptionalKeyRange& optionalKeyRange =
     mType == OpenCursorParams::TObjectStoreOpenCursorParams ?
@@ -8622,6 +8640,7 @@ Cursor::RecvDeleteMe()
   MOZ_ASSERT(!mActorDestroyed);
 
   if (NS_WARN_IF(mCurrentlyRunningOp)) {
+    ASSERT_UNLESS_FUZZING();
     return false;
   }
 
@@ -8636,6 +8655,7 @@ Cursor::RecvContinue(const CursorRequestParams& aParams)
   MOZ_ASSERT(!mActorDestroyed);
 
   if (NS_WARN_IF(mCurrentlyRunningOp)) {
+    ASSERT_UNLESS_FUZZING();
     return false;
   }
 
@@ -8651,6 +8671,7 @@ Cursor::RecvContinue(const CursorRequestParams& aParams)
         case IDBCursor::NEXT:
         case IDBCursor::NEXT_UNIQUE:
           if (NS_WARN_IF(key <= mKey)) {
+            ASSERT_UNLESS_FUZZING();
             return false;
           }
           break;
@@ -8658,6 +8679,7 @@ Cursor::RecvContinue(const CursorRequestParams& aParams)
         case IDBCursor::PREV:
         case IDBCursor::PREV_UNIQUE:
           if (NS_WARN_IF(key >= mKey)) {
+            ASSERT_UNLESS_FUZZING();
             return false;
           }
           break;
@@ -9248,9 +9270,7 @@ QuotaClient::NoteBackgroundThread(nsIEventTarget* aBackgroundThread)
   MOZ_ASSERT(aBackgroundThread);
   MOZ_ASSERT(!mShutdownRequested);
 
-  if (mBackgroundThread != aBackgroundThread) {
-    mBackgroundThread = aBackgroundThread;
-  }
+  mBackgroundThread = aBackgroundThread;
 }
 
 void
@@ -9588,7 +9608,7 @@ QuotaClient::ShutdownTransactionService()
   mShutdownRequested = true;
 
   if (mBackgroundThread) {
-    nsRefPtr<ShutdownTransactionThreadPoolRunnable> runnable = 
+    nsRefPtr<ShutdownTransactionThreadPoolRunnable> runnable =
       new ShutdownTransactionThreadPoolRunnable(this);
 
     if (NS_FAILED(mBackgroundThread->Dispatch(runnable, NS_DISPATCH_NORMAL))) {
@@ -10658,8 +10678,7 @@ FactoryOp::WaitForTransactions()
 {
   AssertIsOnOwningThread();
   MOZ_ASSERT(mState == State_BeginVersionChange ||
-             mState == State_WaitingForOtherDatabasesToClose ||
-             mState == State_BlockedWaitingForOtherDatabasesToClose);
+             mState == State_WaitingForOtherDatabasesToClose);
   MOZ_ASSERT(!mDatabaseId.IsEmpty());
   MOZ_ASSERT(!IsActorDestroyed());
 
@@ -10857,6 +10876,54 @@ FactoryOp::CheckPermission(ContentParent* aContentParent,
   return NS_OK;
 }
 
+nsresult
+FactoryOp::SendVersionChangeMessages(DatabaseActorInfo* aDatabaseActorInfo,
+                                     Database* aOpeningDatabase,
+                                     uint64_t aOldVersion,
+                                     const NullableVersion& aNewVersion)
+{
+  AssertIsOnOwningThread();
+  MOZ_ASSERT(aDatabaseActorInfo);
+  MOZ_ASSERT(mState == State_BeginVersionChange);
+  MOZ_ASSERT(mMaybeBlockedDatabases.IsEmpty());
+  MOZ_ASSERT(!IsActorDestroyed());
+
+  const uint32_t liveCount = aDatabaseActorInfo->mLiveDatabases.Length();
+  if (liveCount > 1) {
+    FallibleTArray<MaybeBlockedDatabaseInfo> maybeBlockedDatabases;
+    for (uint32_t index = 0; index < liveCount; index++) {
+      Database* database = aDatabaseActorInfo->mLiveDatabases[index];
+      if ((!aOpeningDatabase || database != aOpeningDatabase) &&
+          !database->IsClosed() &&
+          NS_WARN_IF(!maybeBlockedDatabases.AppendElement(database))) {
+        return NS_ERROR_OUT_OF_MEMORY;
+      }
+    }
+
+    if (!maybeBlockedDatabases.IsEmpty()) {
+      mMaybeBlockedDatabases.SwapElements(maybeBlockedDatabases);
+    }
+  }
+
+  if (!mMaybeBlockedDatabases.IsEmpty()) {
+    for (uint32_t count = mMaybeBlockedDatabases.Length(), index = 0;
+         index < count;
+         /* incremented conditionally */) {
+      if (mMaybeBlockedDatabases[index]->SendVersionChange(aOldVersion,
+                                                           aNewVersion)) {
+        index++;
+      } else {
+        // We don't want to wait forever if we were not able to send the
+        // message.
+        mMaybeBlockedDatabases.RemoveElementAt(index);
+        count--;
+      }
+    }
+  }
+
+  return NS_OK;
+}
+
 // static
 bool
 FactoryOp::CheckAtLeastOneAppHasPermission(ContentParent* aContentParent,
@@ -10997,39 +11064,33 @@ void
 FactoryOp::NoteDatabaseBlocked(Database* aDatabase)
 {
   AssertIsOnOwningThread();
-  MOZ_ASSERT(mState == State_WaitingForOtherDatabasesToClose ||
-             mState == State_BlockedWaitingForOtherDatabasesToClose);
+  MOZ_ASSERT(mState == State_WaitingForOtherDatabasesToClose);
   MOZ_ASSERT(!mMaybeBlockedDatabases.IsEmpty());
   MOZ_ASSERT(mMaybeBlockedDatabases.Contains(aDatabase));
 
-  // Don't send the blocked notification twice.
-  if (mState == State_WaitingForOtherDatabasesToClose) {
-    // Only send the blocked event if all databases have reported back. If the
-    // database was closed then it will have been removed from the array.
-    // Otherwise if it was blocked its |mBlocked| flag will be true.
-    bool sendBlockedEvent = true;
+  // Only send the blocked event if all databases have reported back. If the
+  // database was closed then it will have been removed from the array.
+  // Otherwise if it was blocked its |mBlocked| flag will be true.
+  bool sendBlockedEvent = true;
 
-    for (uint32_t count = mMaybeBlockedDatabases.Length(), index = 0;
-         index < count;
-         index++) {
-      MaybeBlockedDatabaseInfo& info = mMaybeBlockedDatabases[index];
-      if (info == aDatabase) {
-        // This database was blocked, mark accordingly.
-        info.mBlocked = true;
-      } else if (!info.mBlocked) {
-        // A database has not yet reported back yet, don't send the event yet.
-        sendBlockedEvent = false;
-      }
-    }
-
-    if (sendBlockedEvent) {
-      SendBlockedNotification();
-
-      // Change state so that we don't attempt to send the blocked event again.
-      mState = State_BlockedWaitingForOtherDatabasesToClose;
+  for (uint32_t count = mMaybeBlockedDatabases.Length(), index = 0;
+       index < count;
+       index++) {
+    MaybeBlockedDatabaseInfo& info = mMaybeBlockedDatabases[index];
+    if (info == aDatabase) {
+      // This database was blocked, mark accordingly.
+      info.mBlocked = true;
+    } else if (!info.mBlocked) {
+      // A database has not yet reported back yet, don't send the event yet.
+      sendBlockedEvent = false;
     }
   }
+
+  if (sendBlockedEvent) {
+    SendBlockedNotification();
+  }
 }
+
 NS_IMETHODIMP
 FactoryOp::Run()
 {
@@ -11040,16 +11101,16 @@ FactoryOp::Run()
       rv = Open();
       break;
 
+    case State_OpenPending:
+      rv = QuotaManagerOpen();
+      break;
+
     case State_PermissionChallenge:
       rv = ChallengePermission();
       break;
 
     case State_PermissionRetry:
       rv = RetryCheckPermission();
-      break;
-
-    case State_OpenPending:
-      rv = QuotaManagerOpen();
       break;
 
     case State_DatabaseWorkOpen:
@@ -11646,7 +11707,7 @@ OpenDatabaseOp::BeginVersionChange()
   AssertIsOnOwningThread();
   MOZ_ASSERT(mState == State_BeginVersionChange);
   MOZ_ASSERT(mMaybeBlockedDatabases.IsEmpty());
-  MOZ_ASSERT(mMetadata->mCommonMetadata.version() != mRequestedVersion);
+  MOZ_ASSERT(mMetadata->mCommonMetadata.version() <= mRequestedVersion);
   MOZ_ASSERT(!mDatabase);
   MOZ_ASSERT(!mVersionChangeTransaction);
 
@@ -11684,38 +11745,14 @@ OpenDatabaseOp::BeginVersionChange()
   MOZ_ASSERT(info->mMetadata != mMetadata);
   mMetadata = info->mMetadata;
 
-  const uint32_t liveCount = info->mLiveDatabases.Length();
-  if (liveCount > 1) {
-    FallibleTArray<MaybeBlockedDatabaseInfo> maybeBlockedDatabases;
-    for (uint32_t index = 0; index < liveCount; index++) {
-      Database* database = info->mLiveDatabases[index];
-      if (database != mDatabase &&
-          !database->IsClosed() &&
-          NS_WARN_IF(!maybeBlockedDatabases.AppendElement(database))) {
-        return NS_ERROR_OUT_OF_MEMORY;
-      }
-    }
+  NullableVersion newVersion = mRequestedVersion;
 
-    if (!maybeBlockedDatabases.IsEmpty()) {
-      mMaybeBlockedDatabases.SwapElements(maybeBlockedDatabases);
-    }
-  }
-
-  if (!mMaybeBlockedDatabases.IsEmpty()) {
-    for (uint32_t count = mMaybeBlockedDatabases.Length(), index = 0;
-         index < count;
-         /* incremented conditionally */) {
-      if (mMaybeBlockedDatabases[index]->SendVersionChange(
-                                           mMetadata->mCommonMetadata.version(),
-                                           mRequestedVersion)) {
-        index++;
-      } else {
-        // We don't want to wait forever if we were not able to send the
-        // message.
-        mMaybeBlockedDatabases.RemoveElementAt(index);
-        count--;
-      }
-    }
+  rv = SendVersionChangeMessages(info,
+                                 mDatabase,
+                                 mMetadata->mCommonMetadata.version(),
+                                 newVersion);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
   }
 
   mVersionChangeTransaction.swap(transaction);
@@ -11737,8 +11774,7 @@ void
 OpenDatabaseOp::NoteDatabaseClosed(Database* aDatabase)
 {
   AssertIsOnOwningThread();
-  MOZ_ASSERT(mState == State_WaitingForOtherDatabasesToClose ||
-             mState == State_BlockedWaitingForOtherDatabasesToClose);
+  MOZ_ASSERT(mState == State_WaitingForOtherDatabasesToClose);
   MOZ_ASSERT(!mMaybeBlockedDatabases.IsEmpty());
 
   bool actorDestroyed = IsActorDestroyed() || mDatabase->IsActorDestroyed();
@@ -12538,42 +12574,19 @@ DeleteDatabaseOp::BeginVersionChange()
   if (gLiveDatabaseHashtable->Get(mDatabaseId, &info)) {
     MOZ_ASSERT(!info->mWaitingFactoryOp);
 
-    if (const uint32_t liveCount = info->mLiveDatabases.Length()) {
-      FallibleTArray<MaybeBlockedDatabaseInfo> maybeBlockedDatabases;
-      for (uint32_t index = 0; index < liveCount; index++) {
-        Database* database = info->mLiveDatabases[index];
-        if (!database->IsClosed() &&
-            NS_WARN_IF(!(maybeBlockedDatabases.AppendElement(database)))) {
-          return NS_ERROR_OUT_OF_MEMORY;
-        }
-      }
+    NullableVersion newVersion = null_t();
 
-      if (!maybeBlockedDatabases.IsEmpty()) {
-        mMaybeBlockedDatabases.SwapElements(maybeBlockedDatabases);
-      }
+    nsresult rv =
+      SendVersionChangeMessages(info, nullptr, mPreviousVersion, newVersion);
+    if (NS_WARN_IF(NS_FAILED(rv))) {
+      return rv;
     }
 
     if (!mMaybeBlockedDatabases.IsEmpty()) {
-      for (uint32_t count = mMaybeBlockedDatabases.Length(), index = 0;
-           index < count;
-           /* incremented conditionally */) {
-        if (mMaybeBlockedDatabases[index]->SendVersionChange(mPreviousVersion,
-                                                             null_t())) {
-          index++;
-        } else {
-          // We don't want to wait forever if we were not able to send the
-          // message.
-          mMaybeBlockedDatabases.RemoveElementAt(index);
-          count--;
-        }
-      }
+      info->mWaitingFactoryOp = this;
 
-      if (!mMaybeBlockedDatabases.IsEmpty()) {
-        info->mWaitingFactoryOp = this;
-
-        mState = State_WaitingForOtherDatabasesToClose;
-        return NS_OK;
-      }
+      mState = State_WaitingForOtherDatabasesToClose;
+      return NS_OK;
     }
   }
 
@@ -12608,8 +12621,7 @@ void
 DeleteDatabaseOp::NoteDatabaseClosed(Database* aDatabase)
 {
   AssertIsOnOwningThread();
-  MOZ_ASSERT(mState == State_WaitingForOtherDatabasesToClose ||
-             mState == State_BlockedWaitingForOtherDatabasesToClose);
+  MOZ_ASSERT(mState == State_WaitingForOtherDatabasesToClose);
   MOZ_ASSERT(!mMaybeBlockedDatabases.IsEmpty());
 
   bool actorDestroyed = IsActorDestroyed();
@@ -14979,6 +14991,37 @@ ObjectStoreGetRequestOp::ObjectStoreGetRequestOp(TransactionBase* aTransaction,
 }
 
 nsresult
+ObjectStoreGetRequestOp::ConvertResponse(
+                             uint32_t aIndex,
+                             SerializedStructuredCloneReadInfo& aSerializedInfo)
+{
+  MOZ_ASSERT(aIndex < mResponse.Length());
+
+  StructuredCloneReadInfo& info = mResponse[aIndex];
+
+  info.mData.SwapElements(aSerializedInfo.data());
+
+  FallibleTArray<PBlobParent*> blobs;
+  FallibleTArray<intptr_t> fileInfos;
+  nsresult rv = ConvertBlobsToActors(mBackgroundParent,
+                                     mFileManager,
+                                     info.mFiles,
+                                     blobs,
+                                     fileInfos);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+
+  MOZ_ASSERT(aSerializedInfo.blobsParent().IsEmpty());
+  MOZ_ASSERT(aSerializedInfo.fileInfos().IsEmpty());
+
+  aSerializedInfo.blobsParent().SwapElements(blobs);
+  aSerializedInfo.fileInfos().SwapElements(fileInfos);
+
+  return NS_OK;
+}
+
+nsresult
 ObjectStoreGetRequestOp::DoDatabaseWork(TransactionBase* aTransaction)
 {
   MOZ_ASSERT(aTransaction);
@@ -15061,7 +15104,7 @@ ObjectStoreGetRequestOp::DoDatabaseWork(TransactionBase* aTransaction)
 void
 ObjectStoreGetRequestOp::GetResponse(RequestResponse& aResponse)
 {
-  MOZ_ASSERT_IF(!mGetAll, mResponse.Length() <= 1);
+  MOZ_ASSERT_IF(mLimit, mResponse.Length() <= mLimit);
 
   if (mGetAll) {
     aResponse = ObjectStoreGetAllResponse();
@@ -15076,30 +15119,11 @@ ObjectStoreGetRequestOp::GetResponse(RequestResponse& aResponse)
       for (uint32_t count = mResponse.Length(), index = 0;
            index < count;
            index++) {
-        StructuredCloneReadInfo& info = mResponse[index];
-
-        SerializedStructuredCloneReadInfo& serializedInfo =
-          fallibleCloneInfos[index];
-
-        info.mData.SwapElements(serializedInfo.data());
-
-        FallibleTArray<PBlobParent*> blobs;
-        FallibleTArray<intptr_t> fileInfos;
-        nsresult rv = ConvertBlobsToActors(mBackgroundParent,
-                                           mFileManager,
-                                           info.mFiles,
-                                           blobs,
-                                           fileInfos);
+        nsresult rv = ConvertResponse(index, fallibleCloneInfos[index]);
         if (NS_WARN_IF(NS_FAILED(rv))) {
           aResponse = rv;
           return;
         }
-
-        MOZ_ASSERT(serializedInfo.blobsParent().IsEmpty());
-        MOZ_ASSERT(serializedInfo.fileInfos().IsEmpty());
-
-        serializedInfo.blobsParent().SwapElements(blobs);
-        serializedInfo.fileInfos().SwapElements(fileInfos);
       }
 
       nsTArray<SerializedStructuredCloneReadInfo>& cloneInfos =
@@ -15114,31 +15138,13 @@ ObjectStoreGetRequestOp::GetResponse(RequestResponse& aResponse)
   aResponse = ObjectStoreGetResponse();
 
   if (!mResponse.IsEmpty()) {
-    StructuredCloneReadInfo& info = mResponse[0];
-
     SerializedStructuredCloneReadInfo& serializedInfo =
       aResponse.get_ObjectStoreGetResponse().cloneInfo();
 
-    info.mData.SwapElements(serializedInfo.data());
-
-    FallibleTArray<PBlobParent*> blobs;
-    FallibleTArray<intptr_t> fileInfos;
-    nsresult rv =
-      ConvertBlobsToActors(mBackgroundParent,
-                           mFileManager,
-                           info.mFiles,
-                           blobs,
-                           fileInfos);
+    nsresult rv = ConvertResponse(0, serializedInfo);
     if (NS_WARN_IF(NS_FAILED(rv))) {
       aResponse = rv;
-      return;
     }
-
-    MOZ_ASSERT(serializedInfo.blobsParent().IsEmpty());
-    MOZ_ASSERT(serializedInfo.fileInfos().IsEmpty());
-
-    serializedInfo.blobsParent().SwapElements(blobs);
-    serializedInfo.fileInfos().SwapElements(fileInfos);
   }
 }
 

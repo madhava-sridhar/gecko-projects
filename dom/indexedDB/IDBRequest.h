@@ -42,7 +42,8 @@ class IDBRequest
   : public IDBWrapperCache
 {
 protected:
-  // At most one of these three fields can be non-null.
+  // mSourceAsObjectStore and mSourceAsIndex are exclusive and one must always
+  // be set. mSourceAsCursor is sometimes set also.
   nsRefPtr<IDBObjectStore> mSourceAsObjectStore;
   nsRefPtr<IDBIndex> mSourceAsIndex;
   nsRefPtr<IDBCursor> mSourceAsCursor;

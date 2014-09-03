@@ -850,7 +850,7 @@ BackgroundParent::GetOrCreateActorForBlobImpl(
   MOZ_ASSERT(aBackgroundActor);
   MOZ_ASSERT(aBlobImpl);
 
-  // If the blob represents a remote blob for this ContentParent then we can
+  // If the blob represents a remote blob for this BackgroundParent then we can
   // simply pass its actor back here.
   if (nsCOMPtr<nsIRemoteBlob> remoteBlob = do_QueryInterface(aBlobImpl)) {
     BlobParent* actor = remoteBlob->GetBlobParent();
@@ -867,10 +867,9 @@ BackgroundParent::GetOrCreateActorForBlobImpl(
   ChildBlobConstructorParams params;
 
   if (aBlobImpl->IsSizeUnknown() || aBlobImpl->IsDateUnknown()) {
-    // We don't want to call GetSize or GetLastModifiedDate
-    // yet since that may stat a file on the main thread
-    // here. Instead we'll learn the size lazily from the
-    // other process.
+    // We don't want to call GetSize or GetLastModifiedDate yet since that may
+    // stat a file on the this thread. Instead we'll learn the size lazily from
+    // the other side.
     params = MysteryBlobConstructorParams();
   } else {
     nsString contentType;
@@ -1133,8 +1132,7 @@ ParentImpl::GetContentParent(PBackgroundParent* aBackgroundActor)
     // will run before the reference we hand out can be released, and the
     // ContentParent can't die as long as the existing reference is maintained.
     nsCOMPtr<nsIRunnable> runnable =
-      NS_NewNonOwningRunnableMethod(actor->mContent.get(),
-                                    &ContentParent::AddRef);
+      NS_NewNonOwningRunnableMethod(actor->mContent, &ContentParent::AddRef);
     MOZ_ASSERT(runnable);
 
     MOZ_ALWAYS_TRUE(NS_SUCCEEDED(NS_DispatchToMainThread(runnable)));

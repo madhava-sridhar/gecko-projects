@@ -745,6 +745,16 @@ TabParent::AllocPIndexedDBPermissionRequestParent(const Principal& aPrincipal)
     return nullptr;
   }
 
+  nsCOMPtr<nsIContentParent> manager = Manager();
+  if (manager->IsContentParent()) {
+    if (NS_WARN_IF(!AssertAppPrincipal(manager->AsContentParent(),
+                                       principal))) {
+      return nullptr;
+    }
+  } else {
+    MOZ_CRASH("Figure out security checks for bridged content!");
+  }
+
   nsCOMPtr<nsPIDOMWindow> window;
   nsCOMPtr<nsIContent> frame = do_QueryInterface(mFrameElement);
   if (frame) {

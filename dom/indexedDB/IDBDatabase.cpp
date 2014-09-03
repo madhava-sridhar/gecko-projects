@@ -812,7 +812,7 @@ IDBDatabase::GetOrCreateFileActorForBlob(nsIDOMBlob* aBlob)
   // We use the DOMFile's nsIWeakReference as the key to the table because
   // a) it is unique per blob, b) it is reference-counted so that we can
   // guarantee that it stays alive, and c) it doesn't hold the actual DOMFile
-  // alive. We don't ever need to actually use the nsIWeakReference.
+  // alive.
   nsCOMPtr<nsIWeakReference> weakRef = do_GetWeakReference(aBlob);
   MOZ_ASSERT(weakRef);
 

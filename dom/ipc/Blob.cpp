@@ -39,6 +39,14 @@
 #include "BackgroundChild.h" // BackgroundChild::GetForCurrentThread().
 #endif
 
+#define DISABLE_ASSERTS_FOR_FUZZING 0
+
+#if DISABLE_ASSERTS_FOR_FUZZING
+#define ASSERT_UNLESS_FUZZING(...) do { } while (0)
+#else
+#define ASSERT_UNLESS_FUZZING(...) MOZ_ASSERT(false, __VA_ARGS__)
+#endif
+
 #define PRIVATE_REMOTE_INPUT_STREAM_IID \
   {0x30c7699f, 0x51d2, 0x48c8, {0xad, 0x56, 0xc0, 0x16, 0xd7, 0x6f, 0x71, 0x27}}
 
@@ -1484,7 +1492,6 @@ BlobChild::CommonInit(const ChildBlobConstructorParams& aParams)
   nsRefPtr<DOMFile> blob = new DOMFile(remoteBlob);
   blob.forget(&mBlob);
 
-
   mRemoteBlob = remoteBlob;
   mOwnsBlob = true;
 }
@@ -2404,8 +2411,9 @@ BlobParent::Create(PBackgroundParent* aManager,
 }
 
 // static
+template <class ParentManagerType>
 BlobParent*
-BlobParent::CreateFromParams(nsIContentParent* aManager,
+BlobParent::CreateFromParams(ParentManagerType* aManager,
                              const ParentBlobConstructorParams& aParams)
 {
   AssertCorrectThreadForManager(aManager);
@@ -2413,12 +2421,9 @@ BlobParent::CreateFromParams(nsIContentParent* aManager,
 
   const ChildBlobConstructorParams& blobParams = aParams.blobParams();
 
-  MOZ_ASSERT(blobParams.type() !=
-             ChildBlobConstructorParams::TMysteryBlobConstructorParams);
-
   switch (blobParams.type()) {
     case ChildBlobConstructorParams::TMysteryBlobConstructorParams:
-      MOZ_ASSERT(false);
+      ASSERT_UNLESS_FUZZING();
       return nullptr;
 
     case ChildBlobConstructorParams::TNormalBlobConstructorParams:
@@ -2452,56 +2457,7 @@ BlobParent::CreateFromParams(nsIContentParent* aManager,
       MOZ_CRASH("Unknown params!");
   }
 
-  return nullptr;
-}
-
-BlobParent*
-BlobParent::CreateFromParams(PBackgroundParent* aManager,
-                             const ParentBlobConstructorParams& aParams)
-{
-  AssertCorrectThreadForManager(aManager);
-  MOZ_ASSERT(aManager);
-
-  const ChildBlobConstructorParams& blobParams = aParams.blobParams();
-
-  MOZ_ASSERT(blobParams.type() !=
-             ChildBlobConstructorParams::TMysteryBlobConstructorParams);
-
-  switch (blobParams.type()) {
-    case ChildBlobConstructorParams::TMysteryBlobConstructorParams:
-      MOZ_ASSERT(false);
-      return nullptr;
-
-    case ChildBlobConstructorParams::TNormalBlobConstructorParams:
-    case ChildBlobConstructorParams::TFileBlobConstructorParams:
-      return new BlobParent(aManager, aParams);
-
-    case ChildBlobConstructorParams::TSlicedBlobConstructorParams: {
-      const SlicedBlobConstructorParams& params =
-        blobParams.get_SlicedBlobConstructorParams();
-
-      auto* actor =
-        const_cast<BlobParent*>(
-          static_cast<const BlobParent*>(params.sourceParent()));
-      MOZ_ASSERT(actor);
-
-      nsRefPtr<DOMFileImpl> source = actor->GetBlobImpl();
-      MOZ_ASSERT(source);
-
-      nsRefPtr<DOMFileImpl> slice;
-      nsresult rv =
-        source->Slice(params.begin(), params.end(), params.contentType(), 3,
-                      getter_AddRefs(slice));
-      NS_ENSURE_SUCCESS(rv, nullptr);
-
-      return new BlobParent(aManager, slice);
-    }
-
-    default:
-      MOZ_CRASH("Unknown params!");
-  }
-
-  return nullptr;
+  MOZ_CRASH("Should never get here!");
 }
 
 // static
@@ -2795,7 +2751,7 @@ BlobParent::RecvResolveMystery(const ResolveMysteryParams& aParams)
         aParams.get_NormalBlobConstructorParams();
 
       if (NS_WARN_IF(params.length() == UINT64_MAX)) {
-        MOZ_ASSERT(false);
+        ASSERT_UNLESS_FUZZING();
         return false;
       }
 
@@ -2813,17 +2769,17 @@ BlobParent::RecvResolveMystery(const ResolveMysteryParams& aParams)
       const FileBlobConstructorParams& params =
         aParams.get_FileBlobConstructorParams();
       if (NS_WARN_IF(params.name().IsVoid())) {
-        MOZ_ASSERT(false);
+        ASSERT_UNLESS_FUZZING();
         return false;
       }
 
       if (NS_WARN_IF(params.length() == UINT64_MAX)) {
-        MOZ_ASSERT(false);
+        ASSERT_UNLESS_FUZZING();
         return false;
       }
 
       if (NS_WARN_IF(params.modDate() == UINT64_MAX)) {
-        MOZ_ASSERT(false);
+        ASSERT_UNLESS_FUZZING();
         return false;
       }
 
@@ -2838,7 +2794,7 @@ BlobParent::RecvResolveMystery(const ResolveMysteryParams& aParams)
       MOZ_CRASH("Unknown params!");
   }
 
-  MOZ_MAKE_COMPILER_ASSUME_IS_UNREACHABLE("Should never get here!");
+  MOZ_CRASH("Should never get here!");
 }
 
 bool
@@ -2852,7 +2808,7 @@ BlobParent::RecvGetFileId(int64_t* aFileId)
   MOZ_ASSERT(!mRemoteBlob);
 
   if (NS_WARN_IF(!IndexedDatabaseManager::InTestingMode())) {
-    MOZ_ASSERT(false);
+    ASSERT_UNLESS_FUZZING();
     return false;
   }
 
@@ -2880,7 +2836,7 @@ BlobParent::RecvGetFilePath(nsString* aFilePath)
   MOZ_ASSERT(!mRemoteBlob);
 
   if (NS_WARN_IF(!IndexedDatabaseManager::InTestingMode())) {
-    MOZ_ASSERT(false);
+    ASSERT_UNLESS_FUZZING();
     return false;
   }
 

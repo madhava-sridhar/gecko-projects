@@ -438,6 +438,9 @@ SpecialPowersObserverAPI.prototype = {
           }
         }
 
+        // We always use the getUsageForURI callback even if we're clearing
+        // since we know that clear and getUsageForURI are synchronized by the
+        // QuotaManager.
         let callback = function(uri, usage, fileUsage) {
           let reply = { id: msg.id };
           if (op == 'getUsage') {

@@ -15,7 +15,7 @@ function testSteps()
   // Sanity checks
   ok(request instanceof IDBRequest, "Request should be an IDBRequest");
   ok(request instanceof IDBOpenDBRequest, "Request should be an IDBOpenDBRequest");
-  //ok(request instanceof EventTarget, "Request should be an EventTarget");
+  ok(request instanceof EventTarget, "Request should be an EventTarget");
   is(request.source, null, "Request should have no source");
   try {
     request.result;
