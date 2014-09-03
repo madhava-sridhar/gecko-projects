@@ -5910,8 +5910,7 @@ Factory::AllocPBackgroundIDBFactoryRequestParent(
     }
 
     default:
-      ASSERT_UNLESS_FUZZING();
-      return nullptr;
+      MOZ_CRASH("Should never get here!");
   }
 
   MOZ_ASSERT(commonParams);
@@ -6280,8 +6279,7 @@ Database::AllocPBackgroundIDBDatabaseFileParent(
     }
 
     default:
-      ASSERT_UNLESS_FUZZING();
-      return nullptr;
+      MOZ_CRASH("Should never get here!");
   }
 
   MOZ_ASSERT(actor);
@@ -7041,8 +7039,7 @@ TransactionBase::VerifyRequestParams(const RequestParams& aParams) const
     }
 
     default:
-      ASSERT_UNLESS_FUZZING();
-      return false;
+      MOZ_CRASH("Should never get here!");
   }
 
   return true;
@@ -7131,8 +7128,7 @@ TransactionBase::VerifyRequestParams(const OpenCursorParams& aParams) const
     }
 
     default:
-      ASSERT_UNLESS_FUZZING();
-      return false;
+      MOZ_CRASH("Should never get here!");
   }
 
   return true;
@@ -7152,8 +7148,7 @@ TransactionBase::VerifyRequestParams(const CursorRequestParams& aParams) const
       break;
 
     default:
-      ASSERT_UNLESS_FUZZING();
-      return false;
+      MOZ_CRASH("Should never get here!");
   }
 
   return true;
@@ -7284,8 +7279,7 @@ TransactionBase::VerifyRequestParams(const ObjectStoreAddPutParams& aParams)
         break;
 
       default:
-          ASSERT_UNLESS_FUZZING();
-          return false;
+        MOZ_CRASH("Should never get here!");
     }
   }
 
@@ -7299,22 +7293,18 @@ TransactionBase::VerifyRequestParams(const OptionalKeyRange& aParams) const
   MOZ_ASSERT(aParams.type() != OptionalKeyRange::T__None);
 
   switch (aParams.type()) {
-    case OptionalKeyRange::TSerializedKeyRange: {
+    case OptionalKeyRange::TSerializedKeyRange:
       if (NS_WARN_IF(!VerifyRequestParams(aParams.get_SerializedKeyRange()))) {
         ASSERT_UNLESS_FUZZING();
         return false;
       }
       break;
-    }
 
-    case OptionalKeyRange::Tvoid_t: {
+    case OptionalKeyRange::Tvoid_t:
       break;
-    }
 
-    default: {
-      ASSERT_UNLESS_FUZZING();
-      return false;
-    }
+    default:
+      MOZ_CRASH("Should never get here!");
   }
 
   return true;
@@ -7521,8 +7511,7 @@ TransactionBase::AllocRequest(const RequestParams& aParams, bool aTrustParams)
       break;
 
     default:
-      ASSERT_UNLESS_FUZZING();
-      return nullptr;
+      MOZ_CRASH("Should never get here!");
   }
 
   MOZ_ASSERT(actor);
@@ -15408,8 +15397,6 @@ IndexRequestOpBase::IndexMetadataForParams(TransactionBase* aTransaction,
     }
 
     default:
-      // This should have already been assured in
-      // TransactionBase::AllocRequest().
       MOZ_CRASH("Should never get here!");
   }
 
@@ -16712,7 +16699,7 @@ OpenOp::DoDatabaseWork(TransactionBase* aTransaction)
       break;
 
     default:
-      MOZ_CRASH("Bad type!");
+      MOZ_CRASH("Should never get here!");
   }
 
   if (NS_WARN_IF(NS_FAILED(rv))) {
