@@ -890,6 +890,13 @@ TransactionThreadPool::TransactionQueue::Run()
     }
   } while (!shouldFinish);
 
+#ifdef DEBUG
+  if (kDEBUGThreadSleepMS) {
+    MOZ_ALWAYS_TRUE(
+      PR_Sleep(PR_MillisecondsToInterval(kDEBUGThreadSleepMS)) == PR_SUCCESS);
+  }
+#endif // DEBUG
+
   IDB_PROFILER_MARK("IndexedDB Transaction %llu: Finished database work",
                     "IDBTransaction[%llu] DT Done",
                     mTransaction->GetSerialNumber());

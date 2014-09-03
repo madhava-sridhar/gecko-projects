@@ -2752,8 +2752,6 @@ class Factory MOZ_FINAL
   // ActorDestroy called.
   static uint64_t sFactoryInstanceCount;
 
-  static TransactionThreadPool* sCurrentTransactionThreadPool;
-
   nsRefPtr<TransactionThreadPool> mTransactionThreadPool;
 
   const OptionalWindowId mOptionalWindowId;
@@ -4081,7 +4079,7 @@ private:
   nsresult
   SendUpgradeNeeded();
 
-  nsresult
+  void
   EnsureDatabaseActor();
 
   nsresult
@@ -5056,8 +5054,7 @@ class QuotaClient MOZ_FINAL
   nsCOMPtr<nsIEventTarget> mBackgroundThread;
   nsRefPtr<ShutdownTransactionThreadPoolRunnable> mShutdownRunnable;
 
-  // These are only touched on the background thread!
-  TransactionThreadPool* mCurrentTransactionThreadPool;
+  // This is only touched on the background thread!
   nsTArray<nsRefPtr<TransactionThreadPool>> mDyingTransactionThreadPools;
 
   bool mShutdownRequested;
@@ -5068,8 +5065,6 @@ public:
   static QuotaClient*
   GetInstance()
   {
-    MOZ_ASSERT(NS_IsMainThread());
-
     return sInstance;
   }
 
@@ -5077,10 +5072,10 @@ public:
   NoteBackgroundThread(nsIEventTarget* aBackgroundThread);
 
   void
-  NoteNewTransactionThreadPool(TransactionThreadPool* aTransactionThreadPool);
+  NoteNewTransactionThreadPool();
 
   void
-  NoteDyingTransactionThreadPool(TransactionThreadPool* aTransactionThreadPool);
+  NoteDyingTransactionThreadPool();
 
   bool
   HasShutDown() const
@@ -5531,6 +5526,8 @@ StaticAutoPtr<DatabaseActorHashtable> gLiveDatabaseHashtable;
 
 StaticRefPtr<nsRunnable> gStartTransactionRunnable;
 
+TransactionThreadPool* gCurrentTransactionThreadPool = nullptr;
+
 #ifdef DEBUG
 
 StaticRefPtr<DEBUGThreadSlower> gDEBUGThreadSlower;
@@ -5745,10 +5742,9 @@ FullDatabaseMetadata::Duplicate() const
  ******************************************************************************/
 
 uint64_t Factory::sFactoryInstanceCount = 0;
-TransactionThreadPool* Factory::sCurrentTransactionThreadPool = nullptr;
 
 Factory::Factory(const OptionalWindowId& aOptionalWindowId)
-  : mTransactionThreadPool(sCurrentTransactionThreadPool)
+  : mTransactionThreadPool(gCurrentTransactionThreadPool)
   , mOptionalWindowId(aOptionalWindowId)
   , mActorDestroyed(false)
 {
@@ -5772,7 +5768,7 @@ Factory::Create(const OptionalWindowId& aOptionalWindowId)
 
   // If this is the first instance then we need to do some initialization.
   if (!sFactoryInstanceCount) {
-    MOZ_ASSERT(!sCurrentTransactionThreadPool);
+    MOZ_ASSERT(!gCurrentTransactionThreadPool);
 
     nsRefPtr<TransactionThreadPool> threadPool =
       TransactionThreadPool::Create();
@@ -5780,7 +5776,7 @@ Factory::Create(const OptionalWindowId& aOptionalWindowId)
       return nullptr;
     }
 
-    sCurrentTransactionThreadPool = threadPool;
+    gCurrentTransactionThreadPool = threadPool;
 
     // Hold this alive until the Factory constructor runs.
     kungFuDeathGrip.swap(threadPool);
@@ -5828,7 +5824,6 @@ Factory::ActorDestroy(ActorDestroyReason aWhy)
 {
   AssertIsOnBackgroundThread();
   MOZ_ASSERT(!mActorDestroyed);
-  MOZ_ASSERT(sCurrentTransactionThreadPool == mTransactionThreadPool);
 
   mActorDestroyed = true;
 
@@ -5839,9 +5834,10 @@ Factory::ActorDestroy(ActorDestroyReason aWhy)
 
   // Clean up if there are no more instances.
   if (!(--sFactoryInstanceCount)) {
-    if (sCurrentTransactionThreadPool) {
-      sCurrentTransactionThreadPool->ShutdownAsync();
-      sCurrentTransactionThreadPool = nullptr;
+    if (gCurrentTransactionThreadPool) {
+      gCurrentTransactionThreadPool->ShutdownAsync();
+
+      QuotaClient::GetInstance()->NoteDyingTransactionThreadPool();
     }
 
     MOZ_ASSERT(gStartTransactionRunnable);
@@ -9182,8 +9178,7 @@ FileManager::GetUsage(nsIFile* aDirectory, uint64_t* aUsage)
 QuotaClient* QuotaClient::sInstance = nullptr;
 
 QuotaClient::QuotaClient()
-  : mCurrentTransactionThreadPool(nullptr)
-  , mShutdownRequested(false)
+  : mShutdownRequested(false)
 {
   MOZ_ASSERT(NS_IsMainThread());
   MOZ_ASSERT(!sInstance, "We expect this to be a singleton!");
@@ -9210,14 +9205,12 @@ QuotaClient::NoteBackgroundThread(nsIEventTarget* aBackgroundThread)
 }
 
 void
-QuotaClient::NoteNewTransactionThreadPool(
-                                  TransactionThreadPool* aTransactionThreadPool)
+QuotaClient::NoteNewTransactionThreadPool()
 {
   AssertIsOnBackgroundThread();
-  MOZ_ASSERT(aTransactionThreadPool);
-  MOZ_ASSERT(!mCurrentTransactionThreadPool);
-
-  mCurrentTransactionThreadPool = aTransactionThreadPool;
+  MOZ_ASSERT(gCurrentTransactionThreadPool);
+  MOZ_ASSERT(!mDyingTransactionThreadPools.Contains(
+               gCurrentTransactionThreadPool));
 
   if (!mDyingTransactionThreadPools.IsEmpty()) {
     for (uint32_t index = mDyingTransactionThreadPools.Length();
@@ -9231,17 +9224,18 @@ QuotaClient::NoteNewTransactionThreadPool(
 }
 
 void
-QuotaClient::NoteDyingTransactionThreadPool(
-                                  TransactionThreadPool* aTransactionThreadPool)
+QuotaClient::NoteDyingTransactionThreadPool()
 {
   AssertIsOnBackgroundThread();
-  MOZ_ASSERT(aTransactionThreadPool);
-  MOZ_ASSERT(mCurrentTransactionThreadPool == aTransactionThreadPool);
-  MOZ_ASSERT(!mDyingTransactionThreadPools.Contains(aTransactionThreadPool));
 
-  mCurrentTransactionThreadPool = nullptr;
+  if (gCurrentTransactionThreadPool) {
+    if (!gCurrentTransactionThreadPool->HasCompletedShutdown() &&
+        !mDyingTransactionThreadPools.Contains(gCurrentTransactionThreadPool)) {
+      mDyingTransactionThreadPools.AppendElement(gCurrentTransactionThreadPool);
+    }
 
-  mDyingTransactionThreadPools.AppendElement(aTransactionThreadPool);
+    gCurrentTransactionThreadPool = nullptr;
+  }
 }
 
 mozilla::dom::quota::Client::Type
@@ -9678,8 +9672,9 @@ WaitForTransactionsRunnable::MaybeWait()
   MOZ_ASSERT(mState == State_Initial);
   MOZ_ASSERT(mQuotaClient);
 
-  if (nsRefPtr<TransactionThreadPool> threadPool =
-        mQuotaClient->mCurrentTransactionThreadPool) {
+  nsRefPtr<TransactionThreadPool> threadPool = gCurrentTransactionThreadPool;
+
+  if (threadPool) {
     mState = State_WaitingForTransactions;
 
     threadPool->WaitForDatabasesToComplete(mDatabaseIds, this);
@@ -9778,6 +9773,10 @@ ShutdownTransactionThreadPoolRunnable::Run()
   if (!mHasRequestedShutDown) {
     mHasRequestedShutDown = true;
 
+    mQuotaClient->NoteDyingTransactionThreadPool();
+
+    MOZ_ASSERT(!gCurrentTransactionThreadPool);
+
     while (!mQuotaClient->mDyingTransactionThreadPools.IsEmpty()) {
       nsRefPtr<TransactionThreadPool> threadPool;
       mQuotaClient->mDyingTransactionThreadPools[0].swap(threadPool);
@@ -9790,24 +9789,8 @@ ShutdownTransactionThreadPoolRunnable::Run()
       }
     }
 
-   nsRefPtr<TransactionThreadPool> currentThreadPool =
-     mQuotaClient->mCurrentTransactionThreadPool;
-
-    if (currentThreadPool) {
-      currentThreadPool->ShutdownAndSpin();
-    }
-
-    MOZ_ASSERT(!mQuotaClient->mCurrentTransactionThreadPool);
-
-    if (!mQuotaClient->mDyingTransactionThreadPools.IsEmpty()) {
-      MOZ_ASSERT(mQuotaClient->mDyingTransactionThreadPools.Length() == 1);
-      MOZ_ASSERT(mQuotaClient->mDyingTransactionThreadPools[0] ==
-                   currentThreadPool);
-      MOZ_ASSERT(mQuotaClient->mDyingTransactionThreadPools[0]->
-                   HasCompletedShutdown());
-
-      mQuotaClient->mDyingTransactionThreadPools.Clear();
-    }
+    MOZ_ASSERT(!gCurrentTransactionThreadPool);
+    MOZ_ASSERT(mQuotaClient->mDyingTransactionThreadPools.IsEmpty());
   }
 
   MOZ_ALWAYS_TRUE(NS_SUCCEEDED(NS_DispatchToMainThread(this)));
@@ -11646,10 +11629,7 @@ OpenDatabaseOp::BeginVersionChange()
     return NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
   }
 
-  nsresult rv = EnsureDatabaseActor();
-  if (NS_WARN_IF(NS_FAILED(rv))) {
-    return rv;
-  }
+  EnsureDatabaseActor();
 
   if (mDatabase->IsInvalidated()) {
     IDB_REPORT_INTERNAL_ERR();
@@ -11677,10 +11657,11 @@ OpenDatabaseOp::BeginVersionChange()
 
   NullableVersion newVersion = mRequestedVersion;
 
-  rv = SendVersionChangeMessages(info,
-                                 mDatabase,
-                                 mMetadata->mCommonMetadata.version(),
-                                 newVersion);
+  nsresult rv =
+    SendVersionChangeMessages(info,
+                              mDatabase,
+                              mMetadata->mCommonMetadata.version(),
+                              newVersion);
   if (NS_WARN_IF(NS_FAILED(rv))) {
     return rv;
   }
@@ -11905,7 +11886,7 @@ OpenDatabaseOp::SendResults()
   FinishSendResults();
 }
 
-nsresult
+void
 OpenDatabaseOp::EnsureDatabaseActor()
 {
   AssertIsOnOwningThread();
@@ -11917,7 +11898,7 @@ OpenDatabaseOp::EnsureDatabaseActor()
   MOZ_ASSERT(!IsActorDestroyed());
 
   if (mDatabase) {
-    return NS_OK;
+    return;
   }
 
   MOZ_ASSERT(mMetadata->mDatabaseId.IsEmpty());
@@ -11950,7 +11931,7 @@ OpenDatabaseOp::EnsureDatabaseActor()
     gLiveDatabaseHashtable->Put(mDatabaseId, info);
   }
 
-  return NS_OK;
+  QuotaClient::GetInstance()->NoteNewTransactionThreadPool();
 }
 
 nsresult
@@ -11962,10 +11943,7 @@ OpenDatabaseOp::EnsureDatabaseActorIsAlive()
   MOZ_ASSERT(NS_SUCCEEDED(mResultCode));
   MOZ_ASSERT(!IsActorDestroyed());
 
-  nsresult rv = EnsureDatabaseActor();
-  if (NS_WARN_IF(NS_FAILED(rv))) {
-    return rv;
-  }
+  EnsureDatabaseActor();
 
   if (mDatabase->IsActorAlive()) {
     return NS_OK;
