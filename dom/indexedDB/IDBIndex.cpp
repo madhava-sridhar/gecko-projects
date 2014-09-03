@@ -23,9 +23,9 @@
 // Include this last to avoid path problems on Windows.
 #include "ActorsChild.h"
 
-using namespace mozilla;
-using namespace mozilla::dom;
-using namespace mozilla::dom::indexedDB;
+namespace mozilla {
+namespace dom {
+namespace indexedDB {
 
 namespace {
 
@@ -532,3 +532,7 @@ IDBIndex::WrapObject(JSContext* aCx)
 {
   return IDBIndexBinding::Wrap(aCx, this);
 }
+
+} // namespace indexedDB
+} // namespace dom
+} // namespace mozilla

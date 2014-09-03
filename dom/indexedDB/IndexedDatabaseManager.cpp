@@ -57,15 +57,11 @@
 #define LOW_DISK_SPACE_DATA_FULL "full"
 #define LOW_DISK_SPACE_DATA_FREE "free"
 
-using namespace mozilla;
-using namespace mozilla::ipc;
-using namespace mozilla::dom;
-using namespace mozilla::dom::indexedDB;
-USING_QUOTA_NAMESPACE
-
 namespace mozilla {
 namespace dom {
 namespace indexedDB {
+
+using namespace mozilla::dom::quota;
 
 class FileManagerInfo
 {
@@ -109,10 +105,6 @@ private:
   nsTArray<nsRefPtr<FileManager> > mPersistentStorageFileManagers;
   nsTArray<nsRefPtr<FileManager> > mTemporaryStorageFileManagers;
 };
-
-} // namespace indexedDB
-} // namespace dom
-} // namespace mozilla
 
 namespace {
 
@@ -949,3 +941,7 @@ GetFileReferencesHelper::Run()
 
   return NS_OK;
 }
+
+} // namespace indexedDB
+} // namespace dom
+} // namespace mozilla

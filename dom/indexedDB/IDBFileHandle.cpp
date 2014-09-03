@@ -16,15 +16,15 @@
 #include "nsServiceManagerUtils.h"
 #include "nsWidgetsCID.h"
 
+namespace mozilla {
+namespace dom {
+namespace indexedDB {
+
 namespace {
 
 NS_DEFINE_CID(kAppShellCID2, NS_APPSHELL_CID);
 
 } // anonymous namespace
-
-namespace mozilla {
-namespace dom {
-namespace indexedDB {
 
 IDBFileHandle::IDBFileHandle(FileMode aMode,
                              RequestMode aRequestMode,

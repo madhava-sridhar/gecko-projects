@@ -18,9 +18,9 @@
 #include "ReportInternalError.h"
 #include "xpcpublic.h"
 
-using namespace mozilla;
-using namespace mozilla::dom;
-using namespace mozilla::dom::indexedDB;
+namespace mozilla {
+namespace dom {
+namespace indexedDB {
 
 /*
  Here's how we encode keys:
@@ -552,3 +552,7 @@ Key::Assert(bool aCondition) const
 }
 
 #endif // DEBUG
+
+} // namespace indexedDB
+} // namespace dom
+} // namespace mozilla

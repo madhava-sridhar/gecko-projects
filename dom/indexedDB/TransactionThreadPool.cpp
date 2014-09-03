@@ -20,8 +20,9 @@
 #include "nsXPCOMCIDInternal.h"
 #include "ProfilerHelpers.h"
 
-using namespace mozilla;
-using namespace mozilla::dom::indexedDB;
+namespace mozilla {
+namespace dom {
+namespace indexedDB {
 
 using mozilla::ipc::AssertIsOnBackgroundThread;
 
@@ -1001,3 +1002,7 @@ TransactionThreadPoolListener::OnThreadShuttingDown()
 }
 
 #endif // BUILD_THREADPOOL_LISTENER
+
+} // namespace indexedDB
+} // namespace dom
+} // namespace mozilla

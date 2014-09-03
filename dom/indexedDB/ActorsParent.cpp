@@ -89,9 +89,10 @@
 #include "snappy/snappy.h"
 #include "TransactionThreadPool.h"
 
-using namespace mozilla;
-using namespace mozilla::dom;
-using namespace mozilla::dom::indexedDB;
+namespace mozilla {
+namespace dom {
+namespace indexedDB {
+
 using namespace mozilla::dom::quota;
 using namespace mozilla::ipc;
 
@@ -103,11 +104,21 @@ using namespace mozilla::ipc;
 #define ASSERT_UNLESS_FUZZING(...) MOZ_ASSERT(false, __VA_ARGS__)
 #endif
 
+namespace {
+
+class Cursor;
+class Database;
+struct DatabaseActorInfo;
+class DatabaseFile;
+class DatabaseOfflineStorage;
+class Factory;
+class OpenDatabaseOp;
+class TransactionBase;
+class VersionChangeTransaction;
+
 /*******************************************************************************
  * Constants
  ******************************************************************************/
-
-namespace {
 
 // If JS_STRUCTURED_CLONE_VERSION changes then we need to update our major
 // schema version.
@@ -170,13 +181,9 @@ const uint32_t kDEBUGThreadSleepMS = 0;
 
 #endif
 
-} // anonymous namespace
-
 /*******************************************************************************
  * Metadata classes
  ******************************************************************************/
-
-namespace {
 
 struct FullIndexMetadata
 {
@@ -344,13 +351,9 @@ private:
   }
 };
 
-} // anonymous namespace
-
 /*******************************************************************************
  * SQLite functions
  ******************************************************************************/
-
-namespace {
 
 int32_t
 MakeSchemaVersion(uint32_t aMajorSchemaVersion,
@@ -2515,45 +2518,9 @@ GetDatabaseConnection(const nsAString& aDatabaseFilePath,
   return NS_OK;
 }
 
-} // anonymous namespace
-
 /*******************************************************************************
  * Actor class declarations
  ******************************************************************************/
-
-// These forward declarations and using statements are needed to make the
-// refcount macros happy since we have other classes in the global namespace
-// whose names conflict. Grr.
-
-namespace {
-
-class Cursor;
-class Database;
-struct DatabaseActorInfo;
-class DatabaseFile;
-class DatabaseOfflineStorage;
-class Factory;
-class OpenDatabaseOp;
-class TransactionBase;
-class VersionChangeTransaction;
-
-} // anonymous namespace
-
-namespace mozilla {
-namespace dom {
-namespace indexedDB {
-
-using ::Cursor;
-using ::Database;
-using ::DatabaseFile;
-using ::Factory;
-using ::TransactionBase;
-
-} // namespace indexedDB
-} // namespace dom
-} // namespace mozilla
-
-namespace {
 
 class DatabaseOperationBase
   : public nsRunnable
@@ -5017,13 +4984,9 @@ private:
   ActorDestroy(ActorDestroyReason aWhy) MOZ_OVERRIDE;
 };
 
-} // anonymous namespace
-
 /*******************************************************************************
  * Other class declarations
  ******************************************************************************/
-
-namespace {
 
 struct DatabaseActorInfo
 {
@@ -5413,13 +5376,9 @@ private:
 
 #endif // DEBUG
 
-} // anonymous namespace
-
 /*******************************************************************************
  * Helper Functions
  ******************************************************************************/
-
-namespace {
 
 bool
 TokenizerIgnoreNothing(char16_t /* aChar */)
@@ -5560,13 +5519,9 @@ ConvertBlobsToActors(PBackgroundParent* aBackgroundActor,
   return NS_OK;
 }
 
-} // anonymous namespace
-
 /*******************************************************************************
  * Globals
  ******************************************************************************/
-
-namespace {
 
 // Maps a database id to information about live database actors.
 typedef nsClassHashtable<nsCStringHashKey, DatabaseActorInfo>
@@ -5587,10 +5542,6 @@ StaticRefPtr<DEBUGThreadSlower> gDEBUGThreadSlower;
 /*******************************************************************************
  * Exported functions
  ******************************************************************************/
-
-namespace mozilla {
-namespace dom {
-namespace indexedDB {
 
 PBackgroundIDBFactoryParent*
 AllocPBackgroundIDBFactoryParent(PBackgroundParent* aManager,
@@ -5685,10 +5636,6 @@ CreateQuotaClient()
   nsRefPtr<QuotaClient> client = new QuotaClient();
   return client.forget();
 }
-
-} // namespace indexedDB
-} // namespace dom
-} // namespace mozilla
 
 /*******************************************************************************
  * Metadata classes
@@ -17094,3 +17041,7 @@ DEBUGThreadSlower::AfterProcessNextEvent(nsIThreadInternal* /* aThread */,
 }
 
 #endif // DEBUG
+
+} // namespace indexedDB
+} // namespace dom
+} // namespace mozilla

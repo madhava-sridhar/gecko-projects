@@ -15,7 +15,9 @@
 
 #include "mozilla/dom/BindingDeclarations.h"
 
-using namespace mozilla::dom::indexedDB;
+namespace mozilla {
+namespace dom {
+namespace indexedDB {
 
 namespace {
 
@@ -570,3 +572,7 @@ KeyPath::IsAllowedForObjectStore(bool aAutoIncrement) const
   // Everything else is ok.
   return true;
 }
+
+} // namespace indexedDB
+} // namespace dom
+} // namespace mozilla

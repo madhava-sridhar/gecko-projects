@@ -12,9 +12,9 @@
 #include "mozilla/dom/IDBKeyRangeBinding.h"
 #include "mozilla/dom/indexedDB/PBackgroundIDBSharedTypes.h"
 
-using namespace mozilla;
-using namespace mozilla::dom;
-using namespace mozilla::dom::indexedDB;
+namespace mozilla {
+namespace dom {
+namespace indexedDB {
 
 namespace {
 
@@ -384,3 +384,7 @@ IDBKeyRange::Bound(const GlobalObject& aGlobal,
 
   return keyRange.forget();
 }
+
+} // namespace indexedDB
+} // namespace dom
+} // namespace mozilla

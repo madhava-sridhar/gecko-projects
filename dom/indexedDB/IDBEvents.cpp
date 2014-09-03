@@ -51,10 +51,6 @@ CreateGenericEvent(EventTarget* aOwner,
   return event.forget();
 }
 
-} // namespace indexedDB
-} // namespace dom
-} // namespace mozilla
-
 // static
 already_AddRefed<IDBVersionChangeEvent>
 IDBVersionChangeEvent::CreateInternal(EventTarget* aOwner,
@@ -104,3 +100,7 @@ IDBVersionChangeEvent::WrapObject(JSContext* aCx)
 {
   return IDBVersionChangeEventBinding::Wrap(aCx, this);
 }
+
+} // namespace indexedDB
+} // namespace dom
+} // namespace mozilla

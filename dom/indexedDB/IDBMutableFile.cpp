@@ -30,9 +30,10 @@
 #include "nsIDOMFile.h"
 #include "nsIPrincipal.h"
 
-using namespace mozilla;
-using namespace mozilla::dom;
-using namespace mozilla::dom::indexedDB;
+namespace mozilla {
+namespace dom {
+namespace indexedDB {
+
 using namespace mozilla::dom::quota;
 using namespace mozilla::ipc;
 
@@ -405,3 +406,7 @@ GetFileHelper::GetSuccessResult(JSContext* aCx,
 
   return NS_OK;
 }
+
+} // namespace indexedDB
+} // namespace dom
+} // namespace mozilla

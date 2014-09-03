@@ -15,8 +15,10 @@
 #include "nsError.h"
 #include "nsThreadUtils.h"
 
-using namespace mozilla;
-using namespace mozilla::dom::indexedDB;
+namespace mozilla {
+namespace dom {
+namespace indexedDB {
+
 using namespace mozilla::dom::quota;
 
 namespace {
@@ -222,3 +224,7 @@ CleanupFileRunnable::Run()
 
   return NS_OK;
 }
+
+} // namespace indexedDB
+} // namespace dom
+} // namespace mozilla

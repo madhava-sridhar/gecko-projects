@@ -22,9 +22,9 @@
 // Include this last to avoid path problems on Windows.
 #include "ActorsChild.h"
 
-using namespace mozilla;
-using namespace mozilla::dom;
-using namespace mozilla::dom::indexedDB;
+namespace mozilla {
+namespace dom {
+namespace indexedDB {
 
 IDBCursor::IDBCursor(Type aType,
                      IDBObjectStore* aSourceObjectStore,
@@ -844,3 +844,7 @@ IDBCursor::WrapObject(JSContext* aCx)
       MOZ_CRASH("Bad type!");
   }
 }
+
+} // namespace indexedDB
+} // namespace dom
+} // namespace mozilla

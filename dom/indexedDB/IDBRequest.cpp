@@ -29,9 +29,10 @@
 #include "nsString.h"
 #include "ReportInternalError.h"
 
-using namespace mozilla;
-using namespace mozilla::dom;
-using namespace mozilla::dom::indexedDB;
+namespace mozilla {
+namespace dom {
+namespace indexedDB {
+
 using namespace mozilla::ipc;
 
 IDBRequest::IDBRequest(IDBDatabase* aDatabase)
@@ -489,3 +490,7 @@ IDBOpenDBRequest::WrapObject(JSContext* aCx)
 
   return IDBOpenDBRequestBinding::Wrap(aCx, this);
 }
+
+} // namespace indexedDB
+} // namespace dom
+} // namespace mozilla

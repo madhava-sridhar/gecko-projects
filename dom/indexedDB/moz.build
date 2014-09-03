@@ -42,9 +42,8 @@ EXPORTS.mozilla.dom.indexedDB += [
     'SerializationHelpers.h',
 ]
 
-SOURCES += [
+UNIFIED_SOURCES += [
     'ActorsChild.cpp',
-    'ActorsParent.cpp',
     'FileInfo.cpp',
     'FileSnapshot.cpp',
     'IDBCursor.cpp',
@@ -66,6 +65,10 @@ SOURCES += [
     'PermissionRequestBase.cpp',
     'ReportInternalError.cpp',
     'TransactionThreadPool.cpp',
+]
+
+SOURCES += [
+    'ActorsParent.cpp', # This file is huge.
 ]
 
 IPDL_SOURCES += [

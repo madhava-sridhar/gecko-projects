@@ -32,19 +32,12 @@
 #include "nsContentUtils.h" // For IsCallerChrome assertions.
 #endif
 
-using namespace mozilla;
-using namespace mozilla::dom;
-using namespace mozilla::dom::indexedDB;
+namespace mozilla {
+namespace dom {
+namespace indexedDB {
+
 using namespace mozilla::dom::quota;
 using namespace mozilla::ipc;
-
-using mozilla::dom::ContentChild;
-using mozilla::dom::nsIContentParent;
-using mozilla::dom::IDBOpenDBOptions;
-using mozilla::dom::NonNull;
-using mozilla::dom::Optional;
-using mozilla::dom::TabChild;
-using mozilla::ErrorResult;
 
 namespace {
 
@@ -773,3 +766,7 @@ IDBFactory::BackgroundCreateCallback::ActorFailed()
 
   factory->BackgroundActorFailed();
 }
+
+} // namespace indexedDB
+} // namespace dom
+} // namespace mozilla

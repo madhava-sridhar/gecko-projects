@@ -13,8 +13,11 @@
 #include "nsPIDOMWindow.h"
 #include "nsXULAppAPI.h"
 
+namespace mozilla {
+namespace dom {
+namespace indexedDB {
+
 using namespace mozilla::services;
-using namespace mozilla::dom::indexedDB;
 
 namespace {
 
@@ -258,3 +261,7 @@ PermissionRequestBase::Observe(nsISupports* aSubject,
   OnPromptComplete(permission);
   return NS_OK;
 }
+
+} // namespace indexedDB
+} // namespace dom
+} // namespace mozilla

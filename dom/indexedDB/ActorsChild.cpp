@@ -52,9 +52,9 @@
 
 #endif // DEBUG || GC_ON_IPC_MESSAGES
 
-using namespace mozilla;
-using namespace mozilla::dom;
-using namespace mozilla::dom::indexedDB;
+namespace mozilla {
+namespace dom {
+namespace indexedDB {
 
 /*******************************************************************************
  * Helpers
@@ -2303,10 +2303,6 @@ BackgroundCursorChild::RecvResponse(const CursorResponse& aResponse)
   return true;
 }
 
-namespace mozilla {
-namespace dom {
-namespace indexedDB {
-
 // XXX This doesn't belong here. However, we're not yet porting MutableFile
 //     stuff to PBackground so this is necessary for the time being.
 void
@@ -2327,10 +2323,6 @@ DispatchMutableFileResult(IDBRequest* aRequest,
   }
 }
 
-} // namespace indexedDB
-} // namespace dom
-} // namespace mozilla
-
 NS_IMPL_ISUPPORTS(BackgroundCursorChild::DelayedDeleteRunnable,
                   nsIRunnable)
 
@@ -2349,3 +2341,7 @@ DelayedDeleteRunnable::Run()
 
   return NS_OK;
 }
+
+} // namespace indexedDB
+} // namespace dom
+} // namespace mozilla

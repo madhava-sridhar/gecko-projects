@@ -15,8 +15,9 @@
 #include "nsCycleCollector.h"
 #endif
 
-using namespace mozilla;
-using namespace mozilla::dom::indexedDB;
+namespace mozilla {
+namespace dom {
+namespace indexedDB {
 
 NS_IMPL_CYCLE_COLLECTION_CLASS(IDBWrapperCache)
 
@@ -79,3 +80,7 @@ IDBWrapperCache::AssertIsRooted() const
              "Why aren't we rooted?!");
 }
 #endif
+
+} // namespace indexedDB
+} // namespace dom
+} // namespace mozilla

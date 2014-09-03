@@ -47,9 +47,10 @@
 // Include this last to avoid path problems on Windows.
 #include "ActorsChild.h"
 
-using namespace mozilla;
-using namespace mozilla::dom;
-using namespace mozilla::dom::indexedDB;
+namespace mozilla {
+namespace dom {
+namespace indexedDB {
+
 using namespace mozilla::dom::quota;
 using namespace mozilla::ipc;
 
@@ -2087,3 +2088,6 @@ IDBObjectStore::HasValidKeyPath() const
   return GetKeyPath().IsValid();
 }
 
+} // namespace indexedDB
+} // namespace dom
+} // namespace mozilla
