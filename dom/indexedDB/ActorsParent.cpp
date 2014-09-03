@@ -9216,7 +9216,7 @@ QuotaClient::NoteNewTransactionThreadPool()
     for (uint32_t index = mDyingTransactionThreadPools.Length();
          index > 0;
          index--) {
-      if (mDyingTransactionThreadPools[index]->HasCompletedShutdown()) {
+      if (mDyingTransactionThreadPools[index - 1]->HasCompletedShutdown()) {
         mDyingTransactionThreadPools.RemoveElementAt(index - 1);
       }
     }

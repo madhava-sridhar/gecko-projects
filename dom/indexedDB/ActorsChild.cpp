@@ -2236,6 +2236,10 @@ BackgroundCursorChild::ActorDestroy(ActorDestroyReason aWhy)
 
   MaybeCollectGarbageOnIPCMessage();
 
+  if (mStrongRequest && !mStrongCursor && mTransaction) {
+    mTransaction->OnRequestFinished();
+  }
+
   if (mCursor) {
     mCursor->ClearBackgroundActor();
 #ifdef DEBUG
