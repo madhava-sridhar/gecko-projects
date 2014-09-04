@@ -21,6 +21,7 @@ include protocol PFileSystemRequest;
 include protocol PHal;
 include protocol PImageBridge;
 include protocol PMemoryReportRequest;
+include protocol PMobileConnection;
 include protocol PNecko;
 include protocol PScreenManager;
 include protocol PSharedBufferManager;
@@ -311,6 +312,7 @@ intr protocol PContent
     manages PFMRadio;
     manages PHal;
     manages PMemoryReportRequest;
+    manages PMobileConnection;
     manages PNecko;
     manages PScreenManager;
     manages PSms;
@@ -496,6 +498,8 @@ parent:
         returns (bool isSecureURI);
 
     PHal();
+
+    PMobileConnection(uint32_t clientId);
 
     PNecko();
 
