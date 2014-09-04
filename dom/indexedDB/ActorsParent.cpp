@@ -5831,12 +5831,14 @@ Factory::ActorDestroy(ActorDestroyReason aWhy)
 
   // Make sure this is released on this thread, but keep it alive past the call
   // to TransactionThreadPool::ShutdownAsync() below.
-  nsRefPtr<TransactionThreadPool> threadPool;
-  mTransactionThreadPool.swap(threadPool);
+  nsRefPtr<TransactionThreadPool> kungFuDeathGrip;
+  mTransactionThreadPool.swap(kungFuDeathGrip);
 
   // Clean up if there are no more instances.
   if (!(--sFactoryInstanceCount)) {
     if (gCurrentTransactionThreadPool) {
+      MOZ_ASSERT(gCurrentTransactionThreadPool == kungFuDeathGrip);
+
       gCurrentTransactionThreadPool->ShutdownAsync();
 
       QuotaClient::GetInstance()->NoteDyingTransactionThreadPool();
@@ -15050,7 +15052,7 @@ ObjectStoreGetRequestOp::GetResponse(RequestResponse& aResponse)
 
       fallibleCloneInfos.SwapElements(cloneInfos);
     }
-  
+
     return;
   }
 
