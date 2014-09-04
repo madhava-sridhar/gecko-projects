@@ -127,6 +127,8 @@ private:
                                     uint16_t aMode);
 
   bool MaybeFireCallback(DatabasesCompleteCallback* aCallback);
+
+  void CleanupAsync();
 };
 
 class NS_NO_VTABLE TransactionThreadPool::FinishCallback

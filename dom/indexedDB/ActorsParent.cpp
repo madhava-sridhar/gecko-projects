@@ -2819,6 +2819,7 @@ class Database MOZ_FINAL
   friend class VersionChangeTransaction;
 
   nsRefPtr<Factory> mFactory;
+  nsRefPtr<TransactionThreadPool> mTransactionThreadPool;
   nsRefPtr<FullDatabaseMetadata> mMetadata;
   nsRefPtr<FileManager> mFileManager;
   nsRefPtr<DatabaseOfflineStorage> mOfflineStorage;
@@ -2915,9 +2916,9 @@ public:
   GetTransactionThreadPool() const
   {
     AssertIsOnBackgroundThread();
-    MOZ_ASSERT(mFactory);
+    MOZ_ASSERT(mTransactionThreadPool);
 
-    return mFactory->GetTransactionThreadPool();
+    return mTransactionThreadPool;
   }
 
   bool
@@ -3097,6 +3098,7 @@ protected:
 
 private:
   nsRefPtr<Database> mDatabase;
+  nsRefPtr<TransactionThreadPool> mTransactionThreadPool;
   nsCOMPtr<mozIStorageConnection> mConnection;
   nsRefPtr<UpdateRefcountFunction> mUpdateFileRefcountFunction;
   nsInterfaceHashtable<nsCStringHashKey, mozIStorageStatement>
@@ -3251,9 +3253,9 @@ public:
   GetTransactionThreadPool() const
   {
     AssertIsOnBackgroundThread();
-    MOZ_ASSERT(mDatabase);
+    MOZ_ASSERT(mTransactionThreadPool);
 
-    return mDatabase->GetTransactionThreadPool();
+    return mTransactionThreadPool;
   }
 
   void
@@ -5838,6 +5840,7 @@ Factory::ActorDestroy(ActorDestroyReason aWhy)
       gCurrentTransactionThreadPool->ShutdownAsync();
 
       QuotaClient::GetInstance()->NoteDyingTransactionThreadPool();
+      MOZ_ASSERT(!gCurrentTransactionThreadPool);
     }
 
     MOZ_ASSERT(gStartTransactionRunnable);
@@ -6001,6 +6004,7 @@ Database::Database(Factory* aFactory,
                    already_AddRefed<DatabaseOfflineStorage> aOfflineStorage,
                    bool aChromeWriteAccessAllowed)
   : mFactory(aFactory)
+  , mTransactionThreadPool(aFactory->GetTransactionThreadPool())
   , mMetadata(aMetadata)
   , mFileManager(aFileManager)
   , mOfflineStorage(Move(aOfflineStorage))
@@ -6019,6 +6023,7 @@ Database::Database(Factory* aFactory,
 {
   AssertIsOnBackgroundThread();
   MOZ_ASSERT(aFactory);
+  MOZ_ASSERT(mTransactionThreadPool);
   MOZ_ASSERT(aMetadata);
   MOZ_ASSERT(aFileManager);
   MOZ_ASSERT_IF(aChromeWriteAccessAllowed,
@@ -6223,6 +6228,9 @@ Database::ActorDestroy(ActorDestroyReason aWhy)
   MOZ_ASSERT(!mActorDestroyed);
 
   mActorDestroyed = true;
+
+  // Make sure this is released on this thread.
+  mTransactionThreadPool = nullptr;
 
   if (!IsInvalidated()) {
     Invalidate();
@@ -6566,9 +6574,10 @@ DatabaseFile::ActorDestroy(ActorDestroyReason aWhy)
  ******************************************************************************/
 
 TransactionBase::TransactionBase(Database* aDatabase,
-                                 IDBTransaction::Mode aMode)
+                                 Mode aMode)
   : mDatabase(aDatabase)
-  , mTransactionId(GetTransactionThreadPool()->NextTransactionId())
+  , mTransactionThreadPool(aDatabase->GetTransactionThreadPool())
+  , mTransactionId(mTransactionThreadPool->NextTransactionId())
   , mDatabaseId(aDatabase->Id())
   , mActiveRequestCount(0)
   , mInvalidatedOnAnyThread(false)
@@ -6585,6 +6594,7 @@ TransactionBase::TransactionBase(Database* aDatabase,
 {
   AssertIsOnBackgroundThread();
   MOZ_ASSERT(aDatabase);
+  MOZ_ASSERT(mTransactionThreadPool);
 }
 
 TransactionBase::~TransactionBase()
@@ -7699,6 +7709,8 @@ TransactionBase::ReleaseBackgroundThreadObjects()
     mUpdateFileRefcountFunction->ClearFileInfoEntries();
     mUpdateFileRefcountFunction = nullptr;
   }
+
+  mTransactionThreadPool = nullptr;
 }
 
 /*******************************************************************************
@@ -9216,8 +9228,10 @@ QuotaClient::NoteNewTransactionThreadPool()
     for (uint32_t index = mDyingTransactionThreadPools.Length();
          index > 0;
          index--) {
-      if (mDyingTransactionThreadPools[index - 1]->HasCompletedShutdown()) {
-        mDyingTransactionThreadPools.RemoveElementAt(index - 1);
+      const uint32_t thisIndex = index - 1;
+
+      if (mDyingTransactionThreadPools[thisIndex]->HasCompletedShutdown()) {
+        mDyingTransactionThreadPools.RemoveElementAt(thisIndex);
       }
     }
   }
@@ -9774,7 +9788,6 @@ ShutdownTransactionThreadPoolRunnable::Run()
     mHasRequestedShutDown = true;
 
     mQuotaClient->NoteDyingTransactionThreadPool();
-
     MOZ_ASSERT(!gCurrentTransactionThreadPool);
 
     while (!mQuotaClient->mDyingTransactionThreadPools.IsEmpty()) {
@@ -13202,11 +13215,12 @@ CommitOp::TransactionFinishedAfterUnblock()
                     "IDBTransaction[%llu] MT Complete",
                     mTransaction->TransactionId(), mResultCode);
 
+  mTransaction->ReleaseBackgroundThreadObjects();
+
   if (!mTransaction->IsActorDestroyed()) {
     mTransaction->SendCompleteNotification(ClampResultCode(mResultCode));
   }
 
-  mTransaction->ReleaseBackgroundThreadObjects();
   mTransaction = nullptr;
 
 #ifdef DEBUG

@@ -274,29 +274,18 @@ TransactionThreadPool::ShutdownAndSpin()
 {
   AssertIsOnOwningThread();
 
-  if (mShutdownRequested) {
-    if (!mShutdownComplete) {
-      nsIThread* currentThread = NS_GetCurrentThread();
-      MOZ_ASSERT(currentThread);
-
-      while (!mShutdownComplete) {
-        MOZ_ALWAYS_TRUE(NS_ProcessNextEvent(currentThread));
-      }
-    }
+  if (mShutdownComplete) {
     return;
   }
 
-  mShutdownRequested = true;
+  ShutdownAsync();
 
-  if (!mThreadPool) {
-    MOZ_ASSERT(!mTransactionsInProgress.Count());
-    MOZ_ASSERT(mCompleteCallbacks.IsEmpty());
+  nsIThread* currentThread = NS_GetCurrentThread();
+  MOZ_ASSERT(currentThread);
 
-    mShutdownComplete = true;
-    return;
+  while (!mShutdownComplete) {
+    MOZ_ALWAYS_TRUE(NS_ProcessNextEvent(currentThread));
   }
-
-  Cleanup();
 }
 
 void
@@ -318,11 +307,9 @@ TransactionThreadPool::ShutdownAsync()
     return;
   }
 
-  nsCOMPtr<nsIRunnable> cleanupRunnable =
-    NS_NewRunnableMethod(this, &TransactionThreadPool::Cleanup);
-  MOZ_ASSERT(cleanupRunnable);
-
-  MOZ_ALWAYS_TRUE(NS_SUCCEEDED(NS_DispatchToCurrentThread(cleanupRunnable)));
+  if (!mTransactionsInProgress.Count()) {
+    CleanupAsync();
+  }
 }
 
 bool
@@ -397,35 +384,53 @@ TransactionThreadPool::Cleanup()
 {
   AssertIsOnOwningThread();
   MOZ_ASSERT(mThreadPool);
+  MOZ_ASSERT(mShutdownRequested);
   MOZ_ASSERT(!mShutdownComplete);
-
-  MOZ_ALWAYS_TRUE(NS_SUCCEEDED(mThreadPool->Shutdown()));
-
   MOZ_ASSERT(!mTransactionsInProgress.Count());
 
-  nsIThread* currentThread = NS_GetCurrentThread();
-  MOZ_ASSERT(currentThread);
-
-  // Make sure the pool is still accessible while any callbacks generated from
-  // the other threads are processed.
-  MOZ_ALWAYS_TRUE(NS_SUCCEEDED(NS_ProcessPendingEvents(currentThread)));
+  MOZ_ALWAYS_TRUE(NS_SUCCEEDED(mThreadPool->Shutdown()));
 
   if (!mCompleteCallbacks.IsEmpty()) {
     // Run all callbacks manually now.
     for (uint32_t count = mCompleteCallbacks.Length(), index = 0;
          index < count;
          index++) {
-      MOZ_ASSERT(mCompleteCallbacks[index]);
-      mCompleteCallbacks[index]->mCallback->Run();
+      nsAutoPtr<DatabasesCompleteCallback>& completeCallback =
+        mCompleteCallbacks[index];
+      MOZ_ASSERT(completeCallback);
+      MOZ_ASSERT(completeCallback->mCallback);
+
+      completeCallback->mCallback->Run();
+
+      completeCallback = nullptr;
     }
 
     mCompleteCallbacks.Clear();
 
     // And make sure they get processed.
+    nsIThread* currentThread = NS_GetCurrentThread();
+    MOZ_ASSERT(currentThread);
+
     MOZ_ALWAYS_TRUE(NS_SUCCEEDED(NS_ProcessPendingEvents(currentThread)));
   }
 
   mShutdownComplete = true;
+}
+
+void
+TransactionThreadPool::CleanupAsync()
+{
+  AssertIsOnOwningThread();
+  MOZ_ASSERT(mThreadPool);
+  MOZ_ASSERT(mShutdownRequested);
+  MOZ_ASSERT(!mShutdownComplete);
+  MOZ_ASSERT(!mTransactionsInProgress.Count());
+
+  nsCOMPtr<nsIRunnable> runnable =
+    NS_NewRunnableMethod(this, &TransactionThreadPool::Cleanup);
+  MOZ_ASSERT(runnable);
+
+  MOZ_ALWAYS_TRUE(NS_SUCCEEDED(NS_DispatchToCurrentThread(runnable)));
 }
 
 // static
@@ -500,8 +505,13 @@ TransactionThreadPool::FinishTransaction(
       }
     }
 
+    if (mShutdownRequested) {
+      CleanupAsync();
+    }
+
     return;
   }
+
   TransactionInfo* info = transactionsInProgress.Get(aTransactionId);
   NS_ASSERTION(info, "We've never heard of this transaction?!?");
 
