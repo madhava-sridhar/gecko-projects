@@ -430,9 +430,9 @@ SpecialPowersObserverAPI.prototype = {
 
         if (op == 'clear') {
           if (('inBrowser' in msg) && msg.inBrowser !== undefined) {
-            qm.clearStoragesForURI(uri, null, appId, inBrowser);
+            qm.clearStoragesForURI(uri, msg.appId, msg.inBrowser);
           } else if (('appId' in msg) && msg.appId !== undefined) {
-            qm.clearStoragesForURI(uri, null, appId);
+            qm.clearStoragesForURI(uri, msg.appId);
           } else {
             qm.clearStoragesForURI(uri);
           }
@@ -451,9 +451,9 @@ SpecialPowersObserverAPI.prototype = {
         };
 
         if (('inBrowser' in msg) && msg.inBrowser !== undefined) {
-          qm.getUsageForURI(uri, callback, appId, inBrowser);
+          qm.getUsageForURI(uri, callback, msg.appId, msg.inBrowser);
         } else if (('appId' in msg) && msg.appId !== undefined) {
-          qm.getUsageForURI(uri, callback, appId);
+          qm.getUsageForURI(uri, callback, msg.appId);
         } else {
           qm.getUsageForURI(uri, callback);
         }
