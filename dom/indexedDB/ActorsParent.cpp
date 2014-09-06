@@ -10819,8 +10819,9 @@ FactoryOp::SendVersionChangeMessages(DatabaseActorInfo* aDatabaseActorInfo,
   MOZ_ASSERT(mMaybeBlockedDatabases.IsEmpty());
   MOZ_ASSERT(!IsActorDestroyed());
 
+  const uint32_t expectedCount = mDeleting ? 0 : 1;
   const uint32_t liveCount = aDatabaseActorInfo->mLiveDatabases.Length();
-  if (liveCount > 1) {
+  if (liveCount > expectedCount) {
     FallibleTArray<MaybeBlockedDatabaseInfo> maybeBlockedDatabases;
     for (uint32_t index = 0; index < liveCount; index++) {
       Database* database = aDatabaseActorInfo->mLiveDatabases[index];
