@@ -6142,7 +6142,7 @@ Database::UnregisterTransaction(TransactionBase* aTransaction)
   if (mOfflineStorage) {
     mOfflineStorage->NoteFinishedTransaction();
 
-    if (IsClosed()) {
+    if (!mTransactions.Count() && IsClosed()) {
       DatabaseOfflineStorage::UnregisterOnOwningThread(
         mOfflineStorage.forget());
       CleanupMetadata();
@@ -6751,8 +6751,6 @@ TransactionBase::CommitOrAbort()
                        commitOp,
                        /* aFinish */ true,
                        /* aFinishCallback */ commitOp);
-
-  mDatabase->UnregisterTransaction(this);
 }
 
 already_AddRefed<FullObjectStoreMetadata>
@@ -13223,6 +13221,8 @@ CommitOp::TransactionFinishedAfterUnblock()
   if (!mTransaction->IsActorDestroyed()) {
     mTransaction->SendCompleteNotification(ClampResultCode(mResultCode));
   }
+
+  mTransaction->GetDatabase()->UnregisterTransaction(mTransaction);
 
   mTransaction = nullptr;
 
