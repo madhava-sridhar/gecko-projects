@@ -3570,11 +3570,12 @@ OriginClearRunnable::DeleteFiles(QuotaManager* aQuotaManager,
 
     for (uint32_t index = 0; index < 10; index++) {
       // We can't guarantee that this will always succeed on Windows...
-      if (NS_SUCCEEDED(file->Remove(true))) {
+      if (NS_SUCCEEDED((rv = file->Remove(true)))) {
         break;
       }
 
       NS_WARNING("Failed to remove directory, retrying after a short delay.");
+
       PR_Sleep(PR_MillisecondsToInterval(200));
     }
 
