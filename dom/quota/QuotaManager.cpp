@@ -3568,10 +3568,18 @@ OriginClearRunnable::DeleteFiles(QuotaManager* aQuotaManager,
       continue;
     }
 
-    if (NS_FAILED(file->Remove(true))) {
-      // This should never fail if we've closed all storage connections
-      // correctly...
-      MOZ_CRASH("Failed to remove directory!");
+    for (uint32_t index = 0; index < 10; index++) {
+      // We can't guarantee that this will always succeed on Windows...
+      if (NS_SUCCEEDED(file->Remove(true))) {
+        break;
+      }
+
+      NS_WARNING("Failed to remove directory, retrying after a short delay.");
+      PR_Sleep(PR_MillisecondsToInterval(200));
+    }
+
+    if (NS_FAILED(rv)) {
+      NS_WARNING("Failed to remove directory, giving up!");
     }
   }
 

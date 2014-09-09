@@ -849,7 +849,8 @@ DOMFileImplFile::GetMozLastModifiedDate(uint64_t* aLastModifiedDate)
 const uint32_t sFileStreamFlags =
   nsIFileInputStream::CLOSE_ON_EOF |
   nsIFileInputStream::REOPEN_ON_REWIND |
-  nsIFileInputStream::DEFER_OPEN;
+  nsIFileInputStream::DEFER_OPEN |
+  nsIFileInputStream::SHARE_DELETE;
 
 nsresult
 DOMFileImplFile::GetInternalStream(nsIInputStream** aStream)

@@ -9,6 +9,7 @@
 #include <unistd.h>
 #elif defined(XP_WIN)
 #include <windows.h>
+#include "nsILocalFileWin.h"
 #else
 // XXX add necessary include file for ftruncate (or equivalent)
 #endif
@@ -331,9 +332,24 @@ nsFileStreamBase::DoOpen()
     NS_ASSERTION(mOpenParams.localFile, "Must have a file to open");
 
     PRFileDesc* fd;
-    nsresult rv = mOpenParams.localFile->OpenNSPRFileDesc(mOpenParams.ioFlags,
-                                                          mOpenParams.perm,
-                                                          &fd);
+    nsresult rv;
+
+#ifdef XP_WIN
+    if (mBehaviorFlags & nsIFileInputStream::SHARE_DELETE) {
+      nsCOMPtr<nsILocalFileWin> file = do_QueryInterface(mOpenParams.localFile);
+      MOZ_ASSERT(file);
+
+      rv = file->OpenNSPRFileDescShareDelete(mOpenParams.ioFlags,
+                                             mOpenParams.perm,
+                                             &fd);
+    } else
+#endif // XP_WIN
+    {
+      rv = mOpenParams.localFile->OpenNSPRFileDesc(mOpenParams.ioFlags,
+                                                   mOpenParams.perm,
+                                                   &fd);
+    }
+
     CleanUpOpen();
     if (NS_FAILED(rv))
         return rv;
