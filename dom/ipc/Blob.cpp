@@ -31,6 +31,7 @@
 #include "nsIMultiplexInputStream.h"
 #include "nsIRemoteBlob.h"
 #include "nsISeekableStream.h"
+#include "nsISupportsPriority.h"
 #include "nsNetCID.h"
 #include "nsThreadUtils.h"
 #include "nsXULAppAPI.h"
@@ -778,6 +779,20 @@ private:
       mStream.swap(realStream);
     }
 
+#ifdef XP_WIN
+    {
+      // Briefly raise the priority of this thread so that we will close the
+      // file descriptor ASAP. Otherwise we may race with other threads that
+      // might try to delete the file from disk.
+      nsCOMPtr<nsISupportsPriority> thread =
+        do_QueryInterface(NS_GetCurrentThread());
+      MOZ_ASSERT(thread);
+
+      MOZ_ALWAYS_TRUE(NS_SUCCEEDED(
+        thread->SetPriority(nsISupportsPriority::PRIORITY_HIGH)));
+    }
+#endif
+
     // To force the stream open we call Available(). We don't actually care
     // how much data is available.
     uint64_t available;
@@ -809,6 +824,19 @@ private:
     mIOTarget.swap(ioTarget);
 
     NS_WARN_IF_FALSE(NS_SUCCEEDED(stream->Close()), "Failed to close stream!");
+
+#ifdef XP_WIN
+    {
+      // This thread can resume normal priority once the file descriptor has
+      // been closed.
+      nsCOMPtr<nsISupportsPriority> thread =
+        do_QueryInterface(NS_GetCurrentThread());
+      MOZ_ASSERT(thread);
+
+      MOZ_ALWAYS_TRUE(NS_SUCCEEDED(
+        thread->SetPriority(nsISupportsPriority::PRIORITY_NORMAL)));
+    }
+#endif
 
     nsCOMPtr<nsIRunnable> shutdownRunnable =
       NS_NewRunnableMethod(ioTarget, &nsIThread::Shutdown);
