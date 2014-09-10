@@ -14,6 +14,7 @@
 
 #include "File.h" // workers/File.h
 
+using mozilla::ErrorResult;
 using namespace mozilla::dom;
 
 NS_IMPL_CYCLE_COLLECTING_ADDREF(Response)

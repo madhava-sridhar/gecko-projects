@@ -9,6 +9,7 @@
 
 #include "mozilla/dom/ScriptSettings.h"
 #include "mozilla/dom/workers/Workers.h"
+#include "mozilla/dom/WorkerPrivate.h"
 
 namespace mozilla {
 namespace dom {

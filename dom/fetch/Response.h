@@ -25,6 +25,9 @@ namespace IPC {
 }
 
 namespace mozilla {
+
+class ErrorResult;
+
 namespace dom {
 
 class Headers;
