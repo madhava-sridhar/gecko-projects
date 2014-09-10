@@ -34,7 +34,7 @@ private:
   PHeaders mHeaders;
 
 public:
-  explicit Headers(nsISupports* aOwner, HeadersGuardEnum aGuard = HeadersGuardEnum::None)
+  explicit Headers(nsISupports* aOwner, HeadersGuardEnum aGuard = HeadersGuardEnum::Default)
     : mOwner(aOwner)
     , mGuard(aGuard)
   {
@@ -42,7 +42,7 @@ public:
   }
 
   Headers(nsISupports* aOwner, const PHeaders& aHeaders,
-          HeadersGuardEnum aGuard = HeadersGuardEnum::None)
+          HeadersGuardEnum aGuard = HeadersGuardEnum::Default)
     : mOwner(aOwner)
     , mGuard(aGuard)
     , mHeaders(aHeaders)

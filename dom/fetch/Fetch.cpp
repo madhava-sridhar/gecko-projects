@@ -41,7 +41,7 @@ public:
     aWorkerPrivate->AssertIsOnWorkerThread();
   }
 
-  nsresult
+  NS_IMETHOD
   Run()
   {
     AssertIsOnMainThread();

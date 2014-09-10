@@ -52,6 +52,12 @@ public:
     aUrl.AsAString() = NS_ConvertUTF8toUTF16(mInternalResponse->GetUrl());
   }
 
+
+  // Undo X11 macro brain damage
+  #ifdef Status
+  #undef Status
+  #endif
+
   uint16_t
   Status() const
   {
