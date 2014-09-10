@@ -1,0 +1,42 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this file,
+ * You can obtain one at http://mozilla.org/MPL/2.0/. */
+
+include protocol PBackground;
+include PCacheQueryParams;
+include PCacheRequest;
+include PCacheResponse;
+
+using mozilla::dom::cache::RequestId from "mozilla/dom/CacheTypes.h";
+
+namespace mozilla {
+namespace dom {
+
+protocol PCache
+{
+  manager PBackground;
+
+parent:
+  Match(RequestId requestId, PCacheRequest request, PCacheQueryParams params);
+  MatchAll(RequestId requestId, PCacheRequestOrVoid request, PCacheQueryParams params);
+  Add(RequestId requestId, PCacheRequest request);
+  AddAll(RequestId requestId, PCacheRequest[] requests);
+  Put(RequestId requestId, PCacheRequest request, PCacheResponse response);
+  Delete(RequestId requestId, PCacheRequest request, PCacheQueryParams params);
+  Keys(RequestId requestId, PCacheRequestOrVoid request, PCacheQueryParams params);
+
+child:
+  MatchResponse(RequestId requestId, nsresult aRv, PCacheResponseOrVoid response);
+  MatchAllResponse(RequestId requestId, nsresult aRv, PCacheResponse[] responses);
+  AddResponse(RequestId requestId, nsresult aRv, PCacheResponse response);
+  AddAllResponse(RequestId requestId, nsresult aRv, PCacheResponse[] responses);
+  PutResponse(RequestId requestId, nsresult aRv, PCacheResponseOrVoid response);
+  DeleteResponse(RequestId requestId, nsresult aRv, bool success);
+  KeysResponse(RequestId requestId, nsresult aRv, PCacheRequest[] requests);
+
+both:
+  __delete__();
+};
+
+} // namespace dom
+} // namespace mozilla

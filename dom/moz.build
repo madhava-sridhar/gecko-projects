@@ -45,6 +45,7 @@ DIRS += [
     'bindings',
     'battery',
     'browser-element',
+    'cache',
     'canvas',
     'contacts',
     'crypto',

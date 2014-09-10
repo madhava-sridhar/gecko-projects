@@ -9,6 +9,10 @@
 #include "mozilla/ipc/PBackgroundParent.h"
 
 namespace mozilla {
+namespace dom {
+  class PCacheStorageParent;
+  class PCacheParent;
+}
 namespace ipc {
 
 // Instances of this class should never be created directly. This class is meant
@@ -31,6 +35,21 @@ protected:
 
   virtual bool
   DeallocPBackgroundTestParent(PBackgroundTestParent* aActor) MOZ_OVERRIDE;
+
+  virtual mozilla::dom::PCacheStorageParent*
+  AllocPCacheStorageParent(const Namespace& aNamespace,
+                           const nsCString& aOrigin,
+                           const nsCString& aBaseDomain) MOZ_OVERRIDE;
+
+  virtual bool
+  DeallocPCacheStorageParent(mozilla::dom::PCacheStorageParent* aActor) MOZ_OVERRIDE;
+
+  virtual mozilla::dom::PCacheParent*
+  AllocPCacheParent(const nsCString& aOrigin,
+                    const nsCString& aBaseDomain) MOZ_OVERRIDE;
+
+  virtual bool
+  DeallocPCacheParent(mozilla::dom::PCacheParent* aActor) MOZ_OVERRIDE;
 };
 
 } // namespace ipc

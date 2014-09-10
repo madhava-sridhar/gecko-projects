@@ -8,10 +8,14 @@
 
 #include "Workers.h"
 #include "mozilla/DOMEventTargetHelper.h"
+#include "mozilla/dom/RequestBinding.h"
+#include "mozilla/dom/Promise.h"
+#include "mozilla/dom/UnionTypes.h"
 
 namespace mozilla {
 namespace dom {
 
+class CacheStorage;
 class Console;
 class Function;
 
@@ -32,6 +36,7 @@ class WorkerGlobalScope : public DOMEventTargetHelper,
   nsRefPtr<WorkerLocation> mLocation;
   nsRefPtr<WorkerNavigator> mNavigator;
   nsRefPtr<Performance> mPerformance;
+  nsRefPtr<CacheStorage> mCacheStorage;
 
 protected:
   WorkerPrivate* mWorkerPrivate;
@@ -119,6 +124,13 @@ public:
   Dump(const Optional<nsAString>& aString) const;
 
   Performance* GetPerformance();
+
+  already_AddRefed<Promise>
+  Fetch(const RequestOrScalarValueString& aInput,
+        const RequestInit& aInit,
+        ErrorResult& aRv);
+
+  already_AddRefed<CacheStorage> Caches();
 };
 
 class DedicatedWorkerGlobalScope MOZ_FINAL : public WorkerGlobalScope
@@ -163,7 +175,7 @@ public:
 class ServiceWorkerGlobalScope MOZ_FINAL : public WorkerGlobalScope
 {
   const nsString mScope;
-  ~ServiceWorkerGlobalScope() { }
+  ~ServiceWorkerGlobalScope() { };
 
 public:
   ServiceWorkerGlobalScope(WorkerPrivate* aWorkerPrivate, const nsACString& aScope);

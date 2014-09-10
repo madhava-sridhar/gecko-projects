@@ -38,6 +38,7 @@
 #include "nsSize.h"
 #include "mozFlushType.h"
 #include "prclist.h"
+#include "mozilla/dom/RequestBinding.h"
 #include "mozilla/dom/StorageEvent.h"
 #include "mozilla/dom/StorageEventBinding.h"
 #include "nsFrameMessageManager.h"
@@ -50,6 +51,7 @@
 #include "mozilla/dom/WindowBinding.h"
 #include "Units.h"
 #include "nsComponentManagerUtils.h"
+#include "mozilla/dom/UnionTypes.h"
 
 #define DEFAULT_HOME_PAGE "www.mozilla.org"
 #define PREF_BROWSER_STARTUP_HOMEPAGE "browser.startup.homepage"
@@ -99,6 +101,7 @@ namespace mozilla {
 class DOMEventTargetHelper;
 namespace dom {
 class BarProp;
+class CacheStorage;
 class Console;
 class External;
 class Function;
@@ -107,6 +110,7 @@ class MediaQueryList;
 class MozSelfSupport;
 class Navigator;
 class OwningExternalOrWindowProxy;
+class Promise;
 class Selection;
 class SpeechSynthesis;
 class WakeLock;
@@ -846,7 +850,11 @@ protected:
 public:
   void Alert(mozilla::ErrorResult& aError);
   void Alert(const nsAString& aMessage, mozilla::ErrorResult& aError);
+  already_AddRefed<mozilla::dom::CacheStorage> Caches();
   bool Confirm(const nsAString& aMessage, mozilla::ErrorResult& aError);
+  already_AddRefed<mozilla::dom::Promise> Fetch(const mozilla::dom::RequestOrScalarValueString& aInput,
+                                                const mozilla::dom::RequestInit& aInit,
+                                                mozilla::ErrorResult& aRv);
   void Prompt(const nsAString& aMessage, const nsAString& aInitial,
               nsAString& aReturn, mozilla::ErrorResult& aError);
   void Print(mozilla::ErrorResult& aError);
@@ -1521,6 +1529,7 @@ protected:
   nsString                      mDefaultStatus;
   nsGlobalWindowObserver*       mObserver; // Inner windows only.
   nsCOMPtr<nsIDOMCrypto>        mCrypto;
+  nsRefPtr<mozilla::dom::CacheStorage> mCacheStorage;
   nsRefPtr<mozilla::dom::Console> mConsole;
   // We need to store an nsISupports pointer to this object because the
   // mozilla::dom::External class doesn't exist on b2g and using the type

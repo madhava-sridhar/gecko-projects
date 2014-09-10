@@ -187,7 +187,10 @@
 #include "mozilla/dom/MessagePort.h"
 #include "mozilla/dom/MessagePortBinding.h"
 #include "mozilla/dom/indexedDB/IDBFactory.h"
+#include "mozilla/dom/Promise.h"
 #include "mozilla/dom/quota/QuotaManager.h"
+#include "mozilla/dom/Request.h"
+#include "mozilla/dom/Response.h"
 
 #include "mozilla/dom/StructuredCloneTags.h"
 
@@ -210,7 +213,9 @@
 #include "TimeChangeObserver.h"
 #include "mozilla/dom/AudioContext.h"
 #include "mozilla/dom/BrowserElementDictionariesBinding.h"
+#include "mozilla/dom/CacheStorage.h"
 #include "mozilla/dom/Console.h"
+#include "mozilla/dom/Fetch.h"
 #include "mozilla/dom/FunctionBinding.h"
 #include "mozilla/dom/HashChangeEvent.h"
 #include "mozilla/dom/MozSelfSupportBinding.h"
@@ -1759,6 +1764,8 @@ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INTERNAL(nsGlobalWindow)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mGamepads)
 #endif
 
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mCacheStorage)
+
   // Traverse stuff from nsPIDOMWindow
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mChromeEventHandler)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mParentTarget)
@@ -1819,6 +1826,8 @@ NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(nsGlobalWindow)
 #ifdef MOZ_GAMEPAD
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mGamepads)
 #endif
+
+  NS_IMPL_CYCLE_COLLECTION_UNLINK(mCacheStorage)
 
   // Unlink stuff from nsPIDOMWindow
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mChromeEventHandler)
@@ -6370,6 +6379,13 @@ nsGlobalWindow::Confirm(const nsAString& aString, bool* aReturn)
   return rv.ErrorCode();
 }
 
+already_AddRefed<Promise>
+nsGlobalWindow::Fetch(const RequestOrScalarValueString& aInput,
+                      const RequestInit& aInit, ErrorResult& aRv)
+{
+  return DOMFetch(this, aInput, aInit, aRv);
+}
+
 void
 nsGlobalWindow::Prompt(const nsAString& aMessage, const nsAString& aInitial,
                        nsAString& aReturn, ErrorResult& aError)
@@ -10720,6 +10736,28 @@ nsGlobalWindow::GetInterface(JSContext* aCx, nsIJSID* aIID,
                              ErrorResult& aError)
 {
   dom::GetInterface(aCx, this, aIID, aRetval, aError);
+}
+
+already_AddRefed<CacheStorage>
+nsGlobalWindow::Caches()
+{
+  if (!mCacheStorage) {
+    nsAutoCString origin;
+    nsAutoCString baseDomain;
+    nsCOMPtr<nsIPrincipal> principal = GetPrincipal();
+    if (!principal ||
+        NS_FAILED(principal->GetOrigin(getter_Copies(origin))) ||
+        NS_FAILED(principal->GetBaseDomain(baseDomain))) {
+      origin.AssignLiteral("null");
+      baseDomain.AssignLiteral("");
+    }
+    mCacheStorage = new CacheStorage(cache::DEFAULT_NAMESPACE,
+                                     ToSupports(this), this, origin,
+                                     baseDomain);
+  }
+
+  nsRefPtr<CacheStorage> ref = mCacheStorage;
+  return ref.forget();
 }
 
 void

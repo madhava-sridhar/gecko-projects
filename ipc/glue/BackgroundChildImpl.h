@@ -11,6 +11,10 @@
 template <class> class nsAutoPtr;
 
 namespace mozilla {
+namespace dom {
+  class PCacheStorageChild;
+  class PCacheChild;
+}
 namespace ipc {
 
 // Instances of this class should never be created directly. This class is meant
@@ -40,6 +44,21 @@ protected:
 
   virtual bool
   DeallocPBackgroundTestChild(PBackgroundTestChild* aActor) MOZ_OVERRIDE;
+
+  virtual mozilla::dom::PCacheStorageChild*
+  AllocPCacheStorageChild(const Namespace& aNamespace,
+                          const nsCString& aOrigin,
+                          const nsCString& aBaseDomain) MOZ_OVERRIDE;
+
+  virtual bool
+  DeallocPCacheStorageChild(mozilla::dom::PCacheStorageChild* aActor) MOZ_OVERRIDE;
+
+  virtual mozilla::dom::PCacheChild*
+  AllocPCacheChild(const nsCString& aOrigin,
+                   const nsCString& aBaseDomain) MOZ_OVERRIDE;
+
+  virtual bool
+  DeallocPCacheChild(mozilla::dom::PCacheChild* aActor) MOZ_OVERRIDE;
 };
 
 class BackgroundChildImpl::ThreadLocal

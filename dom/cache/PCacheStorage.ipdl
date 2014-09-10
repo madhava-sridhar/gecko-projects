@@ -1,0 +1,36 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this file,
+ * You can obtain one at http://mozilla.org/MPL/2.0/. */
+
+include protocol PBackground;
+include protocol PCache;
+
+using mozilla::dom::cache::RequestId from "mozilla/dom/CacheTypes.h";
+
+namespace mozilla {
+namespace dom {
+
+protocol PCacheStorage
+{
+  manager PBackground;
+
+parent:
+  Get(RequestId aRequestId, nsString aKey);
+  Has(RequestId aRequestId, nsString aKey);
+  Create(RequestId aRequestId, nsString aKey);
+  Delete(RequestId aRequestId, nsString aKey);
+  Keys(RequestId aRequestId);
+
+child:
+  GetResponse(RequestId aRequestId, nsresult aRv, nullable PCache aActor);
+  HasResponse(RequestId aRequestId, nsresult aRv, bool aSuccess);
+  CreateResponse(RequestId aRequestId, nsresult aRv, nullable PCache aActor);
+  DeleteResponse(RequestId aRequestId, nsresult aRv, bool aSuccess);
+  KeysResponse(RequestId aRequestId, nsresult aRv, nsString[] aKeys);
+
+both:
+  __delete__();
+};
+
+} // namespace dom
+} // namespace mozilla

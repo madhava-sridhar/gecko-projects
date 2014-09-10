@@ -7,11 +7,18 @@
 #include "mozilla/Assertions.h"
 #include "mozilla/ipc/BackgroundParent.h"
 #include "mozilla/ipc/PBackgroundTestParent.h"
+#include "mozilla/dom/CacheParent.h"
+#include "mozilla/dom/CacheStorageParent.h"
 #include "nsThreadUtils.h"
 #include "nsTraceRefcnt.h"
 #include "nsXULAppAPI.h"
 
 using mozilla::ipc::AssertIsOnBackgroundThread;
+using mozilla::dom::CacheStorageParent;
+using mozilla::dom::PCacheStorageParent;
+using mozilla::dom::CacheParent;
+using mozilla::dom::PCacheParent;
+using mozilla::dom::cache::Namespace;
 
 namespace {
 
@@ -105,6 +112,35 @@ BackgroundParentImpl::DeallocPBackgroundTestParent(
   MOZ_ASSERT(aActor);
 
   delete static_cast<TestParent*>(aActor);
+  return true;
+}
+
+PCacheStorageParent*
+BackgroundParentImpl::AllocPCacheStorageParent(const Namespace& aNamespace,
+                                               const nsCString& aOrigin,
+                                               const nsCString& aBaseDomain)
+{
+  return new CacheStorageParent(aNamespace, aOrigin, aBaseDomain);
+}
+
+bool
+BackgroundParentImpl::DeallocPCacheStorageParent(PCacheStorageParent* aActor)
+{
+  delete aActor;
+  return true;
+}
+
+PCacheParent*
+BackgroundParentImpl::AllocPCacheParent(const nsCString& aOrigin,
+                                        const nsCString& aBaseDomain)
+{
+  return new CacheParent(aOrigin, aBaseDomain);
+}
+
+bool
+BackgroundParentImpl::DeallocPCacheParent(PCacheParent* aActor)
+{
+  delete aActor;
   return true;
 }
 

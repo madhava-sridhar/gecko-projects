@@ -462,6 +462,10 @@ interface ChromeWindow {
    */
   [Throws, Func="nsGlobalWindow::IsChromeWindow"]
   void beginWindowMove(Event mouseDownEvent, optional Element? panel = null);
+
+  [Pref="dom.window-caches.enabled"]
+  readonly attribute CacheStorage caches;
 };
 
 Window implements ChromeWindow;
+Window implements GlobalFetch;

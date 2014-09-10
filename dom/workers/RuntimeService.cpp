@@ -155,6 +155,7 @@ static_assert(MAX_WORKERS_PER_DOMAIN >= 1,
 #endif
 
 #define PREF_DOM_FETCH_ENABLED         "dom.fetch.enabled"
+#define PREF_DOM_CACHES_ENABLED        "dom.worker-caches.enabled"
 #define PREF_WORKERS_LATEST_JS_VERSION "dom.workers.latestJSVersion"
 #define PREF_INTL_ACCEPT_LANGUAGES     "intl.accept_languages"
 
@@ -1067,6 +1068,7 @@ class RuntimeService::WorkerThread MOZ_FINAL : public nsThread
     NS_DECL_NSITHREADOBSERVER
   };
 
+  mozilla::Mutex mWorkerPrivateLock;
   WorkerPrivate* mWorkerPrivate;
   nsRefPtr<Observer> mObserver;
 
@@ -1150,6 +1152,7 @@ public:
 private:
   WorkerThread()
   : nsThread(nsThread::NOT_MAIN_THREAD, WORKER_STACK_SIZE),
+    mWorkerPrivateLock("RuntimeService::WorkerThread::mWorkerPrivateLock"),
     mWorkerPrivate(nullptr)
 #ifdef DEBUG
     , mAcceptingNonWorkerRunnables(true)
@@ -1804,6 +1807,10 @@ RuntimeService::Init()
                                   WorkerPrefChanged,
                                   PREF_DOM_FETCH_ENABLED,
                                   reinterpret_cast<void *>(WORKERPREF_DOM_FETCH))) ||
+      NS_FAILED(Preferences::RegisterCallbackAndCall(
+                                  WorkerPrefChanged,
+                                  PREF_DOM_CACHES_ENABLED,
+                                  reinterpret_cast<void *>(WORKERPREF_DOM_CACHES))) ||
       NS_FAILED(Preferences::RegisterCallback(LoadRuntimeOptions,
                                               PREF_JS_OPTIONS_PREFIX,
                                               nullptr)) ||
@@ -1969,6 +1976,10 @@ RuntimeService::Cleanup()
         NS_FAILED(Preferences::UnregisterCallback(LoadRuntimeOptions,
                                                   PREF_WORKERS_OPTIONS_PREFIX,
                                                   nullptr)) ||
+        NS_FAILED(Preferences::UnregisterCallback(
+                                  WorkerPrefChanged,
+                                  PREF_DOM_CACHES_ENABLED,
+                                  reinterpret_cast<void *>(WORKERPREF_DOM_CACHES))) ||
         NS_FAILED(Preferences::UnregisterCallback(
                                   WorkerPrefChanged,
                                   PREF_DOM_FETCH_ENABLED,
@@ -2535,6 +2546,12 @@ RuntimeService::WorkerPrefChanged(const char* aPrefName, void* aClosure)
       Preferences::GetBool(PREF_DOM_FETCH_ENABLED, false);
   }
 
+  if (key == WORKERPREF_DOM_CACHES) {
+    key = WORKERPREF_DOM_CACHES;
+    sDefaultPreferences[WORKERPREF_DOM_CACHES] =
+      Preferences::GetBool(PREF_DOM_CACHES_ENABLED, false);
+  }
+
   // This function should never be registered as a callback for a preference it
   // does not handle.
   MOZ_ASSERT(key != WORKERPREF_COUNT);
@@ -2579,7 +2596,8 @@ RuntimeService::WorkerThread::SetWorker(WorkerPrivate* aWorkerPrivate)
   MOZ_ASSERT_IF(aWorkerPrivate, !mWorkerPrivate);
   MOZ_ASSERT_IF(!aWorkerPrivate, mWorkerPrivate);
 
-  // No need to lock here because mWorkerPrivate is only modified on mThread.
+  // No need to lock here for these checks because mWorkerPrivate is only
+  // modified on mThread.
 
   if (mWorkerPrivate) {
     MOZ_ASSERT(mObserver);
@@ -2590,7 +2608,12 @@ RuntimeService::WorkerThread::SetWorker(WorkerPrivate* aWorkerPrivate)
     mWorkerPrivate->SetThread(nullptr);
   }
 
-  mWorkerPrivate = aWorkerPrivate;
+  // Lock when writing to mWorkerPrivate because WorkerThread::Dispatch()
+  // needs to check it from any thread.
+  {
+    MutexAutoLock lock(mWorkerPrivateLock);
+    mWorkerPrivate = aWorkerPrivate;
+  }
 
   if (mWorkerPrivate) {
     mWorkerPrivate->SetThread(this);
@@ -2643,6 +2666,15 @@ RuntimeService::WorkerThread::Dispatch(nsIRunnable* aRunnable, uint32_t aFlags)
   nsresult rv = nsThread::Dispatch(runnableToDispatch, NS_DISPATCH_NORMAL);
   if (NS_WARN_IF(NS_FAILED(rv))) {
     return rv;
+  }
+
+  if (PR_GetCurrentThread() != mThread) {
+    // We must lock here because we're checking mWorkerPrivate from a different
+    // thread.
+    MutexAutoLock lock(mWorkerPrivateLock);
+    if (mWorkerPrivate) {
+      mWorkerPrivate->WakeUpEventLoop();
+    }
   }
 
   return NS_OK;

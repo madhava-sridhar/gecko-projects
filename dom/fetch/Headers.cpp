@@ -94,7 +94,8 @@ Headers::Append(const nsACString& aName, const nsACString& aValue,
     return;
   }
 
-  mList.AppendElement(Entry(lowerName, aValue));
+  mHeaders.list().AppendElement(PHeadersEntry(nsCString(lowerName),
+                                              nsCString(aValue)));
 }
 
 void
@@ -108,9 +109,9 @@ Headers::Delete(const nsACString& aName, ErrorResult& aRv)
   }
 
   // remove in reverse order to minimize copying
-  for (int32_t i = mList.Length() - 1; i >= 0; --i) {
-    if (lowerName == mList[i].mName) {
-      mList.RemoveElementAt(i);
+  for (int32_t i = mHeaders.list().Length() - 1; i >= 0; --i) {
+    if (lowerName == mHeaders.list()[i].name()) {
+      mHeaders.list().RemoveElementAt(i);
     }
   }
 }
@@ -125,9 +126,9 @@ Headers::Get(const nsACString& aName, nsCString& aValue, ErrorResult& aRv) const
     return;
   }
 
-  for (uint32_t i = 0; i < mList.Length(); ++i) {
-    if (lowerName == mList[i].mName) {
-      aValue = mList[i].mValue;
+  for (uint32_t i = 0; i < mHeaders.list().Length(); ++i) {
+    if (lowerName == mHeaders.list()[i].name()) {
+      aValue = mHeaders.list()[i].value();
       return;
     }
   }
@@ -148,9 +149,9 @@ Headers::GetAll(const nsACString& aName, nsTArray<nsCString>& aResults,
   }
 
   aResults.SetLength(0);
-  for (uint32_t i = 0; i < mList.Length(); ++i) {
-    if (lowerName == mList[i].mName) {
-      aResults.AppendElement(mList[i].mValue);
+  for (uint32_t i = 0; i < mHeaders.list().Length(); ++i) {
+    if (lowerName == mHeaders.list()[i].name()) {
+      aResults.AppendElement(mHeaders.list()[i].value());
     }
   }
 }
@@ -165,8 +166,8 @@ Headers::Has(const nsACString& aName, ErrorResult& aRv) const
     return false;
   }
 
-  for (uint32_t i = 0; i < mList.Length(); ++i) {
-    if (lowerName == mList[i].mName) {
+  for (uint32_t i = 0; i < mHeaders.list().Length(); ++i) {
+    if (lowerName == mHeaders.list()[i].name()) {
       return true;
     }
   }
@@ -186,19 +187,19 @@ Headers::Set(const nsACString& aName, const nsACString& aValue, ErrorResult& aRv
   int32_t firstIndex = INT32_MAX;
 
   // remove in reverse order to minimize copying
-  for (int32_t i = mList.Length() - 1; i >= 0; --i) {
-    if (lowerName == mList[i].mName) {
+  for (int32_t i = mHeaders.list().Length() - 1; i >= 0; --i) {
+    if (lowerName == mHeaders.list()[i].name()) {
       firstIndex = std::min(firstIndex, i);
-      mList.RemoveElementAt(i);
+      mHeaders.list().RemoveElementAt(i);
     }
   }
 
   if (firstIndex < INT32_MAX) {
-    Entry* entry = mList.InsertElementAt(firstIndex);
-    entry->mName = lowerName;
-    entry->mValue = aValue;
+    PHeadersEntry* entry = mHeaders.list().InsertElementAt(firstIndex);
+    entry->name() = lowerName;
+    entry->value() = aValue;
   } else {
-    mList.AppendElement(Entry(lowerName, aValue));
+    mHeaders.list().AppendElement(PHeadersEntry(nsCString(lowerName), nsCString(aValue)));
   }
 }
 
@@ -209,7 +210,7 @@ Headers::SetGuard(HeadersGuardEnum aGuard, ErrorResult& aRv)
   // this prior to populating the Headers object.  Allow setting immutable
   // late, though, as that is pretty much required to have a  useful, immutable
   // headers object.
-  if (aGuard != HeadersGuardEnum::Immutable && mList.Length() > 0) {
+  if (aGuard != HeadersGuardEnum::Immutable && mHeaders.list().Length() > 0) {
     aRv.Throw(NS_ERROR_FAILURE);
   }
   mGuard = aGuard;
@@ -299,7 +300,7 @@ Headers::IsForbiddenResponseHeader(const nsACString& aName) const
 void
 Headers::Fill(const Headers& aInit, ErrorResult&)
 {
-  mList = aInit.mList;
+  mHeaders.list() = aInit.mHeaders.list();
 }
 
 void

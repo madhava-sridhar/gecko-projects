@@ -1173,24 +1173,100 @@ PromiseReportRejectFeature::Notify(JSContext* aCx, workers::Status aStatus)
   return true;
 }
 
-// A WorkerRunnable to resolve/reject the Promise on the worker thread.
+WorkerPromiseHolder::WorkerPromiseHolder(workers::WorkerPrivate* aWorkerPrivate,
+                                         Promise* aWorkerPromise)
+  : mWorkerPrivate(aWorkerPrivate)
+  , mWorkerPromise(aWorkerPromise)
+  , mCleanedUp(false)
+  , mCleanUpLock("cleanUpLock")
+{
+  MOZ_ASSERT(mWorkerPrivate);
+  mWorkerPrivate->AssertIsOnWorkerThread();
+  MOZ_ASSERT(mWorkerPromise);
 
-class PromiseWorkerProxyRunnable : public workers::WorkerRunnable
+  // We do this to make sure the worker thread won't shut down before the
+  // promise is resolved/rejected on the worker thread.
+  if (!mWorkerPrivate->AddFeature(mWorkerPrivate->GetJSContext(), this)) {
+    MOZ_ASSERT(false, "cannot add the worker feature!");
+    return;
+  }
+}
+
+WorkerPromiseHolder::~WorkerPromiseHolder()
+{
+  MOZ_ASSERT(mCleanedUp);
+  MOZ_ASSERT(!mWorkerPromise);
+}
+
+WorkerPrivate*
+WorkerPromiseHolder::GetWorkerPrivate() const
+{
+  // It's ok to race on |mCleanedUp|, because it will never cause us to fire
+  // the assertion when we should not.
+  MOZ_ASSERT(!mCleanedUp);
+
+  return mWorkerPrivate;
+}
+
+Promise*
+WorkerPromiseHolder::GetWorkerPromise() const
+{
+  return mWorkerPromise;
+}
+
+bool
+WorkerPromiseHolder::Notify(JSContext* aCx, Status aStatus)
+{
+  MOZ_ASSERT(mWorkerPrivate);
+  mWorkerPrivate->AssertIsOnWorkerThread();
+  MOZ_ASSERT(mWorkerPrivate->GetJSContext() == aCx);
+
+  if (aStatus >= Canceling) {
+    CleanUp(aCx);
+  }
+
+  return true;
+}
+
+void
+WorkerPromiseHolder::CleanUp(JSContext* aCx)
+{
+  MutexAutoLock lock(mCleanUpLock);
+
+  // |mWorkerPrivate| might not be safe to use anymore if we have already
+  // cleaned up and RemoveFeature(), so we need to check |mCleanedUp| first.
+  if (mCleanedUp) {
+    return;
+  }
+
+  MOZ_ASSERT(mWorkerPrivate);
+  mWorkerPrivate->AssertIsOnWorkerThread();
+  MOZ_ASSERT(mWorkerPrivate->GetJSContext() == aCx);
+
+  // Release the Promise and remove the WorkerPromiseHolder from the features of
+  // the worker thread since the Promise has been resolved/rejected or the
+  // worker thread has been cancelled.
+  mWorkerPromise = nullptr;
+  mWorkerPrivate->RemoveFeature(aCx, this);
+  mCleanedUp = true;
+}
+
+class PromiseWorkerFooRunnable : public workers::WorkerRunnable
 {
 public:
-  PromiseWorkerProxyRunnable(PromiseWorkerProxy* aPromiseWorkerProxy,
+  PromiseWorkerFooRunnable(PromiseWorkerFoo* aPromiseWorkerFoo,
                              JSStructuredCloneCallbacks* aCallbacks,
                              JSAutoStructuredCloneBuffer&& aBuffer,
-                             PromiseWorkerProxy::RunCallbackFunc aFunc)
-    : WorkerRunnable(aPromiseWorkerProxy->GetWorkerPrivate(),
+                             PromiseWorkerFoo::RunCallbackFunc aFunc)
+    : WorkerRunnable(aPromiseWorkerFoo->GetWorkerPrivate(),
                      WorkerThreadUnchangedBusyCount)
-    , mPromiseWorkerProxy(aPromiseWorkerProxy)
+    , mPromiseWorkerFoo(aPromiseWorkerFoo)
     , mCallbacks(aCallbacks)
     , mBuffer(Move(aBuffer))
     , mFunc(aFunc)
   {
     MOZ_ASSERT(NS_IsMainThread());
-    MOZ_ASSERT(mPromiseWorkerProxy);
+    MOZ_ASSERT(mPromiseWorkerFoo);
   }
 
   virtual bool
@@ -1200,13 +1276,13 @@ public:
     aWorkerPrivate->AssertIsOnWorkerThread();
     MOZ_ASSERT(aWorkerPrivate == mWorkerPrivate);
 
-    MOZ_ASSERT(mPromiseWorkerProxy);
-    nsRefPtr<Promise> workerPromise = mPromiseWorkerProxy->GetWorkerPromise();
+    MOZ_ASSERT(mPromiseWorkerFoo);
+    nsRefPtr<Promise> workerPromise = mPromiseWorkerFoo->GetWorkerPromise();
     MOZ_ASSERT(workerPromise);
 
     // Here we convert the buffer to a JS::Value.
     JS::Rooted<JS::Value> value(aCx);
-    if (!mBuffer.read(aCx, &value, mCallbacks, mPromiseWorkerProxy)) {
+    if (!mBuffer.read(aCx, &value, mCallbacks, mPromiseWorkerFoo)) {
       JS_ClearPendingException(aCx);
       return false;
     }
@@ -1217,23 +1293,23 @@ public:
                                   Promise::PromiseTaskSync::SyncTask);
 
     // Release the Promise because it has been resolved/rejected for sure.
-    mPromiseWorkerProxy->CleanUp(aCx);
+    mPromiseWorkerFoo->CleanUp(aCx);
     return true;
   }
 
 protected:
-  ~PromiseWorkerProxyRunnable() {}
+  ~PromiseWorkerFooRunnable() {}
 
 private:
-  nsRefPtr<PromiseWorkerProxy> mPromiseWorkerProxy;
+  nsRefPtr<PromiseWorkerFoo> mPromiseWorkerFoo;
   JSStructuredCloneCallbacks* mCallbacks;
   JSAutoStructuredCloneBuffer mBuffer;
 
   // Function pointer for calling Promise::{ResolveInternal,RejectInternal}.
-  PromiseWorkerProxy::RunCallbackFunc mFunc;
+  PromiseWorkerFoo::RunCallbackFunc mFunc;
 };
 
-PromiseWorkerProxy::PromiseWorkerProxy(WorkerPrivate* aWorkerPrivate,
+PromiseWorkerFoo::PromiseWorkerFoo(WorkerPrivate* aWorkerPrivate,
                                        Promise* aWorkerPromise,
                                        JSStructuredCloneCallbacks* aCallbacks)
   : mWorkerPrivate(aWorkerPrivate)
@@ -1254,14 +1330,14 @@ PromiseWorkerProxy::PromiseWorkerProxy(WorkerPrivate* aWorkerPrivate,
   }
 }
 
-PromiseWorkerProxy::~PromiseWorkerProxy()
+PromiseWorkerFoo::~PromiseWorkerFoo()
 {
   MOZ_ASSERT(mCleanedUp);
   MOZ_ASSERT(!mWorkerPromise);
 }
 
 WorkerPrivate*
-PromiseWorkerProxy::GetWorkerPrivate() const
+PromiseWorkerFoo::GetWorkerPrivate() const
 {
   // It's ok to race on |mCleanedUp|, because it will never cause us to fire
   // the assertion when we should not.
@@ -1271,13 +1347,13 @@ PromiseWorkerProxy::GetWorkerPrivate() const
 }
 
 Promise*
-PromiseWorkerProxy::GetWorkerPromise() const
+PromiseWorkerFoo::GetWorkerPromise() const
 {
   return mWorkerPromise;
 }
 
 void
-PromiseWorkerProxy::StoreISupports(nsISupports* aSupports)
+PromiseWorkerFoo::StoreISupports(nsISupports* aSupports)
 {
   MOZ_ASSERT(NS_IsMainThread());
 
@@ -1287,7 +1363,7 @@ PromiseWorkerProxy::StoreISupports(nsISupports* aSupports)
 }
 
 void
-PromiseWorkerProxy::RunCallback(JSContext* aCx,
+PromiseWorkerFoo::RunCallback(JSContext* aCx,
                                 JS::Handle<JS::Value> aValue,
                                 RunCallbackFunc aFunc)
 {
@@ -1308,8 +1384,8 @@ PromiseWorkerProxy::RunCallback(JSContext* aCx,
     MOZ_ASSERT(false, "cannot write the JSAutoStructuredCloneBuffer!");
   }
 
-  nsRefPtr<PromiseWorkerProxyRunnable> runnable =
-    new PromiseWorkerProxyRunnable(this,
+  nsRefPtr<PromiseWorkerFooRunnable> runnable =
+    new PromiseWorkerFooRunnable(this,
                                    mCallbacks,
                                    Move(buffer),
                                    aFunc);
@@ -1318,21 +1394,21 @@ PromiseWorkerProxy::RunCallback(JSContext* aCx,
 }
 
 void
-PromiseWorkerProxy::ResolvedCallback(JSContext* aCx,
-                                     JS::Handle<JS::Value> aValue)
+PromiseWorkerFoo::Resolve(JSContext* aCx,
+                          JS::Handle<JS::Value> aValue)
 {
   RunCallback(aCx, aValue, &Promise::ResolveInternal);
 }
 
 void
-PromiseWorkerProxy::RejectedCallback(JSContext* aCx,
-                                     JS::Handle<JS::Value> aValue)
+PromiseWorkerFoo::Reject(JSContext* aCx,
+                         JS::Handle<JS::Value> aValue)
 {
   RunCallback(aCx, aValue, &Promise::RejectInternal);
 }
 
 bool
-PromiseWorkerProxy::Notify(JSContext* aCx, Status aStatus)
+PromiseWorkerFoo::Notify(JSContext* aCx, Status aStatus)
 {
   MOZ_ASSERT(mWorkerPrivate);
   mWorkerPrivate->AssertIsOnWorkerThread();
@@ -1346,7 +1422,7 @@ PromiseWorkerProxy::Notify(JSContext* aCx, Status aStatus)
 }
 
 void
-PromiseWorkerProxy::CleanUp(JSContext* aCx)
+PromiseWorkerFoo::CleanUp(JSContext* aCx)
 {
   MutexAutoLock lock(mCleanUpLock);
 
@@ -1360,12 +1436,43 @@ PromiseWorkerProxy::CleanUp(JSContext* aCx)
   mWorkerPrivate->AssertIsOnWorkerThread();
   MOZ_ASSERT(mWorkerPrivate->GetJSContext() == aCx);
 
-  // Release the Promise and remove the PromiseWorkerProxy from the features of
+  // Release the Promise and remove the PromiseWorkerFoo from the features of
   // the worker thread since the Promise has been resolved/rejected or the
   // worker thread has been cancelled.
   mWorkerPromise = nullptr;
   mWorkerPrivate->RemoveFeature(aCx, this);
   mCleanedUp = true;
+}
+
+PromiseWorkerProxy::PromiseWorkerProxy(WorkerPrivate* aWorkerPrivate,
+                                       Promise* aWorkerPromise,
+                                       JSStructuredCloneCallbacks* aCallbacks)
+  : mFoo(new PromiseWorkerFoo(aWorkerPrivate, aWorkerPromise, aCallbacks))
+{
+}
+
+PromiseWorkerProxy::~PromiseWorkerProxy()
+{
+}
+
+void
+PromiseWorkerProxy::StoreISupports(nsISupports* aSupports)
+{
+  mFoo->StoreISupports(aSupports);
+}
+
+void
+PromiseWorkerProxy::ResolvedCallback(JSContext* aCx,
+                                     JS::Handle<JS::Value> aValue)
+{
+  mFoo->Resolve(aCx, aValue);
+}
+
+void
+PromiseWorkerProxy::RejectedCallback(JSContext* aCx,
+                                     JS::Handle<JS::Value> aValue)
+{
+  mFoo->Reject(aCx, aValue);
 }
 
 // Specializations of MaybeRejectBrokenly we actually support.

@@ -1,0 +1,31 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
+include PHeaders;
+
+using RequestCredentials from "mozilla/dom/Request.h";
+using RequestMode from "mozilla/dom/Request.h";
+using struct mozilla::void_t from "ipc/IPCMessageUtils.h";
+
+namespace mozilla {
+namespace dom {
+
+struct PCacheRequest
+{
+  nsCString method;
+  nsString url;
+  nsString urlWithoutQuery;
+  PHeaders headers;
+  RequestMode mode;
+  RequestCredentials credentials;
+};
+
+union PCacheRequestOrVoid
+{
+  void_t;
+  PCacheRequest;
+};
+
+} // namespace dom
+} // namespace mozilla

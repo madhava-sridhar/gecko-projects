@@ -1,0 +1,67 @@
+<!--
+  Any copyright is dedicated to the Public Domain.
+  http://creativecommons.org/publicdomain/zero/1.0/
+-->
+<!DOCTYPE HTML>
+<html>
+<head>
+<title>Test for SharedWorker</title>
+</head>
+<body>
+<script type="text/javascript">
+  "use strict";
+  addEventListener("message", function messageListener(evt) {
+    removeEventListener("message", messageListener);
+    var success = true;
+    success = success && !!caches;
+    caches.create("foobar").then(function(createCache) {
+      success = success && !!createCache;
+      caches.get("foobar").then(function(getCache) {
+        success = success && !!getCache;
+        var request = new Request("http://example.com/hmm?q=foobar");
+        var response = new Response();
+        getCache.put(request, response).then(function(putResponse) {
+          success = success && !!putResponse;
+          getCache.matchAll(request).then(function(matchAllResponses) {
+            success = success && !!matchAllResponses &&
+                      matchAllResponses.length === 1;
+            getCache.match(request).then(function(matchResponse) {
+              success = success && !!matchResponse;
+              var request2 = new Request("http://example.com/hmm?q=snafu");
+              getCache.match(request2, {ignoreSearch:true}).then(function(match2Response) {
+                success = success && !!match2Response;
+                getCache.delete(request).then(function(deleteResult) {
+                  success = success && deleteResult;
+                  getCache.matchAll(request).then(function(matchAll2Responses) {
+                    success = success && !!matchAll2Responses &&
+                              matchAll2Responses.length === 0;
+                    caches.has("foobar").then(function(hasResult) {
+                      success = success && hasResult;
+                      caches.keys().then(function(keys) {
+                        success = success && !!keys;
+                        success = success && keys.length === 1;
+                        success = success && keys.indexOf("foobar") === 0;
+                        caches.delete("foobar").then(function(deleteResult) {
+                          success = success && deleteResult;
+                          caches.get("foobar").then(function(getMissingCache) {
+                            success = success && getMissingCache === undefined;
+                            parent.postMessage({
+                              type: "result",
+                              success: success
+                            }, "*");
+                          });
+                        });
+                      });
+                    });
+                  });
+                });
+              });
+            });
+          });
+        });
+      });
+    });
+  });
+</script>
+</body>
+</html>

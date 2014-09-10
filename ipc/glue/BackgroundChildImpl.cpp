@@ -4,8 +4,14 @@
 
 #include "BackgroundChildImpl.h"
 
+#include "mozilla/dom/CacheChild.h"
+#include "mozilla/dom/PCacheStorageChild.h"
 #include "mozilla/ipc/PBackgroundTestChild.h"
 #include "nsTraceRefcnt.h"
+
+using mozilla::dom::PCacheStorageChild;
+using mozilla::dom::CacheChild;
+using mozilla::dom::PCacheChild;
 
 namespace {
 
@@ -89,6 +95,40 @@ BackgroundChildImpl::DeallocPBackgroundTestChild(PBackgroundTestChild* aActor)
   MOZ_ASSERT(aActor);
 
   delete static_cast<TestChild*>(aActor);
+  return true;
+}
+
+PCacheStorageChild*
+BackgroundChildImpl::AllocPCacheStorageChild(const Namespace& aNamespace,
+                                             const nsCString& aOrigin,
+                                             const nsCString& aBaseDomain)
+{
+  MOZ_CRASH("CacheStorageChild actor must be provided to PBackground manager");
+  return nullptr;
+}
+
+bool
+BackgroundChildImpl::DeallocPCacheStorageChild(PCacheStorageChild* aActor)
+{
+  // The CacheStorageChild actor is provided to the PBackground manager, but
+  // we own the object and must delete it.
+  delete aActor;
+  return true;
+}
+
+PCacheChild*
+BackgroundChildImpl::AllocPCacheChild(const nsCString& aOrigin,
+                                      const nsCString& aBaseDomain)
+{
+  return new CacheChild();
+}
+
+bool
+BackgroundChildImpl::DeallocPCacheChild(PCacheChild* aActor)
+{
+  // The CacheChild actor is provided to the PBackground manager, but
+  // we own the object and must delete it.
+  delete aActor;
   return true;
 }
 

@@ -8,10 +8,12 @@
 
 #include "jsapi.h"
 #include "mozilla/EventListenerManager.h"
+#include "mozilla/dom/Fetch.h"
 #include "mozilla/dom/FunctionBinding.h"
 #include "mozilla/dom/DedicatedWorkerGlobalScopeBinding.h"
 #include "mozilla/dom/ServiceWorkerGlobalScopeBinding.h"
 #include "mozilla/dom/SharedWorkerGlobalScopeBinding.h"
+#include "mozilla/dom/CacheStorage.h"
 #include "mozilla/dom/Console.h"
 
 #ifdef ANDROID
@@ -58,6 +60,7 @@ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(WorkerGlobalScope,
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mPerformance)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mLocation)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mNavigator)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mCacheStorage)
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
 
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN_INHERITED(WorkerGlobalScope,
@@ -67,6 +70,7 @@ NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN_INHERITED(WorkerGlobalScope,
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mPerformance)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mLocation)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mNavigator)
+  NS_IMPL_CYCLE_COLLECTION_UNLINK(mCacheStorage)
 NS_IMPL_CYCLE_COLLECTION_UNLINK_END
 
 NS_IMPL_CYCLE_COLLECTION_TRACE_BEGIN_INHERITED(WorkerGlobalScope,
@@ -99,6 +103,20 @@ WorkerGlobalScope::GetConsole()
   }
 
   return mConsole;
+}
+
+already_AddRefed<CacheStorage>
+WorkerGlobalScope::Caches()
+{
+  if (!mCacheStorage) {
+    MOZ_ASSERT(mWorkerPrivate);
+    NS_ConvertUTF16toUTF8 origin(mWorkerPrivate->GetLocationInfo().mOrigin);
+    mCacheStorage = new CacheStorage(cache::DEFAULT_NAMESPACE, nullptr,
+                                     this, origin, mWorkerPrivate->Domain());
+  }
+
+  nsRefPtr<CacheStorage> ref = mCacheStorage;
+  return ref.forget();
 }
 
 already_AddRefed<WorkerLocation>
@@ -294,6 +312,14 @@ WorkerGlobalScope::GetPerformance()
   }
 
   return mPerformance;
+}
+
+already_AddRefed<Promise>
+WorkerGlobalScope::Fetch(const RequestOrScalarValueString& aInput,
+                         const RequestInit& aInit,
+                         ErrorResult& aRv)
+{
+  return WorkerDOMFetch(this, aInput, aInit, aRv);
 }
 
 DedicatedWorkerGlobalScope::DedicatedWorkerGlobalScope(WorkerPrivate* aWorkerPrivate)

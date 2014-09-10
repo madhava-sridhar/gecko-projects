@@ -18,9 +18,38 @@ namespace workers {
 class WorkerPrivate;
 }
 
-// A proxy to catch the resolved/rejected Promise's result from the main thread
-// and resolve/reject that on the worker thread eventually.
-//
+// A PromiseHolder holds a worker and a worker-thread Promise alive while stuff
+// is done on the main-thread. Main-thread code should then dispatch a Foo
+// runnable to the worker, which should resolve/reject the Promise and call
+// CleanUp() to release it.
+class WorkerPromiseHolder : public workers::WorkerFeature
+{
+  workers::WorkerPrivate* mWorkerPrivate;
+  nsRefPtr<Promise> mWorkerPromise;
+  bool mCleanedUp; // To specify if the cleanUp() has been done.
+  Mutex mCleanUpLock;
+
+  // This overrides the non-threadsafe refcounting in PromiseNativeHandler.
+  NS_INLINE_DECL_THREADSAFE_REFCOUNTING(WorkerPromiseHolder)
+
+private:
+  virtual ~WorkerPromiseHolder();
+
+protected:
+  virtual bool Notify(JSContext* aCx, workers::Status aStatus) MOZ_OVERRIDE;
+
+public:
+  WorkerPromiseHolder(workers::WorkerPrivate* aWorkerPrivate,
+                      Promise* aWorkerPromise);
+
+  workers::WorkerPrivate* GetWorkerPrivate() const;
+
+  Promise* GetWorkerPromise() const;
+
+  void CleanUp(JSContext* aCx);
+};
+
+// A proxy to resolve a worker thread Promise from the main thread.
 // How to use:
 //
 //   1. Create a Promise on the worker thread and return it to the content
@@ -30,32 +59,29 @@ class WorkerPrivate;
 //        if (aRv.Failed()) {
 //          return nullptr;
 //        }
-//        // Pass |promise| around to the WorkerMainThreadRunnable
+//        // Pass |promise| around to the nsIRunnable
 //        return promise.forget();
 //
-//   2. In your WorkerMainThreadRunnable's ctor, create a PromiseWorkerProxy
+//   2. In your main-thread nsIRunnable's ctor, create a PromiseWorkerFoo
 //      which holds a nsRefPtr<Promise> to the Promise created at #1.
 //
-//   3. In your WorkerMainThreadRunnable::MainThreadRun(), obtain a Promise on
-//      the main thread and call its AppendNativeHandler(PromiseNativeHandler*)
-//      to bind the PromiseWorkerProxy created at #2.
+//   3. Call PromiseWorkerFoo::Resolve/Reject at some point on the main-thread.
 //
-//   4. Then the Promise results returned by ResolvedCallback/RejectedCallback
-//      will be dispatched as a WorkerRunnable to the worker thread to
-//      resolve/reject the Promise created at #1.
+//   4. Then the JS::Value passed to Resolve/Reject will be dispatched via
+//      a WorkerRunnable to the worker thread to resolve/reject the Promise
+//      created at #1.
 
-class PromiseWorkerProxy : public PromiseNativeHandler,
-                           public workers::WorkerFeature
+class PromiseWorkerFoo : public workers::WorkerFeature
 {
-  friend class PromiseWorkerProxyRunnable;
+  friend class PromiseWorkerFooRunnable;
 
   // This overrides the non-threadsafe refcounting in PromiseNativeHandler.
-  NS_INLINE_DECL_THREADSAFE_REFCOUNTING(PromiseWorkerProxy)
+  NS_INLINE_DECL_THREADSAFE_REFCOUNTING(PromiseWorkerFoo)
 
 public:
-  PromiseWorkerProxy(workers::WorkerPrivate* aWorkerPrivate,
-                     Promise* aWorkerPromise,
-                     JSStructuredCloneCallbacks* aCallbacks = nullptr);
+  PromiseWorkerFoo(workers::WorkerPrivate* aWorkerPrivate,
+                   Promise* aWorkerPromise,
+                   JSStructuredCloneCallbacks* aCallbacks = nullptr);
 
   workers::WorkerPrivate* GetWorkerPrivate() const;
 
@@ -65,17 +91,17 @@ public:
 
   void CleanUp(JSContext* aCx);
 
+  void Resolve(JSContext* aCx,
+               JS::Handle<JS::Value> aValue);
+
+  void Reject(JSContext* aCx,
+              JS::Handle<JS::Value> aValue);
+
 protected:
-  virtual void ResolvedCallback(JSContext* aCx,
-                                JS::Handle<JS::Value> aValue) MOZ_OVERRIDE;
-
-  virtual void RejectedCallback(JSContext* aCx,
-                                JS::Handle<JS::Value> aValue) MOZ_OVERRIDE;
-
   virtual bool Notify(JSContext* aCx, workers::Status aStatus) MOZ_OVERRIDE;
 
 private:
-  virtual ~PromiseWorkerProxy();
+  virtual ~PromiseWorkerFoo();
 
   // Function pointer for calling Promise::{ResolveInternal,RejectInternal}.
   typedef void (Promise::*RunCallbackFunc)(JSContext*,
@@ -101,6 +127,56 @@ private:
 
   // Ensure the worker and the main thread won't race to access |mCleanedUp|.
   Mutex mCleanUpLock;
+};
+
+// A proxy to catch the resolved/rejected Promise's result from the main thread
+// and resolve/reject that on the worker thread eventually.
+//
+// How to use:
+//
+//   1. Create a Promise on the worker thread and return it to the content
+//      script:
+//
+//        nsRefPtr<Promise> promise = Promise::Create(workerPrivate->GlobalScope(), aRv);
+//        if (aRv.Failed()) {
+//          return nullptr;
+//        }
+//        // Pass |promise| around to the WorkerMainThreadRunnable
+//        return promise.forget();
+//
+//   2. In your WorkerMainThreadRunnable's ctor, create a PromiseWorkerProxy
+//      which holds a nsRefPtr<Promise> to the Promise created at #1.
+//
+//   3. In your WorkerMainThreadRunnable::MainThreadRun(), obtain a Promise on
+//      the main thread and call its AppendNativeHandler(PromiseNativeHandler*)
+//      to bind the PromiseWorkerProxy created at #2.
+//
+//   4. Then the Promise results returned by ResolvedCallback/RejectedCallback
+//      will be dispatched as a WorkerRunnable to the worker thread to
+//      resolve/reject the Promise created at #1.
+class PromiseWorkerProxy : public PromiseNativeHandler
+{
+  // This overrides the non-threadsafe refcounting in PromiseNativeHandler.
+  NS_INLINE_DECL_THREADSAFE_REFCOUNTING(PromiseWorkerProxy)
+
+public:
+  PromiseWorkerProxy(workers::WorkerPrivate* aWorkerPrivate,
+                     Promise* aWorkerPromise,
+                     JSStructuredCloneCallbacks* aCallbacks = nullptr);
+
+  void StoreISupports(nsISupports* aSupports);
+
+protected:
+  virtual void ResolvedCallback(JSContext* aCx,
+                                JS::Handle<JS::Value> aValue) MOZ_OVERRIDE;
+
+  virtual void RejectedCallback(JSContext* aCx,
+                                JS::Handle<JS::Value> aValue) MOZ_OVERRIDE;
+
+private:
+  virtual ~PromiseWorkerProxy();
+
+  nsRefPtr<PromiseWorkerFoo> mFoo;
 };
 
 } // namespace dom

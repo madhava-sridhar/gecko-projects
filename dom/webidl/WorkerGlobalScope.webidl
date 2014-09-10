@@ -38,6 +38,7 @@ partial interface WorkerGlobalScope {
 
 WorkerGlobalScope implements WindowTimers;
 WorkerGlobalScope implements WindowBase64;
+WorkerGlobalScope implements GlobalFetch;
 
 // Mozilla extensions
 partial interface WorkerGlobalScope {
@@ -47,4 +48,7 @@ partial interface WorkerGlobalScope {
 
   // XXXbz no spec for this yet, because the webperf WG is a bit dysfunctional
   readonly attribute Performance performance;
+
+  [Func="mozilla::dom::CacheStorage::PrefEnabled"]
+  readonly attribute CacheStorage caches;
 };

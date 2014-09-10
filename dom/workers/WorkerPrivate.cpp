@@ -2233,12 +2233,20 @@ WorkerPrivateParent<Derived>::DispatchPrivate(WorkerRunnable* aRunnable,
       target = self->mThread;
     }
 
-    nsresult rv = target->Dispatch(aRunnable, NS_DISPATCH_NORMAL);
-    if (NS_WARN_IF(NS_FAILED(rv))) {
-      return rv;
+    // Temporarily unlock while we Dispatch since WorkerThread::Dispatch needs
+    // to call our WakeUpEventLoop() method.
+    {
+      MutexAutoUnlock unlock(mMutex);
+      nsresult rv = target->Dispatch(aRunnable, NS_DISPATCH_NORMAL);
+      if (NS_WARN_IF(NS_FAILED(rv))) {
+        return rv;
+      }
     }
 
-    mCondVar.Notify();
+    // WorkerThread::Dispatch() will call WakeUpEventLoop()
+    if (aSyncLoopTarget) {
+      mCondVar.Notify();
+    }
   }
 
   return NS_OK;
@@ -3348,6 +3356,9 @@ WorkerPrivateParent<Derived>::SetBaseURI(nsIURI* aBaseURI)
   }
 
   mLoadInfo.mBaseURI = aBaseURI;
+  if (NS_FAILED(mLoadInfo.mBaseURI->GetSpec(mBaseURL))) {
+    mBaseURL.Truncate();
+  }
 
   if (NS_FAILED(aBaseURI->GetSpec(mLocationInfo.mHref))) {
     mLocationInfo.mHref.Truncate();
@@ -4113,6 +4124,13 @@ WorkerPrivate::AfterProcessNextEvent(uint32_t aRecursionDepth)
 {
   AssertIsOnWorkerThread();
   MOZ_ASSERT(aRecursionDepth);
+}
+
+void
+WorkerPrivate::WakeUpEventLoop()
+{
+  MutexAutoLock lock(mMutex);
+  mCondVar.Notify();
 }
 
 void
