@@ -27,6 +27,7 @@ NS_INTERFACE_MAP_END
 
 Response::Response(nsISupports* aOwner)
   : mOwner(aOwner)
+  , mInternalResponse(new InternalResponse(200, NS_LITERAL_CSTRING("OK")))
 {
   SetIsDOMBinding();
 }
@@ -58,11 +59,14 @@ Response::Redirect(const GlobalObject& aGlobal, const nsAString& aUrl,
 }
 
 /*static*/ already_AddRefed<Response>
-Response::Constructor(const GlobalObject& global,
+Response::Constructor(const GlobalObject& aGlobal,
                       const Optional<ArrayBufferOrArrayBufferViewOrBlobOrFormDataOrScalarValueStringOrURLSearchParams>& aBody,
                       const ResponseInit& aInit, ErrorResult& rv)
 {
-  nsRefPtr<Response> response = new Response(global.GetAsSupports());
+  nsCOMPtr<nsIGlobalObject> global = do_QueryInterface(aGlobal.GetAsSupports());
+  nsRefPtr<InternalResponse> internal = new InternalResponse(aInit.mStatus,
+    aInit.mStatusText.WasPassed() ? aInit.mStatusText.Value() : NS_LITERAL_CSTRING("OK"));
+  nsRefPtr<Response> response = new Response(global, internal);
   return response.forget();
 }
 

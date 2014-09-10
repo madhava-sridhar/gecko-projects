@@ -36,7 +36,8 @@ public:
   NS_INLINE_DECL_THREADSAFE_REFCOUNTING(InternalResponse)
 
   InternalResponse(uint32_t aStatus, const nsACString& aStatusText)
-    : mStatus(aStatus)
+    : mType(ResponseType::Default)
+    , mStatus(aStatus)
     , mStatusText(aStatusText)
     , mHeaders(new Headers(nullptr))
     , mError(false)
@@ -46,6 +47,7 @@ public:
   explicit InternalResponse(const InternalResponse& aOther)
     : mStatus(aOther.mStatus)
     , mStatusText(aOther.mStatusText)
+    , mHeaders(aOther.mHeaders)
     , mError(aOther.mError)
     // FIXME(nsm): Copy the rest of the stuff.
   {
