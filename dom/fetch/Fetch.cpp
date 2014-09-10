@@ -134,7 +134,7 @@ ResolveFetchWithResponse::ResolveFetchWithResponse(Promise* aPromise)
 void
 ResolveFetchWithResponse::OnResponseAvailable(InternalResponse* aResponse)
 {
-  NS_ASSERT_OWNINGTHREAD(ResolveFetchWithResponse)
+  NS_ASSERT_OWNINGTHREAD(ResolveFetchWithResponse);
   AssertIsOnMainThread();
   mInternalResponse = aResponse;
 
@@ -147,13 +147,13 @@ ResolveFetchWithResponse::OnResponseAvailable(InternalResponse* aResponse)
 void
 ResolveFetchWithResponse::OnResponseEnd()
 {
-  NS_ASSERT_OWNINGTHREAD(ResolveFetchWithResponse)
+  NS_ASSERT_OWNINGTHREAD(ResolveFetchWithResponse);
   AssertIsOnMainThread();
 }
 
 ResolveFetchWithResponse::~ResolveFetchWithResponse()
 {
-  NS_ASSERT_OWNINGTHREAD(ResolveFetchWithResponse)
+  NS_ASSERT_OWNINGTHREAD(ResolveFetchWithResponse);
 }
 
 class ResolveFetchWithResponseRunnable : public WorkerRunnable
@@ -223,7 +223,7 @@ WorkerResolveFetchWithResponse::~WorkerResolveFetchWithResponse()
 void
 WorkerResolveFetchWithResponse::OnResponseAvailable(InternalResponse* aResponse)
 {
-  NS_ASSERT_OWNINGTHREAD(ResolveFetchWithResponse)
+  NS_ASSERT_OWNINGTHREAD(ResolveFetchWithResponse);
   AssertIsOnMainThread();
   mInternalResponse = aResponse;
 
@@ -239,7 +239,7 @@ WorkerResolveFetchWithResponse::OnResponseAvailable(InternalResponse* aResponse)
 void
 WorkerResolveFetchWithResponse::OnResponseEnd()
 {
-  NS_ASSERT_OWNINGTHREAD(ResolveFetchWithResponse)
+  NS_ASSERT_OWNINGTHREAD(ResolveFetchWithResponse);
   AssertIsOnMainThread();
   MOZ_ASSERT(mInternalResponse);
 
