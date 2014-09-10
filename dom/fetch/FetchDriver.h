@@ -63,7 +63,7 @@ private:
   NS_IMETHODIMP FailWithNetworkError();
   NS_IMETHODIMP SucceedWithResponse();
 
-  static nsresult
+  static NS_METHOD
   StreamReaderFunc(nsIInputStream* aInputStream,
                               void* aClosure,
                               const char* aFragment,
