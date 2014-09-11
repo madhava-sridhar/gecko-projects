@@ -872,6 +872,11 @@ private:
 #endif
     }
 
+    // If our luck is *really* bad then it is possible for the CloseStream() and
+    // nsIThread::Shutdown() functions to run before the Dispatch() call here
+    // finishes... Keep the thread alive until this method returns.
+    nsCOMPtr<nsIThread> kungFuDeathGrip = mIOTarget;
+
     mClosing = true;
 
     nsresult rv = mIOTarget->Dispatch(this, NS_DISPATCH_NORMAL);
