@@ -8,6 +8,11 @@
 #define mozilla_dom_cache_CacheStorageDBListener_h
 
 #include "mozilla/dom/CacheTypes.h"
+#include "nsError.h"
+#include "nsString.h"
+
+struct nsID;
+template<class T> class nsTArray;
 
 namespace mozilla {
 namespace dom {

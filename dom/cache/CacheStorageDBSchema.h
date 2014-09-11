@@ -7,7 +7,10 @@
 #ifndef mozilla_dom_cache_CacheStorageDBSchema_h
 #define mozilla_dom_cache_CacheStorageDBSchema_h
 
+#include "mozilla/Attributes.h"
 #include "mozilla/dom/CacheTypes.h"
+#include "nsError.h"
+#include "nsString.h"
 
 class mozIStorageConnection;
 struct nsID;

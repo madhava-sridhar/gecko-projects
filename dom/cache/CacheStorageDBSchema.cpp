@@ -6,6 +6,7 @@
 
 #include "mozilla/dom/CacheStorageDBSchema.h"
 #include "mozStorageHelper.h"
+#include "nsTArray.h"
 
 namespace mozilla {
 namespace dom {

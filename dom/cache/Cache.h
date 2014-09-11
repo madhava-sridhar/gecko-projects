@@ -10,6 +10,7 @@
 #include "mozilla/dom/CacheChildListener.h"
 #include "nsCOMPtr.h"
 #include "nsISupportsImpl.h"
+#include "nsString.h"
 #include "nsWrapperCache.h"
 
 class nsIGlobalObject;

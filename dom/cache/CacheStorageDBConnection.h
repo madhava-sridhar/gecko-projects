@@ -10,9 +10,11 @@
 #include "mozilla/dom/CacheTypes.h"
 #include "nsCOMPtr.h"
 #include "nsISupportsImpl.h"
+#include "nsString.h"
 
 class mozIStorageConnection;
 struct nsID;
+template<class T> class nsTArray;
 
 namespace mozilla {
 namespace dom {

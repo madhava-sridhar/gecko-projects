@@ -8,6 +8,10 @@
 #define mozilla_dom_CacheStorageChildListener_h
 
 #include "mozilla/dom/CacheTypes.h"
+#include "nsError.h"
+#include "nsString.h"
+
+template<class T> class nsTArray;
 
 namespace mozilla {
 

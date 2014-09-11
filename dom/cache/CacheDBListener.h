@@ -8,6 +8,7 @@
 #define mozilla_dom_cache_CacheDBListener_h
 
 #include "mozilla/dom/CacheTypes.h"
+#include "nsError.h"
 
 template<class T> class nsTArray;
 

@@ -7,7 +7,6 @@
 #ifndef mozilla_dom_CacheTypes_h
 #define mozilla_dom_CacheTypes_h
 
-#include "ipc/IPCMessageUtils.h"
 #include <stdint.h>
 
 namespace mozilla {

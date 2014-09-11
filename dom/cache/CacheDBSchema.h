@@ -7,7 +7,9 @@
 #ifndef mozilla_dom_cache_CacheDBSchema_h
 #define mozilla_dom_cache_CacheDBSchema_h
 
+#include "mozilla/Attributes.h"
 #include "mozilla/dom/CacheTypes.h"
+#include "nsError.h"
 
 class mozIStorageConnection;
 template<class T> class nsTArray;

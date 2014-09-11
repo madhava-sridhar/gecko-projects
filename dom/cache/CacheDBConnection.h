@@ -10,6 +10,7 @@
 #include "mozilla/dom/CacheTypes.h"
 #include "nsCOMPtr.h"
 #include "nsISupportsImpl.h"
+#include "nsString.h"
 
 class mozIStorageConnection;
 struct nsID;
