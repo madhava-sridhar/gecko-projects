@@ -8,6 +8,7 @@
 #include "nsIURI.h"
 #include "nsISupportsImpl.h"
 
+#include "mozilla/dom/Headers.h"
 #include "mozilla/dom/Promise.h"
 #include "nsDOMString.h"
 #include "nsPIDOMWindow.h"

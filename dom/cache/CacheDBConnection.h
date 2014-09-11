@@ -7,6 +7,7 @@
 #ifndef mozilla_dom_cache_CacheDBConnection_h
 #define mozilla_dom_cache_CacheDBConnection_h
 
+#include "mozilla/dom/CacheTypes.h"
 #include "nsCOMPtr.h"
 #include "nsISupportsImpl.h"
 
@@ -18,6 +19,11 @@ namespace mozilla {
 namespace dom {
 
 class CacheDBListener;
+class PCacheQueryParams;
+class PCacheRequest;
+class PCacheRequestOrVoid;
+class PCacheResponse;
+class PCacheResponseOrVoid;
 
 class CacheDBConnection MOZ_FINAL
 {

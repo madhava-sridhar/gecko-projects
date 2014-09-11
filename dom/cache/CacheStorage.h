@@ -9,6 +9,7 @@
 
 #include "mozilla/dom/CacheStorageChildListener.h"
 #include "mozilla/dom/CacheTypes.h"
+#include "nsCOMPtr.h"
 #include "nsISupportsImpl.h"
 #include "nsWrapperCache.h"
 #include "nsIIPCBackgroundChildCreateCallback.h"

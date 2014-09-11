@@ -6,12 +6,14 @@
 
 #include "mozilla/dom/CacheParent.h"
 
+#include "mozilla/unused.h"
 #include "mozilla/dom/CacheDBConnection.h"
 #include "nsCOMPtr.h"
 
 namespace mozilla {
 namespace dom {
 
+using mozilla::unused;
 using mozilla::void_t;
 using mozilla::dom::cache::RequestId;
 

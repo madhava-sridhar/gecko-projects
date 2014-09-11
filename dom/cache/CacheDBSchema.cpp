@@ -6,6 +6,14 @@
 
 #include "mozilla/dom/CacheDBSchema.h"
 
+#include "mozilla/dom/CacheDBConnection.h"
+#include "mozilla/dom/PCacheQueryParams.h"
+#include "mozilla/dom/PCacheRequest.h"
+#include "mozilla/dom/PCacheResponse.h"
+#include "mozIStorageConnection.h"
+#include "mozIStorageStatement.h"
+#include "mozStorageHelper.h"
+
 namespace mozilla {
 namespace dom {
 

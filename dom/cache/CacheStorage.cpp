@@ -10,6 +10,7 @@
 #include "mozilla/dom/Cache.h"
 #include "mozilla/dom/CacheStorageBinding.h"
 #include "mozilla/dom/CacheStorageChild.h"
+#include "mozilla/dom/PCacheChild.h"
 #include "mozilla/dom/Promise.h"
 #include "mozilla/ipc/BackgroundChild.h"
 #include "mozilla/ipc/PBackgroundChild.h"

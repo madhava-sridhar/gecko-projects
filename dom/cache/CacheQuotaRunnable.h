@@ -7,8 +7,10 @@
 #ifndef mozilla_dom_CacheQuotaRunnable_h
 #define mozilla_dom_CacheQuotaRunnable_h
 
+#include "nsCOMPtr.h"
 #include "nsIRunnable.h"
 #include "nsISupportsImpl.h"
+#include "nsString.h"
 
 class nsIThread;
 

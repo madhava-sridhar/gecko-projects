@@ -31,6 +31,7 @@ class ErrorResult;
 namespace dom {
 
 class Headers;
+class Promise;
 
 class Response MOZ_FINAL : public nsISupports
                          , public nsWrapperCache

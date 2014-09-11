@@ -17,6 +17,7 @@ namespace dom {
 
 class PCacheQueryParams;
 class PCacheRequest;
+class PCacheRequestOrVoid;
 class PCacheResponse;
 class PCacheResponseOrVoid;
 

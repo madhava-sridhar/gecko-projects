@@ -4,7 +4,9 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "Response.h"
-
+#include "mozilla/dom/Headers.h"
+#include "mozilla/dom/Promise.h"
+#include "nsIDOMFile.h"
 #include "nsISupportsImpl.h"
 #include "nsIURI.h"
 #include "nsPIDOMWindow.h"
@@ -14,8 +16,10 @@
 
 #include "File.h" // workers/File.h
 
+namespace mozilla {
+namespace dom {
+
 using mozilla::ErrorResult;
-using namespace mozilla::dom;
 
 NS_IMPL_CYCLE_COLLECTING_ADDREF(Response)
 NS_IMPL_CYCLE_COLLECTING_RELEASE(Response)
@@ -106,7 +110,7 @@ Response::Blob()
   if (NS_IsMainThread()) {
     rv = nsContentUtils::WrapNative(cx, blob, &val);
   } else {
-    val.setObject(*file::CreateBlob(cx, blob));
+    val.setObject(*workers::file::CreateBlob(cx, blob));
     rv = NS_OK;
   }
 
@@ -168,3 +172,6 @@ Response::BodyUsed()
 {
   return false;
 }
+
+} // namespace dom
+} // namespace mozilla

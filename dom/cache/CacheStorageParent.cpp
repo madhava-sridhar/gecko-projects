@@ -6,6 +6,7 @@
 
 #include "mozilla/dom/CacheStorageParent.h"
 
+#include "mozilla/dom/CacheParent.h"
 #include "mozilla/dom/CacheStorageDBConnection.h"
 #include "mozilla/ipc/PBackgroundParent.h"
 #include "mozilla/unused.h"

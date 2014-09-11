@@ -9,6 +9,7 @@
 #include "mozilla/DebugOnly.h"
 #include "mozilla/dom/quota/OriginOrPatternString.h"
 #include "mozilla/dom/quota/QuotaManager.h"
+#include "nsIFile.h"
 #include "nsThreadUtils.h"
 
 namespace mozilla {
