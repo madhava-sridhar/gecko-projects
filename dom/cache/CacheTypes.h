@@ -28,13 +28,4 @@ static const RequestId INVALID_REQUEST_ID = 0;
 } // namespace dom
 } // namespace mozilla
 
-namespace IPC {
-  template<>
-  struct ParamTraits<mozilla::dom::cache::Namespace> :
-    public ContiguousEnumSerializer<mozilla::dom::cache::Namespace,
-                                    mozilla::dom::cache::DEFAULT_NAMESPACE,
-                                    mozilla::dom::cache::NUMBER_OF_NAMESPACES>
-  {};
-}
-
 #endif // mozilla_dom_CacheTypes_h

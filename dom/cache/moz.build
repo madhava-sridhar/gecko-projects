@@ -11,6 +11,7 @@ EXPORTS.mozilla.dom += [
     'CacheDBConnection.h',
     'CacheDBListener.h',
     'CacheDBSchema.h',
+    'CacheIPCUtils.h',
     'CacheParent.h',
     'CacheQuotaRunnable.h',
     'CacheStorage.h',

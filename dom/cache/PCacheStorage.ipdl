@@ -5,7 +5,7 @@
 include protocol PBackground;
 include protocol PCache;
 
-using mozilla::dom::cache::RequestId from "mozilla/dom/CacheTypes.h";
+using mozilla::dom::cache::RequestId from "mozilla/dom/CacheIPCUtils.h";
 
 namespace mozilla {
 namespace dom {
