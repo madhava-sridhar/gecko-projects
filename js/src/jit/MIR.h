@@ -631,13 +631,13 @@ class MDefinition : public MNode
     // Number of uses of this instruction. This function is only available
     // in DEBUG mode since it requires traversing the list. Most users should
     // use hasUses() or hasOneUse() instead.
-    size_t useCount() const;
+    size_t warmUpCounter() const;
 
     // Number of uses of this instruction (only counting MDefinitions, ignoring
     // MResumePoints). This function is only available in DEBUG mode since it
     // requires traversing the list. Most users should use hasUses() or
     // hasOneUse() instead.
-    size_t defUseCount() const;
+    size_t defWarmUpCounter() const;
 #endif
 
     // Test whether this MDefinition has exactly one use.
@@ -2489,7 +2489,7 @@ class MArrayState : public MVariadicInstruction
   private:
     uint32_t numElements_;
 
-    MArrayState(MDefinition *arr)
+    explicit MArrayState(MDefinition *arr)
     {
         // This instruction is only used as a summary for bailout paths.
         setRecoveredOnBailout();
@@ -4755,7 +4755,7 @@ class MClz
 {
     bool operandIsNeverZero_;
 
-    MClz(MDefinition *num)
+    explicit MClz(MDefinition *num)
       : MUnaryInstruction(num),
         operandIsNeverZero_(false)
     {
@@ -6435,6 +6435,15 @@ class MRegExpReplace
 
     static MRegExpReplace *New(TempAllocator &alloc, MDefinition *string, MDefinition *pattern, MDefinition *replacement) {
         return new(alloc) MRegExpReplace(string, pattern, replacement);
+    }
+
+    bool writeRecoverData(CompactBufferWriter &writer) const;
+    bool canRecoverOnBailout() const {
+        // RegExpReplace will zero the lastIndex field when global flag is set.
+        // So we can only remove this if it's non-global.
+        if (pattern()->isRegExp())
+            return !pattern()->toRegExp()->source()->global();
+        return false;
     }
 };
 
@@ -10623,7 +10632,6 @@ class MFilterTypeSet
       : MUnaryInstruction(def)
     {
         MOZ_ASSERT(!types->unknown());
-        MOZ_ASSERT(def->type() == types->getKnownMIRType());
         setResultType(types->getKnownMIRType());
         setResultTypeSet(types);
     }
@@ -11295,8 +11303,8 @@ class MHasClass
     }
 };
 
-// Increase the usecount of the provided script upon execution and test if
-// the usecount surpasses the threshold. Upon hit it will recompile the
+// Increase the warm-up counter of the provided script upon execution and test if
+// the warm-up counter surpasses the threshold. Upon hit it will recompile the
 // outermost script (i.e. not the inlined script).
 class MRecompileCheck : public MNullaryInstruction
 {
@@ -11313,8 +11321,8 @@ class MRecompileCheck : public MNullaryInstruction
   public:
     INSTRUCTION_HEADER(RecompileCheck);
 
-    static MRecompileCheck *New(TempAllocator &alloc, JSScript *script_, uint32_t useCount) {
-        return new(alloc) MRecompileCheck(script_, useCount);
+    static MRecompileCheck *New(TempAllocator &alloc, JSScript *script_, uint32_t warmUpCounter) {
+        return new(alloc) MRecompileCheck(script_, warmUpCounter);
     }
 
     JSScript *script() const {

@@ -44,13 +44,6 @@ mgjar.generated_sources += [
 ]
 mgjar.javac_flags += ['-Xlint:all']
 
-wsjar = add_java_jar('websockets')
-wsjar.sources += [ thirdparty_source_dir + f for f in [
-    'com/codebutler/android_websockets/HybiParser.java',
-    'com/codebutler/android_websockets/WebSocketClient.java',
-] ]
-wsjar.javac_flags += ['-Xlint:all,-serial']
-
 gujar = add_java_jar('gecko-util')
 gujar.sources += [
     'util/ActivityResultHandler.java',
@@ -194,6 +187,8 @@ gbjar.sources += [
     'GeckoBatteryManager.java',
     'GeckoConnectivityReceiver.java',
     'GeckoEditable.java',
+    'GeckoEditableClient.java',
+    'GeckoEditableListener.java',
     'GeckoEvent.java',
     'GeckoHalDefines.java',
     'GeckoInputConnection.java',
@@ -374,6 +369,7 @@ gbjar.sources += [
     'ReaderModeUtils.java',
     'RemoteTabsExpandableListAdapter.java',
     'Restarter.java',
+    'RestrictedProfiles.java',
     'ScrollAnimator.java',
     'ServiceNotificationClient.java',
     'SessionParser.java',
@@ -508,7 +504,6 @@ gbjar.extra_jars = [
     'nineoldandroids.jar',
     'squareup-picasso.jar',
     'sync-thirdparty.jar',
-    'websockets.jar',
 ]
 
 moz_native_devices_jars = [
@@ -518,6 +513,7 @@ moz_native_devices_jars = [
 ]
 moz_native_devices_sources = [
     'ChromeCast.java',
+    'GeckoMediaPlayer.java',
     'MediaPlayerManager.java',
 ]
 if CONFIG['MOZ_NATIVE_DEVICES']:

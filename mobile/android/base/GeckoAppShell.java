@@ -48,6 +48,7 @@ import org.mozilla.gecko.mozglue.RobocopTarget;
 import org.mozilla.gecko.mozglue.generatorannotations.OptionalGeneratedParameter;
 import org.mozilla.gecko.mozglue.generatorannotations.WrapElementForJNI;
 import org.mozilla.gecko.prompts.PromptService;
+import org.mozilla.gecko.SmsManager;
 import org.mozilla.gecko.util.EventCallback;
 import org.mozilla.gecko.util.GeckoRequest;
 import org.mozilla.gecko.util.HardwareUtils;
@@ -103,7 +104,6 @@ import android.os.Looper;
 import android.os.Message;
 import android.os.MessageQueue;
 import android.os.SystemClock;
-import android.os.UserManager;
 import android.os.Vibrator;
 import android.provider.Settings;
 import android.telephony.TelephonyManager;
@@ -2352,7 +2352,7 @@ public class GeckoAppShell
      */
     @WrapElementForJNI(stubName = "SendMessageWrapper")
     public static void sendMessage(String aNumber, String aMessage, int aRequestId) {
-        if (SmsManager.getInstance() == null) {
+        if (!SmsManager.isEnabled()) {
             return;
         }
 
@@ -2361,7 +2361,7 @@ public class GeckoAppShell
 
     @WrapElementForJNI(stubName = "GetMessageWrapper")
     public static void getMessage(int aMessageId, int aRequestId) {
-        if (SmsManager.getInstance() == null) {
+        if (!SmsManager.isEnabled()) {
             return;
         }
 
@@ -2370,7 +2370,7 @@ public class GeckoAppShell
 
     @WrapElementForJNI(stubName = "DeleteMessageWrapper")
     public static void deleteMessage(int aMessageId, int aRequestId) {
-        if (SmsManager.getInstance() == null) {
+        if (!SmsManager.isEnabled()) {
             return;
         }
 
@@ -2379,7 +2379,7 @@ public class GeckoAppShell
 
     @WrapElementForJNI(stubName = "CreateMessageListWrapper")
     public static void createMessageList(long aStartDate, long aEndDate, String[] aNumbers, int aNumbersCount, String aDelivery, boolean aHasRead, boolean aRead, long aThreadId, boolean aReverse, int aRequestId) {
-        if (SmsManager.getInstance() == null) {
+        if (!SmsManager.isEnabled()) {
             return;
         }
 
@@ -2388,7 +2388,7 @@ public class GeckoAppShell
 
     @WrapElementForJNI(stubName = "GetNextMessageInListWrapper")
     public static void getNextMessageInList(int aListId, int aRequestId) {
-        if (SmsManager.getInstance() == null) {
+        if (!SmsManager.isEnabled()) {
             return;
         }
 
@@ -2397,7 +2397,7 @@ public class GeckoAppShell
 
     @WrapElementForJNI
     public static void clearMessageList(int aListId) {
-        if (SmsManager.getInstance() == null) {
+        if (!SmsManager.isEnabled()) {
             return;
         }
 
@@ -2551,39 +2551,6 @@ public class GeckoAppShell
         }
 
         return "DIRECT";
-    }
-
-    @WrapElementForJNI
-    public static boolean isUserRestricted() {
-        if (Versions.preJBMR2) {
-            return false;
-        }
-
-        UserManager mgr = (UserManager)getContext().getSystemService(Context.USER_SERVICE);
-        Bundle restrictions = mgr.getUserRestrictions();
-
-        return !restrictions.isEmpty();
-    }
-
-    @WrapElementForJNI
-    public static String getUserRestrictions() {
-        if (Versions.preJBMR2) {
-            return "{}";
-        }
-
-        JSONObject json = new JSONObject();
-        UserManager mgr = (UserManager)getContext().getSystemService(Context.USER_SERVICE);
-        Bundle restrictions = mgr.getUserRestrictions();
-
-        Set<String> keys = restrictions.keySet();
-        for (String key : keys) {
-            try {
-                json.put(key, restrictions.get(key));
-            } catch (JSONException e) {
-            }
-        }
-
-        return json.toString();
     }
 
     /* Downloads the uri pointed to by a share intent, and alters the intent to point to the locally stored file.

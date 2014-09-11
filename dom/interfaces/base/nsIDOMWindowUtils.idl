@@ -1681,6 +1681,18 @@ interface nsIDOMWindowUtils : nsISupports {
    AString getOMTAStyle(in nsIDOMElement aElement, in AString aProperty);
 
    /**
+    * Special function that gets a property syncronously from the last composite
+    * that occured.
+    *
+    * Supported properties:
+    *   "overdraw": Report a percentage between 0 and 999 indicate how many times
+    *               each pixels on the destination window have been touched.
+    *   "missed_hwc": Report a bool if hardware composer is supported but was
+    *                 not used for the last frame.
+    */
+   float requestCompositorProperty(in AString aProperty);
+
+   /**
     * If aHandlingInput is true, this informs the event state manager that
     * we're handling user input. Otherwise, this is a no-op (as by default
     * we're not handling user input).

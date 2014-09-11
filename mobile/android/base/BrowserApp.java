@@ -470,7 +470,7 @@ public class BrowserApp extends GeckoApp
         (new UIAsyncTask.WithoutParams<String>(ThreadUtils.getBackgroundHandler()) {
             @Override
             public String doInBackground() {
-                return Favicons.getFaviconURLForPageURL(url);
+                return Favicons.getFaviconURLForPageURL(getContext(), url);
             }
 
             @Override
@@ -942,11 +942,13 @@ public class BrowserApp extends GeckoApp
             }
 
             final OnFaviconLoadedListener listener = new GeckoAppShell.CreateShortcutFaviconLoadedListener(url, title);
-            Favicons.getSizedFavicon(url,
-                    tab.getFaviconURL(),
-                    Integer.MAX_VALUE,
-                    LoadFaviconTask.FLAG_PERSIST,
-                    listener);
+            Favicons.getSizedFavicon(getContext(),
+                                     url,
+                                     tab.getFaviconURL(),
+                                     Integer.MAX_VALUE,
+                                     LoadFaviconTask.FLAG_PERSIST,
+                                     listener);
+
             return true;
         }
 
@@ -1518,13 +1520,12 @@ public class BrowserApp extends GeckoApp
 
     @Override
     public void addTab() {
-        // Always load about:home when opening a new tab.
-        Tabs.getInstance().loadUrl(AboutPages.HOME, Tabs.LOADURL_NEW_TAB);
+        Tabs.getInstance().addTab();
     }
 
     @Override
     public void addPrivateTab() {
-        Tabs.getInstance().loadUrl(AboutPages.PRIVATEBROWSING, Tabs.LOADURL_NEW_TAB | Tabs.LOADURL_PRIVATE);
+        Tabs.getInstance().addPrivateTab();
     }
 
     @Override
@@ -1743,7 +1744,7 @@ public class BrowserApp extends GeckoApp
         final int tabFaviconSize = getResources().getDimensionPixelSize(R.dimen.browser_toolbar_favicon_size);
 
         int flags = (tab.isPrivate() || tab.getErrorType() != Tab.ErrorType.NONE) ? 0 : LoadFaviconTask.FLAG_PERSIST;
-        int id = Favicons.getSizedFavicon(tab.getURL(), tab.getFaviconURL(), tabFaviconSize, flags, sFaviconLoadedListener);
+        int id = Favicons.getSizedFavicon(getContext(), tab.getURL(), tab.getFaviconURL(), tabFaviconSize, flags, sFaviconLoadedListener);
 
         tab.setFaviconLoadId(id);
     }
@@ -2268,8 +2269,13 @@ public class BrowserApp extends GeckoApp
         if (info.parent == 0) {
             destination = menu;
         } else if (info.parent == GECKO_TOOLS_MENU) {
-            MenuItem tools = menu.findItem(R.id.tools);
-            destination = tools != null ? tools.getSubMenu() : menu;
+            // The tools menu only exists in our -v11 resources.
+            if (Versions.feature11Plus) {
+                MenuItem tools = menu.findItem(R.id.tools);
+                destination = tools != null ? tools.getSubMenu() : menu;
+            } else {
+                destination = menu;
+            }
         } else {
             MenuItem parent = menu.findItem(info.parent);
             if (parent == null) {
@@ -2517,8 +2523,11 @@ public class BrowserApp extends GeckoApp
             findInPage.setEnabled(false);
 
             // NOTE: Use MenuUtils.safeSetEnabled because some actions might
-            // be on the BrowserToolbar context menu
-            MenuUtils.safeSetEnabled(aMenu, R.id.page, false);
+            // be on the BrowserToolbar context menu.
+            if (Versions.feature11Plus) {
+                // There is no page menu prior to v11 resources.
+                MenuUtils.safeSetEnabled(aMenu, R.id.page, false);
+            }
             MenuUtils.safeSetEnabled(aMenu, R.id.subscribe, false);
             MenuUtils.safeSetEnabled(aMenu, R.id.add_search_engine, false);
             MenuUtils.safeSetEnabled(aMenu, R.id.site_settings, false);
@@ -2547,16 +2556,18 @@ public class BrowserApp extends GeckoApp
         }
 
         // Disable share menuitem for about:, chrome:, file:, and resource: URIs
-        final boolean inGuestMode = GeckoProfile.get(this).inGuestMode();
-        share.setVisible(!inGuestMode);
-        share.setEnabled(StringUtils.isShareableUrl(url) && !inGuestMode);
-        MenuUtils.safeSetEnabled(aMenu, R.id.apps, !inGuestMode);
-        MenuUtils.safeSetEnabled(aMenu, R.id.addons, !inGuestMode);
-        MenuUtils.safeSetEnabled(aMenu, R.id.downloads, !inGuestMode);
+        final boolean shareEnabled = RestrictedProfiles.isAllowed(RestrictedProfiles.Restriction.DISALLOW_SHARE);
+        share.setVisible(shareEnabled);
+        share.setEnabled(StringUtils.isShareableUrl(url) && shareEnabled);
+        MenuUtils.safeSetEnabled(aMenu, R.id.apps, RestrictedProfiles.isAllowed(RestrictedProfiles.Restriction.DISALLOW_INSTALL_APPS));
+        MenuUtils.safeSetEnabled(aMenu, R.id.addons, RestrictedProfiles.isAllowed(RestrictedProfiles.Restriction.DISALLOW_INSTALL_EXTENSIONS));
+        MenuUtils.safeSetEnabled(aMenu, R.id.downloads, RestrictedProfiles.isAllowed(RestrictedProfiles.Restriction.DISALLOW_DOWNLOADS));
 
         // NOTE: Use MenuUtils.safeSetEnabled because some actions might
-        // be on the BrowserToolbar context menu
-        MenuUtils.safeSetEnabled(aMenu, R.id.page, !isAboutHome(tab));
+        // be on the BrowserToolbar context menu.
+        if (Versions.feature11Plus) {
+            MenuUtils.safeSetEnabled(aMenu, R.id.page, !isAboutHome(tab));
+        }
         MenuUtils.safeSetEnabled(aMenu, R.id.subscribe, tab.hasFeeds());
         MenuUtils.safeSetEnabled(aMenu, R.id.add_search_engine, tab.hasOpenSearch());
         MenuUtils.safeSetEnabled(aMenu, R.id.site_settings, !isAboutHome(tab));
