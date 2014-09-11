@@ -6,8 +6,8 @@
 
 EXPORTS.mozilla.dom += [
     'Fetch.h',
-    # 'FetchBodyStream.h',
     'FetchDriver.h',
+    'FetchIPCUtils.h',
     'Headers.h',
     'InternalRequest.h',
     'InternalResponse.h',
@@ -17,7 +17,6 @@ EXPORTS.mozilla.dom += [
 
 UNIFIED_SOURCES += [
     'Fetch.cpp',
-    # 'FetchBodyStream.cpp',
     'FetchDriver.cpp',
     'Headers.cpp',
     'InternalRequest.cpp',

@@ -8,7 +8,6 @@
 
 #include "mozilla/dom/RequestBinding.h"
 #include "mozilla/dom/UnionTypes.h"
-#include "ipc/IPCMessageUtils.h"
 
 #include "nsWrapperCache.h"
 #include "nsISupportsImpl.h"
@@ -16,19 +15,6 @@
 #include "InternalRequest.h"
 
 class nsPIDOMWindow;
-
-namespace IPC {
-  template<>
-  struct ParamTraits<mozilla::dom::RequestMode> :
-    public ContiguousTypedEnumSerializer<mozilla::dom::RequestMode,
-                                         mozilla::dom::RequestMode::Same_origin,
-                                         mozilla::dom::RequestMode::EndGuard_> {};
-  template<>
-  struct ParamTraits<mozilla::dom::RequestCredentials> :
-    public ContiguousTypedEnumSerializer<mozilla::dom::RequestCredentials,
-                                         mozilla::dom::RequestCredentials::Omit,
-                                         mozilla::dom::RequestCredentials::EndGuard_> {};
-}
 
 namespace mozilla {
 namespace dom {

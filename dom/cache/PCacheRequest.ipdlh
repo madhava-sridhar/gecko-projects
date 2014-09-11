@@ -4,8 +4,8 @@
 
 include PHeaders;
 
-using RequestCredentials from "mozilla/dom/Request.h";
-using RequestMode from "mozilla/dom/Request.h";
+using RequestCredentials from "mozilla/dom/FetchIPCUtils.h";
+using RequestMode from "mozilla/dom/FetchIPCUtils.h";
 using struct mozilla::void_t from "ipc/IPCMessageUtils.h";
 
 namespace mozilla {

@@ -4,7 +4,7 @@
 
 include PHeaders;
 
-using mozilla::dom::ResponseType from "mozilla/dom/Response.h";
+using mozilla::dom::ResponseType from "mozilla/dom/FetchIPCUtils.h";
 using mozilla::void_t from "ipc/IPCMessageUtils.h";
 
 namespace mozilla {
