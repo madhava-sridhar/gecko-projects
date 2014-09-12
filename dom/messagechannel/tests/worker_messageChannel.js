@@ -6,6 +6,10 @@ function is(a, b, msg) {
   ok (a === b, msg);
 }
 
+function info(msg) {
+  postMessage({ type: 'info', message: msg });
+}
+
 function finish() {
   postMessage({ type: 'finish' });
 }
@@ -47,9 +51,38 @@ function sendMessages()
   }
 }
 
+function transferPort()
+{
+  var a = new MessageChannel();
+  ok(a, "MessageChannel created");
+
+  a.port1.postMessage("Hello world!");
+  a.port1.onmessage = function(e) {
+    is(e.data, "Hello world!", "The message is back!");
+    runTests();
+  }
+
+  postMessage({ type: 'port' }, [a.port2]);
+}
+
+function transferPort2()
+{
+  onmessage = function(evt) {
+    is(evt.ports.length, 1, "A port has been received by the worker");
+    evt.ports[0].onmessage = function(e) {
+      is(e.data, 42, "Data is 42!");
+      runTests();
+    }
+  }
+
+  postMessage({ type: 'newport' });
+}
+
 var tests = [
   basic,
   sendMessages,
+  transferPort,
+  transferPort2,
 ];
 
 function runTests() {
@@ -62,6 +95,25 @@ function runTests() {
   t();
 }
 
-onmessage = function() {
-  runTests();
+var subworker;
+onmessage = function(evt) {
+  if (evt.data == 0) {
+    runTests();
+    return;
+  }
+
+  if (!subworker) {
+    info("Create a subworkers. ID: " + evt.data);
+    subworker = new Worker('worker_messageChannel.js');
+    subworker.onmessage = function(e) {
+      info("Proxy a message to the parent.");
+      postMessage(e.data, e.ports);
+    }
+
+    subworker.postMessage(evt.data - 1);
+    return;
+  }
+
+  info("Dispatch a message to the subworker.");
+  subworker.postMessage(evt.data, evt.ports);
 }

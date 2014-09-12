@@ -21,6 +21,7 @@ BEGIN_WORKERS_NAMESPACE
 class Proxy;
 class XMLHttpRequestUpload;
 class WorkerPrivate;
+struct WorkerStructuredCloneClosure;
 
 class XMLHttpRequest MOZ_FINAL: public nsXHREventTarget,
                                 public WorkerFeature
@@ -282,7 +283,7 @@ private:
   void
   SendInternal(const nsAString& aStringBody,
                JSAutoStructuredCloneBuffer&& aBody,
-               nsTArray<nsCOMPtr<nsISupports> >& aClonedObjects,
+               WorkerStructuredCloneClosure& aClosure,
                ErrorResult& aRv);
 };
 

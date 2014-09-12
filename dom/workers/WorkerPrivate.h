@@ -61,6 +61,7 @@ class WorkerControlRunnable;
 class WorkerGlobalScope;
 class WorkerPrivate;
 class WorkerRunnable;
+struct WorkerStructuredCloneClosure;
 
 enum WorkerType
 {
@@ -389,7 +390,7 @@ public:
                                JSContext* aCx,
                                uint64_t aMessagePortSerial,
                                JSAutoStructuredCloneBuffer&& aBuffer,
-                               nsTArray<nsCOMPtr<nsISupports>>& aClonedObjects);
+                               WorkerStructuredCloneClosure& aClosure);
 
   uint64_t
   GetInnerWindowId();

@@ -35,8 +35,7 @@ namespace mozilla {
 namespace dom {
 
 /* TODO
-1. postMessage from main-thread to workers
-2. Blobs
+1. Blobs
 */
 
 class DispatchEventRunnable : public nsCancelableRunnable
