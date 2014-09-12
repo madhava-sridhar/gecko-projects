@@ -111,6 +111,8 @@ public:
 
   // Non WebIDL methods
 
+  void UnshippedEntangle(MessagePort* aEntangledPort);
+
   virtual already_AddRefed<MessagePortIdentifier> CloneAndDisentangle() MOZ_OVERRIDE;
 
   // These methods are useful for MessagePortChild
@@ -123,39 +125,14 @@ public:
 private:
   ~MessagePort();
 
-  void Initialize(const nsID& aUUID, const nsID& aDestinationUUID,
-                  uint32_t aSequenceID, bool mNeutered);
+  enum State {
+    // When a port is created by a MessageChannel it is entangled with the
+    // other. They both run on the same thread, save event loop and the
+    // messages are added to the queues without using PBackground actors.
+    // When one of the port is shipped, the state is changed to
+    // StateEntangling.
+    eStateUnshippedEntangled,
 
-  // Dispatch events from the Message Queue using a nsRunnable.
-  void Dispatch();
-
-  void StartDisentangling();
-  void Disentangle();
-
-  // This method is meant to keep alive the MessagePort when this object is
-  // creating the actor and until the actor is entangled.
-  // We release the object when the port is closed or disentangled or when the
-  // window/worker is closed.
-  void UpdateMustKeepAlive();
-
-  nsRefPtr<DispatchEventRunnable> mDispatchRunnable;
-
-  nsRefPtr<MessagePortChild> mActor;
-
-  nsTArray<nsRefPtr<MessagePortData>> mMessageQueue;
-  nsTArray<nsRefPtr<MessagePortData>> mMessagePendingQueue;
-
-  nsID mUUID;
-  nsID mDestinationUUID;
-  uint32_t mSequenceID;
-
-  bool mMessageQueueEnabled;
-
-  enum {
-    // This is the first state of the MessagePort. At this point we are
-    // creating a PBackground actor, then we wait until we receive the
-    // entangled() message. All the postMessages requests are stored in
-    // mMessagePendingQueue.
     // If the port is closed or cloned when we are in this state, we set the
     // mNextStep. This 'next' operation will be done when entangled() message
     // is received.
@@ -182,7 +159,40 @@ private:
     // Disentangling the port we send all the messages from the mMessageQueue
     // though the actor.
     eStateDisentangled
-  } mState;
+  };
+
+  void Initialize(const nsID& aUUID, const nsID& aDestinationUUID,
+                  uint32_t aSequenceID, bool mNeutered, State aState);
+
+  void ConnectToPBackground();
+
+  // Dispatch events from the Message Queue using a nsRunnable.
+  void Dispatch();
+
+  void StartDisentangling();
+  void Disentangle();
+
+  // This method is meant to keep alive the MessagePort when this object is
+  // creating the actor and until the actor is entangled.
+  // We release the object when the port is closed or disentangled.
+  void UpdateMustKeepAlive();
+
+  nsRefPtr<DispatchEventRunnable> mDispatchRunnable;
+
+  nsRefPtr<MessagePortChild> mActor;
+
+  nsRefPtr<MessagePort> mUnshippedEntangledPort;
+
+  nsTArray<nsRefPtr<MessagePortData>> mMessageQueue;
+  nsTArray<nsRefPtr<MessagePortData>> mMessagePendingQueue;
+
+  nsID mUUID;
+  nsID mDestinationUUID;
+  uint32_t mSequenceID;
+
+  bool mMessageQueueEnabled;
+
+  State mState;
 
   // This 'nextStep' is used when we are waiting to be entangled but the
   // content has called Clone() or Close().

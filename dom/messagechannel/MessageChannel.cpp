@@ -168,6 +168,9 @@ MessageChannel::MessageChannel(nsPIDOMWindow* aWindow,
 
   mPort1 = new MessagePort(mWindow, aPortUUID1, aPortUUID2);
   mPort2 = new MessagePort(mWindow, aPortUUID2, aPortUUID1);
+
+  mPort1->UnshippedEntangle(mPort2);
+  mPort2->UnshippedEntangle(mPort1);
 }
 
 MessageChannel::~MessageChannel()

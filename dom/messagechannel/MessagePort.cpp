@@ -145,6 +145,7 @@ NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN_INHERITED(MessagePort,
     NS_IMPL_CYCLE_COLLECTION_UNLINK(mDispatchRunnable->mPort);
   }
 
+  NS_IMPL_CYCLE_COLLECTION_UNLINK(mUnshippedEntangledPort);
 NS_IMPL_CYCLE_COLLECTION_UNLINK_END
 
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(MessagePort,
@@ -153,6 +154,7 @@ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(MessagePort,
     NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mDispatchRunnable->mPort);
   }
 
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mUnshippedEntangledPort);
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
 
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION_INHERITED(MessagePort)
@@ -197,7 +199,7 @@ MessagePort::MessagePort(nsPIDOMWindow* aWindow, const nsID& aUUID,
   : MessagePortBase(aWindow)
 {
   Initialize(aUUID, aDestinationUUID, 1 /* 0 is an invalid sequence ID */,
-             false /* Neutered */);
+             false /* Neutered */, eStateUnshippedEntangled);
 }
 
 MessagePort::MessagePort(nsPIDOMWindow* aWindow,
@@ -205,28 +207,40 @@ MessagePort::MessagePort(nsPIDOMWindow* aWindow,
   : MessagePortBase(aWindow)
 {
   Initialize(aIdentifier.mUUID, aIdentifier.mDestinationUUID,
-             aIdentifier.mSequenceID, aIdentifier.mNeutered);
+             aIdentifier.mSequenceID, aIdentifier.mNeutered,
+             eStateEntangling);
+}
+
+void
+MessagePort::UnshippedEntangle(MessagePort* aEntangledPort)
+{
+  MOZ_ASSERT(aEntangledPort);
+  MOZ_ASSERT(!mUnshippedEntangledPort);
+
+  mUnshippedEntangledPort = aEntangledPort;
 }
 
 void
 MessagePort::Initialize(const nsID& aUUID,
                         const nsID& aDestinationUUID,
-                        uint32_t aSequenceID, bool mNeutered)
+                        uint32_t aSequenceID, bool mNeutered,
+                        State aState)
 {
   mUUID = aUUID;
   mDestinationUUID = aDestinationUUID;
   mSequenceID = aSequenceID;
   mMessageQueueEnabled = false;
-  mState = eStateEntangling;
+  mState = aState;
   mNextStep = eNextStepNone;
   mIsKeptAlive = false;
   mInnerID = 0;
 
-  if (!mNeutered) {
-    // Register this component to PBackground.
-    mozilla::ipc::BackgroundChild::GetOrCreateForCurrentThread(this);
-  } else {
+  if (mNeutered) {
     mState = eStateDisentangled;
+  } else if (mState == eStateEntangling) {
+    ConnectToPBackground();
+  } else {
+    MOZ_ASSERT(mState == eStateUnshippedEntangled);
   }
 
   // The port has to keep itself alive until it's entangled.
@@ -293,6 +307,14 @@ MessagePort::PostMessageMoz(JSContext* aCx, JS::Handle<JS::Value> aMessage,
     return;
   }
 
+  // If we are unshipped we are connected to the other port on the same thread.
+  if (mState == eStateUnshippedEntangled) {
+    MOZ_ASSERT(mUnshippedEntangledPort);
+    mUnshippedEntangledPort->mMessageQueue.AppendElement(data);
+    mUnshippedEntangledPort->Dispatch();
+    return;
+  }
+
   // Not entangled yet, but already closed.
   if (mNextStep != eNextStepNone) {
     return;
@@ -330,7 +352,7 @@ void
 MessagePort::Dispatch()
 {
   if (!mMessageQueueEnabled || mMessageQueue.IsEmpty() || mDispatchRunnable ||
-      mState > eStateEntangled) {
+      mState > eStateEntangled || mNextStep != eNextStepNone) {
     return;
   }
 
@@ -355,6 +377,20 @@ MessagePort::Close()
 {
   // Not entangled yet, but already closed.
   if (mNextStep != eNextStepNone) {
+    return;
+  }
+
+  if (mState == eStateUnshippedEntangled) {
+    MOZ_ASSERT(mUnshippedEntangledPort);
+
+    // This avoids loops.
+    nsRefPtr<MessagePort> port = mUnshippedEntangledPort;
+    mUnshippedEntangledPort = nullptr;
+
+    mState = eStateDisentangled;
+    port->Close();
+
+    UpdateMustKeepAlive();
     return;
   }
 
@@ -411,7 +447,6 @@ void
 MessagePort::Entangled(const nsTArray<MessagePortMessage>& aMessages)
 {
   MOZ_ASSERT(mState == eStateEntangling);
-  MOZ_ASSERT(mMessageQueue.IsEmpty());
 
   mState = eStateEntangled;
 
@@ -523,6 +558,33 @@ MessagePort::CloneAndDisentangle()
   identifier->mSequenceID = mSequenceID + 1;
   identifier->mNeutered = false;
 
+  // We have to entangle first.
+  if (mState == eStateUnshippedEntangled) {
+    MOZ_ASSERT(mUnshippedEntangledPort);
+    MOZ_ASSERT(mMessagePendingQueue.IsEmpty());
+
+    // Disconnect the entangled port and connect it to PBackground.
+    mUnshippedEntangledPort->ConnectToPBackground();
+    mUnshippedEntangledPort = nullptr;
+
+    // In this case, we don't need to be connected to the PBackground service.
+    if (mMessageQueue.IsEmpty()) {
+      identifier->mSequenceID = mSequenceID;
+
+      // Disentangle can delete this object.
+      nsRefPtr<MessagePort> kungFuDeathGrip(this);
+      mState = eStateDisentangled;
+      UpdateMustKeepAlive();
+      return identifier.forget();
+    }
+
+    // Register this component to PBackground.
+    ConnectToPBackground();
+
+    mNextStep = eNextStepDisentangle;
+    return identifier.forget();
+  }
+
   // Not entangled yet, we have to wait.
   if (mState < eStateEntangled) {
     mNextStep = eNextStepDisentangle;
@@ -548,6 +610,13 @@ MessagePort::Closed()
   }
 
   UpdateMustKeepAlive();
+}
+
+void
+MessagePort::ConnectToPBackground()
+{
+  mozilla::ipc::BackgroundChild::GetOrCreateForCurrentThread(this);
+  mState = eStateEntangling;
 }
 
 void
@@ -581,9 +650,7 @@ MessagePort::UpdateMustKeepAlive()
     return;
   }
 
-  MOZ_ASSERT(mState < eStateDisentangled);
-
-  if (!mIsKeptAlive) {
+  if (mState < eStateDisentangled && !mIsKeptAlive) {
     mIsKeptAlive = true;
     AddRef();
   }
