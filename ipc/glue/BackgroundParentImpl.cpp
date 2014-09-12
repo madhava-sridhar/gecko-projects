@@ -6,6 +6,7 @@
 
 #include "mozilla/Assertions.h"
 #include "mozilla/ipc/BackgroundParent.h"
+#include "mozilla/dom/MessagePortParent.h"
 #include "mozilla/ipc/PBackgroundTestParent.h"
 #include "mozilla/dom/CacheParent.h"
 #include "mozilla/dom/CacheStorageParent.h"
@@ -14,11 +15,8 @@
 #include "nsXULAppAPI.h"
 
 using mozilla::ipc::AssertIsOnBackgroundThread;
-using mozilla::dom::CacheStorageParent;
-using mozilla::dom::PCacheStorageParent;
-using mozilla::dom::CacheParent;
-using mozilla::dom::PCacheParent;
-using mozilla::dom::cache::Namespace;
+
+using namespace mozilla::dom;
 
 namespace {
 
@@ -141,6 +139,26 @@ bool
 BackgroundParentImpl::DeallocPCacheParent(PCacheParent* aActor)
 {
   delete aActor;
+  return true;
+}
+
+PMessagePortParent*
+BackgroundParentImpl::AllocPMessagePortParent()
+{
+  AssertIsInMainProcess();
+  AssertIsOnBackgroundThread();
+
+  return new MessagePortParent();
+}
+
+bool
+BackgroundParentImpl::DeallocPMessagePortParent(PMessagePortParent* aActor)
+{
+  AssertIsInMainProcess();
+  AssertIsOnBackgroundThread();
+  MOZ_ASSERT(aActor);
+
+  delete static_cast<MessagePortParent*>(aActor);
   return true;
 }
 

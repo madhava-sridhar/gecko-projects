@@ -1,0 +1,44 @@
+
+<!DOCTYPE HTML>
+<html>
+<!--
+https://bugzilla.mozilla.org/show_bug.cgi?id=677638
+-->
+<head>
+  <meta charset="utf-8">
+  <title>Test for Bug 677638 - basic support</title>
+  <script type="application/javascript" src="/tests/SimpleTest/SimpleTest.js"></script>
+  <link rel="stylesheet" type="text/css" href="/tests/SimpleTest/test.css"/>
+</head>
+<body>
+<a target="_blank" href="https://bugzilla.mozilla.org/show_bug.cgi?id=677638">Mozilla Bug 677638</a>
+<p id="display"></p>
+<div id="content" style="display: none">
+  <iframe name="x" id="x"></iframe>
+  <iframe name="y" id="y"></iframe>
+</div>
+<pre id="test">
+</pre>
+  <script type="application/javascript">
+
+  function runTest() {
+    var a = new Worker('worker_messageChannel.js');
+    a.onmessage = function(evt) {
+      if (evt.data.type == 'finish') {
+        SimpleTest.finish();
+      } else if (evt.data.type == 'check') {
+        ok(evt.data.check, evt.data.message);
+      } else if (evt.data.type == 'port') {
+        evt.data.port.onmessage = function(e) {
+          evt.data.port.postMessage(e.data);
+        }
+      }
+    }
+    a.postMessage('go');
+  }
+
+  SimpleTest.waitForExplicitFinish();
+  SpecialPowers.pushPrefEnv({"set": [["dom.messageChannel.enabled", true]]}, runTest);
+  </script>
+</body>
+</html>

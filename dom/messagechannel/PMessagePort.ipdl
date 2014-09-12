@@ -1,0 +1,40 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
+include protocol PBackground;
+
+using struct mozilla::SerializedStructuredCloneBuffer from "ipc/IPCMessageUtils.h";
+using struct nsID from "nsID.h";
+
+namespace mozilla {
+namespace dom {
+
+struct MessagePortMessage {
+  SerializedStructuredCloneBuffer data;
+};
+
+// This protocol is used for the MessageChannel/MessagePort API
+protocol PMessagePort
+{
+  manager PBackground;
+
+parent:
+  Entangle(nsID uuid, nsID destinationUuid, uint32_t sequenceId);
+  PostMessages(MessagePortMessage[] messages);
+  Disentangle(MessagePortMessage[] messages);
+  StopSendingData();
+  Close();
+
+child:
+  Entangled(MessagePortMessage[] messages);
+  ReceiveData(MessagePortMessage[] messages);
+  StopSendingDataConfirmed();
+  Closed();
+
+  __delete__();
+};
+
+} // namespace dom
+} // namespace mozilla
+

@@ -31,7 +31,9 @@ public:
   static bool Enabled(JSContext* aCx, JSObject* aGlobal);
 
 public:
-  explicit MessageChannel(nsPIDOMWindow* aWindow);
+  MessageChannel(nsPIDOMWindow* aWindow,
+                 const nsID& aPortUUID1,
+                 const nsID& aPortUUID2);
 
   nsPIDOMWindow*
   GetParentObject() const

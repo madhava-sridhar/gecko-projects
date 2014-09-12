@@ -219,6 +219,7 @@ uint32_t nsContentUtils::sMicroTaskLevel = 0;
 nsTArray< nsCOMPtr<nsIRunnable> >* nsContentUtils::sBlockedScriptRunners = nullptr;
 uint32_t nsContentUtils::sRunnersCountAtFirstBlocker = 0;
 nsIInterfaceRequestor* nsContentUtils::sSameOriginChecker = nullptr;
+nsIUUIDGenerator* nsContentUtils::sUUIDGenerator = nullptr;
 
 bool nsContentUtils::sIsHandlingKeyBoardEvent = false;
 bool nsContentUtils::sAllowXULXBL_for_file = false;
@@ -1819,6 +1820,7 @@ nsContentUtils::Shutdown()
   sModifierSeparator = nullptr;
 
   NS_IF_RELEASE(sSameOriginChecker);
+  NS_IF_RELEASE(sUUIDGenerator);
 }
 
 /**
@@ -6980,4 +6982,24 @@ nsContentUtils::IsJavascriptMIMEType(const nsAString& aMIMEType)
   }
 
   return false;
+}
+
+nsresult
+nsContentUtils::GenerateUUID(nsID& aUUID)
+{
+  nsresult rv;
+
+  if (!sUUIDGenerator) {
+    rv = CallGetService("@mozilla.org/uuid-generator;1", &sUUIDGenerator);
+    if (NS_WARN_IF(NS_FAILED(rv))) {
+      return rv;
+    }
+  }
+
+  rv = sUUIDGenerator->GenerateUUIDInPlace(&aUUID);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+
+  return NS_OK;
 }

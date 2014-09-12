@@ -9,18 +9,29 @@ TEST_DIRS += ['tests']
 EXPORTS.mozilla.dom += [
     'MessageChannel.h',
     'MessagePort.h',
+    'MessagePortChild.h',
     'MessagePortList.h',
+    'MessagePortParent.h',
 ]
 
 SOURCES += [
     'MessageChannel.cpp',
     'MessagePort.cpp',
+    'MessagePortChild.cpp',
+    'MessagePortData.cpp',
     'MessagePortList.cpp',
+    'MessagePortParent.cpp',
+    'MessagePortService.cpp',
+]
+
+IPDL_SOURCES += [
+    'PMessagePort.ipdl',
 ]
 
 LOCAL_INCLUDES += [
     '../base',
     '../events',
+    '../workers',
 ]
 
 include('/ipc/chromium/chromium-config.mozbuild')

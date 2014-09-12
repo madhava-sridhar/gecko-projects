@@ -16,6 +16,7 @@
 
 using mozilla::dom::EventHandlerNonNull;
 using mozilla::dom::MessagePortBase;
+using mozilla::dom::MessagePortIdentifier;
 using mozilla::dom::Optional;
 using mozilla::dom::Sequence;
 using mozilla::dom::AutoNoJSAPI;
@@ -197,8 +198,8 @@ MessagePort::SetOnmessage(EventHandlerNonNull* aCallback)
   Start();
 }
 
-already_AddRefed<MessagePortBase>
-MessagePort::Clone()
+already_AddRefed<MessagePortIdentifier>
+MessagePort::CloneAndDisentangle()
 {
   NS_WARNING("Haven't implemented structured clone for these ports yet!");
   return nullptr;

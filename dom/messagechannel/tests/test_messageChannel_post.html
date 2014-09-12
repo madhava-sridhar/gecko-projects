@@ -45,7 +45,7 @@ https://bugzilla.mozilla.org/show_bug.cgi?id=677638
                   null,
                   undefined,
                   "hello world",
-                  new Blob([]),
+                  // FIXME, this is not supported, yet: new Blob([]),
                   true ];
 
     a.port1.onmessage = function(evt) {

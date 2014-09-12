@@ -50,6 +50,12 @@ protected:
 
   virtual bool
   DeallocPCacheParent(mozilla::dom::PCacheParent* aActor) MOZ_OVERRIDE;
+
+  virtual PMessagePortParent*
+  AllocPMessagePortParent() MOZ_OVERRIDE;
+
+  virtual bool
+  DeallocPMessagePortParent(PMessagePortParent* aActor) MOZ_OVERRIDE;
 };
 
 } // namespace ipc

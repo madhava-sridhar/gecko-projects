@@ -5,6 +5,7 @@
 #include "BackgroundChildImpl.h"
 
 #include "mozilla/dom/CacheChild.h"
+#include "mozilla/dom/MessagePortChild.h"
 #include "mozilla/dom/PCacheStorageChild.h"
 #include "mozilla/ipc/PBackgroundTestChild.h"
 #include "nsTraceRefcnt.h"
@@ -129,6 +130,26 @@ BackgroundChildImpl::DeallocPCacheChild(PCacheChild* aActor)
   // The CacheChild actor is provided to the PBackground manager, but
   // we own the object and must delete it.
   delete aActor;
+  return true;
+}
+
+// -----------------------------------------------------------------------------
+// MessageChannel/MessagePort API
+// -----------------------------------------------------------------------------
+
+dom::PMessagePortChild*
+BackgroundChildImpl::AllocPMessagePortChild()
+{
+  nsRefPtr<dom::MessagePortChild> agent = new dom::MessagePortChild();
+  return agent.forget().take();
+}
+
+bool
+BackgroundChildImpl::DeallocPMessagePortChild(PMessagePortChild* aActor)
+{
+  nsRefPtr<dom::MessagePortChild> child =
+    dont_AddRef(static_cast<dom::MessagePortChild*>(aActor));
+  MOZ_ASSERT(child);
   return true;
 }
 

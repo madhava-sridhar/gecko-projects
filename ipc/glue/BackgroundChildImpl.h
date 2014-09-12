@@ -59,6 +59,12 @@ protected:
 
   virtual bool
   DeallocPCacheChild(mozilla::dom::PCacheChild* aActor) MOZ_OVERRIDE;
+
+  virtual PMessagePortChild*
+  AllocPMessagePortChild() MOZ_OVERRIDE;
+
+  virtual bool
+  DeallocPMessagePortChild(PMessagePortChild* aActor) MOZ_OVERRIDE;
 };
 
 class BackgroundChildImpl::ThreadLocal

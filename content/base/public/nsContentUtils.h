@@ -84,6 +84,7 @@ class nsIStringBundle;
 class nsIStringBundleService;
 class nsISupportsHashKey;
 class nsIURI;
+class nsIUUIDGenerator;
 class nsIWidget;
 class nsIWordBreaker;
 class nsIXPConnect;
@@ -812,6 +813,12 @@ public:
    * @return              the set of flags (0 if sandboxAttr is null)
    */
   static uint32_t ParseSandboxAttributeToFlags(const nsAttrValue* sandboxAttr);
+
+
+  /**
+   * Helper function that generates a UUID.
+   */
+  static nsresult GenerateUUID(nsID& aUUID);
 
 
   /**
@@ -2256,6 +2263,7 @@ private:
   static uint32_t sScriptBlockerCountWhereRunnersPrevented;
 
   static nsIInterfaceRequestor* sSameOriginChecker;
+  static nsIUUIDGenerator* sUUIDGenerator;
 
   static bool sIsHandlingKeyBoardEvent;
   static bool sAllowXULXBL_for_file;
