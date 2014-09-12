@@ -70,8 +70,8 @@ public:
   virtual void
   SetOnmessage(EventHandlerNonNull* aCallback) MOZ_OVERRIDE;
 
-  virtual already_AddRefed<MessagePortIdentifier>
-  CloneAndDisentangle() MOZ_OVERRIDE;
+  virtual bool
+  CloneAndDisentangle(MessagePortIdentifier& aIdentifier) MOZ_OVERRIDE;
 
   bool
   IsClosed() const

@@ -9,6 +9,30 @@
 namespace mozilla {
 namespace dom {
 
+namespace {
+
+void
+FromIdentifierToTransferredPort(const MessagePortIdentifier& aIdentifier,
+                                TransferredMessagePortIdentifier* aPort)
+{
+  aPort->uuid() = aIdentifier.mUUID;
+  aPort->destinationUuid() = aIdentifier.mDestinationUUID;
+  aPort->sequenceId() = aIdentifier.mSequenceID;
+  aPort->neutered() = aIdentifier.mNeutered;
+}
+
+void
+FromTransferredPortToIdentifier(const TransferredMessagePortIdentifier& aPort,
+                                MessagePortIdentifier* aIdentifier)
+{
+  aIdentifier->mUUID = aPort.uuid();
+  aIdentifier->mDestinationUUID = aPort.destinationUuid();
+  aIdentifier->mSequenceID = aPort.sequenceId();
+  aIdentifier->mNeutered = aPort.neutered();
+}
+
+} // anonymous namespace
+
 void
 MessagePortData::FromDataToMessages(
                                const nsTArray<nsRefPtr<MessagePortData>>& aData,
@@ -17,11 +41,10 @@ MessagePortData::FromDataToMessages(
   aArray.Clear();
 
   for (uint32_t i = 0, len = aData.Length(); i < len; ++i) {
-    MessagePortMessage message;
+    MessagePortMessage* message = aArray.AppendElement();
 
-    SerializedStructuredCloneBuffer& buffer = message.data();
-    buffer.data = aData[i]->mBuffer.data();
-    buffer.dataLength = aData[i]->mBuffer.nbytes();
+    SerializedStructuredCloneBuffer& buffer = message->data();
+    aData[i]->mBuffer.steal(&buffer.data, &buffer.dataLength);
 
 #ifdef DEBUG
     {
@@ -30,7 +53,18 @@ MessagePortData::FromDataToMessages(
     }
 #endif
 
-    aArray.AppendElement(message);
+    {
+      const nsTArray<MessagePortIdentifier>& identifiers =
+        aData[i]->mClosure.mMessagePortIdentifiers;
+      nsTArray<TransferredMessagePortIdentifier>& transferredPorts =
+        message->transferredPorts();
+
+      for (uint32_t t = 0; t < identifiers.Length(); ++t) {
+        TransferredMessagePortIdentifier* data =
+          transferredPorts.AppendElement();
+        FromIdentifierToTransferredPort(identifiers[t], data);
+      }
+    }
   }
 }
 
@@ -45,6 +79,18 @@ MessagePortData::FromMessagesToData(const nsTArray<MessagePortMessage>& aArray,
 
     const SerializedStructuredCloneBuffer& buffer = aArray[i].data();
     data->mBuffer.copy(buffer.data, buffer.dataLength);
+
+    {
+      const nsTArray<TransferredMessagePortIdentifier>& transferredPorts =
+        aArray[i].transferredPorts();
+      nsTArray<MessagePortIdentifier>& identifiers =
+        data->mClosure.mMessagePortIdentifiers;
+
+      for (uint32_t t = 0; t < transferredPorts.Length(); ++t) {
+        MessagePortIdentifier* identifier = identifiers.AppendElement();
+        FromTransferredPortToIdentifier(transferredPorts[t], identifier);
+      }
+    }
 
     aData.AppendElement(data);
   }

@@ -7848,6 +7848,18 @@ public:
       return mBuffer;
     }
 
+    const MessagePortIdentifier& GetPortIdentifier(uint64_t aId)
+    {
+      MOZ_ASSERT(aId < mPortIdentifiers.Length());
+      return mPortIdentifiers[aId];
+    }
+
+    MessagePortIdentifier* NewPortIdentifier(uint64_t* aPosition)
+    {
+      *aPosition = mPortIdentifiers.Length();
+      return mPortIdentifiers.AppendElement();
+    }
+
     bool StoreISupports(nsISupports* aSupports)
     {
       mSupportsArray.AppendElement(aSupports);
@@ -7862,6 +7874,7 @@ public:
     nsCOMPtr<nsIPrincipal> mProvidedPrincipal;
     bool mTrustedCaller;
     nsTArray<nsCOMPtr<nsISupports> > mSupportsArray;
+    nsTArray<MessagePortIdentifier> mPortIdentifiers;
 };
 
 namespace {
@@ -7871,8 +7884,8 @@ struct StructuredCloneInfo {
   bool subsumes;
   nsPIDOMWindow* window;
 
-  // This hashtable contains the transferred ports and their clone data.
-  nsRefPtrHashtable<nsRefPtrHashKey<MessagePortBase>, MessagePortIdentifier> portIdentifiers;
+  // This hashtable contains the transferred ports - used to avoid duplicates.
+  nsTHashtable<nsRefPtrHashKey<MessagePortBase>> transferredPorts;
 
   // This array is populated when the ports are cloned.
   nsTArray<nsRefPtr<MessagePortBase>> clonedPorts;
@@ -7977,10 +7990,10 @@ PostMessageReadTransferStructuredClone(JSContext* aCx,
   NS_ASSERTION(scInfo, "Must have scInfo!");
 
   if (tag == SCTAG_DOM_MAP_MESSAGEPORT) {
-    nsRefPtr<MessagePortIdentifier> identifier =
-      dont_AddRef(static_cast<MessagePortIdentifier*>(aData));
-
-    nsRefPtr<MessagePort> port = new MessagePort(scInfo->window, *identifier);
+    MOZ_ASSERT(aData == 0);
+    // aExtraData is the index of this port identifier.
+    nsRefPtr<MessagePort> port =
+      new MessagePort(scInfo->window, scInfo->event->GetPortIdentifier(aExtraData));
     scInfo->clonedPorts.AppendElement(port);
 
     JS::Rooted<JSObject*> obj(aCx, port->WrapObject(aCx));
@@ -8009,19 +8022,24 @@ PostMessageTransferStructuredClone(JSContext* aCx,
   MessagePortBase* port = nullptr;
   nsresult rv = UNWRAP_OBJECT(MessagePort, aObj, port);
   if (NS_SUCCEEDED(rv)) {
-    nsRefPtr<MessagePortIdentifier> identifier;
-    if (scInfo->portIdentifiers.Get(port, getter_AddRefs(identifier))) {
+    if (scInfo->transferredPorts.GetEntry(port)) {
       // No duplicate.
       return false;
     }
 
-    identifier = port->CloneAndDisentangle();
-    scInfo->portIdentifiers.Put(port, identifier);
+    // We use aExtraData to store the index of this new port identifier.
+    MessagePortIdentifier* identifier =
+      scInfo->event->NewPortIdentifier(aExtraData);
+
+    if (!port->CloneAndDisentangle(*identifier)) {
+      return false;
+    }
+
+    scInfo->transferredPorts.PutEntry(port);
 
     *aTag = SCTAG_DOM_MAP_MESSAGEPORT;
     *aOwnership = JS::SCTAG_TMO_CUSTOM;
-    *aContent = identifier.forget().take();
-    *aExtraData = 0;
+    *aContent = nullptr;
 
     return true;
   }
@@ -8033,10 +8051,7 @@ void
 PostMessageFreeTransferStructuredClone(uint32_t aTag, JS::TransferableOwnership aOwnership,
                                        void *aContent, uint64_t aExtraData, void* aClosure)
 {
-  if (aTag == SCTAG_DOM_MAP_MESSAGEPORT) {
-    nsRefPtr<MessagePortIdentifier> identifier =
-      dont_AddRef(static_cast<MessagePortIdentifier*>(aContent));
-  }
+  // Nothing to do.
 }
 
 JSStructuredCloneCallbacks kPostMessageCallbacks = {

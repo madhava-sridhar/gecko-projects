@@ -10,6 +10,7 @@
 #include "nsCOMPtr.h"
 #include "nsTArray.h"
 #include "nsIDOMFile.h"
+#include "mozilla/dom/MessagePort.h"
 
 #include "js/StructuredClone.h"
 
@@ -22,7 +23,8 @@ namespace dom {
 struct
 StructuredCloneClosure
 {
-  nsTArray<nsCOMPtr<nsIDOMBlob> > mBlobs;
+  nsTArray<nsCOMPtr<nsIDOMBlob>> mBlobs;
+  nsTArray<MessagePortIdentifier> mMessagePortIdentifiers;
 };
 
 struct
@@ -48,9 +50,35 @@ ReadStructuredClone(JSContext* aCx, const StructuredCloneData& aData,
 }
 
 bool
+ReadStructuredCloneWithTransfer(JSContext* aCx, uint64_t* aData,
+                                size_t aDataLength,
+                                const StructuredCloneClosure& aClosure,
+                                JS::MutableHandle<JS::Value> aClone,
+                                nsPIDOMWindow* aParentWindow,
+                                nsTArray<nsRefPtr<MessagePort>>& aMessagePorts);
+
+inline bool
+ReadStructuredCloneWithTransfer(JSContext* aCx,
+                                const StructuredCloneData& aData,
+                                JS::MutableHandle<JS::Value> aClone,
+                                nsPIDOMWindow* aParentWindow,
+                                nsTArray<nsRefPtr<MessagePort>>& aMessagePorts)
+{
+  return ReadStructuredCloneWithTransfer(aCx, aData.mData, aData.mDataLength,
+                                         aData.mClosure, aClone, aParentWindow,
+                                         aMessagePorts);
+}
+
+bool
 WriteStructuredClone(JSContext* aCx, JS::Handle<JS::Value> aSource,
                      JSAutoStructuredCloneBuffer& aBuffer,
                      StructuredCloneClosure& aClosure);
+
+bool
+WriteStructuredCloneWithTransfer(JSContext* aCx, JS::Handle<JS::Value> aSource,
+                                 JS::Handle<JS::Value> aTransferable,
+                                 JSAutoStructuredCloneBuffer& aBuffer,
+                                 StructuredCloneClosure& aClosure);
 
 } // namespace dom
 } // namespace mozilla

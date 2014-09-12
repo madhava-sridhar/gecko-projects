@@ -20,11 +20,8 @@ class MessagePortData;
 class MessagePortMessage;
 
 // This class contains all the information to clone a MessagePort object.
-class MessagePortIdentifier
+struct MessagePortIdentifier
 {
-public:
-  NS_INLINE_DECL_THREADSAFE_REFCOUNTING(MessagePortIdentifier)
-
   MessagePortIdentifier()
     : mSequenceID(0)
     , mNeutered(true)
@@ -34,10 +31,6 @@ public:
   nsID mDestinationUUID;
   uint32_t mSequenceID;
   bool mNeutered;
-
-private:
-  ~MessagePortIdentifier()
-  { }
 };
 
 class MessagePortBase : public DOMEventTargetHelper
@@ -70,8 +63,8 @@ public:
   // Duplicate this message port. This method is used by the Structured Clone
   // Algorithm and populates a MessagePortIdentifier object with the information
   // useful to create new MessagePort.
-  virtual already_AddRefed<MessagePortIdentifier>
-  CloneAndDisentangle() = 0;
+  virtual bool
+  CloneAndDisentangle(MessagePortIdentifier& aIdentifier) = 0;
 };
 
 class MessagePortChild;
@@ -113,7 +106,7 @@ public:
 
   void UnshippedEntangle(MessagePort* aEntangledPort);
 
-  virtual already_AddRefed<MessagePortIdentifier> CloneAndDisentangle() MOZ_OVERRIDE;
+  virtual bool CloneAndDisentangle(MessagePortIdentifier& aIdentifier) MOZ_OVERRIDE;
 
   // These methods are useful for MessagePortChild
 

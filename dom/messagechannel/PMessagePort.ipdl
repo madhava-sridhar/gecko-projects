@@ -10,7 +10,16 @@ using struct nsID from "nsID.h";
 namespace mozilla {
 namespace dom {
 
+struct TransferredMessagePortIdentifier
+{
+  nsID uuid;
+  nsID destinationUuid;
+  uint32_t sequenceId;
+  bool neutered;
+};
+
 struct MessagePortMessage {
+  TransferredMessagePortIdentifier[] transferredPorts;
   SerializedStructuredCloneBuffer data;
 };
 

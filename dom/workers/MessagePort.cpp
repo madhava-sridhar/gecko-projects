@@ -198,11 +198,11 @@ MessagePort::SetOnmessage(EventHandlerNonNull* aCallback)
   Start();
 }
 
-already_AddRefed<MessagePortIdentifier>
-MessagePort::CloneAndDisentangle()
+bool
+MessagePort::CloneAndDisentangle(MessagePortIdentifier& aIdentifier)
 {
   NS_WARNING("Haven't implemented structured clone for these ports yet!");
-  return nullptr;
+  return false;
 }
 
 void

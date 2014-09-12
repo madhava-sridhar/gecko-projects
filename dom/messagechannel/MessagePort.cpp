@@ -35,9 +35,8 @@ namespace mozilla {
 namespace dom {
 
 /* TODO
-1. transferable objects
-2. postMessage from main-thread to workers
-3. Blobs
+1. postMessage from main-thread to workers
+2. Blobs
 */
 
 class DispatchEventRunnable : public nsCancelableRunnable
@@ -95,10 +94,16 @@ public:
 
     JSContext* cx = jsapi.cx();
 
+    nsTArray<nsRefPtr<MessagePort>> ports;
+    nsCOMPtr<nsPIDOMWindow> window =
+      do_QueryInterface(mPort->GetParentObject());
+
     JS::Rooted<JS::Value> value(cx, JS::NullValue());
     if (mData->mBuffer.nbytes() &&
-        !ReadStructuredClone(cx, mData->mBuffer.data(), mData->mBuffer.nbytes(),
-                             mData->mClosure, &value)) {
+        !ReadStructuredCloneWithTransfer(cx, mData->mBuffer.data(),
+                                         mData->mBuffer.nbytes(),
+                                         mData->mClosure, &value, window,
+                                         ports)) {
       JS_ClearPendingException(cx);
       return NS_ERROR_FAILURE;
     }
@@ -115,6 +120,15 @@ public:
                             EmptyString(), nullptr);
     event->SetTrusted(true);
     event->SetSource(mPort);
+
+    nsTArray<nsRefPtr<MessagePortBase>> array;
+    for (uint32_t i = 0; i < ports.Length(); ++i) {
+      array.AppendElement(ports[i]);
+    }
+
+    nsRefPtr<MessagePortList> portList =
+      new MessagePortList(static_cast<dom::Event*>(event.get()), array);
+    event->SetPorts(portList);
 
     bool status;
     mPort->DispatchEvent(static_cast<dom::Event*>(event.get()), &status);
@@ -291,7 +305,27 @@ MessagePort::PostMessageMoz(JSContext* aCx, JS::Handle<JS::Value> aMessage,
   // We *must* clone the data here, or the JS::Value could be modified
   // by script
 
-  if (!WriteStructuredClone(aCx, aMessage, data->mBuffer, data->mClosure)) {
+  JS::Rooted<JS::Value> transferable(aCx, JS::UndefinedValue());
+  if (aTransferable.WasPassed()) {
+    const Sequence<JS::Value>& realTransferable = aTransferable.Value();
+
+    // The input sequence only comes from the generated bindings code, which
+    // ensures it is rooted.
+    JS::HandleValueArray elements =
+      JS::HandleValueArray::fromMarkedLocation(realTransferable.Length(),
+                                               realTransferable.Elements());
+
+    JSObject* array =
+      JS_NewArrayObject(aCx, elements);
+    if (!array) {
+      aRv.Throw(NS_ERROR_OUT_OF_MEMORY);
+      return;
+    }
+    transferable.setObject(*array);
+  }
+
+  if (!WriteStructuredCloneWithTransfer(aCx, aMessage, transferable,
+                                        data->mBuffer, data->mClosure)) {
     aRv.Throw(NS_ERROR_DOM_DATA_CLONE_ERR);
     return;
   }
@@ -538,25 +572,25 @@ MessagePort::Disentangle()
   UpdateMustKeepAlive();
 }
 
-already_AddRefed<MessagePortIdentifier>
-MessagePort::CloneAndDisentangle()
+bool
+MessagePort::CloneAndDisentangle(MessagePortIdentifier& aIdentifier)
 {
-  nsRefPtr<MessagePortIdentifier> identifier = new MessagePortIdentifier();
+  aIdentifier.mNeutered = true;
 
   if (mState > eStateEntangled) {
-    return identifier.forget();
+    return true;
   }
 
   // We already have a 'next step'. We have to consider this port as already
   // cloned/closed/disentangled.
   if (mNextStep != eNextStepNone) {
-    return identifier.forget();
+    return true;
   }
 
-  identifier->mUUID = mUUID;
-  identifier->mDestinationUUID = mDestinationUUID;
-  identifier->mSequenceID = mSequenceID + 1;
-  identifier->mNeutered = false;
+  aIdentifier.mUUID = mUUID;
+  aIdentifier.mDestinationUUID = mDestinationUUID;
+  aIdentifier.mSequenceID = mSequenceID + 1;
+  aIdentifier.mNeutered = false;
 
   // We have to entangle first.
   if (mState == eStateUnshippedEntangled) {
@@ -569,30 +603,30 @@ MessagePort::CloneAndDisentangle()
 
     // In this case, we don't need to be connected to the PBackground service.
     if (mMessageQueue.IsEmpty()) {
-      identifier->mSequenceID = mSequenceID;
+      aIdentifier.mSequenceID = mSequenceID;
 
       // Disentangle can delete this object.
       nsRefPtr<MessagePort> kungFuDeathGrip(this);
       mState = eStateDisentangled;
       UpdateMustKeepAlive();
-      return identifier.forget();
+      return true;
     }
 
     // Register this component to PBackground.
     ConnectToPBackground();
 
     mNextStep = eNextStepDisentangle;
-    return identifier.forget();
+    return true;
   }
 
   // Not entangled yet, we have to wait.
   if (mState < eStateEntangled) {
     mNextStep = eNextStepDisentangle;
-    return identifier.forget();
+    return true;
   }
 
   StartDisentangling();
-  return identifier.forget();
+  return true;
 }
 
 void
