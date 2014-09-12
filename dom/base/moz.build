@@ -54,9 +54,6 @@ EXPORTS.mozilla.dom += [
     'DOMException.h',
     'DOMRequest.h',
     'ImageEncoder.h',
-    'MessageChannel.h',
-    'MessagePort.h',
-    'MessagePortList.h',
     'NameSpaceConstants.h',
     'Navigator.h',
     'NodeInfo.h',
@@ -81,8 +78,6 @@ UNIFIED_SOURCES += [
     'DOMException.cpp',
     'DOMRequest.cpp',
     'ImageEncoder.cpp',
-    'MessageChannel.cpp',
-    'MessagePortList.cpp',
     'Navigator.cpp',
     'NodeInfo.cpp',
     'nsContentPermissionHelper.cpp',
@@ -117,8 +112,6 @@ UNIFIED_SOURCES += [
 
 # these files couldn't be in UNIFIED_SOURCES for now for reasons given below:
 SOURCES += [
-    # this file doesn't like windows.h
-    'MessagePort.cpp',
     # this file doesn't like windows.h
     'nsDOMWindowUtils.cpp',
     # This file has a #error "Never include windows.h in this file!"
