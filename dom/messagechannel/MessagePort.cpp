@@ -22,6 +22,7 @@
 #include "nsPresContext.h"
 #include "ScriptSettings.h"
 
+#include "nsIBFCacheEntry.h"
 #include "nsIDocument.h"
 #include "nsIDOMFile.h"
 #include "nsIDOMFileList.h"
@@ -353,6 +354,8 @@ MessagePort::PostMessageMoz(JSContext* aCx, JS::Handle<JS::Value> aMessage,
     return;
   }
 
+  RemoveDocFromBFCache();
+
   // Not entangled yet.
   if (mState != eStateEntangled) {
     mMessagePendingQueue.AppendElement(data);
@@ -533,6 +536,8 @@ MessagePort::MessagesReceived(const nsTArray<MessagePortMessage>& aMessages)
   MOZ_ASSERT(mState == eStateEntangled || mState == eStateDisentangling);
   MOZ_ASSERT(mNextStep == eNextStepNone);
   MOZ_ASSERT(mMessagePendingQueue.IsEmpty());
+
+  RemoveDocFromBFCache();
 
   nsTArray<nsRefPtr<MessagePortData>> data;
   MessagePortData::FromMessagesToData(aMessages, data);
@@ -723,6 +728,29 @@ MessagePort::Observe(nsISupports* aSubject, const char* aTopic,
   }
 
   return NS_OK;
+}
+
+void
+MessagePort::RemoveDocFromBFCache()
+{
+  if (!NS_IsMainThread()) {
+    return;
+  }
+
+  nsPIDOMWindow* window = GetOwner();
+  MOZ_ASSERT(window);
+
+  nsIDocument* doc = window->GetExtantDoc();
+  if (!doc) {
+    return;
+  }
+
+  nsIBFCacheEntry* bfCacheEntry = doc->GetBFCacheEntry();
+  if (!bfCacheEntry) {
+    return;
+  }
+
+  bfCacheEntry->RemoveFromBFCacheSync();
 }
 
 } // namespace dom

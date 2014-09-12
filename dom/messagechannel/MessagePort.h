@@ -165,6 +165,8 @@ private:
   void StartDisentangling();
   void Disentangle();
 
+  void RemoveDocFromBFCache();
+
   // This method is meant to keep alive the MessagePort when this object is
   // creating the actor and until the actor is entangled.
   // We release the object when the port is closed or disentangled.
