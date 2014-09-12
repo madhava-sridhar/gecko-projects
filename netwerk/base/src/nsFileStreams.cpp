@@ -563,6 +563,8 @@ nsFileInputStream::Serialize(InputStreamParams& aParams,
         NS_ASSERTION(dbgFD->IsValid(), "Sending an invalid file descriptor!");
 
         params.fileDescriptorIndex() = aFileDescriptors.Length() - 1;
+
+        Close();
     } else {
         NS_WARNING("This file has not been opened (or could not be opened). "
                    "Sending an invalid file descriptor to the other process!");
