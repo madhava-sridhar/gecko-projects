@@ -2235,7 +2235,7 @@ nsDisplayBackgroundImage::GetInsideClipRegion(nsDisplayItem* aItem,
       clipRect = frame->GetPaddingRect() - frame->GetPosition() + aItem->ToReferenceFrame();
       break;
     case NS_STYLE_BG_CLIP_CONTENT:
-      clipRect = frame->GetContentRect() - frame->GetPosition() + aItem->ToReferenceFrame();
+      clipRect = frame->GetContentRectRelativeToSelf() + aItem->ToReferenceFrame();
       break;
     default:
       NS_NOTREACHED("Unknown clip type");
@@ -3031,11 +3031,11 @@ nsDisplayBoxShadowInner::Paint(nsDisplayListBuilder* aBuilder,
     js::ProfileEntry::Category::GRAPHICS);
 
   for (uint32_t i = 0; i < rects.Length(); ++i) {
-    aCtx->PushState();
+    aCtx->ThebesContext()->Save();
     aCtx->IntersectClip(rects[i]);
     nsCSSRendering::PaintBoxShadowInner(presContext, *aCtx, mFrame,
                                         borderRect, rects[i]);
-    aCtx->PopState();
+    aCtx->ThebesContext()->Restore();
   }
 }
 

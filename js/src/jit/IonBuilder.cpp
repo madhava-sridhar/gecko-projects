@@ -658,11 +658,11 @@ IonBuilder::build()
     } else if (info().executionMode() == SequentialExecution && script()->hasIonScript()) {
         JitSpew(JitSpew_Scripts, "Recompiling script %s:%d (%p) (warmup-counter=%d, level=%s)",
                 script()->filename(), script()->lineno(), (void *)script(),
-                (int)script()->getWarmUpCounter(), OptimizationLevelString(optimizationInfo().level()));
+                (int)script()->getWarmUpCount(), OptimizationLevelString(optimizationInfo().level()));
     } else {
         JitSpew(JitSpew_Scripts, "Compiling script %s:%d (%p) (warmup-counter=%d, level=%s)",
                 script()->filename(), script()->lineno(), (void *)script(),
-                (int)script()->getWarmUpCounter(), OptimizationLevelString(optimizationInfo().level()));
+                (int)script()->getWarmUpCount(), OptimizationLevelString(optimizationInfo().level()));
     }
 #endif
 
@@ -1277,11 +1277,11 @@ IonBuilder::traverseBytecode()
         // adding any SSA uses and doesn't call setImplicitlyUsedUnchecked on it.
         Vector<MDefinition *, 4, IonAllocPolicy> popped(alloc());
         Vector<size_t, 4, IonAllocPolicy> poppedUses(alloc());
-        unsigned nuses = GetWarmUpCounter(script_, script_->pcToOffset(pc));
+        unsigned nuses = GetUseCount(script_, script_->pcToOffset(pc));
 
         for (unsigned i = 0; i < nuses; i++) {
             MDefinition *def = current->peek(-int32_t(i + 1));
-            if (!popped.append(def) || !poppedUses.append(def->defWarmUpCounter()))
+            if (!popped.append(def) || !poppedUses.append(def->defUseCount()))
                 return false;
         }
 #endif
@@ -1328,7 +1328,7 @@ IonBuilder::traverseBytecode()
                           // for more details.
                           popped[i]->isNewDerivedTypedObject() ||
 
-                          popped[i]->defWarmUpCounter() > poppedUses[i]);
+                          popped[i]->defUseCount() > poppedUses[i]);
                 break;
             }
         }
@@ -3229,8 +3229,8 @@ IonBuilder::improveTypesAtCompare(MCompare *ins, bool trueBranch, MTest *test)
     }
 
     types::TemporaryTypeSet *type =
-        type = subject->resultTypeSet()->filter(alloc_->lifoAlloc(), filtersUndefined,
-                                                                     filtersNull);
+        subject->resultTypeSet()->filter(alloc_->lifoAlloc(), filtersUndefined,
+                                                              filtersNull);
     if (!type)
         return false;
 
@@ -4367,7 +4367,7 @@ IonBuilder::makeInliningDecision(JSFunction *target, CallInfo &callInfo)
         // Callee must have been called a few times to have somewhat stable
         // type information, except for definite properties analysis,
         // as the caller has not run yet.
-        if (targetScript->getWarmUpCounter() < optimizationInfo().inliningWarmUpThreshold() &&
+        if (targetScript->getWarmUpCount() < optimizationInfo().inliningWarmUpThreshold() &&
             !targetScript->baselineScript()->ionCompiledOrInlined() &&
             info().executionMode() != DefinitePropertiesAnalysis)
         {
@@ -5733,11 +5733,24 @@ bool
 IonBuilder::jsop_newarray(uint32_t count)
 {
     JSObject *templateObject = inspector->getTemplateObject(pc);
-    if (!templateObject)
+    if (!templateObject) {
+        if (info().executionMode() == ArgumentsUsageAnalysis) {
+            MUnknownValue *unknown = MUnknownValue::New(alloc());
+            current->add(unknown);
+            current->push(unknown);
+            return true;
+        }
         return abort("No template object for NEWARRAY");
+    }
 
     JS_ASSERT(templateObject->is<ArrayObject>());
     if (templateObject->type()->unknownProperties()) {
+        if (info().executionMode() == ArgumentsUsageAnalysis) {
+            MUnknownValue *unknown = MUnknownValue::New(alloc());
+            current->add(unknown);
+            current->push(unknown);
+            return true;
+        }
         // We will get confused in jsop_initelem_array if we can't find the
         // type object being initialized.
         return abort("New array has unknown properties");
@@ -5788,8 +5801,15 @@ bool
 IonBuilder::jsop_newobject()
 {
     JSObject *templateObject = inspector->getTemplateObject(pc);
-    if (!templateObject)
+    if (!templateObject) {
+        if (info().executionMode() == ArgumentsUsageAnalysis) {
+            MUnknownValue *unknown = MUnknownValue::New(alloc());
+            current->add(unknown);
+            current->push(unknown);
+            return true;
+        }
         return abort("No template object for NEWOBJECT");
+    }
 
     JS_ASSERT(templateObject->is<JSObject>());
     MConstant *templateConst = MConstant::NewConstraintlessObject(alloc(), templateObject);
@@ -5829,15 +5849,19 @@ IonBuilder::jsop_initelem_array()
     // intializer, and that arrays are marked as non-packed when writing holes
     // to them during initialization.
     bool needStub = false;
-    types::TypeObjectKey *initializer = obj->resultTypeSet()->getObject(0);
-    if (value->type() == MIRType_MagicHole) {
-        if (!initializer->hasFlags(constraints(), types::OBJECT_FLAG_NON_PACKED))
-            needStub = true;
-    } else if (!initializer->unknownProperties()) {
-        types::HeapTypeSetKey elemTypes = initializer->property(JSID_VOID);
-        if (!TypeSetIncludes(elemTypes.maybeTypes(), value->type(), value->resultTypeSet())) {
-            elemTypes.freeze(constraints());
-            needStub = true;
+    if (obj->isUnknownValue()) {
+        needStub = true;
+    } else {
+        types::TypeObjectKey *initializer = obj->resultTypeSet()->getObject(0);
+        if (value->type() == MIRType_MagicHole) {
+            if (!initializer->hasFlags(constraints(), types::OBJECT_FLAG_NON_PACKED))
+                needStub = true;
+        } else if (!initializer->unknownProperties()) {
+            types::HeapTypeSetKey elemTypes = initializer->property(JSID_VOID);
+            if (!TypeSetIncludes(elemTypes.maybeTypes(), value->type(), value->resultTypeSet())) {
+                elemTypes.freeze(constraints());
+                needStub = true;
+            }
         }
     }
 
@@ -5898,20 +5922,28 @@ IonBuilder::jsop_initprop(PropertyName *name)
     MDefinition *value = current->pop();
     MDefinition *obj = current->peek(-1);
 
-    JSObject *templateObject = obj->toNewObject()->templateObject();
+    JSObject *templateObject = nullptr;
+    Shape *shape = nullptr;
 
-    Shape *shape = templateObject->lastProperty()->searchLinear(NameToId(name));
+    bool useSlowPath = false;
 
-    if (!shape) {
-        // JSOP_NEWINIT becomes an MNewObject without preconfigured properties.
-        MInitProp *init = MInitProp::New(alloc(), obj, name, value);
-        current->add(init);
-        return resumeAfter(init);
+    if (obj->isUnknownValue()) {
+        useSlowPath = true;
+    } else {
+        templateObject = obj->toNewObject()->templateObject();
+        shape = templateObject->lastProperty()->searchLinear(NameToId(name));
+
+        if (!shape)
+            useSlowPath = true;
     }
 
     if (PropertyWriteNeedsTypeBarrier(alloc(), constraints(), current,
                                       &obj, name, &value, /* canModify = */ true))
     {
+        useSlowPath = true;
+    }
+
+    if (useSlowPath) {
         // JSOP_NEWINIT becomes an MNewObject without preconfigured properties.
         MInitProp *init = MInitProp::New(alloc(), obj, name, value);
         current->add(init);
@@ -6381,12 +6413,12 @@ IonBuilder::insertRecompileCheck()
     while (topBuilder->callerBuilder_)
         topBuilder = topBuilder->callerBuilder_;
 
-    // Add recompile check to recompile when the warm-up counter reaches the
+    // Add recompile check to recompile when the warm-up count reaches the
     // threshold of the next optimization level.
     OptimizationLevel nextLevel = js_IonOptimizations.nextLevel(curLevel);
     const OptimizationInfo *info = js_IonOptimizations.get(nextLevel);
-    uint32_t warmUpCounter = info->compilerWarmUpThreshold(topBuilder->script());
-    current->add(MRecompileCheck::New(alloc(), topBuilder->script(), warmUpCounter));
+    uint32_t warmUpThreshold = info->compilerWarmUpThreshold(topBuilder->script());
+    current->add(MRecompileCheck::New(alloc(), topBuilder->script(), warmUpThreshold));
 }
 
 JSObject *
