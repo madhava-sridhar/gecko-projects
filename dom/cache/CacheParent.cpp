@@ -21,8 +21,9 @@ CacheParent::CacheParent(const nsACString& aOrigin,
                          const nsACString& aBaseDomain)
   : mOrigin(aOrigin)
   , mBaseDomain(aBaseDomain)
-  , mDBConnection(CacheDBConnection::Create(this, aOrigin, aBaseDomain))
 {
+  mDBConnection = CacheDBConnection::Create(this, aOrigin, aBaseDomain);
+  MOZ_ASSERT(mDBConnection);
 }
 
 CacheParent::CacheParent(const nsACString& aOrigin,
@@ -30,9 +31,10 @@ CacheParent::CacheParent(const nsACString& aOrigin,
                          const nsID& aExistingCacheId)
   : mOrigin(aOrigin)
   , mBaseDomain(aBaseDomain)
-  , mDBConnection(new CacheDBConnection(this, aOrigin, aBaseDomain,
-                                        aExistingCacheId))
 {
+  mDBConnection = new CacheDBConnection(this, aOrigin, aBaseDomain,
+                                        aExistingCacheId);
+  MOZ_ASSERT(mDBConnection);
 }
 
 CacheParent::~CacheParent()

@@ -23,9 +23,9 @@ CacheStorageParent::CacheStorageParent(cache::Namespace aNamespace,
   : mNamespace(aNamespace)
   , mOrigin(aOrigin)
   , mBaseDomain(aBaseDomain)
-  , mDBConnection(new CacheStorageDBConnection(this, mNamespace, mOrigin,
-                                               mBaseDomain))
 {
+  mDBConnection = new CacheStorageDBConnection(this, mNamespace, mOrigin,
+                                               mBaseDomain);
   MOZ_ASSERT(mDBConnection);
 }
 
