@@ -333,13 +333,8 @@ DrawTargetD2D::GetImageForSurface(SourceSurface *aSurface)
 {
   RefPtr<ID2D1Image> image;
 
-  if (aSurface->GetType() == SurfaceType::D2D1_1_IMAGE) {
-    image = static_cast<SourceSurfaceD2D1*>(aSurface)->GetImage();
-    static_cast<SourceSurfaceD2D1*>(aSurface)->EnsureIndependent();
-  } else {
-    Rect r(Point(), Size(aSurface->GetSize()));
-    image = GetBitmapForSurface(aSurface, r);
-  }
+  Rect r(Point(), Size(aSurface->GetSize()));
+  image = GetBitmapForSurface(aSurface, r);
 
   return image;
 }
@@ -2366,11 +2361,29 @@ DrawTargetD2D::CreateBrushForPattern(const Pattern &aPattern, Float aAlpha)
     RefPtr<ID2D1Bitmap> bitmap;
 
     Matrix mat = pat->mMatrix;
+
+    RefPtr<SourceSurface> source = pat->mSurface;
+
+    if (!pat->mSamplingRect.IsEmpty()) {
+      IntRect samplingRect = pat->mSamplingRect;
+
+      RefPtr<DrawTargetD2D> dt = new DrawTargetD2D();
+      if (!dt->Init(samplingRect.Size(),
+                    source->GetFormat())) {
+        MOZ_ASSERT("Invalid sampling rect size!");
+        return nullptr;
+      }
+
+      dt->CopySurface(source, samplingRect, IntPoint());
+      source = dt->Snapshot();
+
+      mat.PreTranslate(samplingRect.x, samplingRect.y);
+    }
     
-    switch (pat->mSurface->GetType()) {
+    switch (source->GetType()) {
     case SurfaceType::D2D1_BITMAP:
       {
-        SourceSurfaceD2D *surf = static_cast<SourceSurfaceD2D*>(pat->mSurface.get());
+        SourceSurfaceD2D *surf = static_cast<SourceSurfaceD2D*>(source.get());
 
         bitmap = surf->mBitmap;
 
@@ -2382,14 +2395,14 @@ DrawTargetD2D::CreateBrushForPattern(const Pattern &aPattern, Float aAlpha)
     case SurfaceType::D2D1_DRAWTARGET:
       {
         SourceSurfaceD2DTarget *surf =
-          static_cast<SourceSurfaceD2DTarget*>(pat->mSurface.get());
+          static_cast<SourceSurfaceD2DTarget*>(source.get());
         bitmap = surf->GetBitmap(mRT);
         AddDependencyOnSource(surf);
       }
       break;
     default:
       {
-        RefPtr<DataSourceSurface> dataSurf = pat->mSurface->GetDataSurface();
+        RefPtr<DataSourceSurface> dataSurf = source->GetDataSurface();
         if (!dataSurf) {
           gfxWarning() << "Invalid surface type.";
           return nullptr;
@@ -2674,6 +2687,7 @@ DrawTargetD2D::factory()
 #else
   options.debugLevel = D2D1_DEBUG_LEVEL_NONE;
 #endif
+  //options.debugLevel = D2D1_DEBUG_LEVEL_INFORMATION;
 
   HRESULT hr = createD2DFactory(D2D1_FACTORY_TYPE_MULTI_THREADED,
                                 __uuidof(ID2D1Factory),

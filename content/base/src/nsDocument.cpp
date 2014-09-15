@@ -149,12 +149,6 @@
 #include "nsHtml5TreeOpExecutor.h"
 #include "mozilla/dom/HTMLLinkElement.h"
 #include "mozilla/dom/HTMLMediaElement.h"
-#ifdef MOZ_MEDIA_NAVIGATOR
-#include "mozilla/MediaManager.h"
-#endif // MOZ_MEDIA_NAVIGATOR
-#ifdef MOZ_WEBRTC
-#include "IPeerConnection.h"
-#endif // MOZ_WEBRTC
 
 #include "mozAutoDocUpdate.h"
 #include "nsGlobalWindow.h"
@@ -173,6 +167,7 @@
 #include "nsCSPService.h"
 #include "nsHTMLStyleSheet.h"
 #include "nsHTMLCSSStyleSheet.h"
+#include "SVGAttrAnimationRuleProcessor.h"
 #include "mozilla/dom/DOMImplementation.h"
 #include "mozilla/dom/ShadowRoot.h"
 #include "mozilla/dom/Comment.h"
@@ -227,6 +222,13 @@
 #include "mozilla/dom/DOMStringList.h"
 #include "nsWindowMemoryReporter.h"
 #include "nsLocation.h"
+
+#ifdef MOZ_MEDIA_NAVIGATOR
+#include "mozilla/MediaManager.h"
+#endif // MOZ_MEDIA_NAVIGATOR
+#ifdef MOZ_WEBRTC
+#include "IPeerConnection.h"
+#endif // MOZ_WEBRTC
 
 using namespace mozilla;
 using namespace mozilla::dom;
@@ -2445,6 +2447,11 @@ nsDocument::ResetStylesheetsToURI(nsIURI* aURI)
 
   if (!mStyleAttrStyleSheet) {
     mStyleAttrStyleSheet = new nsHTMLCSSStyleSheet();
+  }
+
+  if (!mSVGAttrAnimationRuleProcessor) {
+    mSVGAttrAnimationRuleProcessor =
+      new mozilla::SVGAttrAnimationRuleProcessor();
   }
 
   // Now set up our style sets
@@ -12158,6 +12165,12 @@ nsDocument::DocAddSizeOfExcludingThis(nsWindowSizes* aWindowSizes) const
   aWindowSizes->mDOMOtherSize +=
     mAttrStyleSheet ?
     mAttrStyleSheet->DOMSizeOfIncludingThis(aWindowSizes->mMallocSizeOf) :
+    0;
+
+  aWindowSizes->mDOMOtherSize +=
+    mSVGAttrAnimationRuleProcessor ?
+    mSVGAttrAnimationRuleProcessor->DOMSizeOfIncludingThis(
+                                      aWindowSizes->mMallocSizeOf) :
     0;
 
   aWindowSizes->mDOMOtherSize +=
