@@ -1179,10 +1179,6 @@ ParentImpl::Alloc(ContentParent* aContent,
     MOZ_ASSERT(sLiveActorCount);
     sLiveActorCount--;
 
-    if (!sLiveActorCount) {
-      ShutdownBackgroundThread();
-    }
-
     return nullptr;
   }
 
@@ -1294,7 +1290,7 @@ ParentImpl::ShutdownBackgroundThread()
   AssertIsInMainProcess();
   AssertIsOnMainThread();
   MOZ_ASSERT_IF(!sBackgroundThread, !sBackgroundThreadMessageLoop);
-  MOZ_ASSERT_IF(!sShutdownHasStarted, !sLiveActorCount);
+  MOZ_ASSERT(sShutdownHasStarted);
   MOZ_ASSERT_IF(!sBackgroundThread, !sLiveActorCount);
   MOZ_ASSERT_IF(sBackgroundThread, sShutdownTimer);
 
@@ -1312,51 +1308,44 @@ ParentImpl::ShutdownBackgroundThread()
       }
     }
 
-    if (sShutdownHasStarted) {
-      sPendingCallbacks = nullptr;
-    }
+    sPendingCallbacks = nullptr;
   }
 
-  nsCOMPtr<nsITimer> shutdownTimer;
-  if (sShutdownHasStarted) {
-    shutdownTimer = sShutdownTimer.get();
-    sShutdownTimer = nullptr;
-  }
+  nsCOMPtr<nsITimer> shutdownTimer = sShutdownTimer.get();
+  sShutdownTimer = nullptr;
 
   if (sBackgroundThread) {
     nsCOMPtr<nsIThread> thread = sBackgroundThread.get();
-    nsAutoPtr<nsTArray<ParentImpl*>> liveActors(sLiveActorsForBackgroundThread);
-
     sBackgroundThread = nullptr;
+
+    nsAutoPtr<nsTArray<ParentImpl*>> liveActors(sLiveActorsForBackgroundThread);
     sLiveActorsForBackgroundThread = nullptr;
+
     sBackgroundThreadMessageLoop = nullptr;
 
     MOZ_ASSERT_IF(!sShutdownHasStarted, !sLiveActorCount);
 
-    if (sShutdownHasStarted) {
-      // If this is final shutdown then we need to spin the event loop while we
-      // wait for all the actors to be cleaned up. We also set a timeout to
-      // force-kill any hanging actors.
+    if (sLiveActorCount) {
+      // We need to spin the event loop while we wait for all the actors to be
+      // cleaned up. We also set a timeout to force-kill any hanging actors.
+      TimerCallbackClosure closure(thread, liveActors);
 
-      if (sLiveActorCount) {
-        TimerCallbackClosure closure(thread, liveActors);
+      MOZ_ALWAYS_TRUE(NS_SUCCEEDED(
+        shutdownTimer->InitWithFuncCallback(&ShutdownTimerCallback,
+                                            &closure,
+                                            kShutdownTimerDelayMS,
+                                            nsITimer::TYPE_ONE_SHOT)));
 
-        MOZ_ALWAYS_TRUE(NS_SUCCEEDED(
-          shutdownTimer->InitWithFuncCallback(&ShutdownTimerCallback, &closure,
-                                              kShutdownTimerDelayMS,
-                                              nsITimer::TYPE_ONE_SHOT)));
+      nsIThread* currentThread = NS_GetCurrentThread();
+      MOZ_ASSERT(currentThread);
 
-        nsIThread* currentThread = NS_GetCurrentThread();
-        MOZ_ASSERT(currentThread);
-
-        while (sLiveActorCount) {
-          NS_ProcessNextEvent(currentThread);
-        }
-
-        MOZ_ASSERT(liveActors->IsEmpty());
-
-        MOZ_ALWAYS_TRUE(NS_SUCCEEDED(shutdownTimer->Cancel()));
+      while (sLiveActorCount) {
+        NS_ProcessNextEvent(currentThread);
       }
+
+      MOZ_ASSERT(liveActors->IsEmpty());
+
+      MOZ_ALWAYS_TRUE(NS_SUCCEEDED(shutdownTimer->Cancel()));
     }
 
     // Dispatch this runnable to unregister the thread from the profiler.
@@ -1433,10 +1422,6 @@ ParentImpl::MainThreadActorDestroy()
 
   MOZ_ASSERT(sLiveActorCount);
   sLiveActorCount--;
-
-  if (!sLiveActorCount) {
-    ShutdownBackgroundThread();
-  }
 
   // This may be the last reference!
   Release();
