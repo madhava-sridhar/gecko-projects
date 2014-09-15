@@ -77,10 +77,7 @@ public:
 
   NS_INLINE_DECL_REFCOUNTING(TransactionThreadPool)
 
-  void ShutdownAndSpin();
-  void ShutdownAsync();
-
-  bool HasCompletedShutdown() const;
+  void Shutdown();
 
   void AssertIsOnOwningThread() const
 #ifdef DEBUG

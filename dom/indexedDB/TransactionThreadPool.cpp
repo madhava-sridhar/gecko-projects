@@ -235,7 +235,8 @@ TransactionThreadPool::TransactionThreadPool()
 TransactionThreadPool::~TransactionThreadPool()
 {
   AssertIsOnOwningThread();
-  MOZ_ASSERT(HasCompletedShutdown());
+  MOZ_ASSERT(mShutdownRequested);
+  MOZ_ASSERT(mShutdownComplete);
 }
 
 #ifdef DEBUG
@@ -262,7 +263,7 @@ TransactionThreadPool::Create()
   threadPool->AssertIsOnOwningThread();
 
   if (NS_WARN_IF(NS_FAILED(threadPool->Init()))) {
-    threadPool->ShutdownAsync();
+    threadPool->CleanupAsync();
     return nullptr;
   }
 
@@ -270,32 +271,11 @@ TransactionThreadPool::Create()
 }
 
 void
-TransactionThreadPool::ShutdownAndSpin()
+TransactionThreadPool::Shutdown()
 {
   AssertIsOnOwningThread();
-
-  if (mShutdownComplete) {
-    return;
-  }
-
-  ShutdownAsync();
-
-  nsIThread* currentThread = NS_GetCurrentThread();
-  MOZ_ASSERT(currentThread);
-
-  while (!mShutdownComplete) {
-    MOZ_ALWAYS_TRUE(NS_ProcessNextEvent(currentThread));
-  }
-}
-
-void
-TransactionThreadPool::ShutdownAsync()
-{
-  AssertIsOnOwningThread();
-
-  if (mShutdownRequested) {
-    return;
-  }
+  MOZ_ASSERT(!mShutdownRequested);
+  MOZ_ASSERT(!mShutdownComplete);
 
   mShutdownRequested = true;
 
@@ -308,17 +288,18 @@ TransactionThreadPool::ShutdownAsync()
   }
 
   if (!mTransactionsInProgress.Count()) {
-    CleanupAsync();
+    Cleanup();
+
+    MOZ_ASSERT(mShutdownComplete);
+    return;
   }
-}
 
-bool
-TransactionThreadPool::HasCompletedShutdown() const
-{
-  AssertIsOnOwningThread();
-  MOZ_ASSERT_IF(mShutdownComplete, mShutdownRequested);
+  nsIThread* currentThread = NS_GetCurrentThread();
+  MOZ_ASSERT(currentThread);
 
-  return mShutdownComplete;
+  while (!mShutdownComplete) {
+    MOZ_ALWAYS_TRUE(NS_ProcessNextEvent(currentThread));
+  }
 }
 
 // static
@@ -421,10 +402,17 @@ void
 TransactionThreadPool::CleanupAsync()
 {
   AssertIsOnOwningThread();
-  MOZ_ASSERT(mThreadPool);
-  MOZ_ASSERT(mShutdownRequested);
   MOZ_ASSERT(!mShutdownComplete);
   MOZ_ASSERT(!mTransactionsInProgress.Count());
+
+  mShutdownRequested = true;
+
+  if (!mThreadPool) {
+    MOZ_ASSERT(mCompleteCallbacks.IsEmpty());
+
+    mShutdownComplete = true;
+    return;
+  }
 
   nsCOMPtr<nsIRunnable> runnable =
     NS_NewRunnableMethod(this, &TransactionThreadPool::Cleanup);
