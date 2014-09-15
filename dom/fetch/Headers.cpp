@@ -7,6 +7,7 @@
 #include "mozilla/dom/Headers.h"
 
 #include "mozilla/ErrorResult.h"
+#include "mozilla/dom/PHeaders.h"
 #include "mozilla/dom/UnionTypes.h"
 #include "mozilla/dom/WorkerPrivate.h"
 #include "mozilla/Preferences.h"
@@ -29,6 +30,18 @@ NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(Headers)
   NS_WRAPPERCACHE_INTERFACE_MAP_ENTRY
   NS_INTERFACE_MAP_ENTRY(nsISupports)
 NS_INTERFACE_MAP_END
+
+Headers::Headers(nsISupports* aOwner, const nsTArray<PHeadersEntry>& aHeaders,
+                 HeadersGuardEnum aGuard)
+  : mOwner(aOwner)
+  , mGuard(aGuard)
+{
+  SetIsDOMBinding();
+
+  for (uint32_t i = 0; i < aHeaders.Length(); ++i) {
+    mList.AppendElement(Entry(aHeaders[i].name(), aHeaders[i].value()));
+  }
+}
 
 // static
 bool
@@ -94,8 +107,7 @@ Headers::Append(const nsACString& aName, const nsACString& aValue,
     return;
   }
 
-  mHeaders.list().AppendElement(PHeadersEntry(nsCString(lowerName),
-                                              nsCString(aValue)));
+  mList.AppendElement(Entry(lowerName, aValue));
 }
 
 void
@@ -109,9 +121,9 @@ Headers::Delete(const nsACString& aName, ErrorResult& aRv)
   }
 
   // remove in reverse order to minimize copying
-  for (int32_t i = mHeaders.list().Length() - 1; i >= 0; --i) {
-    if (lowerName == mHeaders.list()[i].name()) {
-      mHeaders.list().RemoveElementAt(i);
+  for (int32_t i = mList.Length() - 1; i >= 0; --i) {
+    if (lowerName == mList[i].mName) {
+      mList.RemoveElementAt(i);
     }
   }
 }
@@ -126,9 +138,9 @@ Headers::Get(const nsACString& aName, nsCString& aValue, ErrorResult& aRv) const
     return;
   }
 
-  for (uint32_t i = 0; i < mHeaders.list().Length(); ++i) {
-    if (lowerName == mHeaders.list()[i].name()) {
-      aValue = mHeaders.list()[i].value();
+  for (uint32_t i = 0; i < mList.Length(); ++i) {
+    if (lowerName == mList[i].mName) {
+      aValue = mList[i].mValue;
       return;
     }
   }
@@ -149,9 +161,9 @@ Headers::GetAll(const nsACString& aName, nsTArray<nsCString>& aResults,
   }
 
   aResults.SetLength(0);
-  for (uint32_t i = 0; i < mHeaders.list().Length(); ++i) {
-    if (lowerName == mHeaders.list()[i].name()) {
-      aResults.AppendElement(mHeaders.list()[i].value());
+  for (uint32_t i = 0; i < mList.Length(); ++i) {
+    if (lowerName == mList[i].mName) {
+      aResults.AppendElement(mList[i].mValue);
     }
   }
 }
@@ -166,8 +178,8 @@ Headers::Has(const nsACString& aName, ErrorResult& aRv) const
     return false;
   }
 
-  for (uint32_t i = 0; i < mHeaders.list().Length(); ++i) {
-    if (lowerName == mHeaders.list()[i].name()) {
+  for (uint32_t i = 0; i < mList.Length(); ++i) {
+    if (lowerName == mList[i].mName) {
       return true;
     }
   }
@@ -187,19 +199,19 @@ Headers::Set(const nsACString& aName, const nsACString& aValue, ErrorResult& aRv
   int32_t firstIndex = INT32_MAX;
 
   // remove in reverse order to minimize copying
-  for (int32_t i = mHeaders.list().Length() - 1; i >= 0; --i) {
-    if (lowerName == mHeaders.list()[i].name()) {
+  for (int32_t i = mList.Length() - 1; i >= 0; --i) {
+    if (lowerName == mList[i].mName) {
       firstIndex = std::min(firstIndex, i);
-      mHeaders.list().RemoveElementAt(i);
+      mList.RemoveElementAt(i);
     }
   }
 
   if (firstIndex < INT32_MAX) {
-    PHeadersEntry* entry = mHeaders.list().InsertElementAt(firstIndex);
-    entry->name() = lowerName;
-    entry->value() = aValue;
+    Entry* entry = mList.InsertElementAt(firstIndex);
+    entry->mName = lowerName;
+    entry->mValue = aValue;
   } else {
-    mHeaders.list().AppendElement(PHeadersEntry(nsCString(lowerName), nsCString(aValue)));
+    mList.AppendElement(Entry(lowerName, aValue));
   }
 }
 
@@ -210,7 +222,7 @@ Headers::SetGuard(HeadersGuardEnum aGuard, ErrorResult& aRv)
   // this prior to populating the Headers object.  Allow setting immutable
   // late, though, as that is pretty much required to have a  useful, immutable
   // headers object.
-  if (aGuard != HeadersGuardEnum::Immutable && mHeaders.list().Length() > 0) {
+  if (aGuard != HeadersGuardEnum::Immutable && mList.Length() > 0) {
     aRv.Throw(NS_ERROR_FAILURE);
   }
   mGuard = aGuard;
@@ -220,6 +232,14 @@ JSObject*
 Headers::WrapObject(JSContext* aCx)
 {
   return mozilla::dom::HeadersBinding::Wrap(aCx, this);
+}
+
+void
+Headers::GetPHeaders(nsTArray<PHeadersEntry>& aPHeadersOut) const
+{
+  for (uint32_t i = 0; i < mList.Length(); ++i) {
+    aPHeadersOut.AppendElement(PHeadersEntry(mList[i].mName, mList[i].mValue));
+  }
 }
 
 Headers::~Headers()
@@ -300,7 +320,7 @@ Headers::IsForbiddenResponseHeader(const nsACString& aName) const
 void
 Headers::Fill(const Headers& aInit, ErrorResult&)
 {
-  mHeaders.list() = aInit.mHeaders.list();
+  mList = aInit.mList;
 }
 
 void

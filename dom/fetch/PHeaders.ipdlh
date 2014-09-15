@@ -11,10 +11,5 @@ struct PHeadersEntry
   nsCString value;
 };
 
-struct PHeaders
-{
-  PHeadersEntry[] list;
-};
-
 } // namespace dom
 } // namespace mozilla

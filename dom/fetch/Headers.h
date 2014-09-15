@@ -8,7 +8,7 @@
 #define mozilla_dom_Headers_h
 
 #include "mozilla/dom/HeadersBinding.h"
-#include "mozilla/dom/PHeaders.h"
+#include "nsTArray.h"
 #include "nsWrapperCache.h"
 
 class nsPIDOMWindow;
@@ -21,6 +21,7 @@ namespace dom {
 
 template<typename T> class MozMap;
 class HeadersOrByteStringSequenceSequenceOrByteStringMozMap;
+class PHeadersEntry;
 
 class Headers MOZ_FINAL : public nsISupports
                         , public nsWrapperCache
@@ -29,9 +30,22 @@ class Headers MOZ_FINAL : public nsISupports
   NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS(Headers)
 
 private:
+  struct Entry
+  {
+    Entry(const nsACString& aName, const nsACString& aValue)
+      : mName(aName)
+      , mValue(aValue)
+    { }
+
+    Entry() { }
+
+    nsCString mName;
+    nsCString mValue;
+  };
+
   nsRefPtr<nsISupports> mOwner;
   HeadersGuardEnum mGuard;
-  PHeaders mHeaders;
+  nsTArray<Entry> mList;
 
 public:
   explicit Headers(nsISupports* aOwner, HeadersGuardEnum aGuard = HeadersGuardEnum::Default)
@@ -41,13 +55,8 @@ public:
     SetIsDOMBinding();
   }
 
-  Headers(nsISupports* aOwner, const PHeaders& aHeaders,
-          HeadersGuardEnum aGuard = HeadersGuardEnum::Default)
-    : mOwner(aOwner)
-    , mGuard(aGuard)
-    , mHeaders(aHeaders)
-  {
-  }
+  Headers(nsISupports* aOwner, const nsTArray<PHeadersEntry>& aHeaders,
+          HeadersGuardEnum aGuard = HeadersGuardEnum::Default);
 
   static bool PrefEnabled(JSContext* cx, JSObject* obj);
 
@@ -72,7 +81,7 @@ public:
   virtual JSObject* WrapObject(JSContext* aCx);
   nsISupports* GetParentObject() const { return mOwner; }
 
-  PHeaders& AsPHeaders() { return mHeaders; }
+  void GetPHeaders(nsTArray<PHeadersEntry>& aPHeadersOut) const;
 
 private:
   Headers(const Headers& aOther) MOZ_DELETE;

@@ -80,7 +80,7 @@ ToPCacheRequest(PCacheRequest& aOut, const Request& aIn)
   }
   nsRefPtr<Headers> headers = aIn.Headers_();
   MOZ_ASSERT(headers);
-  aOut.headers() = headers->AsPHeaders();
+  headers->GetPHeaders(aOut.headers());
   aOut.mode() = aIn.Mode();
   aOut.credentials() = aIn.Credentials();
 }
@@ -134,7 +134,7 @@ ToPCacheResponse(PCacheResponse& aOut, const Response& aIn)
   aIn.GetStatusText(aOut.statusText());
   nsRefPtr<Headers> headers = aIn.Headers_();
   MOZ_ASSERT(headers);
-  aOut.headers() = headers->AsPHeaders();
+  headers->GetPHeaders(aOut.headers());
 }
 
 static void

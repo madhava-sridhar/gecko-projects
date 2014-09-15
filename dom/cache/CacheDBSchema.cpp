@@ -53,7 +53,7 @@ CacheDBSchema::Create(mozIStorageConnection* aConn)
 {
   MOZ_ASSERT(aConn);
 
-  nsresult rv = aConn->ExecuteSimpleSQL(NS_LITERAL_CSTRING(
+  nsAutoCString pragmas(
 #if defined(MOZ_WIDGET_ANDROID) || defined(MOZ_WIDGET_GONK)
     // Switch the journaling mode to TRUNCATE to avoid changing the directory
     // structure at the conclusion of every transaction for devices with slower
@@ -61,7 +61,9 @@ CacheDBSchema::Create(mozIStorageConnection* aConn)
     "PRAGMA journal_mode = TRUNCATE; "
 #endif
     "PRAGMA foreign_keys = ON; "
-  ));
+  );
+
+  nsresult rv = aConn->ExecuteSimpleSQL(pragmas);
   if (NS_FAILED(rv)) { return rv; }
 
   int32_t schemaVersion;
@@ -604,7 +606,7 @@ CacheDBSchema::InsertEntry(mozIStorageConnection* aConnection,
   ), getter_AddRefs(statement));
   if (NS_FAILED(rv)) { return rv; }
 
-  const nsTArray<PHeadersEntry>& requestHeaders = aRequest.headers().list();
+  const nsTArray<PHeadersEntry>& requestHeaders = aRequest.headers();
   for (uint32_t i = 0; i < requestHeaders.Length(); ++i) {
     rv = statement->BindUTF8StringParameter(0, requestHeaders[i].name());
     if (NS_FAILED(rv)) { return rv; }
@@ -628,7 +630,7 @@ CacheDBSchema::InsertEntry(mozIStorageConnection* aConnection,
   ), getter_AddRefs(statement));
   if (NS_FAILED(rv)) { return rv; }
 
-  const nsTArray<PHeadersEntry>& responseHeaders = aResponse.headers().list();
+  const nsTArray<PHeadersEntry>& responseHeaders = aResponse.headers();
   for (uint32_t i = 0; i < responseHeaders.Length(); ++i) {
     rv = statement->BindUTF8StringParameter(0, responseHeaders[i].name());
     if (NS_FAILED(rv)) { return rv; }
@@ -696,7 +698,7 @@ CacheDBSchema::ReadResponse(mozIStorageConnection* aConnection,
   if (NS_FAILED(rv)) { return rv; }
 
   while(NS_SUCCEEDED(statement->ExecuteStep(&hasMoreData)) && hasMoreData) {
-    PHeadersEntry* header = aResponseOut.headers().list().AppendElement();
+    PHeadersEntry* header = aResponseOut.headers().AppendElement();
     if (!header) { return NS_ERROR_OUT_OF_MEMORY; }
 
     rv = statement->GetUTF8String(0, header->name());

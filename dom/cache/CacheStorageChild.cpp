@@ -8,7 +8,9 @@
 
 #include "mozilla/dom/CacheStorageChildListener.h"
 
-using mozilla::dom::CacheStorageChild;
+namespace mozilla {
+namespace dom {
+
 using mozilla::dom::cache::RequestId;
 
 CacheStorageChild::CacheStorageChild(CacheStorageChildListener& aListener)
@@ -87,3 +89,6 @@ CacheStorageChild::ClearListener()
   MOZ_ASSERT(mListener);
   mListener = nullptr;
 }
+
+} // namespace dom
+} // namespace mozilla

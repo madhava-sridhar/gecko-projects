@@ -15,7 +15,7 @@ struct PCacheResponse
   ResponseType type;
   uint32_t status;
   nsCString statusText;
-  PHeaders headers;
+  PHeadersEntry[] headers;
 };
 
 union PCacheResponseOrVoid
