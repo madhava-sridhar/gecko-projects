@@ -8,7 +8,7 @@
  */
 
 [Constructor(optional HTMLFormElement form),
- Exposed=(Window,Worker)]
+ Exposed=(Window)]
 interface FormData {
   void append(DOMString name, Blob value, optional DOMString filename);
   void append(DOMString name, DOMString value);

@@ -16,7 +16,7 @@ interface Body {
   readonly attribute boolean bodyUsed;
   Promise<ArrayBuffer> arrayBuffer();
   Promise<Blob> blob();
-  Promise<FormData> formData();
+  // Promise<FormData> formData();
   // Promise<JSON>
   Promise<object> json();
   Promise<ScalarValueString> text();
