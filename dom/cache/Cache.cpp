@@ -390,14 +390,12 @@ Cache::PrefEnabled(JSContext* aCx, JSObject* aObj)
   // In the long term we want to support Cache on main-thread, so
   // allow it to be exposed there via a pref.
   if (NS_IsMainThread()) {
-    static bool sPrefCacheInit = false;
-    static bool sPrefEnabled = false;
-    if (sPrefCacheInit) {
-      return sPrefEnabled;
+    bool enabled;
+    nsresult rv = Preferences::GetBool("dom.window-caches.enabled", &enabled);
+    if (NS_FAILED(rv)) {
+      return false;
     }
-    Preferences::AddBoolVarCache(&sPrefEnabled, "dom.window-caches.enabled");
-    sPrefCacheInit = true;
-    return sPrefEnabled;
+    return enabled;
   }
 
   WorkerPrivate* workerPrivate = GetWorkerPrivateFromContext(aCx);

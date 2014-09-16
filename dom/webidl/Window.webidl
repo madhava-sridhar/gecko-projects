@@ -375,6 +375,8 @@ partial interface Window {
   [ChromeOnly, Throws] readonly attribute object? __content;
 
   [Throws, ChromeOnly] any getInterface(IID iid);
+
+  [Pref="dom.window-caches.enabled"] readonly attribute CacheStorage caches;
 };
 
 Window implements TouchEventHandlers;
@@ -462,9 +464,6 @@ interface ChromeWindow {
    */
   [Throws, Func="nsGlobalWindow::IsChromeWindow"]
   void beginWindowMove(Event mouseDownEvent, optional Element? panel = null);
-
-  [Pref="dom.window-caches.enabled"]
-  readonly attribute CacheStorage caches;
 };
 
 Window implements ChromeWindow;
