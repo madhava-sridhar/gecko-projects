@@ -12,9 +12,9 @@
 <iframe id="frame"></iframe>
 <script class="testbody" type="text/javascript">
 SimpleTest.waitForExplicitFinish();
-SpecialPowers.setBoolPref("dom.window-caches.enabled", true);
 SpecialPowers.pushPrefEnv({
   "set": [["dom.window-caches.enabled", true],
+          ["dom.worker-caches.enabled", true],
           ["dom.fetch.enabled", true]]
 }, function() {
   var frame = document.getElementById("frame");
@@ -28,7 +28,6 @@ SpecialPowers.pushPrefEnv({
       frame.parentNode.removeChild(frame);
       frame = null;
 
-      SpecialPowers.setBoolPref("dom.worker-caches.enabled", true);
       workerTestExec("test_cache.js");
     });
 
