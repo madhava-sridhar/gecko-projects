@@ -26,9 +26,9 @@ sync protocol PBlob
 both:
   __delete__();
 
+parent:
   PBlobStream();
 
-parent:
   ResolveMystery(ResolveMysteryParams params);
 
   // Use only for testing!

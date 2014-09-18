@@ -172,9 +172,6 @@ private:
   AllocPBlobStreamChild() MOZ_OVERRIDE;
 
   virtual bool
-  RecvPBlobStreamConstructor(PBlobStreamChild* aActor) MOZ_OVERRIDE;
-
-  virtual bool
   DeallocPBlobStreamChild(PBlobStreamChild* aActor) MOZ_OVERRIDE;
 };
 
