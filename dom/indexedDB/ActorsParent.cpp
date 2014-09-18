@@ -5741,10 +5741,13 @@ Factory::Create(const OptionalWindowId& aOptionalWindowId)
   // If this is the first instance then we need to do some initialization.
   if (!sFactoryInstanceCount) {
     if (!gTransactionThreadPool) {
-      gTransactionThreadPool = TransactionThreadPool::Create().take();
-      if (NS_WARN_IF(!gTransactionThreadPool)) {
+      nsRefPtr<TransactionThreadPool> threadPool =
+        TransactionThreadPool::Create();
+      if (NS_WARN_IF(!threadPool)) {
         return nullptr;
       }
+
+      gTransactionThreadPool = threadPool;
     }
 
     MOZ_ASSERT(!gLiveDatabaseHashtable);
