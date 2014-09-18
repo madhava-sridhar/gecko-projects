@@ -518,7 +518,7 @@ public:
   virtual nsIInputStream*
   BlockAndGetInternalStream()
   {
-    AssertIsOnOwningThread();
+    MOZ_ASSERT(!IsOnOwningThread());
 
     nsresult rv = BlockAndWaitForStream();
     NS_ENSURE_SUCCESS(rv, nullptr);
