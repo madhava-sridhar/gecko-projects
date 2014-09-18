@@ -267,7 +267,7 @@ public:
     }
   }
 
-protected:
+private:
   ~BlobInputStreamTether()
   {
     MOZ_ASSERT(mStream);
@@ -301,7 +301,7 @@ class RemoteInputStream MOZ_FINAL
 {
   Monitor mMonitor;
   nsCOMPtr<nsIInputStream> mStream;
-  nsRefPtr<DOMFileImpl> mSourceBlob;
+  nsRefPtr<DOMFileImpl> mBlobImpl;
   nsCOMPtr<nsIEventTarget> mEventTarget;
   nsISeekableStream* mWeakSeekableStream;
   ActorType mOrigin;
@@ -309,14 +309,14 @@ class RemoteInputStream MOZ_FINAL
 public:
   NS_DECL_THREADSAFE_ISUPPORTS
 
-  RemoteInputStream(DOMFileImpl* aSourceBlob, ActorType aOrigin)
+  RemoteInputStream(DOMFileImpl* aBlobImpl, ActorType aOrigin)
     : mMonitor("RemoteInputStream.mMonitor")
-    , mSourceBlob(aSourceBlob)
+    , mBlobImpl(aBlobImpl)
     , mWeakSeekableStream(nullptr)
     , mOrigin(aOrigin)
   {
     MOZ_ASSERT(IsOnOwningThread());
-    MOZ_ASSERT(aSourceBlob);
+    MOZ_ASSERT(aBlobImpl);
 
     if (!NS_IsMainThread()) {
       mEventTarget = do_GetCurrentThread();
@@ -340,7 +340,7 @@ public:
   Serialize(InputStreamParams& aParams,
             FileDescriptorArray& /* aFileDescriptors */)
   {
-    nsCOMPtr<nsIRemoteBlob> remote = do_QueryInterface(mSourceBlob);
+    nsCOMPtr<nsIRemoteBlob> remote = do_QueryInterface(mBlobImpl);
     MOZ_ASSERT(remote);
 
     if (mOrigin == ParentActor) {
@@ -398,8 +398,8 @@ public:
     nsresult rv = BlockAndWaitForStream();
     NS_ENSURE_SUCCESS(rv, rv);
 
-    nsRefPtr<DOMFileImpl> sourceBlob;
-    mSourceBlob.swap(sourceBlob);
+    nsRefPtr<DOMFileImpl> blobImpl;
+    mBlobImpl.swap(blobImpl);
 
     rv = mStream->Close();
     NS_ENSURE_SUCCESS(rv, rv);
@@ -535,8 +535,8 @@ private:
       mStream = nullptr;
       mWeakSeekableStream = nullptr;
 
-      if (mSourceBlob) {
-        ReleaseOnTarget(mSourceBlob, mEventTarget);
+      if (mBlobImpl) {
+        ReleaseOnTarget(mBlobImpl, mEventTarget);
       }
     }
   }
@@ -1033,20 +1033,20 @@ class BlobChild::RemoteBlobImpl::StreamHelper MOZ_FINAL
 {
   Monitor mMonitor;
   BlobChild* mActor;
-  nsRefPtr<DOMFileImpl> mSourceBlob;
+  nsRefPtr<DOMFileImpl> mBlobImpl;
   nsRefPtr<RemoteInputStream> mInputStream;
   bool mDone;
 
 public:
-  StreamHelper(BlobChild* aActor, DOMFileImplBase* aSourceBlob)
+  StreamHelper(BlobChild* aActor, DOMFileImpl* aBlobImpl)
     : mMonitor("BlobChild::RemoteBlobImpl::StreamHelper::mMonitor")
     , mActor(aActor)
-    , mSourceBlob(aSourceBlob)
+    , mBlobImpl(aBlobImpl)
     , mDone(false)
   {
     // This may be created on any thread.
     MOZ_ASSERT(aActor);
-    MOZ_ASSERT(aSourceBlob);
+    MOZ_ASSERT(aBlobImpl);
   }
 
   nsresult
@@ -1110,7 +1110,7 @@ private:
     MOZ_ASSERT(!mDone);
 
     nsRefPtr<RemoteInputStream> stream =
-      new RemoteInputStream(mSourceBlob, ChildActor);
+      new RemoteInputStream(mBlobImpl, ChildActor);
 
     InputStreamChild* streamActor = new InputStreamChild(stream);
     if (mActor->SendPBlobStreamConstructor(streamActor)) {
