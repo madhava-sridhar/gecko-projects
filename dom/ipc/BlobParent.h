@@ -158,12 +158,9 @@ private:
   void
   CommonInit(const ParentBlobConstructorParams& aParams);
 
+  template <class ParentManagerType>
   static BlobParent*
-  CreateFromParams(nsIContentParent* aManager,
-                   const ParentBlobConstructorParams& aParams);
-
-  static BlobParent*
-  CreateFromParams(PBackgroundParent* aManager,
+  CreateFromParams(ParentManagerType* aManager,
                    const ParentBlobConstructorParams& aParams);
 
   template <class ParentManagerType>
