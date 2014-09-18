@@ -229,8 +229,7 @@ loop.panel = (function(_, mozL10n) {
     },
 
     _isSignedIn: function() {
-      // XXX to be implemented - bug 979845
-      return !!navigator.mozLoop.loggedInToFxA;
+      return !!navigator.mozLoop.userProfile;
     },
 
     render: function() {
@@ -449,6 +448,19 @@ loop.panel = (function(_, mozL10n) {
   });
 
   /**
+   * FxA user identity (guest/authenticated) component.
+   */
+  var UserIdentity = React.createClass({displayName: 'UserIdentity',
+    render: function() {
+      return (
+        React.DOM.p({className: "user-identity"}, 
+          this.props.displayName
+        )
+      );
+    }
+  });
+
+  /**
    * Panel view.
    */
   var PanelView = React.createClass({displayName: 'PanelView',
@@ -456,12 +468,32 @@ loop.panel = (function(_, mozL10n) {
       notifications: React.PropTypes.object.isRequired,
       client: React.PropTypes.object.isRequired,
       // Mostly used for UI components showcase and unit tests
-      callUrl: React.PropTypes.string
+      callUrl: React.PropTypes.string,
+      userProfile: React.PropTypes.object,
+    },
+
+    getInitialState: function() {
+      return {
+        userProfile: this.props.userProfile || navigator.mozLoop.userProfile,
+      };
+    },
+
+    _onAuthStatusChange: function() {
+      this.setState({userProfile: navigator.mozLoop.userProfile});
+    },
+
+    componentDidMount: function() {
+      window.addEventListener("LoopStatusChanged", this._onAuthStatusChange);
+    },
+
+    componentWillUnmount: function() {
+      window.removeEventListener("LoopStatusChanged", this._onAuthStatusChange);
     },
 
     render: function() {
       var NotificationListView = sharedViews.NotificationListView;
-
+      var displayName = this.state.userProfile && this.state.userProfile.email ||
+                        __("display_name_guest");
       return (
         React.DOM.div(null, 
           NotificationListView({notifications: this.props.notifications, 
@@ -478,43 +510,15 @@ loop.panel = (function(_, mozL10n) {
             )
           ), 
           React.DOM.div({className: "footer"}, 
-            AvailabilityDropdown(null), 
+            React.DOM.div({className: "user-details"}, 
+              UserIdentity({displayName: displayName}), 
+              AvailabilityDropdown(null)
+            ), 
             AuthLink(null), 
             SettingsDropdown(null)
           )
         )
       );
-    }
-  });
-
-  var PanelRouter = loop.desktopRouter.DesktopRouter.extend({
-    /**
-     * DOM document object.
-     * @type {HTMLDocument}
-     */
-    document: undefined,
-
-    routes: {
-      "": "home"
-    },
-
-    initialize: function(options) {
-      options = options || {};
-      if (!options.document) {
-        throw new Error("missing required document");
-      }
-    },
-
-    /**
-     * Default entry point.
-     */
-    home: function() {
-      this._notifications.reset();
-      var client = new loop.Client({
-        baseServerUrl: navigator.mozLoop.serverUrl
-      });
-      this.loadReactComponent(
-          PanelView({client: client, notifications: this._notifications}));
     }
   });
 
@@ -526,11 +530,15 @@ loop.panel = (function(_, mozL10n) {
     // else to ensure the L10n environment is setup correctly.
     mozL10n.initialize(navigator.mozLoop);
 
-    router = new PanelRouter({
-      document: document,
-      notifications: new sharedModels.NotificationCollection()
+    var client = new loop.Client({
+      baseServerUrl: navigator.mozLoop.serverUrl
     });
-    Backbone.history.start();
+    var notifications = new sharedModels.NotificationCollection()
+
+    React.renderComponent(PanelView({
+      client: client, 
+      notifications: notifications}
+    ), document.querySelector("#main"));
 
     document.body.classList.add(loop.shared.utils.getTargetPlatform());
     document.body.setAttribute("dir", mozL10n.getDirection());
@@ -543,11 +551,13 @@ loop.panel = (function(_, mozL10n) {
 
   return {
     init: init,
+    UserIdentity: UserIdentity,
     AvailabilityDropdown: AvailabilityDropdown,
     CallUrlResult: CallUrlResult,
     PanelView: PanelView,
-    PanelRouter: PanelRouter,
     SettingsDropdown: SettingsDropdown,
     ToSView: ToSView
   };
 })(_, document.mozL10n);
+
+document.addEventListener('DOMContentLoaded', loop.panel.init);
