@@ -5,6 +5,7 @@
 #include "ActorsParent.h"
 
 #include <algorithm>
+#include "CheckQuotaHelper.h"
 #include "FileInfo.h"
 #include "FileManager.h"
 #include "IDBObjectStore.h"
@@ -3865,6 +3866,7 @@ protected:
   nsCString mDatabaseId;
   State mState;
   StoragePrivilege mStoragePrivilege;
+  bool mEnforcingQuota;
   const bool mDeleting;
   bool mBlockedQuotaManager;
   bool mChromeWriteAccessAllowed;
@@ -3894,6 +3896,7 @@ protected:
     , mCommonParams(aCommonParams)
     , mState(State_Initial)
     , mStoragePrivilege(mozilla::dom::quota::Content)
+    , mEnforcingQuota(true)
     , mDeleting(aDeleting)
     , mBlockedQuotaManager(false)
     , mChromeWriteAccessAllowed(false)
@@ -10630,6 +10633,8 @@ FactoryOp::CheckPermission(ContentParent* aContentParent,
     if (State_Initial == mState) {
       QuotaManager::GetInfoForChrome(&mGroup, &mOrigin, &mStoragePrivilege,
                                      nullptr);
+      MOZ_ASSERT(mStoragePrivilege == mozilla::dom::quota::Chrome);
+      mEnforcingQuota = false;
     }
 
     *aPermission = PermissionRequestBase::kPermissionAllowed;
@@ -10683,6 +10688,19 @@ FactoryOp::CheckPermission(ContentParent* aContentParent,
                                             &mStoragePrivilege, nullptr);
     if (NS_WARN_IF(NS_FAILED(rv))) {
       return rv;
+    }
+
+    MOZ_ASSERT(mStoragePrivilege != mozilla::dom::quota::Chrome);
+  }
+
+  if (permission == PermissionRequestBase::kPermissionAllowed &&
+      mEnforcingQuota)
+  {
+    // If we're running from a window then we should check the quota permission
+    // as well.
+    uint32_t quotaPermission = CheckQuotaHelper::GetQuotaPermission(principal);
+    if (quotaPermission == nsIPermissionManager::ALLOW_ACTION) {
+      mEnforcingQuota = false;
     }
   }
 
@@ -11089,7 +11107,7 @@ OpenDatabaseOp::DoDatabaseWork()
     quotaManager->EnsureOriginIsInitialized(persistenceType,
                                             mGroup,
                                             mOrigin,
-                                            mStoragePrivilege != Chrome,
+                                            mEnforcingQuota,
                                             getter_AddRefs(dbDirectory));
   if (NS_WARN_IF(NS_FAILED(rv))) {
     return rv;

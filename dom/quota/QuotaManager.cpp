@@ -1734,7 +1734,7 @@ QuotaManager::InitializeOrigin(PersistenceType aPersistenceType,
       quotaMaxBytes = GetStorageQuotaMB() * 1024 * 1024;
       if (totalUsageBytes > quotaMaxBytes) {
         NS_WARNING("Origin is already using more storage than allowed!");
-        return NS_ERROR_UNEXPECTED;
+        return NS_ERROR_FILE_NO_DEVICE_SPACE;
       }
     }
 
