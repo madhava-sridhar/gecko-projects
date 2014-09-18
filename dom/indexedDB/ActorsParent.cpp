@@ -9587,7 +9587,8 @@ WaitForTransactionsRunnable::MaybeWait()
   MOZ_ASSERT(mState == State_Initial);
   MOZ_ASSERT(mQuotaClient);
 
-  if (nsRefPtr<TransactionThreadPool> threadPool = gTransactionThreadPool) {
+  nsRefPtr<TransactionThreadPool> threadPool = gTransactionThreadPool.get();
+  if (threadPool) {
     mState = State_WaitingForTransactions;
 
     threadPool->WaitForDatabasesToComplete(mDatabaseIds, this);
@@ -9686,7 +9687,8 @@ ShutdownTransactionThreadPoolRunnable::Run()
   if (!mHasRequestedShutDown) {
     mHasRequestedShutDown = true;
 
-    if (nsRefPtr<TransactionThreadPool> threadPool = gTransactionThreadPool) {
+    nsRefPtr<TransactionThreadPool> threadPool = gTransactionThreadPool.get();
+    if (threadPool) {
       threadPool->Shutdown();
 
       gTransactionThreadPool = nullptr;
@@ -10502,7 +10504,7 @@ FactoryOp::WaitForTransactions()
   nsTArray<nsCString> databaseIds;
   databaseIds.AppendElement(mDatabaseId);
 
-  nsRefPtr<TransactionThreadPool> threadPool = gTransactionThreadPool;
+  nsRefPtr<TransactionThreadPool> threadPool = gTransactionThreadPool.get();
   MOZ_ASSERT(threadPool);
 
   // WaitForDatabasesToComplete() will run this op immediately if there are no
