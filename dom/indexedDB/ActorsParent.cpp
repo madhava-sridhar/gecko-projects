@@ -11791,8 +11791,8 @@ OpenDatabaseOp::SendResults()
       response = ClampResultCode(mResultCode);
     }
 
-    NS_WARN_IF(!PBackgroundIDBFactoryRequestParent::Send__delete__(this,
-                                                                   response));
+    unused <<
+      PBackgroundIDBFactoryRequestParent::Send__delete__(this, response));
   }
 
   if (NS_FAILED(mResultCode) && mOfflineStorage) {
@@ -12502,8 +12502,8 @@ DeleteDatabaseOp::SendResults()
       response = ClampResultCode(mResultCode);
     }
 
-    NS_WARN_IF(!PBackgroundIDBFactoryRequestParent::Send__delete__(this,
-                                                                   response));
+    unused <<
+      PBackgroundIDBFactoryRequestParent::Send__delete__(this, response);
   }
 
   FinishSendResults();
@@ -13549,7 +13549,9 @@ AutoSavepoint::~AutoSavepoint()
     MOZ_ASSERT(mTransaction->GetMode() == IDBTransaction::READ_WRITE ||
                mTransaction->GetMode() == IDBTransaction::VERSION_CHANGE);
 
-    NS_WARN_IF(NS_FAILED(mTransaction->RollbackSavepoint()));
+    if (NS_FAILED(mTransaction->RollbackSavepoint())) {
+      NS_WARNING("Failed to rollback savepoint!");
+    }
   }
 }
 

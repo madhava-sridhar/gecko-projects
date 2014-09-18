@@ -1062,7 +1062,9 @@ BackgroundFactoryRequestChild::RecvBlocked(const uint64_t& aCurrentVersion)
   nsRefPtr<IDBRequest> kungFuDeathGrip = mRequest;
 
   bool dummy;
-  NS_WARN_IF(NS_FAILED(mRequest->DispatchEvent(blockedEvent, &dummy)));
+  if (NS_FAILED(mRequest->DispatchEvent(blockedEvent, &dummy))) {
+    NS_WARNING("Failed to dispatch event!");
+  }
 
   return true;
 }
@@ -1346,7 +1348,9 @@ BackgroundDatabaseChild::RecvVersionChange(const uint64_t& aOldVersion,
   }
 
   bool dummy;
-  NS_WARN_IF(NS_FAILED(mDatabase->DispatchEvent(versionChangeEvent, &dummy)));
+  if (NS_FAILED(mDatabase->DispatchEvent(versionChangeEvent, &dummy))) {
+    NS_WARNING("Failed to dispatch event!");
+  }
 
   if (!mDatabase->IsClosed()) {
     SendBlocked();

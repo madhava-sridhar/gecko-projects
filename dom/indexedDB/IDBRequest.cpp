@@ -193,7 +193,9 @@ IDBRequest::DispatchNonTransactionError(nsresult aErrorCode)
   }
 
   bool ignored;
-  NS_WARN_IF(NS_FAILED(DispatchEvent(event, &ignored)));
+  if (NS_FAILED(DispatchEvent(event, &ignored))) {
+    NS_WARNING("Failed to dispatch event!");
+  }
 }
 
 void
