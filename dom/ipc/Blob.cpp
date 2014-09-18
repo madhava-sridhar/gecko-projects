@@ -218,7 +218,6 @@ class BlobInputStreamTether MOZ_FINAL
 {
   nsCOMPtr<nsIInputStream> mStream;
   nsRefPtr<DOMFileImpl> mBlobImpl;
-  nsCOMPtr<nsIEventTarget> mEventTarget;
 
   nsIMultiplexInputStream* mWeakMultiplexStream;
   nsISeekableStream* mWeakSeekableStream;
@@ -240,11 +239,6 @@ public:
   {
     MOZ_ASSERT(aStream);
     MOZ_ASSERT(aBlobImpl);
-
-    if (!NS_IsMainThread()) {
-      mEventTarget = do_GetCurrentThread();
-      MOZ_ASSERT(mEventTarget);
-    }
 
     nsCOMPtr<nsIMultiplexInputStream> multiplexStream =
       do_QueryInterface(aStream);
@@ -269,15 +263,7 @@ public:
 
 private:
   ~BlobInputStreamTether()
-  {
-    MOZ_ASSERT(mStream);
-    MOZ_ASSERT(mBlobImpl);
-
-    if (!EventTargetIsOnCurrentThread(mEventTarget)) {
-      mStream = nullptr;
-      ReleaseOnTarget(mBlobImpl, mEventTarget);
-    }
-  }
+  { }
 };
 
 NS_IMPL_ADDREF(BlobInputStreamTether)
