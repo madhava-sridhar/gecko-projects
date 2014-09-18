@@ -157,17 +157,15 @@ const char kJournalDirectoryName[] = "journals";
 const char kPrefIndexedDBEnabled[] = "dom.indexedDB.enabled";
 
 #define IDB_PREFIX "indexedDB"
-#define CHROME_PREFIX "chrome"
 
+#ifdef MOZ_CHILD_PERMISSIONS
 const char kPermissionString[] = IDB_PREFIX;
+#endif // MOZ_CHILD_PERMISSIONS
 
-const char kChromeOrigin[] = CHROME_PREFIX;
-
-const char kPermissionStringChromeBase[] = IDB_PREFIX "-" CHROME_PREFIX "-";
+const char kPermissionStringChromeBase[] = IDB_PREFIX "-chrome-";
 const char kPermissionStringChromeReadSuffix[] = "-read";
 const char kPermissionStringChromeWriteSuffix[] = "-write";
 
-#undef CHROME_PREFIX
 #undef IDB_PREFIX
 
 enum AppId {

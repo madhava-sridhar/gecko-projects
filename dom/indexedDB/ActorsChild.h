@@ -166,7 +166,6 @@ class BackgroundFactoryRequestChild MOZ_FINAL
 
   nsRefPtr<IDBFactory> mFactory;
   const uint64_t mRequestedVersion;
-  const PersistenceType mPersistenceType;
   const bool mIsDeleteOp;
 
 public:
@@ -178,8 +177,7 @@ private:
   BackgroundFactoryRequestChild(IDBFactory* aFactory,
                                 IDBOpenDBRequest* aOpenRequest,
                                 bool aIsDeleteOp,
-                                uint64_t aRequestedVersion,
-                                PersistenceType aPersistenceType);
+                                uint64_t aRequestedVersion);
 
   // Only destroyed by BackgroundFactoryChild.
   ~BackgroundFactoryRequestChild();
@@ -210,8 +208,6 @@ private:
 class BackgroundDatabaseChild MOZ_FINAL
   : public PBackgroundIDBDatabaseChild
 {
-  typedef mozilla::dom::quota::PersistenceType PersistenceType;
-
   friend class BackgroundFactoryChild;
   friend class BackgroundFactoryRequestChild;
   friend class IDBDatabase;
@@ -220,8 +216,6 @@ class BackgroundDatabaseChild MOZ_FINAL
   nsRefPtr<IDBDatabase> mTemporaryStrongDatabase;
   BackgroundFactoryRequestChild* mOpenRequestActor;
   IDBDatabase* mDatabase;
-
-  PersistenceType mPersistenceType;
 
 public:
   void

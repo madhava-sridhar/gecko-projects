@@ -691,8 +691,10 @@ IDBFactory::InitiateRequest(IDBOpenDBRequest* aRequest,
   }
 
   auto actor =
-    new BackgroundFactoryRequestChild(this, aRequest, deleting,
-                                      requestedVersion, persistenceType);
+    new BackgroundFactoryRequestChild(this,
+                                      aRequest,
+                                      deleting,
+                                      requestedVersion);
 
   if (!mBackgroundActor->SendPBackgroundIDBFactoryRequestConstructor(actor,
                                                                      aParams)) {

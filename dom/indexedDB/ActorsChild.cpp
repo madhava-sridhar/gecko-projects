@@ -854,12 +854,10 @@ BackgroundFactoryRequestChild::BackgroundFactoryRequestChild(
                                                IDBFactory* aFactory,
                                                IDBOpenDBRequest* aOpenRequest,
                                                bool aIsDeleteOp,
-                                               uint64_t aRequestedVersion,
-                                               PersistenceType aPersistenceType)
+                                               uint64_t aRequestedVersion)
   : BackgroundRequestChildBase(aOpenRequest)
   , mFactory(aFactory)
   , mRequestedVersion(aRequestedVersion)
-  , mPersistenceType(aPersistenceType)
   , mIsDeleteOp(aIsDeleteOp)
 {
   // Can't assert owning thread here because IPDL has not yet set our manager!
@@ -1079,7 +1077,6 @@ BackgroundDatabaseChild::BackgroundDatabaseChild(
   : mSpec(new DatabaseSpec(aSpec))
   , mOpenRequestActor(aOpenRequestActor)
   , mDatabase(nullptr)
-  , mPersistenceType(aOpenRequestActor->mPersistenceType)
 {
   // Can't assert owning thread here because IPDL has not yet set our manager!
   MOZ_ASSERT(aOpenRequestActor);
