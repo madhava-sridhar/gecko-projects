@@ -31,11 +31,11 @@ class BlobChild MOZ_FINAL
 {
   typedef mozilla::ipc::PBackgroundChild PBackgroundChild;
 
-  class RemoteBlob;
-  friend class RemoteBlob;
+  class RemoteBlobImpl;
+  friend class RemoteBlobImpl;
 
   nsIDOMBlob* mBlob;
-  RemoteBlob* mRemoteBlob;
+  RemoteBlobImpl* mRemoteBlobImpl;
 
   // One of these will be null and the other non-null.
   PBackgroundChild* mBackgroundManager;

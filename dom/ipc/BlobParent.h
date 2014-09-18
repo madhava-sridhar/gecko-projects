@@ -36,11 +36,11 @@ class BlobParent MOZ_FINAL
   class OpenStreamRunnable;
   friend class OpenStreamRunnable;
 
-  class RemoteBlob;
-  friend class RemoteBlob;
+  class RemoteBlobImpl;
+  friend class RemoteBlobImpl;
 
   nsIDOMBlob* mBlob;
-  RemoteBlob* mRemoteBlob;
+  RemoteBlobImpl* mRemoteBlobImpl;
 
   // One of these will be null and the other non-null.
   PBackgroundParent* mBackgroundManager;
@@ -61,7 +61,7 @@ class BlobParent MOZ_FINAL
   nsTArray<nsRevocableEventPtr<OpenStreamRunnable>> mOpenStreamRunnables;
 
   bool mOwnsBlob;
-  bool mOwnsRemoteBlob;
+  bool mOwnsRemoteBlobImpl;
 
 public:
   // These create functions are called on the sending side.
