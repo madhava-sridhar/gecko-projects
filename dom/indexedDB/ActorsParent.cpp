@@ -11792,7 +11792,7 @@ OpenDatabaseOp::SendResults()
     }
 
     unused <<
-      PBackgroundIDBFactoryRequestParent::Send__delete__(this, response));
+      PBackgroundIDBFactoryRequestParent::Send__delete__(this, response);
   }
 
   if (NS_FAILED(mResultCode) && mOfflineStorage) {
