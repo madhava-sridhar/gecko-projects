@@ -665,7 +665,6 @@ IDBFactory::InitiateRequest(IDBOpenDBRequest* aRequest,
 
   bool deleting;
   uint64_t requestedVersion;
-  PersistenceType persistenceType;
 
   switch (aParams.type()) {
     case FactoryRequestParams::TDeleteDatabaseRequestParams: {
@@ -673,7 +672,6 @@ IDBFactory::InitiateRequest(IDBOpenDBRequest* aRequest,
         aParams.get_DeleteDatabaseRequestParams().commonParams().metadata();
       deleting = true;
       requestedVersion = metadata.version();
-      persistenceType = metadata.persistenceType();
       break;
     }
 
@@ -682,7 +680,6 @@ IDBFactory::InitiateRequest(IDBOpenDBRequest* aRequest,
         aParams.get_OpenDatabaseRequestParams().commonParams().metadata();
       deleting = false;
       requestedVersion = metadata.version();
-      persistenceType = metadata.persistenceType();
       break;
     }
 
