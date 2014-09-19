@@ -774,8 +774,6 @@ var gBrowserInit = {
 
     gBrowser.addEventListener("DOMUpdatePageReport", gPopupBlockerObserver, false);
 
-    gBrowser.addEventListener("NewPluginInstalled", gPluginHandler.newPluginInstalled, true);
-
     Services.obs.addObserver(gPluginHandler.pluginCrashed, "plugin-crashed", false);
 
     window.addEventListener("AppCommand", HandleAppCommandEvent, true);
@@ -6080,8 +6078,10 @@ function GetSearchFieldBookmarkData(node) {
 
   if (isURLEncoded)
     postData = formData.join("&");
-  else
-    spec += "?" + formData.join("&");
+  else {
+    let separator = spec.contains("?") ? "&" : "?";
+    spec += separator + formData.join("&");
+  }
 
   return {
     spec: spec,
@@ -7264,7 +7264,9 @@ function focusNextFrame(event) {
   let fm = Services.focus;
   let dir = event.shiftKey ? fm.MOVEFOCUS_BACKWARDDOC : fm.MOVEFOCUS_FORWARDDOC;
   let element = fm.moveFocus(window, null, dir, fm.FLAG_BYKEY);
-  if (element.ownerDocument == document)
+  let panelOrNotificationSelector = "popupnotification " + element.localName + ", " +
+                                    "panel " + element.localName;
+  if (element.ownerDocument == document && !element.matches(panelOrNotificationSelector))
     focusAndSelectUrlBar();
 }
 
