@@ -34,7 +34,7 @@ class BlobChild MOZ_FINAL
   class RemoteBlobImpl;
   friend class RemoteBlobImpl;
 
-  nsIDOMBlob* mBlob;
+  DOMFileImpl* mBlobImpl;
   RemoteBlobImpl* mRemoteBlobImpl;
 
   // One of these will be null and the other non-null.
@@ -43,20 +43,20 @@ class BlobChild MOZ_FINAL
 
   nsCOMPtr<nsIEventTarget> mEventTarget;
 
-  bool mOwnsBlob;
+  bool mOwnsBlobImpl;
 
 public:
   // These create functions are called on the sending side.
   static BlobChild*
-  Create(nsIContentChild* aManager, nsIDOMBlob* aBlob)
+  Create(nsIContentChild* aManager, DOMFileImpl* aBlobImpl)
   {
-    return new BlobChild(aManager, aBlob);
+    return new BlobChild(aManager, aBlobImpl);
   }
 
   static BlobChild*
-  Create(PBackgroundChild* aManager, nsIDOMBlob* aBlob)
+  Create(PBackgroundChild* aManager, DOMFileImpl* aBlobImpl)
   {
-    return new BlobChild(aManager, aBlob);
+    return new BlobChild(aManager, aBlobImpl);
   }
 
   // These create functions are called on the receiving side.
@@ -91,14 +91,16 @@ public:
     return mContentManager;
   }
 
-  // Get the blob associated with this actor. This may always be called on the
-  // sending side. It may also be called on the receiving side unless this is a
-  // "mystery" blob that has not yet received a SetMysteryBlobInfo() call.
-  already_AddRefed<nsIDOMBlob>
-  GetBlob();
-
+  // Get the DOMFileImpl associated with this actor. This may always be called
+  // on the sending side. It may also be called on the receiving side unless
+  // this is a "mystery" blob that has not yet received a SetMysteryBlobInfo()
+  // call.
   already_AddRefed<DOMFileImpl>
   GetBlobImpl();
+
+  // XXX This method will be removed soon.
+  already_AddRefed<nsIDOMBlob>
+  GetBlob();
 
   // Use this for files.
   bool
@@ -121,9 +123,9 @@ public:
 
 private:
   // These constructors are called on the sending side.
-  BlobChild(nsIContentChild* aManager, nsIDOMBlob* aBlob);
+  BlobChild(nsIContentChild* aManager, DOMFileImpl* aBlobImpl);
 
-  BlobChild(PBackgroundChild* aManager, nsIDOMBlob* aBlob);
+  BlobChild(PBackgroundChild* aManager, DOMFileImpl* aBlobImpl);
 
   // These constructors are called on the receiving side.
   BlobChild(nsIContentChild* aManager,
@@ -136,7 +138,7 @@ private:
   ~BlobChild();
 
   void
-  CommonInit(nsIDOMBlob* aBlob);
+  CommonInit(DOMFileImpl* aBlobImpl);
 
   void
   CommonInit(const ChildBlobConstructorParams& aParams);
@@ -153,7 +155,7 @@ private:
                        const ParentBlobConstructorParams& aOtherSideParams);
 
   void
-  NoteDyingRemoteBlob();
+  NoteDyingRemoteBlobImpl();
 
   nsIEventTarget*
   EventTarget() const

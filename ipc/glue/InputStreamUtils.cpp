@@ -115,11 +115,8 @@ DeserializeInputStream(const InputStreamParams& aParams,
         blobImpl =
           static_cast<BlobParent*>(params.remoteBlobParent())->GetBlobImpl();
       } else {
-        nsCOMPtr<nsIDOMBlob> blob =
-          static_cast<BlobChild*>(params.remoteBlobChild())->GetBlob();
-        MOZ_ASSERT(blob);
-
-        blobImpl = static_cast<DOMFile*>(blob.get())->Impl();
+        blobImpl =
+          static_cast<BlobChild*>(params.remoteBlobChild())->GetBlobImpl();
       }
 
       MOZ_ASSERT(blobImpl, "Invalid blob contents");

@@ -5003,11 +5003,11 @@ private:
   }
 };
 
-class NonMainThreadHackBlob MOZ_FINAL
+class NonMainThreadHackBlobImpl MOZ_FINAL
   : public DOMFileImplFile
 {
 public:
-  NonMainThreadHackBlob(nsIFile* aFile, FileInfo* aFileInfo)
+  NonMainThreadHackBlobImpl(nsIFile* aFile, FileInfo* aFileInfo)
     : DOMFileImplFile(aFile, aFileInfo)
   {
     // Getting the content type is not currently supported off the main thread.
@@ -5025,6 +5025,10 @@ public:
     // picture entirely. Eventually we should probably fix this some other way.
     mContentType.Truncate();
   }
+
+private:
+  ~NonMainThreadHackBlobImpl()
+  { }
 };
 
 class QuotaClient MOZ_FINAL
@@ -5466,7 +5470,7 @@ ConvertBlobsToActors(PBackgroundParent* aBackgroundActor,
     MOZ_ASSERT(isFile);
 
     nsRefPtr<DOMFileImpl> impl =
-      new NonMainThreadHackBlob(nativeFile, file.mFileInfo);
+      new NonMainThreadHackBlobImpl(nativeFile, file.mFileInfo);
 
     PBlobParent* actor =
       BackgroundParent::GetOrCreateActorForBlobImpl(aBackgroundActor, impl);

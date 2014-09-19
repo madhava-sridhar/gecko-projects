@@ -65,8 +65,7 @@ public:
 
   static mozilla::dom::PBlobChild*
   GetOrCreateActorForBlob(PBackgroundChild* aBackgroundActor,
-                          nsIDOMBlob* aBlob,
-                          bool* aActorWasCreated = nullptr);
+                          nsIDOMBlob* aBlob);
 
   // See above.
   static void

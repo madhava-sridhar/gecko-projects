@@ -843,8 +843,7 @@ BackgroundParent::GetContentParent(PBackgroundParent* aBackgroundActor)
 PBlobParent*
 BackgroundParent::GetOrCreateActorForBlobImpl(
                                             PBackgroundParent* aBackgroundActor,
-                                            DOMFileImpl* aBlobImpl,
-                                            bool* aActorWasCreated)
+                                            DOMFileImpl* aBlobImpl)
 {
   AssertIsOnBackgroundThread();
   MOZ_ASSERT(aBackgroundActor);
@@ -855,14 +854,14 @@ BackgroundParent::GetOrCreateActorForBlobImpl(
   if (nsCOMPtr<nsIRemoteBlob> remoteBlob = do_QueryInterface(aBlobImpl)) {
     BlobParent* actor = remoteBlob->GetBlobParent();
     if (actor && actor->GetBackgroundManager() == aBackgroundActor) {
-      if (aActorWasCreated) {
-        *aActorWasCreated = false;
-      }
       return actor;
     }
   }
 
-  MOZ_ALWAYS_TRUE(NS_SUCCEEDED(aBlobImpl->SetMutable(false)));
+  // All blobs shared between processes must be immutable.
+  if (NS_WARN_IF(NS_FAILED(aBlobImpl->SetMutable(false)))) {
+    return nullptr;
+  }
 
   ChildBlobConstructorParams params;
 
@@ -893,17 +892,15 @@ BackgroundParent::GetOrCreateActorForBlobImpl(
   }
 
   BlobParent* actor = BlobParent::Create(aBackgroundActor, aBlobImpl);
-  if (NS_WARN_IF(!actor) ||
-      NS_WARN_IF(!aBackgroundActor->SendPBlobConstructor(actor, params))) {
-    if (aActorWasCreated) {
-      *aActorWasCreated = false;
-    }
+  if (NS_WARN_IF(!actor)) {
     return nullptr;
   }
 
-  if (aActorWasCreated) {
-    *aActorWasCreated = true;
+  if (NS_WARN_IF(!aBackgroundActor->SendPBlobConstructor(actor, params))) {
+    BlobParent::Destroy(actor);
+    return nullptr;
   }
+
   return actor;
 }
 
@@ -952,8 +949,7 @@ BackgroundChild::GetOrCreateForCurrentThread(
 // static
 PBlobChild*
 BackgroundChild::GetOrCreateActorForBlob(PBackgroundChild* aBackgroundActor,
-                                         nsIDOMBlob* aBlob,
-                                         bool* aActorWasCreated)
+                                         nsIDOMBlob* aBlob)
 {
   MOZ_ASSERT(aBackgroundActor);
   MOZ_ASSERT(aBlob);
@@ -962,31 +958,25 @@ BackgroundChild::GetOrCreateActorForBlob(PBackgroundChild* aBackgroundActor,
   MOZ_ASSERT(aBackgroundActor == GetForCurrentThread(),
              "BackgroundChild is bound to a different thread!");
 
+  nsRefPtr<DOMFileImpl> blobImpl = static_cast<DOMFile*>(aBlob)->Impl();
+  MOZ_ASSERT(blobImpl);
+
   // If the blob represents a remote blob then we can simply pass its actor back
   // here.
-  const auto* domFile = static_cast<DOMFile*>(aBlob);
-  if (nsCOMPtr<nsIRemoteBlob> remoteBlob = do_QueryInterface(domFile->Impl())) {
+  if (nsCOMPtr<nsIRemoteBlob> remoteBlob = do_QueryInterface(blobImpl)) {
     BlobChild* actor = remoteBlob->GetBlobChild();
     if (actor && actor->GetBackgroundManager() == aBackgroundActor) {
-      if (aActorWasCreated) {
-        *aActorWasCreated = false;
-      }
       return actor;
     }
   }
 
-  {
-    nsCOMPtr<nsIMutable> mutableBlob = do_QueryInterface(aBlob);
-    MOZ_ASSERT(mutableBlob);
-
-    MOZ_ALWAYS_TRUE(NS_SUCCEEDED(mutableBlob->SetMutable(false)));
+  // All blobs shared between processes must be immutable.
+  if (NS_WARN_IF(NS_FAILED(blobImpl->SetMutable(false)))) {
+    return nullptr;
   }
 
-  // XXX This is only safe so long as all blob implementations in our tree
-  //     inherit nsDOMFileBase. If that ever changes then this will need to grow
-  //     a real interface or something.
-  MOZ_ASSERT(!static_cast<DOMFileImplBase*>(domFile->Impl())->IsSizeUnknown());
-  MOZ_ASSERT(!static_cast<DOMFileImplBase*>(domFile->Impl())->IsDateUnknown());
+  MOZ_ASSERT(!blobImpl->IsSizeUnknown());
+  MOZ_ASSERT(!blobImpl->IsDateUnknown());
 
   ParentBlobConstructorParams params;
 
@@ -998,14 +988,14 @@ BackgroundChild::GetOrCreateActorForBlob(PBackgroundChild* aBackgroundActor,
 
   nsCOMPtr<nsIInputStream> stream;
   MOZ_ALWAYS_TRUE(NS_SUCCEEDED(
-    aBlob->GetInternalStream(getter_AddRefs(stream))));
+    blobImpl->GetInternalStream(getter_AddRefs(stream))));
 
-  if (nsCOMPtr<nsIDOMFile> file = do_QueryInterface(aBlob)) {
+  if (blobImpl->IsFile()) {
     nsString name;
-    MOZ_ALWAYS_TRUE(NS_SUCCEEDED(file->GetName(name)));
+    MOZ_ALWAYS_TRUE(NS_SUCCEEDED(blobImpl->GetName(name)));
 
     uint64_t modDate;
-    MOZ_ALWAYS_TRUE(NS_SUCCEEDED(file->GetMozLastModifiedDate(&modDate)));
+    MOZ_ALWAYS_TRUE(NS_SUCCEEDED(blobImpl->GetMozLastModifiedDate(&modDate)));
 
     params.blobParams() =
       FileBlobConstructorParams(name, contentType, length, modDate);
@@ -1023,20 +1013,17 @@ BackgroundChild::GetOrCreateActorForBlob(PBackgroundChild* aBackgroundActor,
 
   params.optionalInputStreamParams() = inputStreamParams;
 
-  BlobChild* blobActor = BlobChild::Create(aBackgroundActor, aBlob);
-  MOZ_ASSERT(blobActor);
-
-  if (NS_WARN_IF(!aBackgroundActor->SendPBlobConstructor(blobActor, params))) {
-    if (aActorWasCreated) {
-      *aActorWasCreated = false;
-    }
+  BlobChild* actor = BlobChild::Create(aBackgroundActor, blobImpl);
+  if (NS_WARN_IF(!actor)) {
     return nullptr;
   }
 
-  if (aActorWasCreated) {
-    *aActorWasCreated = true;
+  if (NS_WARN_IF(!aBackgroundActor->SendPBlobConstructor(actor, params))) {
+    BlobChild::Destroy(actor);
+    return nullptr;
   }
-  return blobActor;
+
+  return actor;
 }
 
 // static

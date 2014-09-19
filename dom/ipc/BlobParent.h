@@ -39,15 +39,12 @@ class BlobParent MOZ_FINAL
   class RemoteBlobImpl;
   friend class RemoteBlobImpl;
 
-  nsIDOMBlob* mBlob;
+  DOMFileImpl* mBlobImpl;
   RemoteBlobImpl* mRemoteBlobImpl;
 
   // One of these will be null and the other non-null.
   PBackgroundParent* mBackgroundManager;
   nsCOMPtr<nsIContentParent> mContentManager;
-
-  // This is only set when the blob is created with an existing DOMFileImpl.
-  nsRefPtr<DOMFileImpl> mBlobImpl;
 
   nsCOMPtr<nsIEventTarget> mEventTarget;
 
@@ -60,21 +57,14 @@ class BlobParent MOZ_FINAL
   // destructor will cancel any stream events that are currently in flight.
   nsTArray<nsRevocableEventPtr<OpenStreamRunnable>> mOpenStreamRunnables;
 
-  bool mOwnsBlob;
-  bool mOwnsRemoteBlobImpl;
+  bool mOwnsBlobImpl;
 
 public:
   // These create functions are called on the sending side.
   static BlobParent*
-  Create(nsIContentParent* aManager, nsIDOMBlob* aBlob)
+  Create(nsIContentParent* aManager, DOMFileImpl* aBlobImpl)
   {
-    return new BlobParent(aManager, aBlob);
-  }
-
-  static BlobParent*
-  Create(PBackgroundParent* aManager, nsIDOMBlob* aBlob)
-  {
-    return new BlobParent(aManager, aBlob);
+    return new BlobParent(aManager, aBlobImpl);
   }
 
   static BlobParent*
@@ -116,15 +106,14 @@ public:
     return mContentManager;
   }
 
-  // Get the blob associated with this actor. This may always be called on the
-  // sending side. It may also be called on the receiving side unless this is a
-  // "mystery" blob that has not yet received a SetMysteryBlobInfo() call. Must
-  // only be called on a DOM thread since blobs are cycle-collected objects.
-  already_AddRefed<nsIDOMBlob>
-  GetBlob();
-
+  // Get the DOMFileImpl associated with this actor.
   already_AddRefed<DOMFileImpl>
   GetBlobImpl();
+
+  // XXX This method will be removed soon. It may never be called on a non-DOM
+  //     thread.
+  already_AddRefed<nsIDOMBlob>
+  GetBlob();
 
   void
   AssertIsOnOwningThread() const
@@ -136,9 +125,7 @@ public:
 
 private:
   // These constructors are called on the sending side.
-  BlobParent(nsIContentParent* aManager, nsIDOMBlob* aBlob);
-
-  BlobParent(PBackgroundParent* aManager, nsIDOMBlob* aBlob);
+  BlobParent(nsIContentParent* aManager, DOMFileImpl* aBlobImpl);
 
   BlobParent(PBackgroundParent* aManager, DOMFileImpl* aBlobImpl);
 
@@ -153,7 +140,7 @@ private:
   ~BlobParent();
 
   void
-  CommonInit(nsIDOMBlob* aBlob);
+  CommonInit(DOMFileImpl* aBlobImpl);
 
   void
   CommonInit(const ParentBlobConstructorParams& aParams);
@@ -170,7 +157,7 @@ private:
                        const ChildBlobConstructorParams& aOtherSideParams);
 
   void
-  NoteDyingRemoteBlob();
+  NoteDyingRemoteBlobImpl();
 
   void
   NoteRunnableCompleted(OpenStreamRunnable* aRunnable);

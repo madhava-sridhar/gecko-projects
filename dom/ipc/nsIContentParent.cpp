@@ -157,11 +157,12 @@ nsIContentParent::GetOrCreateActorForBlob(nsIDOMBlob* aBlob)
   MOZ_ASSERT(NS_IsMainThread());
   MOZ_ASSERT(aBlob);
 
+  nsRefPtr<DOMFileImpl> blobImpl = static_cast<DOMFile*>(aBlob)->Impl();
+  MOZ_ASSERT(blobImpl);
+
   // If the blob represents a remote blob for this ContentParent then we can
   // simply pass its actor back here.
-  const auto* domFile = static_cast<DOMFile*>(aBlob);
-  nsCOMPtr<nsIRemoteBlob> remoteBlob = do_QueryInterface(domFile->Impl());
-  if (remoteBlob) {
+  if (nsCOMPtr<nsIRemoteBlob> remoteBlob = do_QueryInterface(blobImpl)) {
     BlobParent* actor = remoteBlob->GetBlobParent();
     if (actor && actor->GetContentManager() == this) {
       return actor;
@@ -169,61 +170,47 @@ nsIContentParent::GetOrCreateActorForBlob(nsIDOMBlob* aBlob)
   }
 
   // All blobs shared between processes must be immutable.
-  nsCOMPtr<nsIMutable> mutableBlob = do_QueryInterface(aBlob);
-  if (!mutableBlob || NS_FAILED(mutableBlob->SetMutable(false))) {
-    NS_WARNING("Failed to make blob immutable!");
+  if (NS_WARN_IF(NS_FAILED(blobImpl->SetMutable(false)))) {
     return nullptr;
   }
 
-  // XXX This is only safe so long as all blob implementations in our tree
-  //     inherit DOMFileImplBase. If that ever changes then this will need to grow
-  //     a real interface or something.
-  const auto* blob = static_cast<DOMFileImplBase*>(domFile->Impl());
-
   ChildBlobConstructorParams params;
 
-  if (blob->IsSizeUnknown() || blob->IsDateUnknown()) {
+  if (blobImpl->IsSizeUnknown() || blobImpl->IsDateUnknown()) {
     // We don't want to call GetSize or GetLastModifiedDate
     // yet since that may stat a file on the main thread
     // here. Instead we'll learn the size lazily from the
     // other process.
     params = MysteryBlobConstructorParams();
-  }
-  else {
+  } else {
     nsString contentType;
-    nsresult rv = aBlob->GetType(contentType);
-    NS_ENSURE_SUCCESS(rv, nullptr);
+    MOZ_ALWAYS_TRUE(NS_SUCCEEDED(blobImpl->GetType(contentType)));
 
     uint64_t length;
-    rv = aBlob->GetSize(&length);
-    NS_ENSURE_SUCCESS(rv, nullptr);
+    MOZ_ALWAYS_TRUE(NS_SUCCEEDED(blobImpl->GetSize(&length)));
 
-    nsCOMPtr<nsIDOMFile> file = do_QueryInterface(aBlob);
-    if (file) {
-      FileBlobConstructorParams fileParams;
+    if (blobImpl->IsFile()) {
+      nsString name;
+      MOZ_ALWAYS_TRUE(NS_SUCCEEDED(blobImpl->GetName(name)));
 
-      rv = file->GetMozLastModifiedDate(&fileParams.modDate());
-      NS_ENSURE_SUCCESS(rv, nullptr);
+      uint64_t modDate;
+      MOZ_ALWAYS_TRUE(NS_SUCCEEDED(blobImpl->GetMozLastModifiedDate(&modDate)));
 
-      rv = file->GetName(fileParams.name());
-      NS_ENSURE_SUCCESS(rv, nullptr);
-
-      fileParams.contentType() = contentType;
-      fileParams.length() = length;
-
-      params = fileParams;
+      params = FileBlobConstructorParams(name, contentType, length, modDate);
     } else {
-      NormalBlobConstructorParams blobParams;
-      blobParams.contentType() = contentType;
-      blobParams.length() = length;
-      params = blobParams;
+      params = NormalBlobConstructorParams(contentType, length);
     }
   }
 
-  BlobParent* actor = BlobParent::Create(this, aBlob);
+  BlobParent* actor = BlobParent::Create(this, blobImpl);
   NS_ENSURE_TRUE(actor, nullptr);
 
-  return SendPBlobConstructor(actor, params) ? actor : nullptr;
+  if (!SendPBlobConstructor(actor, params)) {
+    BlobParent::Destroy(actor);
+    return nullptr;
+  }
+
+  return actor;
 }
 
 bool

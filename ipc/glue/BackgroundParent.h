@@ -56,8 +56,7 @@ public:
 
   static mozilla::dom::PBlobParent*
   GetOrCreateActorForBlobImpl(PBackgroundParent* aBackgroundActor,
-                              DOMFileImpl* aBlobImpl,
-                              bool* aActorWasCreated = nullptr);
+                              DOMFileImpl* aBlobImpl);
 
 private:
   // Only called by ContentParent for cross-process actors.
