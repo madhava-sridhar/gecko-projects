@@ -140,7 +140,6 @@
 #endif
 
 #include "nsDOMFile.h"
-#include "nsIRemoteBlob.h"
 #include "ProcessUtils.h"
 #include "StructuredCloneUtils.h"
 #include "URIUtils.h"

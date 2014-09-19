@@ -14,7 +14,6 @@
 #include "mozilla/dom/StructuredCloneUtils.h"
 #include "mozilla/dom/TabParent.h"
 #include "mozilla/dom/ipc/BlobParent.h"
-#include "mozilla/dom/ipc/nsIRemoteBlob.h"
 #include "mozilla/unused.h"
 
 #include "JavaScriptParent.h"
@@ -160,55 +159,8 @@ nsIContentParent::GetOrCreateActorForBlob(nsIDOMBlob* aBlob)
   nsRefPtr<DOMFileImpl> blobImpl = static_cast<DOMFile*>(aBlob)->Impl();
   MOZ_ASSERT(blobImpl);
 
-  // If the blob represents a remote blob for this ContentParent then we can
-  // simply pass its actor back here.
-  if (nsCOMPtr<nsIRemoteBlob> remoteBlob = do_QueryInterface(blobImpl)) {
-    BlobParent* actor = remoteBlob->GetBlobParent();
-    if (actor && actor->GetContentManager() == this) {
-      return actor;
-    }
-  }
-
-  // All blobs shared between processes must be immutable.
-  if (NS_WARN_IF(NS_FAILED(blobImpl->SetMutable(false)))) {
-    return nullptr;
-  }
-
-  ChildBlobConstructorParams params;
-
-  if (blobImpl->IsSizeUnknown() || blobImpl->IsDateUnknown()) {
-    // We don't want to call GetSize or GetLastModifiedDate
-    // yet since that may stat a file on the main thread
-    // here. Instead we'll learn the size lazily from the
-    // other process.
-    params = MysteryBlobConstructorParams();
-  } else {
-    nsString contentType;
-    MOZ_ALWAYS_TRUE(NS_SUCCEEDED(blobImpl->GetType(contentType)));
-
-    uint64_t length;
-    MOZ_ALWAYS_TRUE(NS_SUCCEEDED(blobImpl->GetSize(&length)));
-
-    if (blobImpl->IsFile()) {
-      nsString name;
-      MOZ_ALWAYS_TRUE(NS_SUCCEEDED(blobImpl->GetName(name)));
-
-      uint64_t modDate;
-      MOZ_ALWAYS_TRUE(NS_SUCCEEDED(blobImpl->GetMozLastModifiedDate(&modDate)));
-
-      params = FileBlobConstructorParams(name, contentType, length, modDate);
-    } else {
-      params = NormalBlobConstructorParams(contentType, length);
-    }
-  }
-
-  BlobParent* actor = BlobParent::Create(this, blobImpl);
+  BlobParent* actor = BlobParent::GetOrCreate(this, blobImpl);
   NS_ENSURE_TRUE(actor, nullptr);
-
-  if (!SendPBlobConstructor(actor, params)) {
-    BlobParent::Destroy(actor);
-    return nullptr;
-  }
 
   return actor;
 }

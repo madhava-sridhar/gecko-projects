@@ -12,7 +12,6 @@
 #include "mozilla/dom/StructuredCloneUtils.h"
 #include "mozilla/dom/TabChild.h"
 #include "mozilla/dom/ipc/BlobChild.h"
-#include "mozilla/dom/ipc/nsIRemoteBlob.h"
 #include "mozilla/ipc/InputStreamUtils.h"
 
 #include "JavaScriptChild.h"
@@ -106,69 +105,8 @@ nsIContentChild::GetOrCreateActorForBlob(nsIDOMBlob* aBlob)
   nsRefPtr<DOMFileImpl> blobImpl = static_cast<DOMFile*>(aBlob)->Impl();
   MOZ_ASSERT(blobImpl);
 
-  // If the blob represents a remote blob then we can simply pass its actor back
-  // here.
-  if (nsCOMPtr<nsIRemoteBlob> remoteBlob = do_QueryInterface(blobImpl)) {
-    BlobChild* actor = remoteBlob->GetBlobChild();
-    MOZ_ASSERT(actor);
-
-    if (actor->GetContentManager() == this) {
-      return actor;
-    }
-  }
-
-  // All blobs shared between processes must be immutable.
-  if (NS_WARN_IF(NS_FAILED(blobImpl->SetMutable(false)))) {
-    return nullptr;
-  }
-
-  MOZ_ASSERT(!blobImpl->IsSizeUnknown());
-  MOZ_ASSERT(!blobImpl->IsDateUnknown());
-
-  ParentBlobConstructorParams params;
-
-  nsString contentType;
-  nsresult rv = blobImpl->GetType(contentType);
-  NS_ENSURE_SUCCESS(rv, nullptr);
-
-  uint64_t length;
-  rv = blobImpl->GetSize(&length);
-  NS_ENSURE_SUCCESS(rv, nullptr);
-
-  nsCOMPtr<nsIInputStream> stream;
-  rv = blobImpl->GetInternalStream(getter_AddRefs(stream));
-  NS_ENSURE_SUCCESS(rv, nullptr);
-
-  InputStreamParams inputStreamParams;
-  nsTArray<mozilla::ipc::FileDescriptor> fds;
-  SerializeInputStream(stream, inputStreamParams, fds);
-
-  MOZ_ASSERT(fds.IsEmpty());
-
-  params.optionalInputStreamParams() = inputStreamParams;
-
-  if (blobImpl->IsFile()) {
-    nsString name;
-    rv = blobImpl->GetName(name);
-    NS_ENSURE_SUCCESS(rv, nullptr);
-
-    uint64_t modDate;
-    rv = blobImpl->GetMozLastModifiedDate(&modDate);
-    NS_ENSURE_SUCCESS(rv, nullptr);
-
-    params.blobParams() =
-      FileBlobConstructorParams(name, contentType, length, modDate);
-  } else {
-    params.blobParams() = NormalBlobConstructorParams(contentType, length);
-  }
-
-  BlobChild* actor = BlobChild::Create(this, blobImpl);
+  BlobChild* actor = BlobChild::GetOrCreate(this, blobImpl);
   NS_ENSURE_TRUE(actor, nullptr);
-
-  if (!SendPBlobConstructor(actor, params)) {
-    BlobChild::Destroy(actor);
-    return nullptr;
-  }
 
   return actor;
 }

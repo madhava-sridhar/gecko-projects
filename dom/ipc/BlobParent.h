@@ -62,16 +62,10 @@ class BlobParent MOZ_FINAL
 public:
   // These create functions are called on the sending side.
   static BlobParent*
-  Create(nsIContentParent* aManager, DOMFileImpl* aBlobImpl)
-  {
-    return new BlobParent(aManager, aBlobImpl);
-  }
+  GetOrCreate(nsIContentParent* aManager, DOMFileImpl* aBlobImpl);
 
   static BlobParent*
-  Create(PBackgroundParent* aManager, DOMFileImpl* aBlobImpl)
-  {
-    return new BlobParent(aManager, aBlobImpl);
-  }
+  GetOrCreate(PBackgroundParent* aManager, DOMFileImpl* aBlobImpl);
 
   // These create functions are called on the receiving side.
   static BlobParent*
@@ -144,6 +138,11 @@ private:
 
   void
   CommonInit(const ParentBlobConstructorParams& aParams);
+
+  template <class ParentManagerType>
+  static BlobParent*
+  GetOrCreateFromImpl(ParentManagerType* aManager,
+                      DOMFileImpl* aBlobImpl);
 
   template <class ParentManagerType>
   static BlobParent*

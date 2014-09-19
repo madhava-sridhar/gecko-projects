@@ -96,7 +96,6 @@
 #include "nsIMutable.h"
 #include "nsIObserverService.h"
 #include "nsIPresShell.h"
-#include "nsIRemoteBlob.h"
 #include "nsIScriptError.h"
 #include "nsISiteSecurityService.h"
 #include "nsIStyleSheet.h"

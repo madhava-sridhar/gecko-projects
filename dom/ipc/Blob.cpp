@@ -84,24 +84,21 @@ struct ConcreteManagerTypeTraits<PBackgroundParent>
   typedef PBackgroundParent Type;
 };
 
-template <class ManagerType>
-void AssertCorrectThreadForManager(ManagerType* aManager);
-
-template <>
-void AssertCorrectThreadForManager<nsIContentChild>(nsIContentChild* aManager)
+void
+AssertCorrectThreadForManager(nsIContentChild* aManager)
 {
   MOZ_ASSERT(NS_IsMainThread());
 }
 
-template <>
-void AssertCorrectThreadForManager<nsIContentParent>(nsIContentParent* aManager)
+void
+AssertCorrectThreadForManager(nsIContentParent* aManager)
 {
   MOZ_ASSERT(XRE_GetProcessType() == GeckoProcessType_Default);
   MOZ_ASSERT(NS_IsMainThread());
 }
 
-template <>
-void AssertCorrectThreadForManager<PBackgroundChild>(PBackgroundChild* aManager)
+void
+AssertCorrectThreadForManager(PBackgroundChild* aManager)
 {
 #ifdef DEBUG
   if (aManager) {
@@ -112,12 +109,35 @@ void AssertCorrectThreadForManager<PBackgroundChild>(PBackgroundChild* aManager)
 #endif
 }
 
-template <>
-void AssertCorrectThreadForManager<PBackgroundParent>(
-                                                    PBackgroundParent* aManager)
+void
+AssertCorrectThreadForManager(PBackgroundParent* aManager)
 {
   MOZ_ASSERT(XRE_GetProcessType() == GeckoProcessType_Default);
   AssertIsOnBackgroundThread();
+}
+
+bool
+ActorManagerIs(BlobParent* aActor, nsIContentParent* aManager)
+{
+  return aActor->GetContentManager() == aManager;
+}
+
+bool
+ActorManagerIs(BlobParent* aActor, PBackgroundParent* aManager)
+{
+  return aActor->GetBackgroundManager() == aManager;
+}
+
+bool
+ActorManagerIs(BlobChild* aActor, nsIContentChild* aManager)
+{
+  return aActor->GetContentManager() == aManager;
+}
+
+bool
+ActorManagerIs(BlobChild* aActor, PBackgroundChild* aManager)
+{
+  return aActor->GetBackgroundManager() == aManager;
 }
 
 bool
@@ -1467,6 +1487,26 @@ BlobChild::AssertIsOnOwningThread() const
 
 // static
 BlobChild*
+BlobChild::GetOrCreate(nsIContentChild* aManager, DOMFileImpl* aBlobImpl)
+{
+  AssertCorrectThreadForManager(aManager);
+  MOZ_ASSERT(aManager);
+
+  return GetOrCreateFromImpl(aManager, aBlobImpl);
+}
+
+// static
+BlobChild*
+BlobChild::GetOrCreate(PBackgroundChild* aManager, DOMFileImpl* aBlobImpl)
+{
+  AssertCorrectThreadForManager(aManager);
+  MOZ_ASSERT(aManager);
+
+  return GetOrCreateFromImpl(aManager, aBlobImpl);
+}
+
+// static
+BlobChild*
 BlobChild::Create(nsIContentChild* aManager,
                   const ChildBlobConstructorParams& aParams)
 {
@@ -1485,6 +1525,77 @@ BlobChild::Create(PBackgroundChild* aManager,
   MOZ_ASSERT(aManager);
 
   return CreateFromParams(aManager, aParams);
+}
+
+// static
+template <class ChildManagerType>
+BlobChild*
+BlobChild::GetOrCreateFromImpl(ChildManagerType* aManager,
+                               DOMFileImpl* aBlobImpl)
+{
+  AssertCorrectThreadForManager(aManager);
+  MOZ_ASSERT(aManager);
+  MOZ_ASSERT(aBlobImpl);
+
+  // If the blob represents a remote blob then we can simply pass its actor back
+  // here.
+  if (nsCOMPtr<nsIRemoteBlob> remoteBlob = do_QueryInterface(aBlobImpl)) {
+    BlobChild* actor = remoteBlob->GetBlobChild();
+    if (actor && ActorManagerIs(actor, aManager)) {
+      return actor;
+    }
+  }
+
+  // All blobs shared between processes must be immutable.
+  if (NS_WARN_IF(NS_FAILED(aBlobImpl->SetMutable(false)))) {
+    return nullptr;
+  }
+
+  MOZ_ASSERT(!aBlobImpl->IsSizeUnknown());
+  MOZ_ASSERT(!aBlobImpl->IsDateUnknown());
+
+  ParentBlobConstructorParams params;
+
+  nsString contentType;
+  MOZ_ALWAYS_TRUE(NS_SUCCEEDED(aBlobImpl->GetType(contentType)));
+
+  uint64_t length;
+  MOZ_ALWAYS_TRUE(NS_SUCCEEDED(aBlobImpl->GetSize(&length)));
+
+  nsCOMPtr<nsIInputStream> stream;
+  MOZ_ALWAYS_TRUE(NS_SUCCEEDED(
+    aBlobImpl->GetInternalStream(getter_AddRefs(stream))));
+
+  if (aBlobImpl->IsFile()) {
+    nsString name;
+    MOZ_ALWAYS_TRUE(NS_SUCCEEDED(aBlobImpl->GetName(name)));
+
+    uint64_t modDate;
+    MOZ_ALWAYS_TRUE(NS_SUCCEEDED(aBlobImpl->GetMozLastModifiedDate(&modDate)));
+
+    params.blobParams() =
+      FileBlobConstructorParams(name, contentType, length, modDate);
+  } else {
+    params.blobParams() = NormalBlobConstructorParams(contentType, length);
+  }
+
+  InputStreamParams inputStreamParams;
+
+  nsTArray<FileDescriptor> fds;
+  SerializeInputStream(stream, inputStreamParams, fds);
+
+  MOZ_ASSERT(inputStreamParams.type() != InputStreamParams::T__None);
+  MOZ_ASSERT(fds.IsEmpty());
+
+  params.optionalInputStreamParams() = inputStreamParams;
+
+  BlobChild* actor = new BlobChild(aManager, aBlobImpl);
+  if (NS_WARN_IF(!aManager->SendPBlobConstructor(actor, params))) {
+    BlobChild::Destroy(actor);
+    return nullptr;
+  }
+
+  return actor;
 }
 
 // static
@@ -2166,6 +2277,26 @@ BlobParent::AssertIsOnOwningThread() const
 
 // static
 BlobParent*
+BlobParent::GetOrCreate(nsIContentParent* aManager, DOMFileImpl* aBlobImpl)
+{
+  AssertCorrectThreadForManager(aManager);
+  MOZ_ASSERT(aManager);
+
+  return GetOrCreateFromImpl(aManager, aBlobImpl);
+}
+
+// static
+BlobParent*
+BlobParent::GetOrCreate(PBackgroundParent* aManager, DOMFileImpl* aBlobImpl)
+{
+  AssertCorrectThreadForManager(aManager);
+  MOZ_ASSERT(aManager);
+
+  return GetOrCreateFromImpl(aManager, aBlobImpl);
+}
+
+// static
+BlobParent*
 BlobParent::Create(nsIContentParent* aManager,
                    const ParentBlobConstructorParams& aParams)
 {
@@ -2184,6 +2315,68 @@ BlobParent::Create(PBackgroundParent* aManager,
   MOZ_ASSERT(aManager);
 
   return CreateFromParams(aManager, aParams);
+}
+
+// static
+template <class ParentManagerType>
+BlobParent*
+BlobParent::GetOrCreateFromImpl(ParentManagerType* aManager,
+                                DOMFileImpl* aBlobImpl)
+{
+  AssertCorrectThreadForManager(aManager);
+  MOZ_ASSERT(aManager);
+  MOZ_ASSERT(aBlobImpl);
+
+  // If the blob represents a remote blob for this manager then we can simply
+  // pass its actor back here.
+  if (nsCOMPtr<nsIRemoteBlob> remoteBlob = do_QueryInterface(aBlobImpl)) {
+    BlobParent* actor = remoteBlob->GetBlobParent();
+    if (actor && ActorManagerIs(actor, aManager)) {
+      return actor;
+    }
+  }
+
+  // All blobs shared between processes must be immutable.
+  if (NS_WARN_IF(NS_FAILED(aBlobImpl->SetMutable(false)))) {
+    return nullptr;
+  }
+
+  ChildBlobConstructorParams params;
+
+  if (aBlobImpl->IsSizeUnknown() || aBlobImpl->IsDateUnknown()) {
+    // We don't want to call GetSize or GetLastModifiedDate yet since that may
+    // stat a file on the this thread. Instead we'll learn the size lazily from
+    // the other side.
+    params = MysteryBlobConstructorParams();
+  } else {
+    nsString contentType;
+    MOZ_ALWAYS_TRUE(NS_SUCCEEDED(aBlobImpl->GetType(contentType)));
+
+    uint64_t length;
+    MOZ_ALWAYS_TRUE(NS_SUCCEEDED(aBlobImpl->GetSize(&length)));
+
+    if (aBlobImpl->IsFile()) {
+      nsString name;
+      MOZ_ALWAYS_TRUE(NS_SUCCEEDED(aBlobImpl->GetName(name)));
+
+      uint64_t modDate;
+      MOZ_ALWAYS_TRUE(NS_SUCCEEDED(
+        aBlobImpl->GetMozLastModifiedDate(&modDate)));
+
+      params = FileBlobConstructorParams(name, contentType, length, modDate);
+    } else {
+      params = NormalBlobConstructorParams(contentType, length);
+    }
+  }
+
+  BlobParent* actor = new BlobParent(aManager, aBlobImpl);
+
+  if (NS_WARN_IF(!aManager->SendPBlobConstructor(actor, params))) {
+    BlobParent::Destroy(actor);
+    return nullptr;
+  }
+
+  return actor;
 }
 
 // static

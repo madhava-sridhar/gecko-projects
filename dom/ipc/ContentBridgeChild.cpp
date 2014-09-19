@@ -9,7 +9,6 @@
 #include "mozilla/dom/StructuredCloneUtils.h"
 #include "mozilla/dom/TabChild.h"
 #include "mozilla/dom/ipc/BlobChild.h"
-#include "mozilla/dom/ipc/nsIRemoteBlob.h"
 #include "mozilla/ipc/InputStreamUtils.h"
 #include "nsDOMFile.h"
 #include "JavaScriptChild.h"

@@ -849,55 +849,8 @@ BackgroundParent::GetOrCreateActorForBlobImpl(
   MOZ_ASSERT(aBackgroundActor);
   MOZ_ASSERT(aBlobImpl);
 
-  // If the blob represents a remote blob for this BackgroundParent then we can
-  // simply pass its actor back here.
-  if (nsCOMPtr<nsIRemoteBlob> remoteBlob = do_QueryInterface(aBlobImpl)) {
-    BlobParent* actor = remoteBlob->GetBlobParent();
-    if (actor && actor->GetBackgroundManager() == aBackgroundActor) {
-      return actor;
-    }
-  }
-
-  // All blobs shared between processes must be immutable.
-  if (NS_WARN_IF(NS_FAILED(aBlobImpl->SetMutable(false)))) {
-    return nullptr;
-  }
-
-  ChildBlobConstructorParams params;
-
-  if (aBlobImpl->IsSizeUnknown() || aBlobImpl->IsDateUnknown()) {
-    // We don't want to call GetSize or GetLastModifiedDate yet since that may
-    // stat a file on the this thread. Instead we'll learn the size lazily from
-    // the other side.
-    params = MysteryBlobConstructorParams();
-  } else {
-    nsString contentType;
-    MOZ_ALWAYS_TRUE(NS_SUCCEEDED(aBlobImpl->GetType(contentType)));
-
-    uint64_t length;
-    MOZ_ALWAYS_TRUE(NS_SUCCEEDED(aBlobImpl->GetSize(&length)));
-
-    if (aBlobImpl->IsFile()) {
-      nsString name;
-      MOZ_ALWAYS_TRUE(NS_SUCCEEDED(aBlobImpl->GetName(name)));
-
-      uint64_t modDate;
-      MOZ_ALWAYS_TRUE(NS_SUCCEEDED(
-        aBlobImpl->GetMozLastModifiedDate(&modDate)));
-
-      params = FileBlobConstructorParams(name, contentType, length, modDate);
-    } else {
-      params = NormalBlobConstructorParams(contentType, length);
-    }
-  }
-
-  BlobParent* actor = BlobParent::Create(aBackgroundActor, aBlobImpl);
+  BlobParent* actor = BlobParent::GetOrCreate(aBackgroundActor, aBlobImpl);
   if (NS_WARN_IF(!actor)) {
-    return nullptr;
-  }
-
-  if (NS_WARN_IF(!aBackgroundActor->SendPBlobConstructor(actor, params))) {
-    BlobParent::Destroy(actor);
     return nullptr;
   }
 
@@ -961,65 +914,8 @@ BackgroundChild::GetOrCreateActorForBlob(PBackgroundChild* aBackgroundActor,
   nsRefPtr<DOMFileImpl> blobImpl = static_cast<DOMFile*>(aBlob)->Impl();
   MOZ_ASSERT(blobImpl);
 
-  // If the blob represents a remote blob then we can simply pass its actor back
-  // here.
-  if (nsCOMPtr<nsIRemoteBlob> remoteBlob = do_QueryInterface(blobImpl)) {
-    BlobChild* actor = remoteBlob->GetBlobChild();
-    if (actor && actor->GetBackgroundManager() == aBackgroundActor) {
-      return actor;
-    }
-  }
-
-  // All blobs shared between processes must be immutable.
-  if (NS_WARN_IF(NS_FAILED(blobImpl->SetMutable(false)))) {
-    return nullptr;
-  }
-
-  MOZ_ASSERT(!blobImpl->IsSizeUnknown());
-  MOZ_ASSERT(!blobImpl->IsDateUnknown());
-
-  ParentBlobConstructorParams params;
-
-  nsString contentType;
-  MOZ_ALWAYS_TRUE(NS_SUCCEEDED(aBlob->GetType(contentType)));
-
-  uint64_t length;
-  MOZ_ALWAYS_TRUE(NS_SUCCEEDED(aBlob->GetSize(&length)));
-
-  nsCOMPtr<nsIInputStream> stream;
-  MOZ_ALWAYS_TRUE(NS_SUCCEEDED(
-    blobImpl->GetInternalStream(getter_AddRefs(stream))));
-
-  if (blobImpl->IsFile()) {
-    nsString name;
-    MOZ_ALWAYS_TRUE(NS_SUCCEEDED(blobImpl->GetName(name)));
-
-    uint64_t modDate;
-    MOZ_ALWAYS_TRUE(NS_SUCCEEDED(blobImpl->GetMozLastModifiedDate(&modDate)));
-
-    params.blobParams() =
-      FileBlobConstructorParams(name, contentType, length, modDate);
-  } else {
-    params.blobParams() = NormalBlobConstructorParams(contentType, length);
-  }
-
-  InputStreamParams inputStreamParams;
-
-  nsTArray<FileDescriptor> fds;
-  SerializeInputStream(stream, inputStreamParams, fds);
-
-  MOZ_ASSERT(inputStreamParams.type() != InputStreamParams::T__None);
-  MOZ_ASSERT(fds.IsEmpty());
-
-  params.optionalInputStreamParams() = inputStreamParams;
-
-  BlobChild* actor = BlobChild::Create(aBackgroundActor, blobImpl);
+  BlobChild* actor = BlobChild::GetOrCreate(aBackgroundActor, blobImpl);
   if (NS_WARN_IF(!actor)) {
-    return nullptr;
-  }
-
-  if (NS_WARN_IF(!aBackgroundActor->SendPBlobConstructor(actor, params))) {
-    BlobChild::Destroy(actor);
     return nullptr;
   }
 
