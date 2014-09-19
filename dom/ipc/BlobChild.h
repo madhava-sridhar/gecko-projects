@@ -149,7 +149,7 @@ private:
   template <class ChildManagerType>
   static BlobChild*
   SendSliceConstructor(ChildManagerType* aManager,
-                       const NormalBlobConstructorParams& aParams,
+                       const ChildBlobConstructorParams& aParams,
                        const ParentBlobConstructorParams& aOtherSideParams);
 
   void

@@ -45,7 +45,7 @@ struct MysteryBlobConstructorParams
   // Nothing is known about this type of blob.
 };
 
-union ChildBlobConstructorParams
+union AnyBlobConstructorParams
 {
   NormalBlobConstructorParams;
   FileBlobConstructorParams;
@@ -53,9 +53,14 @@ union ChildBlobConstructorParams
   MysteryBlobConstructorParams;
 };
 
+struct ChildBlobConstructorParams
+{
+  AnyBlobConstructorParams blobParams;
+};
+
 struct ParentBlobConstructorParams
 {
-  ChildBlobConstructorParams blobParams;
+  AnyBlobConstructorParams blobParams;
   OptionalInputStreamParams optionalInputStreamParams;
 };
 

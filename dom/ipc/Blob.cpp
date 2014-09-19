@@ -1203,8 +1203,9 @@ private:
 
     NS_ENSURE_TRUE_VOID(mActor->HasManager());
 
-    NormalBlobConstructorParams params(mContentType /* contentType */,
-                                       mLength /* length */);
+    ChildBlobConstructorParams params(
+      NormalBlobConstructorParams(mContentType /* contentType */,
+                                  mLength /* length */));
 
     ParentBlobConstructorParams otherSideParams(
       SlicedBlobConstructorParams(nullptr /* sourceParent */,
@@ -1425,27 +1426,28 @@ void
 BlobChild::CommonInit(const ChildBlobConstructorParams& aParams)
 {
   AssertIsOnOwningThread();
-  MOZ_ASSERT(aParams.type() != ChildBlobConstructorParams::T__None);
 
   MOZ_COUNT_CTOR(BlobChild);
 
-  ChildBlobConstructorParams::Type paramsType = aParams.type();
-  MOZ_ASSERT(paramsType != ChildBlobConstructorParams::T__None);
+  const AnyBlobConstructorParams& blobParams = aParams.blobParams();
+
+  AnyBlobConstructorParams::Type paramsType = blobParams.type();
+  MOZ_ASSERT(paramsType != AnyBlobConstructorParams::T__None);
 
   nsRefPtr<RemoteBlobImpl> remoteBlob;
 
   switch (paramsType) {
-    case ChildBlobConstructorParams::TNormalBlobConstructorParams: {
+    case AnyBlobConstructorParams::TNormalBlobConstructorParams: {
       const NormalBlobConstructorParams& params =
-        aParams.get_NormalBlobConstructorParams();
+        blobParams.get_NormalBlobConstructorParams();
       remoteBlob =
         new RemoteBlobImpl(this, params.contentType(), params.length());
       break;
     }
 
-    case ChildBlobConstructorParams::TFileBlobConstructorParams: {
+    case AnyBlobConstructorParams::TFileBlobConstructorParams: {
       const FileBlobConstructorParams& params =
-        aParams.get_FileBlobConstructorParams();
+        blobParams.get_FileBlobConstructorParams();
       remoteBlob = new RemoteBlobImpl(this,
                                       params.name(),
                                       params.contentType(),
@@ -1454,7 +1456,7 @@ BlobChild::CommonInit(const ChildBlobConstructorParams& aParams)
       break;
     }
 
-    case ChildBlobConstructorParams::TMysteryBlobConstructorParams: {
+    case AnyBlobConstructorParams::TMysteryBlobConstructorParams: {
       remoteBlob = new RemoteBlobImpl(this);
       break;
     }
@@ -1607,16 +1609,18 @@ BlobChild::CreateFromParams(ChildManagerType* aManager,
   AssertCorrectThreadForManager(aManager);
   MOZ_ASSERT(aManager);
 
-  switch (aParams.type()) {
-    case ChildBlobConstructorParams::TNormalBlobConstructorParams:
-    case ChildBlobConstructorParams::TFileBlobConstructorParams:
-    case ChildBlobConstructorParams::TMysteryBlobConstructorParams: {
+  const AnyBlobConstructorParams& blobParams = aParams.blobParams();
+
+  switch (blobParams.type()) {
+    case AnyBlobConstructorParams::TNormalBlobConstructorParams:
+    case AnyBlobConstructorParams::TFileBlobConstructorParams:
+    case AnyBlobConstructorParams::TMysteryBlobConstructorParams: {
       return new BlobChild(aManager, aParams);
     }
 
-    case ChildBlobConstructorParams::TSlicedBlobConstructorParams: {
+    case AnyBlobConstructorParams::TSlicedBlobConstructorParams: {
       const SlicedBlobConstructorParams& params =
-        aParams.get_SlicedBlobConstructorParams();
+        blobParams.get_SlicedBlobConstructorParams();
 
       auto* actor =
         const_cast<BlobChild*>(
@@ -1649,7 +1653,7 @@ template <class ChildManagerType>
 BlobChild*
 BlobChild::SendSliceConstructor(
                             ChildManagerType* aManager,
-                            const NormalBlobConstructorParams& aParams,
+                            const ChildBlobConstructorParams& aParams,
                             const ParentBlobConstructorParams& aOtherSideParams)
 {
   AssertCorrectThreadForManager(aManager);
@@ -2213,13 +2217,13 @@ BlobParent::CommonInit(const ParentBlobConstructorParams& aParams)
 
   MOZ_COUNT_CTOR(BlobParent);
 
-  const ChildBlobConstructorParams& blobParams = aParams.blobParams();
+  const AnyBlobConstructorParams& blobParams = aParams.blobParams();
 
-  ChildBlobConstructorParams::Type paramsType = blobParams.type();
+  AnyBlobConstructorParams::Type paramsType = blobParams.type();
   MOZ_ASSERT(paramsType ==
-               ChildBlobConstructorParams::TNormalBlobConstructorParams ||
+               AnyBlobConstructorParams::TNormalBlobConstructorParams ||
              paramsType ==
-               ChildBlobConstructorParams::TFileBlobConstructorParams);
+               AnyBlobConstructorParams::TFileBlobConstructorParams);
 
   const InputStreamParams& inputStreamParams =
     aParams.optionalInputStreamParams().get_InputStreamParams();
@@ -2227,7 +2231,7 @@ BlobParent::CommonInit(const ParentBlobConstructorParams& aParams)
   nsRefPtr<RemoteBlobImpl> remoteBlob;
 
   switch (paramsType) {
-    case ChildBlobConstructorParams::TNormalBlobConstructorParams: {
+    case AnyBlobConstructorParams::TNormalBlobConstructorParams: {
       const NormalBlobConstructorParams& params =
         blobParams.get_NormalBlobConstructorParams();
       remoteBlob = new RemoteBlobImpl(this,
@@ -2237,7 +2241,7 @@ BlobParent::CommonInit(const ParentBlobConstructorParams& aParams)
       break;
     }
 
-    case ChildBlobConstructorParams::TFileBlobConstructorParams: {
+    case AnyBlobConstructorParams::TFileBlobConstructorParams: {
       const FileBlobConstructorParams& params =
         blobParams.get_FileBlobConstructorParams();
       remoteBlob = new RemoteBlobImpl(this,
@@ -2341,13 +2345,13 @@ BlobParent::GetOrCreateFromImpl(ParentManagerType* aManager,
     return nullptr;
   }
 
-  ChildBlobConstructorParams params;
+  AnyBlobConstructorParams blobParams;
 
   if (aBlobImpl->IsSizeUnknown() || aBlobImpl->IsDateUnknown()) {
     // We don't want to call GetSize or GetLastModifiedDate yet since that may
     // stat a file on the this thread. Instead we'll learn the size lazily from
     // the other side.
-    params = MysteryBlobConstructorParams();
+    blobParams = MysteryBlobConstructorParams();
   } else {
     nsString contentType;
     MOZ_ALWAYS_TRUE(NS_SUCCEEDED(aBlobImpl->GetType(contentType)));
@@ -2363,14 +2367,16 @@ BlobParent::GetOrCreateFromImpl(ParentManagerType* aManager,
       MOZ_ALWAYS_TRUE(NS_SUCCEEDED(
         aBlobImpl->GetMozLastModifiedDate(&modDate)));
 
-      params = FileBlobConstructorParams(name, contentType, length, modDate);
+      blobParams =
+        FileBlobConstructorParams(name, contentType, length, modDate);
     } else {
-      params = NormalBlobConstructorParams(contentType, length);
+      blobParams = NormalBlobConstructorParams(contentType, length);
     }
   }
 
   BlobParent* actor = new BlobParent(aManager, aBlobImpl);
 
+  ChildBlobConstructorParams params(blobParams);
   if (NS_WARN_IF(!aManager->SendPBlobConstructor(actor, params))) {
     BlobParent::Destroy(actor);
     return nullptr;
@@ -2388,16 +2394,16 @@ BlobParent::CreateFromParams(ParentManagerType* aManager,
   AssertCorrectThreadForManager(aManager);
   MOZ_ASSERT(aManager);
 
-  const ChildBlobConstructorParams& blobParams = aParams.blobParams();
+  const AnyBlobConstructorParams& blobParams = aParams.blobParams();
 
   switch (blobParams.type()) {
-    case ChildBlobConstructorParams::TMysteryBlobConstructorParams: {
+    case AnyBlobConstructorParams::TMysteryBlobConstructorParams: {
       ASSERT_UNLESS_FUZZING();
       return nullptr;
     }
 
-    case ChildBlobConstructorParams::TNormalBlobConstructorParams:
-    case ChildBlobConstructorParams::TFileBlobConstructorParams: {
+    case AnyBlobConstructorParams::TNormalBlobConstructorParams:
+    case AnyBlobConstructorParams::TFileBlobConstructorParams: {
       if (aParams.optionalInputStreamParams().type() !=
             OptionalInputStreamParams::TInputStreamParams) {
         ASSERT_UNLESS_FUZZING();
@@ -2407,7 +2413,7 @@ BlobParent::CreateFromParams(ParentManagerType* aManager,
       return new BlobParent(aManager, aParams);
     }
 
-    case ChildBlobConstructorParams::TSlicedBlobConstructorParams: {
+    case AnyBlobConstructorParams::TSlicedBlobConstructorParams: {
       if (aParams.optionalInputStreamParams().type() !=
             OptionalInputStreamParams::Tvoid_t) {
         ASSERT_UNLESS_FUZZING();
