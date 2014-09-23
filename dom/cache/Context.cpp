@@ -32,6 +32,9 @@ public:
   }
 
 private:
+  ~QuotaReleaseRunnable()
+  {}
+
   const nsCString mOrigin;
   const nsCString mQuotaId;
 
