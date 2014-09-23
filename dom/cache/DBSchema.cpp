@@ -19,6 +19,10 @@ namespace mozilla {
 namespace dom {
 namespace cache {
 
+
+const int32_t DBSchema::kLatestSchemaVersion;
+const int32_t DBSchema::kMaxEntriesPerStatement;
+
 using mozilla::void_t;
 
 // static
