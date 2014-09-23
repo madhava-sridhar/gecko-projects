@@ -20,8 +20,8 @@ namespace dom {
 namespace cache {
 
 
-const int32_t DBSchema::kLatestSchemaVersion;
-const int32_t DBSchema::kMaxEntriesPerStatement;
+const int32_t DBSchema::kLatestSchemaVersion = 1;
+const int32_t DBSchema::kMaxEntriesPerStatement = 255;
 
 using mozilla::void_t;
 

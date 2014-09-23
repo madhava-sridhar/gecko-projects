@@ -99,8 +99,8 @@ private:
   DBSchema() MOZ_DELETE;
   ~DBSchema() MOZ_DELETE;
 
-  static const int32_t kLatestSchemaVersion = 1;
-  static const int32_t kMaxEntriesPerStatement = 255;
+  static const int32_t kLatestSchemaVersion;
+  static const int32_t kMaxEntriesPerStatement;
 };
 
 } // namespace cache
