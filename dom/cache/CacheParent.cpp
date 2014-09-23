@@ -4,58 +4,48 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "mozilla/dom/CacheParent.h"
+#include "mozilla/dom/cache/CacheParent.h"
 
 #include "mozilla/unused.h"
-#include "mozilla/dom/CacheDBConnection.h"
 #include "nsCOMPtr.h"
 
 namespace mozilla {
 namespace dom {
+namespace cache {
 
 using mozilla::unused;
 using mozilla::void_t;
-using mozilla::dom::cache::RequestId;
-
-CacheParent::CacheParent(const nsACString& aOrigin,
-                         const nsACString& aBaseDomain)
-  : mOrigin(aOrigin)
-  , mBaseDomain(aBaseDomain)
-{
-  mDBConnection = CacheDBConnection::Create(this, aOrigin, aBaseDomain);
-  MOZ_ASSERT(mDBConnection);
-}
 
 CacheParent::CacheParent(const nsACString& aOrigin,
                          const nsACString& aBaseDomain,
-                         const nsID& aExistingCacheId)
-  : mOrigin(aOrigin)
-  , mBaseDomain(aBaseDomain)
+                         CacheId aCacheId)
+  : mCacheId(aCacheId)
+  , mManager(Manager::ForOrigin(aOrigin, aBaseDomain))
 {
-  mDBConnection = new CacheDBConnection(this, aOrigin, aBaseDomain,
-                                        aExistingCacheId);
-  MOZ_ASSERT(mDBConnection);
+  MOZ_ASSERT(mManager);
+  mManager->AddRefCacheId(mCacheId);
 }
 
 CacheParent::~CacheParent()
 {
-  MOZ_ASSERT(!mDBConnection);
+  MOZ_ASSERT(!mManager);
 }
 
 void
 CacheParent::ActorDestroy(ActorDestroyReason aReason)
 {
-  MOZ_ASSERT(mDBConnection);
-  mDBConnection->ClearListener();
-  mDBConnection = nullptr;
+  MOZ_ASSERT(mManager);
+  mManager->RemoveListener(this);
+  mManager->ReleaseCacheId(mCacheId);
+  mManager = nullptr;
 }
 
 bool
 CacheParent::RecvMatch(const RequestId& aRequestId, const PCacheRequest& aRequest,
                        const PCacheQueryParams& aParams)
 {
-  MOZ_ASSERT(mDBConnection);
-  mDBConnection->Match(aRequestId, aRequest, aParams);
+  MOZ_ASSERT(mManager);
+  mManager->CacheMatch(this, aRequestId, mCacheId, aRequest, aParams);
   return true;
 }
 
@@ -64,8 +54,8 @@ CacheParent::RecvMatchAll(const RequestId& aRequestId,
                           const PCacheRequestOrVoid& aRequest,
                           const PCacheQueryParams& aParams)
 {
-  MOZ_ASSERT(mDBConnection);
-  mDBConnection->MatchAll(aRequestId, aRequest, aParams);
+  MOZ_ASSERT(mManager);
+  mManager->CacheMatchAll(this, aRequestId, mCacheId, aRequest, aParams);
   return true;
 }
 
@@ -86,8 +76,8 @@ bool
 CacheParent::RecvPut(const RequestId& aRequestId, const PCacheRequest& aRequest,
                      const PCacheResponse& aResponse)
 {
-  MOZ_ASSERT(mDBConnection);
-  mDBConnection->Put(aRequestId, aRequest, aResponse);
+  MOZ_ASSERT(mManager);
+  mManager->CachePut(this, aRequestId, mCacheId, aRequest, aResponse);
   return true;
 }
 
@@ -96,8 +86,8 @@ CacheParent::RecvDelete(const RequestId& aRequestId,
                         const PCacheRequest& aRequest,
                         const PCacheQueryParams& aParams)
 {
-  MOZ_ASSERT(mDBConnection);
-  mDBConnection->Delete(aRequestId, aRequest, aParams);
+  MOZ_ASSERT(mManager);
+  mManager->CacheDelete(this, aRequestId, mCacheId, aRequest, aParams);
   return true;
 }
 
@@ -110,32 +100,32 @@ CacheParent::RecvKeys(const RequestId& aRequestId,
 }
 
 void
-CacheParent::OnMatch(cache::RequestId aRequestId, nsresult aRv,
-                     const PCacheResponseOrVoid& aResponse)
+CacheParent::OnCacheMatch(RequestId aRequestId, nsresult aRv,
+                          const PCacheResponseOrVoid& aResponse)
 {
   unused << SendMatchResponse(aRequestId, aRv, aResponse);
 }
 
 void
-CacheParent::OnMatchAll(cache::RequestId aRequestId, nsresult aRv,
-                        const nsTArray<PCacheResponse>& aResponses)
+CacheParent::OnCacheMatchAll(RequestId aRequestId, nsresult aRv,
+                             const nsTArray<PCacheResponse>& aResponses)
 {
   unused << SendMatchAllResponse(aRequestId, aRv, aResponses);
 }
 
 void
-CacheParent::OnPut(RequestId aRequestId, nsresult aRv,
-                   const PCacheResponseOrVoid& aResponse)
+CacheParent::OnCachePut(RequestId aRequestId, nsresult aRv,
+                        const PCacheResponseOrVoid& aResponseOrVoid)
 {
-  unused << SendPutResponse(aRequestId, aRv, aResponse);
+  unused << SendPutResponse(aRequestId, aRv, aResponseOrVoid);
 }
 
 void
-CacheParent::OnDelete(RequestId aRequestId, nsresult aRv,
-                      bool aSuccess)
+CacheParent::OnCacheDelete(RequestId aRequestId, nsresult aRv, bool aSuccess)
 {
   unused << SendDeleteResponse(aRequestId, aRv, aSuccess);
 }
 
+} // namespace cache
 } // namespace dom
 } // namesapce mozilla

@@ -13,7 +13,7 @@
 #include "mozilla/dom/DedicatedWorkerGlobalScopeBinding.h"
 #include "mozilla/dom/ServiceWorkerGlobalScopeBinding.h"
 #include "mozilla/dom/SharedWorkerGlobalScopeBinding.h"
-#include "mozilla/dom/CacheStorage.h"
+#include "mozilla/dom/cache/CacheStorage.h"
 #include "mozilla/dom/Console.h"
 
 #ifdef ANDROID
@@ -34,6 +34,7 @@
 
 using namespace mozilla;
 using namespace mozilla::dom;
+using mozilla::dom::cache::CacheStorage;
 USING_WORKERS_NAMESPACE
 
 BEGIN_WORKERS_NAMESPACE

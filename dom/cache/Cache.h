@@ -4,10 +4,10 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#ifndef mozilla_dom_Cache_h
-#define mozilla_dom_Cache_h
+#ifndef mozilla_dom_cache_Cache_h
+#define mozilla_dom_cache_Cache_h
 
-#include "mozilla/dom/CacheChildListener.h"
+#include "mozilla/dom/cache/CacheChildListener.h"
 #include "nsCOMPtr.h"
 #include "nsISupportsImpl.h"
 #include "nsString.h"
@@ -21,15 +21,18 @@ class ErrorResult;
 
 namespace dom {
 
-class CacheChild;
 class OwningRequestOrScalarValueString;
 class Promise;
-class PCacheChild;
-class RequestOrScalarValueString;
 struct QueryParams;
+class RequestOrScalarValueString;
 class Response;
 template<typename T> class Optional;
 template<typename T> class Sequence;
+
+namespace cache {
+
+class CacheChild;
+class PCacheChild;
 
 class Cache MOZ_FINAL : public nsISupports
                       , public nsWrapperCache
@@ -70,32 +73,32 @@ public:
   // CacheChildListener methods
   virtual void ActorDestroy(mozilla::ipc::IProtocol& aActor) MOZ_OVERRIDE;
   virtual void
-  RecvMatchResponse(cache::RequestId aRequestId, nsresult aRv,
+  RecvMatchResponse(RequestId aRequestId, nsresult aRv,
                     const PCacheResponseOrVoid& aResponse) MOZ_OVERRIDE;
   virtual void
-  RecvMatchAllResponse(cache::RequestId aRequestId, nsresult aRv,
+  RecvMatchAllResponse(RequestId aRequestId, nsresult aRv,
                        const nsTArray<PCacheResponse>& aResponses) MOZ_OVERRIDE;
   virtual void
-  RecvAddResponse(cache::RequestId aRequestId, nsresult aRv,
+  RecvAddResponse(RequestId aRequestId, nsresult aRv,
                   const PCacheResponse& aResponse) MOZ_OVERRIDE;
   virtual void
-  RecvAddAllResponse(cache::RequestId aRequestId, nsresult aRv,
+  RecvAddAllResponse(RequestId aRequestId, nsresult aRv,
                      const nsTArray<PCacheResponse>& aResponses) MOZ_OVERRIDE;
   virtual void
-  RecvPutResponse(cache::RequestId aRequestId, nsresult aRv,
+  RecvPutResponse(RequestId aRequestId, nsresult aRv,
                   const PCacheResponseOrVoid& aResponse) MOZ_OVERRIDE;
   virtual void
-  RecvDeleteResponse(cache::RequestId aRequestId, nsresult aRv,
+  RecvDeleteResponse(RequestId aRequestId, nsresult aRv,
                      bool aSuccess) MOZ_OVERRIDE;
   virtual void
-  RecvKeysResponse(cache::RequestId aRequestId, nsresult aRv,
+  RecvKeysResponse(RequestId aRequestId, nsresult aRv,
                    const nsTArray<PCacheRequest>& aRequests) MOZ_OVERRIDE;
 
 private:
   virtual ~Cache();
 
-  cache::RequestId AddRequestPromise(Promise* aPromise, ErrorResult& aRv);
-  already_AddRefed<Promise> RemoveRequestPromise(cache::RequestId aRequestId);
+  RequestId AddRequestPromise(Promise* aPromise, ErrorResult& aRv);
+  already_AddRefed<Promise> RemoveRequestPromise(RequestId aRequestId);
 
 private:
   nsCOMPtr<nsISupports> mOwner;
@@ -110,6 +113,7 @@ public:
   NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS(Cache)
 };
 
+} // namespace cache
 } // namespace dom
 } // namespace mozilla
 

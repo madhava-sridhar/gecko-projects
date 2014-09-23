@@ -4,14 +4,13 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "mozilla/dom/CacheStorageChild.h"
+#include "mozilla/dom/cache/CacheStorageChild.h"
 
-#include "mozilla/dom/CacheStorageChildListener.h"
+#include "mozilla/dom/cache/CacheStorageChildListener.h"
 
 namespace mozilla {
 namespace dom {
-
-using mozilla::dom::cache::RequestId;
+namespace cache {
 
 CacheStorageChild::CacheStorageChild(CacheStorageChildListener& aListener)
   : mListener(&aListener)
@@ -90,5 +89,6 @@ CacheStorageChild::ClearListener()
   mListener = nullptr;
 }
 
+} // namespace cache
 } // namespace dom
 } // namespace mozilla

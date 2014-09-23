@@ -9,7 +9,7 @@
  */
 
 [Exposed=(Window,Worker),
- Func="mozilla::dom::CacheStorage::PrefEnabled"]
+ Func="mozilla::dom::cache::CacheStorage::PrefEnabled"]
 interface CacheStorage {
    [Throws] Promise<Response> match((Request or ScalarValueString) request,
                                     optional QueryParams params);

@@ -7,11 +7,12 @@
 #ifndef mozilla_dom_cache_CacheStorageChild_h
 #define mozilla_dom_cache_CacheStorageChild_h
 
-#include "mozilla/dom/CacheTypes.h"
-#include "mozilla/dom/PCacheStorageChild.h"
+#include "mozilla/dom/cache/Types.h"
+#include "mozilla/dom/cache/PCacheStorageChild.h"
 
 namespace mozilla {
 namespace dom {
+namespace cache {
 
 class CacheStorageChildListener;
 class PCacheChild;
@@ -43,6 +44,7 @@ private:
   CacheStorageChildListener* mListener;
 };
 
+} // namespace cache
 } // namespace dom
 } // namespace mozilla
 

@@ -12,8 +12,10 @@ template <class> class nsAutoPtr;
 
 namespace mozilla {
 namespace dom {
-  class PCacheStorageChild;
+namespace cache {
   class PCacheChild;
+  class PCacheStorageChild;
+}
 }
 namespace ipc {
 
@@ -45,20 +47,18 @@ protected:
   virtual bool
   DeallocPBackgroundTestChild(PBackgroundTestChild* aActor) MOZ_OVERRIDE;
 
-  virtual mozilla::dom::PCacheStorageChild*
+  virtual mozilla::dom::cache::PCacheStorageChild*
   AllocPCacheStorageChild(const Namespace& aNamespace,
                           const nsCString& aOrigin,
                           const nsCString& aBaseDomain) MOZ_OVERRIDE;
 
   virtual bool
-  DeallocPCacheStorageChild(mozilla::dom::PCacheStorageChild* aActor) MOZ_OVERRIDE;
+  DeallocPCacheStorageChild(mozilla::dom::cache::PCacheStorageChild* aActor) MOZ_OVERRIDE;
 
-  virtual mozilla::dom::PCacheChild*
-  AllocPCacheChild(const nsCString& aOrigin,
-                   const nsCString& aBaseDomain) MOZ_OVERRIDE;
+  virtual mozilla::dom::cache::PCacheChild* AllocPCacheChild() MOZ_OVERRIDE;
 
   virtual bool
-  DeallocPCacheChild(mozilla::dom::PCacheChild* aActor) MOZ_OVERRIDE;
+  DeallocPCacheChild(mozilla::dom::cache::PCacheChild* aActor) MOZ_OVERRIDE;
 
   virtual PMessagePortChild*
   AllocPMessagePortChild() MOZ_OVERRIDE;

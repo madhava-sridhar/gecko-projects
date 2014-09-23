@@ -7,7 +7,7 @@ include protocol PCacheStorage;
 include protocol PCache;
 include protocol PMessagePort;
 
-using mozilla::dom::cache::Namespace from "mozilla/dom/CacheTypes.h";
+using mozilla::dom::cache::Namespace from "mozilla/dom/cache/Types.h";
 
 namespace mozilla {
 namespace ipc {
@@ -27,8 +27,8 @@ parent:
 
   PMessagePort();
 
-both:
-  PCache(nsCString origin, nsCString baseDomain);
+child:
+  PCache();
 };
 
 } // namespace ipc

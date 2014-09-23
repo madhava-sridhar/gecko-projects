@@ -4,31 +4,30 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "mozilla/dom/CacheStorage.h"
+#include "mozilla/dom/cache/CacheStorage.h"
 
 #include "mozilla/unused.h"
-#include "mozilla/dom/Cache.h"
-#include "mozilla/dom/CacheStorageBinding.h"
-#include "mozilla/dom/CacheStorageChild.h"
-#include "mozilla/dom/PCacheChild.h"
 #include "mozilla/dom/Promise.h"
+#include "mozilla/dom/CacheStorageBinding.h"
+#include "mozilla/dom/cache/Cache.h"
+#include "mozilla/dom/cache/PCacheChild.h"
+#include "mozilla/dom/cache/CacheStorageChild.h"
 #include "mozilla/ipc/BackgroundChild.h"
 #include "mozilla/ipc/PBackgroundChild.h"
 #include "nsIGlobalObject.h"
 
 namespace mozilla {
 namespace dom {
+namespace cache {
 
 using mozilla::unused;
 using mozilla::ErrorResult;
-using mozilla::dom::cache::INVALID_REQUEST_ID;
-using mozilla::dom::cache::RequestId;
 using mozilla::ipc::BackgroundChild;
 using mozilla::ipc::PBackgroundChild;
 using mozilla::ipc::IProtocol;
 
-NS_IMPL_CYCLE_COLLECTING_ADDREF(mozilla::dom::CacheStorage);
-NS_IMPL_CYCLE_COLLECTING_RELEASE(mozilla::dom::CacheStorage);
+NS_IMPL_CYCLE_COLLECTING_ADDREF(mozilla::dom::cache::CacheStorage);
+NS_IMPL_CYCLE_COLLECTING_RELEASE(mozilla::dom::cache::CacheStorage);
 NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE(CacheStorage, mOwner,
                                                     mGlobal,
                                                     mRequestPromises)
@@ -39,7 +38,7 @@ NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(CacheStorage)
   NS_INTERFACE_MAP_ENTRY(nsIIPCBackgroundChildCreateCallback)
 NS_INTERFACE_MAP_END
 
-CacheStorage::CacheStorage(cache::Namespace aNamespace,
+CacheStorage::CacheStorage(Namespace aNamespace,
                            nsISupports* aOwner,
                            nsIGlobalObject* aGlobal,
                            const nsACString& aOrigin,
@@ -390,5 +389,6 @@ CacheStorage::RemoveRequestPromise(RequestId aRequestId)
   return nullptr;
 }
 
+} // namespace cache
 } // namespace dom
 } // namespace mozilla

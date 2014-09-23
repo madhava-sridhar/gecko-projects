@@ -4,8 +4,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#ifndef mozilla_dom_CacheQuotaRunnable_h
-#define mozilla_dom_CacheQuotaRunnable_h
+#ifndef mozilla_dom_cache_CacheQuotaRunnable_h
+#define mozilla_dom_cache_CacheQuotaRunnable_h
 
 #include "nsCOMPtr.h"
 #include "nsIRunnable.h"
@@ -16,6 +16,7 @@ class nsIThread;
 
 namespace mozilla {
 namespace dom {
+namespace cache {
 
 class CacheQuotaRunnable : public nsIRunnable
 {
@@ -59,7 +60,8 @@ public:
   NS_DECL_NSIRUNNABLE
 };
 
+} // namespace cache
 } // namespace dom
 } // namespace mozilla
 
-#endif // mozilla_dom_CacheQuotaRunnable_h
+#endif // mozilla_dom_cache_CacheQuotaRunnable_h

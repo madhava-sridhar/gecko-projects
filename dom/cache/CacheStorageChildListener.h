@@ -4,10 +4,10 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#ifndef mozilla_dom_CacheStorageChildListener_h
-#define mozilla_dom_CacheStorageChildListener_h
+#ifndef mozilla_dom_cache_CacheStorageChildListener_h
+#define mozilla_dom_cache_CacheStorageChildListener_h
 
-#include "mozilla/dom/CacheTypes.h"
+#include "mozilla/dom/cache/Types.h"
 #include "nsError.h"
 #include "nsString.h"
 
@@ -20,6 +20,7 @@ namespace ipc {
 }
 
 namespace dom {
+namespace cache {
 
 class PCacheChild;
 
@@ -40,7 +41,8 @@ public:
                                 const nsTArray<nsString>& aKeys)=0;
 };
 
+} // namespace cache
 } // namespace dom
 } // namespace mozilla
 
-#endif // mozilla_dom_CacheStorageChildListener_h
+#endif // mozilla_dom_cache_CacheStorageChildListener_h

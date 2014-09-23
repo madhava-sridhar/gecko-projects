@@ -4,13 +4,13 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "mozilla/dom/Cache.h"
+#include "mozilla/dom/cache/Cache.h"
 
-#include "mozilla/dom/CacheBinding.h"
-#include "mozilla/dom/CacheChild.h"
 #include "mozilla/dom/Headers.h"
 #include "mozilla/dom/Promise.h"
 #include "mozilla/dom/WorkerPrivate.h"
+#include "mozilla/dom/CacheBinding.h"
+#include "mozilla/dom/cache/CacheChild.h"
 #include "mozilla/ErrorResult.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/unused.h"
@@ -20,12 +20,11 @@
 
 namespace mozilla {
 namespace dom {
+namespace cache {
 
 using mozilla::ErrorResult;
 using mozilla::unused;
 using mozilla::void_t;
-using mozilla::dom::cache::INVALID_REQUEST_ID;
-using mozilla::dom::cache::RequestId;
 
 // Utility function to remove the query from a URL.  We're not using nsIURL
 // or URL to do this because they require going to the main thread.
@@ -168,8 +167,8 @@ ToRequest(Request& aOut, const PCacheRequest& aIn)
   NS_WARNING("Not filling in contents of Request returned from Cache.");
 }
 
-NS_IMPL_CYCLE_COLLECTING_ADDREF(mozilla::dom::Cache);
-NS_IMPL_CYCLE_COLLECTING_RELEASE(mozilla::dom::Cache);
+NS_IMPL_CYCLE_COLLECTING_ADDREF(mozilla::dom::cache::Cache);
+NS_IMPL_CYCLE_COLLECTING_RELEASE(mozilla::dom::cache::Cache);
 NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE(Cache, mOwner, mGlobal)
 
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(Cache)
@@ -654,5 +653,6 @@ Cache::RemoveRequestPromise(RequestId aRequestId)
   return nullptr;
 }
 
+} // namespace cache
 } // namespace dom
 } // namespace mozilla

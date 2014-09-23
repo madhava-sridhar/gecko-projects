@@ -4,15 +4,15 @@
 
 #include "BackgroundChildImpl.h"
 
-#include "mozilla/dom/CacheChild.h"
 #include "mozilla/dom/MessagePortChild.h"
-#include "mozilla/dom/PCacheStorageChild.h"
+#include "mozilla/dom/cache/CacheChild.h"
+#include "mozilla/dom/cache/PCacheStorageChild.h"
 #include "mozilla/ipc/PBackgroundTestChild.h"
 #include "nsTraceRefcnt.h"
 
-using mozilla::dom::PCacheStorageChild;
-using mozilla::dom::CacheChild;
-using mozilla::dom::PCacheChild;
+using mozilla::dom::cache::PCacheStorageChild;
+using mozilla::dom::cache::CacheChild;
+using mozilla::dom::cache::PCacheChild;
 
 namespace {
 
@@ -118,8 +118,7 @@ BackgroundChildImpl::DeallocPCacheStorageChild(PCacheStorageChild* aActor)
 }
 
 PCacheChild*
-BackgroundChildImpl::AllocPCacheChild(const nsCString& aOrigin,
-                                      const nsCString& aBaseDomain)
+BackgroundChildImpl::AllocPCacheChild()
 {
   return new CacheChild();
 }

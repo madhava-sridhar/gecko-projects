@@ -4,27 +4,15 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#ifndef mozilla_dom_CacheTypes_h
-#define mozilla_dom_CacheTypes_h
-
-#include <stdint.h>
+#include "mozilla/dom/cache/Action.h"
 
 namespace mozilla {
 namespace dom {
 namespace cache {
 
-enum Namespace
-{
-  DEFAULT_NAMESPACE,
-  CHROME_ONLY_NAMESPACE,
-  NUMBER_OF_NAMESPACES
-};
-
-typedef uintptr_t RequestId;
-static const RequestId INVALID_REQUEST_ID = 0;
+NS_IMPL_ISUPPORTS0(mozilla::dom::cache::Action);
+NS_IMPL_ISUPPORTS0(mozilla::dom::cache::Action::Resolver);
 
 } // namespace cache
 } // namespace dom
 } // namespace mozilla
-
-#endif // mozilla_dom_CacheTypes_h

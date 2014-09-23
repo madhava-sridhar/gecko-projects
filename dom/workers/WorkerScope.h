@@ -17,9 +17,12 @@
 namespace mozilla {
 namespace dom {
 
-class CacheStorage;
 class Console;
 class Function;
+
+namespace cache {
+class CacheStorage;
+}
 
 } // namespace dom
 } // namespace mozilla
@@ -38,7 +41,7 @@ class WorkerGlobalScope : public DOMEventTargetHelper,
   nsRefPtr<WorkerLocation> mLocation;
   nsRefPtr<WorkerNavigator> mNavigator;
   nsRefPtr<Performance> mPerformance;
-  nsRefPtr<CacheStorage> mCacheStorage;
+  nsRefPtr<mozilla::dom::cache::CacheStorage> mCacheStorage;
 
 protected:
   WorkerPrivate* mWorkerPrivate;
@@ -132,7 +135,7 @@ public:
         const RequestInit& aInit,
         ErrorResult& aRv);
 
-  already_AddRefed<CacheStorage> Caches();
+  already_AddRefed<mozilla::dom::cache::CacheStorage> Caches();
 };
 
 class DedicatedWorkerGlobalScope MOZ_FINAL : public WorkerGlobalScope

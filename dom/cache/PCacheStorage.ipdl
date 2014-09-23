@@ -5,10 +5,11 @@
 include protocol PBackground;
 include protocol PCache;
 
-using mozilla::dom::cache::RequestId from "mozilla/dom/CacheIPCUtils.h";
+using mozilla::dom::cache::RequestId from "mozilla/dom/cache/IPCUtils.h";
 
 namespace mozilla {
 namespace dom {
+namespace cache {
 
 protocol PCacheStorage
 {
@@ -32,5 +33,6 @@ both:
   __delete__();
 };
 
+} // namespace cache
 } // namespace dom
 } // namespace mozilla

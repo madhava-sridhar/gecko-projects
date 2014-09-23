@@ -9,7 +9,7 @@
  */
 
 [Exposed=(Window,Worker),
- Func="mozilla::dom::Cache::PrefEnabled"]
+ Func="mozilla::dom::cache::Cache::PrefEnabled"]
 interface Cache {
   [Throws]
   Promise<Response> match((Request or ScalarValueString) request,

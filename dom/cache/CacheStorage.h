@@ -4,11 +4,11 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#ifndef mozilla_dom_CacheStorage_h
-#define mozilla_dom_CacheStorage_h
+#ifndef mozilla_dom_cache_CacheStorage_h
+#define mozilla_dom_cache_CacheStorage_h
 
-#include "mozilla/dom/CacheStorageChildListener.h"
-#include "mozilla/dom/CacheTypes.h"
+#include "mozilla/dom/cache/CacheStorageChildListener.h"
+#include "mozilla/dom/cache/Types.h"
 #include "nsAutoPtr.h"
 #include "nsCOMPtr.h"
 #include "nsISupportsImpl.h"
@@ -28,10 +28,13 @@ namespace ipc {
 
 namespace dom {
 
-class CacheStorageChild;
 class Promise;
 struct QueryParams;
 class RequestOrScalarValueString;
+
+namespace cache {
+
+class CacheStorageChild;
 
 class CacheStorage MOZ_FINAL : public nsIIPCBackgroundChildCreateCallback
                              , public nsWrapperCache
@@ -40,7 +43,7 @@ class CacheStorage MOZ_FINAL : public nsIIPCBackgroundChildCreateCallback
   typedef mozilla::ipc::PBackgroundChild PBackgroundChild;
 
 public:
-  CacheStorage(cache::Namespace aNamespace, nsISupports* aOwner,
+  CacheStorage(Namespace aNamespace, nsISupports* aOwner,
                nsIGlobalObject* aGlobal, const nsACString& aOrigin,
                const nsACString& aBaseDomain);
 
@@ -65,24 +68,24 @@ public:
 
   // CacheStorageChildListener methods
   virtual void ActorDestroy(mozilla::ipc::IProtocol& aActor) MOZ_OVERRIDE;
-  virtual void RecvGetResponse(cache::RequestId aRequestId, nsresult aRv,
+  virtual void RecvGetResponse(RequestId aRequestId, nsresult aRv,
                                PCacheChild* aActor) MOZ_OVERRIDE;
-  virtual void RecvHasResponse(cache::RequestId aRequestId, nsresult aRv,
+  virtual void RecvHasResponse(RequestId aRequestId, nsresult aRv,
                                bool aSuccess) MOZ_OVERRIDE;
-  virtual void RecvCreateResponse(cache::RequestId aRequestId, nsresult aRv,
+  virtual void RecvCreateResponse(RequestId aRequestId, nsresult aRv,
                                   PCacheChild* aActor) MOZ_OVERRIDE;
-  virtual void RecvDeleteResponse(cache::RequestId aRequestId, nsresult aRv,
+  virtual void RecvDeleteResponse(RequestId aRequestId, nsresult aRv,
                                   bool aSuccess) MOZ_OVERRIDE;
-  virtual void RecvKeysResponse(cache::RequestId aRequestId, nsresult aRv,
+  virtual void RecvKeysResponse(RequestId aRequestId, nsresult aRv,
                                 const nsTArray<nsString>& aKeys) MOZ_OVERRIDE;
 
 private:
   virtual ~CacheStorage();
 
-  cache::RequestId AddRequestPromise(Promise* aPromise, ErrorResult& aRv);
-  already_AddRefed<Promise> RemoveRequestPromise(cache::RequestId aRequestId);
+  RequestId AddRequestPromise(Promise* aPromise, ErrorResult& aRv);
+  already_AddRefed<Promise> RemoveRequestPromise(RequestId aRequestId);
 
-  const cache::Namespace mNamespace;
+  const Namespace mNamespace;
   nsCOMPtr<nsISupports> mOwner;
   nsCOMPtr<nsIGlobalObject> mGlobal;
   const nsCString mOrigin;
@@ -95,7 +98,8 @@ public:
   NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS(CacheStorage)
 };
 
+} // namespace cache
 } // namespace dom
 } // namespace mozilla
 
-#endif // mozilla_dom_CacheStorage_h
+#endif // mozilla_dom_cache_CacheStorage_h

@@ -10,8 +10,10 @@
 
 namespace mozilla {
 namespace dom {
-  class PCacheStorageParent;
+namespace cache {
   class PCacheParent;
+  class PCacheStorageParent;
+}
 }
 namespace ipc {
 
@@ -36,20 +38,18 @@ protected:
   virtual bool
   DeallocPBackgroundTestParent(PBackgroundTestParent* aActor) MOZ_OVERRIDE;
 
-  virtual mozilla::dom::PCacheStorageParent*
+  virtual mozilla::dom::cache::PCacheStorageParent*
   AllocPCacheStorageParent(const Namespace& aNamespace,
                            const nsCString& aOrigin,
                            const nsCString& aBaseDomain) MOZ_OVERRIDE;
 
   virtual bool
-  DeallocPCacheStorageParent(mozilla::dom::PCacheStorageParent* aActor) MOZ_OVERRIDE;
+  DeallocPCacheStorageParent(mozilla::dom::cache::PCacheStorageParent* aActor) MOZ_OVERRIDE;
 
-  virtual mozilla::dom::PCacheParent*
-  AllocPCacheParent(const nsCString& aOrigin,
-                    const nsCString& aBaseDomain) MOZ_OVERRIDE;
+  virtual mozilla::dom::cache::PCacheParent* AllocPCacheParent() MOZ_OVERRIDE;
 
   virtual bool
-  DeallocPCacheParent(mozilla::dom::PCacheParent* aActor) MOZ_OVERRIDE;
+  DeallocPCacheParent(mozilla::dom::cache::PCacheParent* aActor) MOZ_OVERRIDE;
 
   virtual PMessagePortParent*
   AllocPMessagePortParent() MOZ_OVERRIDE;

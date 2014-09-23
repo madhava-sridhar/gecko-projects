@@ -4,38 +4,38 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-EXPORTS.mozilla.dom += [
+EXPORTS.mozilla.dom.cache += [
+    'Action.h',
     'Cache.h',
     'CacheChild.h',
     'CacheChildListener.h',
-    'CacheDBConnection.h',
-    'CacheDBListener.h',
-    'CacheDBSchema.h',
-    'CacheIPCUtils.h',
     'CacheParent.h',
     'CacheQuotaRunnable.h',
     'CacheStorage.h',
     'CacheStorageChild.h',
     'CacheStorageChildListener.h',
-    'CacheStorageDBConnection.h',
-    'CacheStorageDBListener.h',
-    'CacheStorageDBSchema.h',
     'CacheStorageParent.h',
-    'CacheTypes.h',
+    'Context.h',
+    'DBAction.h',
+    'DBSchema.h',
+    'IPCUtils.h',
+    'Manager.h',
+    'Types.h',
 ]
 
-UNIFIED_SOURCES += [
+SOURCES += [
+    'Action.cpp',
     'Cache.cpp',
     'CacheChild.cpp',
-    'CacheDBConnection.cpp',
-    'CacheDBSchema.cpp',
     'CacheParent.cpp',
     'CacheQuotaRunnable.cpp',
     'CacheStorage.cpp',
     'CacheStorageChild.cpp',
-    'CacheStorageDBConnection.cpp',
-    'CacheStorageDBSchema.cpp',
     'CacheStorageParent.cpp',
+    'Context.cpp',
+    'DBAction.cpp',
+    'DBSchema.cpp',
+    'Manager.cpp',
 ]
 
 IPDL_SOURCES += [

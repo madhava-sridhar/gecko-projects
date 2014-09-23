@@ -49,6 +49,6 @@ partial interface WorkerGlobalScope {
   // XXXbz no spec for this yet, because the webperf WG is a bit dysfunctional
   readonly attribute Performance performance;
 
-  [Func="mozilla::dom::CacheStorage::PrefEnabled"]
+  [Func="mozilla::dom::cache::CacheStorage::PrefEnabled"]
   readonly attribute CacheStorage caches;
 };

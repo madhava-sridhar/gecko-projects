@@ -7,10 +7,11 @@
 #ifndef mozilla_dom_cache_CacheChild_h
 #define mozilla_dom_cache_CacheChild_h
 
-#include "mozilla/dom/PCacheChild.h"
+#include "mozilla/dom/cache/PCacheChild.h"
 
 namespace mozilla {
 namespace dom {
+namespace cache {
 
 class CacheChildListener;
 
@@ -51,6 +52,7 @@ public:
                    const nsTArray<PCacheRequest>& requests) MOZ_OVERRIDE;
 };
 
+} // namespace cache
 } // namespace dom
 } // namespace mozilla
 

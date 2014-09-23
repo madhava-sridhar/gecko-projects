@@ -4,57 +4,53 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "mozilla/dom/CacheStorageParent.h"
+#include "mozilla/dom/cache/CacheStorageParent.h"
 
-#include "mozilla/dom/CacheParent.h"
-#include "mozilla/dom/CacheStorageDBConnection.h"
+#include "mozilla/dom/cache/CacheParent.h"
+#include "mozilla/dom/cache/Manager.h"
 #include "mozilla/ipc/PBackgroundParent.h"
 #include "mozilla/unused.h"
 #include "nsCOMPtr.h"
 
 namespace mozilla {
 namespace dom {
+namespace cache {
 
-using mozilla::dom::cache::RequestId;
-
-CacheStorageParent::CacheStorageParent(cache::Namespace aNamespace,
+CacheStorageParent::CacheStorageParent(Namespace aNamespace,
                                        const nsACString& aOrigin,
                                        const nsACString& aBaseDomain)
   : mNamespace(aNamespace)
   , mOrigin(aOrigin)
   , mBaseDomain(aBaseDomain)
+  , mManager(Manager::ForOrigin(aOrigin, aBaseDomain))
 {
-  mDBConnection = new CacheStorageDBConnection(this, mNamespace, mOrigin,
-                                               mBaseDomain);
-  MOZ_ASSERT(mDBConnection);
+  MOZ_ASSERT(mManager);
 }
 
 CacheStorageParent::~CacheStorageParent()
 {
-  MOZ_ASSERT(!mDBConnection);
+  MOZ_ASSERT(!mManager);
 }
 
 void
 CacheStorageParent::ActorDestroy(ActorDestroyReason aReason)
 {
-  MOZ_ASSERT(mDBConnection);
-  mDBConnection->ClearListener();
-  mDBConnection = nullptr;
+  MOZ_ASSERT(mManager);
+  mManager->RemoveListener(this);
+  mManager = nullptr;
 }
 
 bool
 CacheStorageParent::RecvGet(const RequestId& aRequestId, const nsString& aKey)
 {
-  MOZ_ASSERT(mDBConnection);
-  mDBConnection->Get(aRequestId, aKey);
+  mManager->StorageGet(this, aRequestId, mNamespace, aKey);
   return true;
 }
 
 bool
 CacheStorageParent::RecvHas(const RequestId& aRequestId, const nsString& aKey)
 {
-  MOZ_ASSERT(mDBConnection);
-  mDBConnection->Has(aRequestId, aKey);
+  mManager->StorageHas(this, aRequestId, mNamespace, aKey);
   return true;
 }
 
@@ -62,15 +58,7 @@ bool
 CacheStorageParent::RecvCreate(const RequestId& aRequestId,
                                const nsString& aKey)
 {
-  MOZ_ASSERT(mDBConnection);
-
-  // TODO: perform a Has() check first
-  // TODO: create real DB-backed cache object
-  // TODO: get uuid from cache object
-  nsID uuid;
-
-  mDBConnection->Put(aRequestId, aKey, uuid);
-
+  mManager->StorageCreate(this, aRequestId, mNamespace, aKey);
   return true;
 }
 
@@ -78,77 +66,68 @@ bool
 CacheStorageParent::RecvDelete(const RequestId& aRequestId,
                                const nsString& aKey)
 {
-  MOZ_ASSERT(mDBConnection);
-  mDBConnection->Delete(aRequestId, aKey);
+  mManager->StorageDelete(this, aRequestId, mNamespace, aKey);
   return true;
 }
 
 bool
 CacheStorageParent::RecvKeys(const RequestId& aRequestId)
 {
-  MOZ_ASSERT(mDBConnection);
-  mDBConnection->Keys(aRequestId);
+  mManager->StorageKeys(this, aRequestId, mNamespace);
   return true;
 }
 
 void
-CacheStorageParent::OnGet(cache::RequestId aRequestId, nsresult aRv,
-                          nsID* aCacheId)
+CacheStorageParent::OnStorageGet(RequestId aRequestId, nsresult aRv,
+                                 bool aCacheFound, CacheId aCacheId)
 {
-  if (NS_FAILED(aRv) || !aCacheId) {
+  if (NS_FAILED(aRv) || !aCacheFound) {
     unused << SendGetResponse(aRequestId, aRv, nullptr);
     return;
   }
 
-  // TODO: create cache parent for given uuid
-  CacheParent* actor = new CacheParent(mOrigin, mBaseDomain);
-  if (actor) {
-    PCacheParent* base = Manager()->SendPCacheConstructor(actor, mOrigin,
-                                                          mBaseDomain);
-    actor = static_cast<CacheParent*>(base);
-  }
+  CacheParent* actor = new CacheParent(mOrigin, mBaseDomain, aCacheId);
+  PCacheParent* base = Manager()->SendPCacheConstructor(actor);
+  actor = static_cast<CacheParent*>(base);
   unused << SendGetResponse(aRequestId, aRv, actor);
 }
 
 void
-CacheStorageParent::OnHas(RequestId aRequestId, nsresult aRv, bool aSuccess)
+CacheStorageParent::OnStorageHas(RequestId aRequestId, nsresult aRv,
+                                 bool aCacheFound)
 {
-  unused << SendHasResponse(aRequestId, aRv, aSuccess);
+  unused << SendHasResponse(aRequestId, aRv, aCacheFound);
 }
 
 void
-CacheStorageParent::OnPut(RequestId aRequestId, nsresult aRv, bool aSuccess)
+CacheStorageParent::OnStorageCreate(RequestId aRequestId, nsresult aRv,
+                                    CacheId aCacheId)
 {
   if (NS_FAILED(aRv)) {
     unused << SendCreateResponse(aRequestId, aRv, nullptr);
     return;
   }
 
-  CacheParent* actor = nullptr;
-  if (aSuccess) {
-    // TODO: retrieve DB-backed actor for uuid generated in RecvCreate()
-    actor = new CacheParent(mOrigin, mBaseDomain);
-    if (actor) {
-      PCacheParent* base = Manager()->SendPCacheConstructor(actor, mOrigin,
-                                                            mBaseDomain);
-      actor = static_cast<CacheParent*>(base);
-    }
-  }
+  CacheParent* actor = new CacheParent(mOrigin, mBaseDomain, aCacheId);
+  PCacheParent* base = Manager()->SendPCacheConstructor(actor);
+  actor = static_cast<CacheParent*>(base);
   unused << SendCreateResponse(aRequestId, aRv, actor);
 }
 
 void
-CacheStorageParent::OnDelete(RequestId aRequestId, nsresult aRv, bool aSuccess)
+CacheStorageParent::OnStorageDelete(RequestId aRequestId, nsresult aRv,
+                                    bool aCacheDeleted)
 {
-  unused << SendDeleteResponse(aRequestId, aRv, aSuccess);
+  unused << SendDeleteResponse(aRequestId, aRv, aCacheDeleted);
 }
 
 void
-CacheStorageParent::OnKeys(RequestId aRequestId, nsresult aRv,
-                           const nsTArray<nsString>& aKeys)
+CacheStorageParent::OnStorageKeys(RequestId aRequestId, nsresult aRv,
+                                  const nsTArray<nsString>& aKeys)
 {
   unused << SendKeysResponse(aRequestId, aRv, aKeys);
 }
 
+} // namespace cache
 } // namespace dom
 } // namespace mozilla

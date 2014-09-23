@@ -4,7 +4,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "mozilla/dom/CacheQuotaRunnable.h"
+#include "mozilla/dom/cache/CacheQuotaRunnable.h"
 
 #include "mozilla/DebugOnly.h"
 #include "mozilla/dom/quota/OriginOrPatternString.h"
@@ -14,6 +14,7 @@
 
 namespace mozilla {
 namespace dom {
+namespace cache {
 
 using mozilla::dom::quota::OriginOrPatternString;
 using mozilla::dom::quota::QuotaManager;
@@ -143,5 +144,6 @@ CacheQuotaRunnable::DispatchError(nsresult aRv)
   MOZ_ASSERT(NS_SUCCEEDED(rv));
 }
 
+} // namespace cache
 } // namespace dom
 } // namespace mozilla

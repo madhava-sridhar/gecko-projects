@@ -7,25 +7,25 @@
 #ifndef mozilla_dom_cache_CacheParent_h
 #define mozilla_dom_cache_CacheParent_h
 
-#include "mozilla/dom/CacheDBListener.h"
-#include "mozilla/dom/CacheTypes.h"
-#include "mozilla/dom/PCacheParent.h"
+#include "mozilla/dom/cache/Manager.h"
+#include "mozilla/dom/cache/PCacheParent.h"
+#include "mozilla/dom/cache/Types.h"
 
 struct nsID;
 template <class T> class nsRefPtr;
 
 namespace mozilla {
 namespace dom {
+namespace cache {
 
 class CacheDBConnection;
 
 class CacheParent MOZ_FINAL : public PCacheParent
-                            , public CacheDBListener
+                            , public Manager::Listener
 {
 public:
-  CacheParent(const nsACString& aOrigin, const nsACString& aBaseDomain);
   CacheParent(const nsACString& aOrigin, const nsACString& aBaseDomain,
-              const nsID& aExistingCacheId);
+              CacheId aCacheId);
   virtual ~CacheParent();
   virtual void ActorDestroy(ActorDestroyReason aReason) MOZ_OVERRIDE;
 
@@ -52,22 +52,22 @@ public:
   RecvKeys(const RequestId& aRequestId, const PCacheRequestOrVoid& aRequest,
            const PCacheQueryParams& aParams) MOZ_OVERRIDE;
 
-  // CacheDBListener methods
-  virtual void OnMatch(cache::RequestId aRequestId, nsresult aRv,
-                       const PCacheResponseOrVoid& aResponse) MOZ_OVERRIDE;
-  virtual void OnMatchAll(cache::RequestId aRequestId, nsresult aRv,
-                          const nsTArray<PCacheResponse>& aResponses) MOZ_OVERRIDE;
-  virtual void OnPut(cache::RequestId aRequestId, nsresult aRv,
-                     const PCacheResponseOrVoid& aResponse) MOZ_OVERRIDE;
-  virtual void OnDelete(cache::RequestId aRequestId, nsresult aRv,
-                        bool aSuccess) MOZ_OVERRIDE;
+  // Manager::Listener methods
+  virtual void OnCacheMatch(RequestId aRequestId, nsresult aRv,
+                            const PCacheResponseOrVoid& aResponse) MOZ_OVERRIDE;
+  virtual void OnCacheMatchAll(RequestId aRequestId, nsresult aRv,
+                       const nsTArray<PCacheResponse>& aResponses) MOZ_OVERRIDE;
+  virtual void OnCachePut(RequestId aRequestId, nsresult aRv,
+                      const PCacheResponseOrVoid& aResponseOrVoid) MOZ_OVERRIDE;
+  virtual void OnCacheDelete(RequestId aRequestId, nsresult aRv,
+                             bool aSuccess) MOZ_OVERRIDE;
 
 private:
-  const nsCString mOrigin;
-  const nsCString mBaseDomain;
-  nsRefPtr<CacheDBConnection> mDBConnection;
+  const CacheId mCacheId;
+  nsRefPtr<mozilla::dom::cache::Manager> mManager;
 };
 
+} // namespace cache
 } // namespace dom
 } // namespace mozilla
 

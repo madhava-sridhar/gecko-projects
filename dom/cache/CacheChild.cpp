@@ -4,12 +4,13 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "mozilla/dom/CacheChild.h"
+#include "mozilla/dom/cache/CacheChild.h"
 
-#include "mozilla/dom/CacheChildListener.h"
+#include "mozilla/dom/cache/CacheChildListener.h"
 
 namespace mozilla {
 namespace dom {
+namespace cache {
 
 CacheChild::CacheChild()
   : mListener(nullptr)
@@ -108,5 +109,6 @@ CacheChild::RecvKeysResponse(const RequestId& requestId, const nsresult& aRv,
   return true;
 }
 
+} // namespace cache
 } // namespace dom
 } // namesapce mozilla

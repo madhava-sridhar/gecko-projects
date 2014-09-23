@@ -5,11 +5,11 @@
 #include "BackgroundParentImpl.h"
 
 #include "mozilla/Assertions.h"
-#include "mozilla/ipc/BackgroundParent.h"
 #include "mozilla/dom/MessagePortParent.h"
+#include "mozilla/dom/cache/CacheStorageParent.h"
+#include "mozilla/dom/cache/PCacheParent.h"
+#include "mozilla/ipc/BackgroundParent.h"
 #include "mozilla/ipc/PBackgroundTestParent.h"
-#include "mozilla/dom/CacheParent.h"
-#include "mozilla/dom/CacheStorageParent.h"
 #include "nsThreadUtils.h"
 #include "nsTraceRefcnt.h"
 #include "nsXULAppAPI.h"
@@ -17,6 +17,9 @@
 using mozilla::ipc::AssertIsOnBackgroundThread;
 
 using namespace mozilla::dom;
+using mozilla::dom::cache::PCacheParent;
+using mozilla::dom::cache::CacheStorageParent;
+using mozilla::dom::cache::PCacheStorageParent;
 
 namespace {
 
@@ -129,15 +132,17 @@ BackgroundParentImpl::DeallocPCacheStorageParent(PCacheStorageParent* aActor)
 }
 
 PCacheParent*
-BackgroundParentImpl::AllocPCacheParent(const nsCString& aOrigin,
-                                        const nsCString& aBaseDomain)
+BackgroundParentImpl::AllocPCacheParent()
 {
-  return new CacheParent(aOrigin, aBaseDomain);
+  MOZ_CRASH("CacheParent actor must be provided to PBackground manager");
+  return nullptr;
 }
 
 bool
 BackgroundParentImpl::DeallocPCacheParent(PCacheParent* aActor)
 {
+  // The CacheParent actor is provided to the PBackground manager, but
+  // we own the object and must delete it.
   delete aActor;
   return true;
 }

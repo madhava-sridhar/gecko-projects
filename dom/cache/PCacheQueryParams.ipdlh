@@ -6,6 +6,7 @@ include PHeaders;
 
 namespace mozilla {
 namespace dom {
+namespace cache {
 
 struct PCacheQueryParams
 {
@@ -17,5 +18,6 @@ struct PCacheQueryParams
   nsString cacheName;
 };
 
+} // namespace cache
 } // namespace dom
 } // namespace mozilla

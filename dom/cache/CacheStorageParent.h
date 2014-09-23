@@ -7,58 +7,57 @@
 #ifndef mozilla_dom_cache_CacheStorageParent_h
 #define mozilla_dom_cache_CacheStorageParent_h
 
-#include "mozilla/dom/CacheStorageDBListener.h"
-#include "mozilla/dom/CacheTypes.h"
-#include "mozilla/dom/PCacheStorageParent.h"
+#include "mozilla/dom/cache/PCacheStorageParent.h"
+#include "mozilla/dom/cache/Manager.h"
+#include "mozilla/dom/cache/Types.h"
 
 template <class T> class nsRefPtr;
 
 namespace mozilla {
 namespace dom {
-
-class CacheStorageDBConnection;
-class CacheStorageManager;
+namespace cache {
 
 class CacheStorageParent MOZ_FINAL : public PCacheStorageParent
-                                   , public CacheStorageDBListener
+                                   , public Manager::Listener
 {
 public:
-  CacheStorageParent(cache::Namespace aNamespace, const nsACString& aOrigin,
+  CacheStorageParent(Namespace aNamespace, const nsACString& aOrigin,
                      const nsACString& mBaseDomain);
   virtual ~CacheStorageParent();
 
   // PCacheStorageParent methods
   virtual void ActorDestroy(ActorDestroyReason aReason) MOZ_OVERRIDE;
-  virtual bool RecvGet(const cache::RequestId& aRequestId,
+  virtual bool RecvGet(const RequestId& aRequestId,
                        const nsString& aKey) MOZ_OVERRIDE;
-  virtual bool RecvHas(const cache::RequestId& aRequestId,
+  virtual bool RecvHas(const RequestId& aRequestId,
                        const nsString& aKey) MOZ_OVERRIDE;
-  virtual bool RecvCreate(const cache::RequestId& aRequestId,
+  virtual bool RecvCreate(const RequestId& aRequestId,
                           const nsString& aKey) MOZ_OVERRIDE;
-  virtual bool RecvDelete(const cache::RequestId& aRequestId,
+  virtual bool RecvDelete(const RequestId& aRequestId,
                           const nsString& aKey) MOZ_OVERRIDE;
-  virtual bool RecvKeys(const cache::RequestId& aRequestId) MOZ_OVERRIDE;
+  virtual bool RecvKeys(const RequestId& aRequestId) MOZ_OVERRIDE;
 
-  // CacheStorageDBListener
-  virtual void OnGet(cache::RequestId aRequestId, nsresult aRv,
-                     nsID* aCacheId) MOZ_OVERRIDE;
-  virtual void OnHas(cache::RequestId aRequestId, nsresult aRv,
-                     bool aSuccess) MOZ_OVERRIDE;
-  virtual void OnPut(cache::RequestId aRequestId, nsresult aRv,
-                     bool aSuccess) MOZ_OVERRIDE;
-  virtual void OnDelete(cache::RequestId aRequestId, nsresult aRv,
-                        bool aSuccess) MOZ_OVERRIDE;
-  virtual void OnKeys(cache::RequestId aRequestId, nsresult aRv,
-                      const nsTArray<nsString>& aKeys) MOZ_OVERRIDE;
+  // Manager::Listener methods
+  virtual void OnStorageGet(RequestId aRequestId, nsresult aRv,
+                            bool aCacheFound,
+                            CacheId aCacheId) MOZ_OVERRIDE;
+  virtual void OnStorageHas(RequestId aRequestId, nsresult aRv,
+                            bool aCacheFound) MOZ_OVERRIDE;
+  virtual void OnStorageCreate(RequestId aRequestId, nsresult aRv,
+                               CacheId aCacheId) MOZ_OVERRIDE;
+  virtual void OnStorageDelete(RequestId aRequestId, nsresult aRv,
+                               bool aCacheDeleted) MOZ_OVERRIDE;
+  virtual void OnStorageKeys(RequestId aRequestId, nsresult aRv,
+                             const nsTArray<nsString>& aKeys) MOZ_OVERRIDE;
 
 private:
-  const cache::Namespace mNamespace;
+  const Namespace mNamespace;
   const nsCString mOrigin;
   const nsCString mBaseDomain;
-  nsRefPtr<CacheStorageDBConnection> mDBConnection;
-  nsTArray<nsString> mKeys;
+  nsRefPtr<mozilla::dom::cache::Manager> mManager;
 };
 
+} // namesapce cache
 } // namespace dom
 } // namespace mozilla
 
