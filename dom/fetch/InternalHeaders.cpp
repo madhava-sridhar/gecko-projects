@@ -342,5 +342,12 @@ InternalHeaders::CORSHeaders(InternalHeaders* aHeaders)
 
   return cors.forget();
 }
+
+void
+InternalHeaders::GetEntries(nsTArray<InternalHeaders::Entry>& aEntries)
+{
+  MOZ_ASSERT(aEntries.IsEmpty());
+  aEntries.AppendElements(mList);
+}
 } // namespace dom
 } // namespace mozilla

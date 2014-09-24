@@ -30,7 +30,7 @@ class InternalHeaders MOZ_FINAL
 {
   NS_INLINE_DECL_THREADSAFE_REFCOUNTING(InternalHeaders)
 
-private:
+public:
   struct Entry
   {
     Entry(const nsACString& aName, const nsACString& aValue)
@@ -44,6 +44,7 @@ private:
     nsCString mValue;
   };
 
+private:
   HeadersGuardEnum mGuard;
   nsTArray<Entry> mList;
 
@@ -89,6 +90,9 @@ public:
 
   static already_AddRefed<InternalHeaders>
   CORSHeaders(InternalHeaders* aHeaders);
+
+  void
+  GetEntries(nsTArray<InternalHeaders::Entry>& aEntries);
 
   void
   GetPHeaders(nsTArray<PHeadersEntry>& aPHeadersOut) const;

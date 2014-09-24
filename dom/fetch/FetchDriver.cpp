@@ -8,6 +8,8 @@
 #include "nsIHttpHeaderVisitor.h"
 #include "nsIMultiplexInputStream.h"
 #include "nsIScriptSecurityManager.h"
+#include "nsIHttpChannel.h"
+#include "nsIUploadChannel2.h"
 
 #include "nsContentPolicyUtils.h"
 #include "nsDataHandler.h"
@@ -296,7 +298,8 @@ FetchDriver::ContinueHttpFetchAfterCORSPreflight()
 NS_IMETHODIMP
 FetchDriver::HttpNetworkFetch()
 {
-  nsRefPtr<InternalRequest> httpRequest = new InternalRequest(*mRequest);
+  // We don't create a HTTPRequest copy since Necko sets the information on the
+  // nsIHttpChannel instead.
   // FIXME(nsm): Figure out how to tee request's body.
 
   // FIXME(nsm): Http network fetch steps 2-7.
@@ -306,7 +309,7 @@ FetchDriver::HttpNetworkFetch()
   NS_ENSURE_SUCCESS(rv, rv);
 
   nsCString url;
-  httpRequest->GetURL(url);
+  mRequest->GetURL(url);
   nsCOMPtr<nsIURI> uri;
   rv = NS_NewURI(getter_AddRefs(uri),
                           url,
@@ -332,8 +335,64 @@ FetchDriver::HttpNetworkFetch()
     mRequest->GetMethod(method);
     rv = httpChan->SetRequestMethod(method);
     NS_ENSURE_SUCCESS(rv, rv);
+
+    nsTArray<InternalHeaders::Entry> headers;
+    mRequest->Headers()->GetEntries(headers);
+    for (size_t i = 0; i < headers.Length(); ++i) {
+      httpChan->SetRequestHeader(headers[i].mName, headers[i].mValue, false /* merge */);
+    }
+
+    MOZ_ASSERT(mRequest->ReferrerIsURL());
+    nsCString referrer = mRequest->ReferrerAsURL();
+    if (!referrer.IsEmpty()) {
+      nsCOMPtr<nsIURI> uri;
+      rv = NS_NewURI(getter_AddRefs(uri), referrer, nullptr, nullptr, ios);
+      if (NS_WARN_IF(NS_FAILED(rv))) {
+        return rv;
+      }
+      rv = httpChan->SetReferrer(uri);
+      if (NS_WARN_IF(NS_FAILED(rv))) {
+        return rv;
+      }
+    }
+
+    if (mRequest->ForceOriginHeader()) {
+      nsCString origin;
+      mRequest->GetOrigin(origin);
+      httpChan->SetRequestHeader(NS_LITERAL_CSTRING("origin"),
+                                 origin,
+                                 false /* merge */);
+    }
+
+    // FIXME(nsm): Step 4 credentials.
+    // FIXME(nsm): Step 5 proxy auth entry.
+    // FIXME(nsm): Step 6. I don't think we have to do this here. Necko should
+    // handle it.
   }
 
+  nsCOMPtr<nsIUploadChannel2> uploadChan = do_QueryInterface(chan);
+  if (uploadChan) {
+    nsCString contentType;
+    ErrorResult result;
+    mRequest->Headers()->Get(NS_LITERAL_CSTRING("content-type"), contentType, result);
+    if (result.Failed()) {
+      return result.ErrorCode();
+    }
+
+    nsCOMPtr<nsIInputStream> bodyStream;
+    mRequest->GetBody(getter_AddRefs(bodyStream));
+    if (!bodyStream) {
+      NS_WARNING("InternalRequest body input stream was null.");
+      return NS_ERROR_FAILURE;
+    }
+
+    nsCString method;
+    mRequest->GetMethod(method);
+    rv = uploadChan->ExplicitSetUploadStream(bodyStream, contentType, -1, method, false /* aStreamHasHeaders */);
+    if (NS_WARN_IF(NS_FAILED(rv))) {
+      return rv;
+    }
+  }
   return chan->AsyncOpen(this, nullptr);
 }
 
@@ -444,16 +503,24 @@ FetchDriver::OnStartRequest(nsIRequest* aRequest,
   // For now we only support HTTP.
   MOZ_ASSERT(channel);
 
-  uint32_t status;
-  channel->GetResponseStatus(&status);
+  nsresult rv;
+  aRequest->GetStatus(&rv);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    nsRefPtr<InternalResponse> err = InternalResponse::NetworkError();
+    mObserver->OnResponseAvailable(err);
+    return rv;
+  }
+
+  uint32_t responseStatus;
+  channel->GetResponseStatus(&responseStatus);
 
   nsCString statusText;
   channel->GetResponseStatusText(statusText);
 
-  nsRefPtr<InternalResponse> response = new InternalResponse(status, statusText);
+  nsRefPtr<InternalResponse> response = new InternalResponse(responseStatus, statusText);
 
   nsRefPtr<FillResponseHeaders> visitor = new FillResponseHeaders(response);
-  nsresult rv = channel->VisitResponseHeaders(visitor);
+  rv = channel->VisitResponseHeaders(visitor);
   if (NS_WARN_IF(NS_FAILED(rv))) {
     NS_WARNING("Failed to visit all headers.");
   }
