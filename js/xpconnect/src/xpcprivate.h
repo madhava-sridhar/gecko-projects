@@ -2141,6 +2141,7 @@ public:
     nsresult RescueOrphans();
 
     void FlatJSObjectFinalized();
+    void FlatJSObjectMoved(JSObject *obj, const JSObject *old);
 
     void SystemIsBeingShutDown();
 
@@ -2492,7 +2493,8 @@ protected:
     nsXPCWrappedJS(JSContext* cx,
                    JSObject* aJSObj,
                    nsXPCWrappedJSClass* aClass,
-                   nsXPCWrappedJS* root);
+                   nsXPCWrappedJS* root,
+                   nsresult* rv);
 
     bool CanSkip();
     void Destroy();

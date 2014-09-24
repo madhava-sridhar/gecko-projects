@@ -54,6 +54,7 @@ class Heap;
 
 namespace js {
 class JS_FRIEND_API(BaseProxyHandler);
+class InterpreterFrame;
 } /* namespace js */
 
 extern JS_FRIEND_API(void)
@@ -86,6 +87,10 @@ JS_GetCustomIteratorCount(JSContext *cx);
 
 extern JS_FRIEND_API(bool)
 JS_NondeterministicGetWeakMapKeys(JSContext *cx, JS::HandleObject obj, JS::MutableHandleObject ret);
+
+// Raw JSScript* because this needs to be callable from a signal handler.
+extern JS_FRIEND_API(unsigned)
+JS_PCToLineNumber(JSScript *script, jsbytecode *pc);
 
 /*
  * Determine whether the given object is backed by a DeadObjectProxy.
@@ -194,7 +199,28 @@ js_DumpObject(JSObject *obj);
 
 extern JS_FRIEND_API(void)
 js_DumpChars(const char16_t *s, size_t n);
+
+extern JS_FRIEND_API(void)
+js_DumpValue(const JS::Value &val);
+
+extern JS_FRIEND_API(void)
+js_DumpId(jsid id);
+
+extern JS_FRIEND_API(void)
+js_DumpInterpreterFrame(JSContext *cx, js::InterpreterFrame *start = nullptr);
+
 #endif
+
+extern JS_FRIEND_API(void)
+js_DumpBacktrace(JSContext *cx);
+
+namespace JS {
+
+// Exposed for DumpJSStack
+extern JS_FRIEND_API(char *)
+FormatStackDump(JSContext *cx, char *buf, bool showArgs, bool showLocals, bool showThisProps);
+
+} // namespace JS
 
 /*
  * Copies all own properties from |obj| to |target|. |obj| must be a "native"
@@ -252,14 +278,14 @@ namespace js {
  *     allow for potention JSClass extensions.
  */
 #define PROXY_MAKE_EXT(outerObject, innerObject, iteratorObject,        \
-                       isWrappedNative)                                 \
+                       isWrappedNative, objectMoved)                    \
     {                                                                   \
         outerObject,                                                    \
         innerObject,                                                    \
         iteratorObject,                                                 \
         isWrappedNative,                                                \
         js::proxy_WeakmapKeyDelegate,                                   \
-        js::proxy_ObjectMoved                                           \
+        objectMoved                                                     \
     }
 
 #define PROXY_CLASS_WITH_EXT(name, extraSlots, flags, ext)                              \
@@ -313,7 +339,8 @@ namespace js {
                          nullptr, /* outerObject */                     \
                          nullptr, /* innerObject */                     \
                          nullptr, /* iteratorObject */                  \
-                         false    /* isWrappedNative */                 \
+                         false,   /* isWrappedNative */                 \
+                         js::proxy_ObjectMoved                          \
                        ))
 
 /*

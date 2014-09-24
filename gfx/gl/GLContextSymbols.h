@@ -420,6 +420,12 @@ struct GLContextSymbols
     typedef realGLboolean (GLAPIENTRY * PFNGLUNMAPBUFFER) (GLenum target);
     PFNGLUNMAPBUFFER fUnmapBuffer;
 
+    // ARB_copy_buffer / OpenGL 3.1 / OpenGL ES 3.0
+    typedef void (GLAPIENTRY * PFNGLCOPYBUFFERSUBDATAPROC) (GLenum readTarget, GLenum writeTarget,
+                                                            GLintptr readOffset, GLintptr writeOffset,
+                                                            GLsizeiptr size);
+    PFNGLCOPYBUFFERSUBDATAPROC fCopyBufferSubData;
+
     typedef GLenum (GLAPIENTRY * PFNGLGETGRAPHICSRESETSTATUS) (void);
     PFNGLGETGRAPHICSRESETSTATUS fGetGraphicsResetStatus;
 
@@ -521,6 +527,30 @@ struct GLContextSymbols
     pfnIsFenceT fIsFence;
     typedef void (GLAPIENTRY * pfnGetFenceivT) (GLuint fence, GLenum pname, GLint* params);
     pfnGetFenceivT fGetFenceiv;
+
+    // map_buffer_range
+    typedef void* (GLAPIENTRY * PFNGLMAPBUFFERRANGEPROC) (GLenum target, GLintptr offset, GLsizeiptr length, GLbitfield access);
+    PFNGLMAPBUFFERRANGEPROC fMapBufferRange;
+    typedef void (GLAPIENTRY * PFNGLFLUSHMAPPEDBUFFERRANGEPROC) (GLenum target, GLintptr offset, GLsizeiptr length);
+    PFNGLFLUSHMAPPEDBUFFERRANGEPROC fFlushMappedBufferRange;
+
+    // uniform_buffer_object
+    typedef void (GLAPIENTRY * PFNGLGETUNIFORMINDICESPROC) (GLuint program, GLsizei uniformCount,
+                                                            const GLchar* const* uniformNames, GLuint* uniformIndices);
+    PFNGLGETUNIFORMINDICESPROC fGetUniformIndices;
+    typedef void (GLAPIENTRY * PFNGLGETACTIVEUNIFORMSIVPROC) (GLuint program, GLsizei uniformCount, const GLuint* uniformIndices,
+                                                             GLenum pname, GLint* params);
+    PFNGLGETACTIVEUNIFORMSIVPROC fGetActiveUniformsiv;
+    typedef void (GLAPIENTRY * PFNGLGETACTIVEUNIFORMNAMEPROC) (GLuint program, GLuint uniformIdex, GLsizei bufSize, GLsizei* length, GLchar* uniformName);
+    PFNGLGETACTIVEUNIFORMNAMEPROC fGetActiveUniformName;
+    typedef GLuint (GLAPIENTRY * PFNGLGETUNIFORMBLOCKINDEXPROC) (GLuint program, const GLchar* uniformBlockName);
+    PFNGLGETUNIFORMBLOCKINDEXPROC fGetUniformBlockIndex;
+    typedef void (GLAPIENTRY * PFNGLGETACTIVEUNIFORMBLOCKIVPROC) (GLuint program, GLuint uniformBlockIndex, GLenum pname, GLint* params);
+    PFNGLGETACTIVEUNIFORMBLOCKIVPROC fGetActiveUniformBlockiv;
+    typedef void (GLAPIENTRY * PFNGLGETACTIVEUNIFORMBLOCKNAMEPROC) (GLuint program, GLuint uniformBlockIndex, GLsizei bufSize, GLsizei* length, GLchar* uniformBlockName);
+    PFNGLGETACTIVEUNIFORMBLOCKNAMEPROC fGetActiveUniformBlockName;
+    typedef void (GLAPIENTRY * PFNGLUNIFORMBLOCKBINDINGPROC) (GLuint program, GLuint uniformBlockIndex, GLuint uniformBlockBinding);
+    PFNGLUNIFORMBLOCKBINDINGPROC fUniformBlockBinding;
 };
 
 }
