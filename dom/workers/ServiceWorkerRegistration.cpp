@@ -237,7 +237,8 @@ ServiceWorkerRegistration::GetWorkerReference(WhichServiceWorker aWhichOne)
       MOZ_CRASH("Invalid enum value");
   }
 
-  if (NS_WARN_IF(NS_FAILED(rv))) {
+  NS_WARN_IF_FALSE(rv == NS_OK || rv == NS_ERROR_DOM_NOT_FOUND_ERR, "Unexpected error getting service worker instance from ServiceWorkerManager");
+  if (NS_FAILED(rv)) {
     return nullptr;
   }
 

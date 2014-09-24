@@ -15,6 +15,7 @@
 #include "nsStreamUtils.h"
 #include "nsNetCID.h"
 
+#include "mozilla/unused.h"
 #include "mozilla/dom/FetchEventBinding.h"
 #include "mozilla/dom/Promise.h"
 #include "mozilla/dom/PromiseNativeHandler.h"
@@ -45,6 +46,7 @@ FetchEvent::FetchEvent(EventTarget* aOwner)
   , mRespondWithEntered(false)
   , mRespondWithError(false)
 {
+  unused << mRespondWithError;
 }
 
 FetchEvent::~FetchEvent()
@@ -257,6 +259,7 @@ NS_IMPL_CYCLE_COLLECTION_INHERITED(InstallPhaseEvent, Event, mPromise)
 
 InstallEvent::InstallEvent(EventTarget* aOwner)
   : InstallPhaseEvent(aOwner)
+  , mActivateImmediately(false)
 {
 }
 

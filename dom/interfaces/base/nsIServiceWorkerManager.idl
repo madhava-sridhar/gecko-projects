@@ -18,7 +18,7 @@ interface nsIServiceWorkerUnregisterCallback : nsISupports
   [noscript] void UnregisterFailed();
 };
 
-[builtinclass, uuid(b91004e9-5f3f-432b-a117-c18c6eda0496)]
+[builtinclass, uuid(23f5f5b3-ec13-4b63-8748-5ae9856874b6)]
 interface nsIServiceWorkerManager : nsISupports
 {
   /**
@@ -29,7 +29,7 @@ interface nsIServiceWorkerManager : nsISupports
    *
    * Returns a Promise.
    */
-  nsISupports register(in DOMString aScope, in DOMString aScriptURI);
+  nsISupports register(in nsIDOMWindow aWindow, in DOMString aScope, in DOMString aScriptURI);
 
   /**
    * Unregister an existing ServiceWorker registration for `aScope`.
