@@ -673,7 +673,8 @@ DBSchema::DeleteEntries(mozIStorageConnection* aConn,
     uint32_t curPos = aPos;
     int32_t remaining = aLen;
     while (remaining > 0) {
-      int32_t curLen = std::min(kMaxEntriesPerStatement, remaining);
+      int32_t max = kMaxEntriesPerStatement;
+      int32_t curLen = std::min(max, remaining);
       nsresult rv = DeleteEntries(aConn, aEntryIdList, curPos, curLen);
       if (NS_FAILED(rv)) { return rv; }
 
