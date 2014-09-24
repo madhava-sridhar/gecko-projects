@@ -12,8 +12,6 @@
 #include "mozilla/dom/Promise.h"
 #include "mozilla/dom/UnionTypes.h"
 
-#include "ServiceWorkerClients.h"
-
 namespace mozilla {
 namespace dom {
 
@@ -29,6 +27,7 @@ class CacheStorage;
 
 BEGIN_WORKERS_NAMESPACE
 
+class ServiceWorkerClients;
 class WorkerPrivate;
 class WorkerLocation;
 class WorkerNavigator;
@@ -182,7 +181,7 @@ class ServiceWorkerGlobalScope MOZ_FINAL : public WorkerGlobalScope
   const nsString mScope;
   nsRefPtr<ServiceWorkerClients> mClients;
 
-  ~ServiceWorkerGlobalScope() { };
+  ~ServiceWorkerGlobalScope();
 
 public:
   NS_DECL_ISUPPORTS_INHERITED
@@ -219,13 +218,7 @@ public:
   }
 
   ServiceWorkerClients*
-  Clients() {
-    if (!mClients) {
-      mClients = new ServiceWorkerClients(this);
-    }
-
-    return mClients;
-  }
+  Clients();
 
   IMPL_EVENT_HANDLER(activate)
   IMPL_EVENT_HANDLER(beforeevicted)
@@ -239,5 +232,11 @@ JSObject*
 CreateGlobalScope(JSContext* aCx);
 
 END_WORKERS_NAMESPACE
+
+inline nsISupports*
+ToSupports(mozilla::dom::workers::WorkerGlobalScope* aScope)
+{
+  return static_cast<nsIDOMEventTarget*>(aScope);
+}
 
 #endif /* mozilla_dom_workerscope_h__ */
