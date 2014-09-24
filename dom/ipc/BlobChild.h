@@ -8,9 +8,11 @@
 #include "mozilla/Attributes.h"
 #include "mozilla/dom/PBlobChild.h"
 #include "nsCOMPtr.h"
+#include "nsID.h"
 
 class nsIDOMBlob;
 class nsIEventTarget;
+class nsIRemoteBlob;
 class nsString;
 
 namespace mozilla {
@@ -22,6 +24,7 @@ class PBackgroundChild;
 
 namespace dom {
 
+class ContentChild;
 class DOMFileImpl;
 class nsIContentChild;
 class PBlobStreamChild;
@@ -43,9 +46,16 @@ class BlobChild MOZ_FINAL
 
   nsCOMPtr<nsIEventTarget> mEventTarget;
 
+  nsID mParentID;
+
   bool mOwnsBlobImpl;
 
 public:
+  class FriendKey;
+
+  static void
+  Startup(const FriendKey& aKey);
+
   // These create functions are called on the sending side.
   static BlobChild*
   GetOrCreate(nsIContentChild* aManager, DOMFileImpl* aBlobImpl);
@@ -85,6 +95,9 @@ public:
     return mContentManager;
   }
 
+  const nsID&
+  ParentID() const;
+
   // Get the DOMFileImpl associated with this actor. This may always be called
   // on the sending side. It may also be called on the receiving side unless
   // this is a "mystery" blob that has not yet received a SetMysteryBlobInfo()
@@ -121,6 +134,10 @@ private:
 
   BlobChild(PBackgroundChild* aManager, DOMFileImpl* aBlobImpl);
 
+  BlobChild(nsIContentChild* aManager, BlobChild* aOther);
+
+  BlobChild(PBackgroundChild* aManager, BlobChild* aOther);
+
   // These constructors are called on the receiving side.
   BlobChild(nsIContentChild* aManager,
             const ChildBlobConstructorParams& aParams);
@@ -133,6 +150,9 @@ private:
 
   void
   CommonInit(DOMFileImpl* aBlobImpl);
+
+  void
+  CommonInit(BlobChild* aOther);
 
   void
   CommonInit(const ChildBlobConstructorParams& aParams);
@@ -151,6 +171,14 @@ private:
   SendSliceConstructor(ChildManagerType* aManager,
                        const ChildBlobConstructorParams& aParams,
                        const ParentBlobConstructorParams& aOtherSideParams);
+
+  static BlobChild*
+  MaybeGetActorFromRemoteBlob(nsIRemoteBlob* aRemoteBlob,
+                              nsIContentChild* aManager);
+
+  static BlobChild*
+  MaybeGetActorFromRemoteBlob(nsIRemoteBlob* aRemoteBlob,
+                              PBackgroundChild* aManager);
 
   void
   NoteDyingRemoteBlobImpl();
@@ -173,6 +201,24 @@ private:
 
   virtual bool
   DeallocPBlobStreamChild(PBlobStreamChild* aActor) MOZ_OVERRIDE;
+};
+
+// Only let ContentChild call BlobChild::Startup() and ensure that
+// ContentChild can't access any other BlobChild internals.
+class BlobChild::FriendKey MOZ_FINAL
+{
+  friend class ContentChild;
+
+private:
+  FriendKey()
+  { }
+
+  FriendKey(const FriendKey& /* aOther */)
+  { }
+
+public:
+  ~FriendKey()
+  { }
 };
 
 } // namespace dom

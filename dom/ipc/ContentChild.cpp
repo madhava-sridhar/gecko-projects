@@ -13,6 +13,8 @@
 #endif
 
 #include "ContentChild.h"
+
+#include "BlobChild.h"
 #include "CrashReporterChild.h"
 #include "TabChild.h"
 
@@ -673,6 +675,8 @@ ContentChild::InitXPCOM()
     if (!BackgroundChild::GetOrCreateForCurrentThread(callback)) {
         MOZ_CRASH("Failed to create PBackgroundChild!");
     }
+
+    BlobChild::Startup(BlobChild::FriendKey());
 
     nsCOMPtr<nsIConsoleService> svc(do_GetService(NS_CONSOLESERVICE_CONTRACTID));
     if (!svc) {

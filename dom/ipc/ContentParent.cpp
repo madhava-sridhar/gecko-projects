@@ -26,6 +26,7 @@
 
 #include "AppProcessChecker.h"
 #include "AudioChannelService.h"
+#include "BlobParent.h"
 #include "CrashReporterParent.h"
 #include "IHistory.h"
 #include "mozIApplication.h"
@@ -678,6 +679,8 @@ ContentParent::StartUp()
     RegisterStrongMemoryReporter(new ContentParentsMemoryReporter());
 
     mozilla::dom::time::InitializeDateCacheCleaner();
+
+    BlobParent::Startup(BlobParent::FriendKey());
 
     BackgroundChild::Startup();
 

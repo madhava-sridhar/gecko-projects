@@ -29,6 +29,7 @@
 #include "mozilla/dom/IDBObjectStoreBinding.h"
 #include "mozilla/dom/indexedDB/PBackgroundIDBDatabaseFileChild.h"
 #include "mozilla/dom/indexedDB/PBackgroundIDBSharedTypes.h"
+#include "mozilla/ipc/BackgroundChild.h"
 #include "mozilla/ipc/BackgroundUtils.h"
 #include "mozilla/dom/ipc/BlobChild.h"
 #include "mozilla/dom/ipc/nsIRemoteBlob.h"
@@ -820,7 +821,7 @@ IDBDatabase::GetOrCreateFileActorForBlob(nsIDOMBlob* aBlob)
   PBackgroundIDBDatabaseFileChild* actor = nullptr;
 
   if (!mFileActors.Get(weakRef, &actor)) {
-    DOMFileImpl* blobImpl = static_cast<DOMFile*>(aBlob)->Impl();
+    nsRefPtr<DOMFileImpl> blobImpl = static_cast<DOMFile*>(aBlob)->Impl();
     MOZ_ASSERT(blobImpl);
 
     if (mReceivedBlobs.GetEntry(weakRef)) {
@@ -851,6 +852,20 @@ IDBDatabase::GetOrCreateFileActorForBlob(nsIDOMBlob* aBlob)
         return nullptr;
       }
     } else {
+      // Make sure that the input stream we get here is one that can actually be
+      // serialized to PBackground.
+      PBackgroundChild* backgroundManager =
+        mBackgroundActor->Manager()->Manager();
+      MOZ_ASSERT(backgroundManager);
+
+      auto* blobActor =
+        static_cast<BlobChild*>(
+          BackgroundChild::GetOrCreateActorForBlob(backgroundManager, aBlob));
+      MOZ_ASSERT(blobActor);
+
+      blobImpl = blobActor->GetBlobImpl();
+      MOZ_ASSERT(blobImpl);
+
       nsCOMPtr<nsIInputStream> inputStream;
       MOZ_ALWAYS_TRUE(NS_SUCCEEDED(
         blobImpl->GetInternalStream(getter_AddRefs(inputStream))));

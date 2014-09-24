@@ -233,6 +233,10 @@ private:
   GetContentParent(PBackgroundParent* aBackgroundActor);
 
   // Forwarded from BackgroundParent.
+  static intptr_t
+  GetRawContentParentForComparison(PBackgroundParent* aBackgroundActor);
+
+  // Forwarded from BackgroundParent.
   static PBackgroundParent*
   Alloc(ContentParent* aContent,
         Transport* aTransport,
@@ -858,6 +862,14 @@ BackgroundParent::GetOrCreateActorForBlobImpl(
 }
 
 // static
+intptr_t
+BackgroundParent::GetRawContentParentForComparison(
+                                            PBackgroundParent* aBackgroundActor)
+{
+  return ParentImpl::GetRawContentParentForComparison(aBackgroundActor);
+}
+
+// static
 PBackgroundParent*
 BackgroundParent::Alloc(ContentParent* aContent,
                         Transport* aTransport,
@@ -1022,6 +1034,25 @@ ParentImpl::GetContentParent(PBackgroundParent* aBackgroundActor)
   }
 
   return already_AddRefed<ContentParent>(actor->mContent.get());
+}
+
+// static
+intptr_t
+ParentImpl::GetRawContentParentForComparison(
+                                            PBackgroundParent* aBackgroundActor)
+{
+  AssertIsOnBackgroundThread();
+  MOZ_ASSERT(aBackgroundActor);
+
+  auto actor = static_cast<ParentImpl*>(aBackgroundActor);
+  if (actor->mActorDestroyed) {
+    MOZ_ASSERT(false,
+               "GetRawContentParentForComparison called after ActorDestroy was "
+               "called!");
+    return intptr_t(-1);
+  }
+
+  return intptr_t(static_cast<nsIContentParent*>(actor->mContent.get()));
 }
 
 // static

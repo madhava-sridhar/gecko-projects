@@ -58,6 +58,13 @@ public:
   GetOrCreateActorForBlobImpl(PBackgroundParent* aBackgroundActor,
                               DOMFileImpl* aBlobImpl);
 
+  // Get a value that represents the ContentParent associated with the parent
+  // actor for comparison. The value is not guaranteed to uniquely identify the
+  // ContentParent after the ContentParent has died. This function may only be
+  // called on the background thread.
+  static intptr_t
+  GetRawContentParentForComparison(PBackgroundParent* aBackgroundActor);
+
 private:
   // Only called by ContentParent for cross-process actors.
   static PBackgroundParent*

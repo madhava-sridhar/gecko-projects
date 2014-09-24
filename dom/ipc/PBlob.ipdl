@@ -31,6 +31,8 @@ parent:
 
   ResolveMystery(ResolveMysteryParams params);
 
+  sync WaitForSliceCreation();
+
   // Use only for testing!
   sync GetFileId()
     returns (int64_t fileId);
