@@ -1130,6 +1130,7 @@ class Mochitest(MochitestUtilsMixin):
       options.extraPrefs.append("testing.browserTestHarness.timeout=%d" % options.timeout)
     options.extraPrefs.append("browser.tabs.remote=%s" % ('true' if options.e10s else 'false'))
     options.extraPrefs.append("browser.tabs.remote.autostart=%s" % ('true' if options.e10s else 'false'))
+    options.extraPrefs.append("browser.tabs.remote.sandbox=%s" % options.contentSandbox)
 
     # get extensions to install
     extensions = self.getExtensionsToInstall(options)
@@ -1201,17 +1202,28 @@ class Mochitest(MochitestUtilsMixin):
     if options.gmp_path:
       return options.gmp_path
 
-    # For local builds, gmp-fake will be under dist/bin.
-    gmp_path = os.path.join(options.xrePath, 'gmp-fake', '1.0')
-    if os.path.isdir(gmp_path):
-      return gmp_path
+    gmp_parentdirs = [
+      # For local builds, GMP plugins will be under dist/bin.
+      options.xrePath,
+      # For packaged builds, GMP plugins will get copied under $profile/plugins.
+      os.path.join(self.profile.profile, 'plugins'),
+    ]
 
-    # For packaged builds, gmp-fake will get copied under $profile/plugins.
-    gmp_path = os.path.join(self.profile.profile, 'plugins', 'gmp-fake', '1.0')
-    if os.path.isdir(gmp_path):
-      return gmp_path
-    # This is fatal for desktop environments.
-    raise EnvironmentError('Could not find gmp-fake')
+    gmp_subdirs = [
+      os.path.join('gmp-fake', '1.0'),
+      os.path.join('gmp-clearkey', '0.1'),
+    ]
+
+    gmp_paths = [os.path.join(parent, sub)
+      for parent in gmp_parentdirs
+      for sub in gmp_subdirs
+      if os.path.isdir(os.path.join(parent, sub))]
+
+    if not gmp_paths:
+      # This is fatal for desktop environments.
+      raise EnvironmentError('Could not find test gmp plugins')
+
+    return os.pathsep.join(gmp_paths)
 
   def buildBrowserEnv(self, options, debugger=False, env=None):
     """build the environment variables for the specific test and operating system"""
@@ -1521,11 +1533,10 @@ class Mochitest(MochitestUtilsMixin):
 
       # check for crashes
       minidump_path = os.path.join(self.profile.profile, "minidumps")
-      crashed = mozcrash.check_for_crashes(minidump_path,
-                                           symbolsPath,
-                                           test_name=self.lastTestSeen)
+      crash_count = mozcrash.log_crashes(self.log, minidump_path, symbolsPath,
+                                         test=self.lastTestSeen)
 
-      if crashed or zombieProcesses:
+      if crash_count or zombieProcesses:
         status = 1
 
     finally:
@@ -1580,6 +1591,8 @@ class Mochitest(MochitestUtilsMixin):
     paths = []
 
     for test in tests:
+      if test.get('expected') == 'fail':
+        raise Exception('fail-if encountered for test: %s. There is no support for fail-if in Mochitests.' % test['name'])
       pathAbs = os.path.abspath(test['path'])
       assert pathAbs.startswith(self.testRootAbs)
       tp = pathAbs[len(self.testRootAbs):].replace('\\', '/').strip('/')

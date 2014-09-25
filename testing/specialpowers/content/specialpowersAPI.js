@@ -1800,8 +1800,8 @@ SpecialPowersAPI.prototype = {
     return this._sendSyncMessage('SPPermissionManager', msg)[0];
   },
 
-  isWindowPrivate: function(win) {
-    return PrivateBrowsingUtils.isWindowPrivate(win);
+  isContentWindowPrivate: function(win) {
+    return PrivateBrowsingUtils.isContentWindowPrivate(win);
   },
 
   notifyObserversInParentProcess: function(subject, topic, data) {

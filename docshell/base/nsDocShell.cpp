@@ -2861,22 +2861,24 @@ nsDocShell::PopProfileTimelineMarkers(JSContext* aCx,
           mProfileTimelineMarkers[j]->mPayload);
         const char* endMarkerName = mProfileTimelineMarkers[j]->mName;
 
-        // Look for Layer markers to stream out paint markers
+        // Look for Layer markers to stream out paint markers.
         if (strcmp(endMarkerName, "Layer") == 0) {
           hasSeenPaintedLayer = true;
         }
 
         bool isSameMarkerType = strcmp(startMarkerName, endMarkerName) == 0;
-        bool isValidType = strcmp(endMarkerName, "Paint") != 0 ||
-                           hasSeenPaintedLayer;
+        bool isPaint = strcmp(startMarkerName, "Paint") == 0;
 
-        if (endPayload->GetMetaData() == TRACING_INTERVAL_END &&
-            isSameMarkerType && isValidType) {
-          mozilla::dom::ProfileTimelineMarker marker;
-          marker.mName = NS_ConvertUTF8toUTF16(startMarkerName);
-          marker.mStart = mProfileTimelineMarkers[i]->mTime;
-          marker.mEnd = mProfileTimelineMarkers[j]->mTime;
-          profileTimelineMarkers.AppendElement(marker);
+        // Pair start and end markers.
+        if (endPayload->GetMetaData() == TRACING_INTERVAL_END && isSameMarkerType) {
+          // But ignore paint start/end if no layer has been painted.
+          if (!isPaint || (isPaint && hasSeenPaintedLayer)) {
+            mozilla::dom::ProfileTimelineMarker marker;
+            marker.mName = NS_ConvertUTF8toUTF16(startMarkerName);
+            marker.mStart = mProfileTimelineMarkers[i]->mTime;
+            marker.mEnd = mProfileTimelineMarkers[j]->mTime;
+            profileTimelineMarkers.AppendElement(marker);
+          }
 
           break;
         }
@@ -3054,14 +3056,14 @@ nsDocShell::RemoveWeakScrollObserver(nsIScrollObserver* aObserver)
 }
 
 void
-nsDocShell::NotifyAsyncPanZoomStarted()
+nsDocShell::NotifyAsyncPanZoomStarted(const mozilla::CSSIntPoint aScrollPos)
 {
     nsTObserverArray<nsWeakPtr>::ForwardIterator iter(mScrollObservers);
     while (iter.HasMore()) {
         nsWeakPtr ref = iter.GetNext();
         nsCOMPtr<nsIScrollObserver> obs = do_QueryReferent(ref);
         if (obs) {
-            obs->AsyncPanZoomStarted();
+            obs->AsyncPanZoomStarted(aScrollPos);
         } else {
             mScrollObservers.RemoveElement(ref);
         }
@@ -3069,14 +3071,14 @@ nsDocShell::NotifyAsyncPanZoomStarted()
 }
 
 void
-nsDocShell::NotifyAsyncPanZoomStopped()
+nsDocShell::NotifyAsyncPanZoomStopped(const mozilla::CSSIntPoint aScrollPos)
 {
     nsTObserverArray<nsWeakPtr>::ForwardIterator iter(mScrollObservers);
     while (iter.HasMore()) {
         nsWeakPtr ref = iter.GetNext();
         nsCOMPtr<nsIScrollObserver> obs = do_QueryReferent(ref);
         if (obs) {
-            obs->AsyncPanZoomStopped();
+            obs->AsyncPanZoomStopped(aScrollPos);
         } else {
             mScrollObservers.RemoveElement(ref);
         }
@@ -9836,7 +9838,18 @@ nsDocShell::InternalLoad(nsIURI * aURI,
             return NS_OK;
         }
     }
-    
+
+    // Check if the webbrowser chrome wants the load to proceed; this can be
+    // used to cancel attempts to load URIs in the wrong process.
+    nsCOMPtr<nsIWebBrowserChrome3> browserChrome3 = do_GetInterface(mTreeOwner);
+    if (browserChrome3) {
+        bool shouldLoad;
+        rv = browserChrome3->ShouldLoadURI(this, aURI, aReferrer, &shouldLoad);
+        if (NS_SUCCEEDED(rv) && !shouldLoad) {
+            return NS_OK;
+        }
+    }
+
     // mContentViewer->PermitUnload can destroy |this| docShell, which
     // causes the next call of CanSavePresentation to crash. 
     // Hold onto |this| until we return, to prevent a crash from happening. 

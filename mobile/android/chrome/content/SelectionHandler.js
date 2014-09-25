@@ -301,6 +301,10 @@ var SelectionHandler = {
     // Clear out any existing active selection
     this._closeSelection();
 
+    if (this._isNonTextInputElement(aElement)) {
+      return false;
+    }
+
     this._initTargetInfo(aElement, this.TYPE_SELECTION);
 
     // Perform the appropriate selection method, if we can't determine method, or it fails, return
@@ -801,6 +805,10 @@ var SelectionHandler = {
             (aElement instanceof HTMLTextAreaElement)) && !aElement.readOnly);
   },
 
+  _isNonTextInputElement: function(aElement) {
+    return (aElement instanceof HTMLInputElement && !aElement.mozIsTextField(false));
+  },
+
   /*
    * Helper function for moving the selection inside an editable element.
    *
@@ -944,7 +952,7 @@ var SelectionHandler = {
     if (selectedText.length) {
       let req = Services.search.defaultEngine.getSubmission(selectedText);
       let parent = BrowserApp.selectedTab;
-      let isPrivate = PrivateBrowsingUtils.isWindowPrivate(parent.browser.contentWindow);
+      let isPrivate = PrivateBrowsingUtils.isBrowserPrivate(parent.browser);
       // Set current tab as parent of new tab, and set new tab as private if the parent is.
       BrowserApp.addTab(req.uri.spec, {parentId: parent.id,
                                        selected: true,

@@ -32,7 +32,6 @@
 #include "nsURLHelper.h"
 #include "nsThreadUtils.h"
 #include "GetAddrInfo.h"
-#include "mtransport/runnable_utils.h"
 
 #include "mozilla/HashFunctions.h"
 #include "mozilla/TimeStamp.h"
@@ -290,6 +289,7 @@ nsHostRecord::nsHostRecord(const nsHostKey *key)
     , mGetTtl(false)
 #endif
     , mBlacklistedCount(0)
+    , mResolveAgain(false)
 {
     host = ((char *) this) + sizeof(nsHostRecord);
     memcpy((char *) host, key->host, strlen(key->host) + 1);
@@ -468,6 +468,21 @@ nsHostRecord::GetPriority(uint16_t aFlags)
     return nsHostRecord::DNS_PRIORITY_LOW;
 }
 
+// Returns true if the entry can be removed, or false if it was marked to get
+// refreshed.
+bool
+nsHostRecord::RemoveOrRefresh()
+{
+  // This condition implies that the request has been passed to the OS
+  // resolver. The resultant DNS record should be considered stale and not
+  // trusted; set a flag to ensure it is called again.
+    if (resolving && !onQueue) {
+        mResolveAgain = true;
+        return false;
+    }
+    return true; // can be removed now
+}
+
 //----------------------------------------------------------------------------
 
 struct nsHostDBEnt : PLDHashEntryHdr
@@ -581,26 +596,34 @@ HostDB_RemoveEntry(PLDHashTable *table,
     return PL_DHASH_REMOVE;
 }
 
+static PLDHashOperator
+HostDB_PruneEntry(PLDHashTable *table,
+                  PLDHashEntryHdr *hdr,
+                  uint32_t number,
+                  void *arg)
+{
+    nsHostDBEnt* ent = static_cast<nsHostDBEnt *>(hdr);
+
+    // Try to remove the record, or mark it for refresh
+    if (ent->rec->RemoveOrRefresh()) {
+        return PL_DHASH_REMOVE;
+    }
+    return PL_DHASH_NEXT;
+}
+
 //----------------------------------------------------------------------------
 
 #if TTL_AVAILABLE
+static const char kTtlExperiment[] = "dns.ttl-experiment.";
 static const char kTtlExperimentEnabled[] = "dns.ttl-experiment.enabled";
 static const char kNetworkExperimentsEnabled[] = "network.allow-experiments";
 static const char kTtlExperimentVariant[] = "dns.ttl-experiment.variant";
 
-
-static void
-SetTtlExperimentVariantCallback(DnsExpirationVariant aVariant)
+void
+nsHostResolver::DnsExperimentChangedInternal()
 {
-    DebugOnly<nsresult> rv = Preferences::SetInt(
-            "dns.ttl-experiment.variant", sDnsVariant);
-    NS_WARN_IF_FALSE(NS_SUCCEEDED(rv),
-                     "Could not save experiment variant.");
-}
+    MOZ_ASSERT(NS_IsMainThread(), "Can only get prefs on main thread!");
 
-static void
-_DnsExperimentChangedInternal(const char* aPref, void*)
-{
     if (!Preferences::GetBool(kTtlExperimentEnabled) ||
             !Preferences::GetBool(kNetworkExperimentsEnabled)) {
         sDnsVariant = DNS_EXP_VARIANT_CONTROL;
@@ -618,12 +641,10 @@ _DnsExperimentChangedInternal(const char* aPref, void*)
         LOG(("No DNS TTL experiment variant saved. Randomly picked %d.",
              variant));
 
-        // We can't set a property inside of this callback, so run it on the
-        // main thread.
-        DebugOnly<nsresult> rv = NS_DispatchToMainThread(
-            WrapRunnableNM(SetTtlExperimentVariantCallback, variant));
+        DebugOnly<nsresult> rv = Preferences::SetInt(
+            kTtlExperimentVariant, variant);
         NS_WARN_IF_FALSE(NS_SUCCEEDED(rv),
-                         "Could not dispatch set TTL experiment callback.");
+                         "Could not set experiment variant pref.");
     } else {
         LOG(("Using saved DNS TTL experiment %d.", variant));
     }
@@ -631,24 +652,34 @@ _DnsExperimentChangedInternal(const char* aPref, void*)
     sDnsVariant = variant;
 }
 
-static void
-DnsExperimentChanged(const char* aPref, void*)
+void
+nsHostResolver::DnsExperimentChanged(const char* aPref, void* aClosure)
 {
-    if (strcmp(aPref, kNetworkExperimentsEnabled) != 0
-            && strcmp(aPref, kTtlExperimentEnabled) != 0
-            && strcmp(aPref, kTtlExperimentVariant) != 0) {
+    MOZ_ASSERT(NS_IsMainThread(),
+               "Should be getting pref changed notification on main thread!");
+
+    if (strcmp(aPref, kNetworkExperimentsEnabled) != 0 &&
+        strncmp(aPref, kTtlExperiment, strlen(kTtlExperiment)) != 0) {
+        LOG(("DnsExperimentChanged ignoring pref \"%s\"", aPref));
         return;
     }
 
+    auto self = static_cast<nsHostResolver*>(aClosure);
+    MOZ_ASSERT(self);
+
+    // We can't set a pref in the context of a pref change callback, so
+    // dispatch DnsExperimentChangedInternal for async getting/setting.
     DebugOnly<nsresult> rv = NS_DispatchToMainThread(
-        WrapRunnableNM(_DnsExperimentChangedInternal, aPref, nullptr));
+        NS_NewRunnableMethod(self, &DnsExperimentChangedInternal));
     NS_WARN_IF_FALSE(NS_SUCCEEDED(rv),
                      "Could not dispatch DnsExperimentChanged event.");
 }
 
-static void
-InitCRandom()
+void
+nsHostResolver::InitCRandom()
 {
+    MOZ_ASSERT(NS_IsMainThread(), "Should be seeding rand() on main thread!");
+
     srand(time(nullptr));
 }
 #endif
@@ -703,15 +734,15 @@ nsHostResolver::Init()
     // callback won't be called.
     {
         DebugOnly<nsresult> rv = NS_DispatchToMainThread(
-            WrapRunnableNM(InitCRandom));
+            NS_NewRunnableMethod(this, &nsHostResolver::InitCRandom));
         NS_WARN_IF_FALSE(NS_SUCCEEDED(rv),
                          "Could not dispatch InitCRandom event.");
         rv = Preferences::RegisterCallbackAndCall(
-            &DnsExperimentChanged, "dns.ttl-experiment.", nullptr);
+            &DnsExperimentChanged, kTtlExperiment, this);
         NS_WARN_IF_FALSE(NS_SUCCEEDED(rv),
                          "Could not register DNS experiment callback.");
         rv = Preferences::RegisterCallback(
-            &DnsExperimentChanged, "network.", nullptr);
+            &DnsExperimentChanged, kNetworkExperimentsEnabled, this);
         NS_WARN_IF_FALSE(NS_SUCCEEDED(rv),
                          "Could not register network experiment callback.");
     }
@@ -746,6 +777,41 @@ nsHostResolver::ClearPendingQueue(PRCList *aPendingQ)
     }
 }
 
+//
+// FlushCache() is what we call when the network has changed. We must not
+// trust names that were resolved before this change. They may resolve
+// differently now.
+//
+// This function removes all existing resolved host entries from the hash.
+// Names that are in the pending queues can be left there. Entries in the
+// cache that have 'Resolve' set true but not 'onQueue' are being resolved
+// right now, so we need to mark them to get re-resolved on completion!
+
+void
+nsHostResolver::FlushCache()
+{
+    PRCList evictionQ;
+    PR_INIT_CLIST(&evictionQ);
+
+    {
+        MutexAutoLock lock(mLock);
+        MoveCList(mEvictionQ, evictionQ);
+        mEvictionQSize = 0;
+
+        // prune the hash from all hosts already resolved
+        PL_DHashTableEnumerate(&mDB, HostDB_PruneEntry, nullptr);
+    }
+
+    if (!PR_CLIST_IS_EMPTY(&evictionQ)) {
+        PRCList *node = evictionQ.next;
+        while (node != &evictionQ) {
+            nsHostRecord *rec = static_cast<nsHostRecord *>(node);
+            node = node->next;
+            NS_RELEASE(rec);
+        }
+    }
+}
+
 void
 nsHostResolver::Shutdown()
 {
@@ -754,11 +820,11 @@ nsHostResolver::Shutdown()
 #if TTL_AVAILABLE
     {
         DebugOnly<nsresult> rv = Preferences::UnregisterCallback(
-            &DnsExperimentChanged, "dns.ttl-experiment.", this);
+            &DnsExperimentChanged, kTtlExperiment, this);
         NS_WARN_IF_FALSE(NS_SUCCEEDED(rv),
                          "Could not unregister TTL experiment callback.");
         rv = Preferences::UnregisterCallback(
-            &DnsExperimentChanged, "network.", this);
+            &DnsExperimentChanged, kNetworkExperimentsEnabled, this);
         NS_WARN_IF_FALSE(NS_SUCCEEDED(rv),
                          "Could not unregister network experiment callback.");
     }
@@ -772,7 +838,7 @@ nsHostResolver::Shutdown()
 
     {
         MutexAutoLock lock(mLock);
-        
+
         mShutdown = true;
 
         MoveCList(mHighQ, pendingQHigh);
@@ -781,14 +847,14 @@ nsHostResolver::Shutdown()
         MoveCList(mEvictionQ, evictionQ);
         mEvictionQSize = 0;
         mPendingCount = 0;
-        
+
         if (mNumIdleThreads)
             mIdleThreadCV.NotifyAll();
-        
+
         // empty host database
         PL_DHashTableEnumerate(&mDB, HostDB_RemoveEntry, nullptr);
     }
-    
+
     ClearPendingQueue(&pendingQHigh);
     ClearPendingQueue(&pendingQMed);
     ClearPendingQueue(&pendingQLow);
@@ -1331,7 +1397,12 @@ nsHostResolver::PrepareRecordExpiration(nsHostRecord* rec) const
          rec->host, lifetime, grace, sDnsVariant));
 }
 
-void
+//
+// OnLookupComplete() checks if the resolving should be redone and if so it
+// returns LOOKUP_RESOLVEAGAIN, but only if 'status' is not NS_ERROR_ABORT.
+//
+
+nsHostResolver::LookupStatus
 nsHostResolver::OnLookupComplete(nsHostRecord* rec, nsresult status, AddrInfo* result)
 {
     // get the list of pending callbacks for this lookup, and notify
@@ -1340,6 +1411,11 @@ nsHostResolver::OnLookupComplete(nsHostRecord* rec, nsresult status, AddrInfo* r
     PR_INIT_CLIST(&cbs);
     {
         MutexAutoLock lock(mLock);
+
+        if (rec->mResolveAgain && (status != NS_ERROR_ABORT)) {
+            rec->mResolveAgain = false;
+            return LOOKUP_RESOLVEAGAIN;
+        }
 
         // grab list of callbacks to notify
         MoveCList(rec->callbacks, cbs);
@@ -1419,6 +1495,8 @@ nsHostResolver::OnLookupComplete(nsHostRecord* rec, nsresult status, AddrInfo* r
 #endif
 
     NS_RELEASE(rec);
+
+    return LOOKUP_OK;
 }
 
 void
@@ -1502,9 +1580,10 @@ nsHostResolver::ThreadFunc(void *arg)
     nsResState rs;
 #endif
     nsHostResolver *resolver = (nsHostResolver *)arg;
-    nsHostRecord *rec;
+    nsHostRecord *rec  = nullptr;
     AddrInfo *ai = nullptr;
-    while (resolver->GetHostToLookup(&rec)) {
+
+    while (rec || resolver->GetHostToLookup(&rec)) {
         LOG(("DNS lookup thread - Calling getaddrinfo for host [%s].\n",
              rec->host));
 
@@ -1548,7 +1627,13 @@ nsHostResolver::ThreadFunc(void *arg)
         // OnLookupComplete may release "rec", long before we lose it.
         LOG(("DNS lookup thread - lookup completed for host [%s]: %s.\n",
              rec->host, ai ? "success" : "failure: unknown host"));
-        resolver->OnLookupComplete(rec, status, ai);
+        if (LOOKUP_RESOLVEAGAIN == resolver->OnLookupComplete(rec, status, ai)) {
+            // leave 'rec' assigned and loop to make a renewed host resolve
+            LOG(("DNS lookup thread - Re-resolving host [%s].\n",
+                 rec->host));
+        } else {
+            rec = nullptr;
+        }
     }
     NS_RELEASE(resolver);
     LOG(("DNS lookup thread - queue empty, thread finished.\n"));

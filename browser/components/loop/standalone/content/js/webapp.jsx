@@ -4,7 +4,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-/* global loop:true, React */
+/* global loop:true, React, MozActivity */
 /* jshint newcap:false, maxlen:false */
 
 var loop = loop || {};
@@ -15,7 +15,8 @@ loop.webapp = (function($, _, OT, mozL10n) {
   loop.config.serverUrl = loop.config.serverUrl || "http://localhost:5000";
 
   var sharedModels = loop.shared.models,
-      sharedViews = loop.shared.views;
+      sharedViews = loop.shared.views,
+      sharedUtils = loop.shared.utils;
 
   /**
    * Homepage view.
@@ -118,6 +119,95 @@ loop.webapp = (function($, _, OT, mozL10n) {
           <strong>{mozL10n.get("brandShortname")}</strong> {mozL10n.get("clientShortname")}
         </h1>
       );
+    }
+  });
+
+  /**
+   * The Firefox Marketplace exposes a web page that contains a postMesssage
+   * based API that wraps a small set of functionality from the WebApps API
+   * that allow us to request the installation of apps given their manifest
+   * URL. We will be embedding the content of this web page within an hidden
+   * iframe in case that we need to request the installation of the FxOS Loop
+   * client.
+   */
+  var FxOSHiddenMarketplace = React.createClass({
+    render: function() {
+      return <iframe id="marketplace" src={this.props.marketplaceSrc} hidden/>;
+    },
+
+    componentDidUpdate: function() {
+      // This happens only once when we change the 'src' property of the iframe.
+      if (this.props.onMarketplaceMessage) {
+        // The reason for listening on the global window instead of on the
+        // iframe content window is because the Marketplace is doing a
+        // window.top.postMessage.
+        window.addEventListener("message", this.props.onMarketplaceMessage);
+      }
+    }
+  });
+
+  var FxOSConversationModel = Backbone.Model.extend({
+    setupOutgoingCall: function() {
+      // The FxOS Loop client exposes a "loop-call" activity. If we get the
+      // activity onerror callback it means that there is no "loop-call"
+      // activity handler available and so no FxOS Loop client installed.
+      var request = new MozActivity({
+        name: "loop-call",
+        data: {
+          type: "loop/token",
+          token: this.get("loopToken"),
+          callerId: this.get("callerId"),
+          callType: this.get("callType")
+        }
+      });
+
+      request.onsuccess = function() {};
+
+      request.onerror = (function(event) {
+        if (event.target.error.name !== "NO_PROVIDER") {
+          console.error ("Unexpected " + event.target.error.name);
+          this.trigger("session:error", "fxos_app_needed", {
+            fxosAppName: loop.config.fxosApp.name
+          });
+          return;
+        }
+        this.trigger("fxos:app-needed");
+      }).bind(this);
+    },
+
+    onMarketplaceMessage: function(event) {
+      var message = event.data;
+      switch (message.name) {
+        case "loaded":
+          var marketplace = window.document.getElementById("marketplace");
+          // Once we have it loaded, we request the installation of the FxOS
+          // Loop client app. We will be receiving the result of this action
+          // via postMessage from the child iframe.
+          marketplace.contentWindow.postMessage({
+            "name": "install-package",
+            "data": {
+              "product": {
+                "name": loop.config.fxosApp.name,
+                "manifest_url": loop.config.fxosApp.manifestUrl,
+                "is_packaged": true
+              }
+            }
+          }, "*");
+          break;
+        case "install-package":
+          window.removeEventListener("message", this.onMarketplaceMessage);
+          if (message.error) {
+            console.error(message.error.error);
+            this.trigger("session:error", "fxos_app_needed", {
+              fxosAppName: loop.config.fxosApp.name
+            });
+            return;
+          }
+          // We installed the FxOS app \o/, so we can continue with the call
+          // process.
+          this.setupOutgoingCall();
+          break;
+      }
     }
   });
 
@@ -232,8 +322,10 @@ loop.webapp = (function($, _, OT, mozL10n) {
    */
   var StartConversationView = React.createClass({
     propTypes: {
-      model: React.PropTypes.instanceOf(sharedModels.ConversationModel)
-                                       .isRequired,
+      model: React.PropTypes.oneOfType([
+               React.PropTypes.instanceOf(sharedModels.ConversationModel),
+               React.PropTypes.instanceOf(FxOSConversationModel)
+             ]).isRequired,
       // XXX Check more tightly here when we start injecting window.loop.*
       notifications: React.PropTypes.object.isRequired,
       client: React.PropTypes.object.isRequired
@@ -256,14 +348,28 @@ loop.webapp = (function($, _, OT, mozL10n) {
       window.addEventListener("click", this.clickHandler);
       this.props.model.listenTo(this.props.model, "session:error",
                                 this._onSessionError);
+      this.props.model.listenTo(this.props.model, "fxos:app-needed",
+                                this._onFxOSAppNeeded);
       this.props.client.requestCallUrlInfo(this.props.model.get("loopToken"),
                                            this._setConversationTimestamp);
     },
 
-    _onSessionError: function(error) {
-      console.error(error);
-      this.props.notifications.errorL10n("unable_retrieve_call_info");
+    _onSessionError: function(error, l10nProps) {
+      var errorL10n = error || "unable_retrieve_call_info";
+      this.props.notifications.errorL10n(errorL10n, l10nProps);
+      console.error(errorL10n);
     },
+
+    _onFxOSAppNeeded: function() {
+      this.setState({
+        marketplaceSrc: loop.config.marketplaceUrl
+      });
+      this.setState({
+        onMarketplaceMessage: this.props.model.onMarketplaceMessage.bind(
+          this.props.model
+        )
+      });
+     },
 
     /**
      * Initiates the call.
@@ -314,7 +420,7 @@ loop.webapp = (function($, _, OT, mozL10n) {
       var privacy_notice_name = mozL10n.get("privacy_notice_link_text");
 
       var tosHTML = mozL10n.get("legal_text_and_links", {
-        "terms_of_use_url": "<a target=_blank href='/legal/terms'>" +
+        "terms_of_use_url": "<a target=_blank href='/legal/terms/'>" +
           tos_link_name + "</a>",
         "privacy_notice_url": "<a target=_blank href='" +
           "https://www.mozilla.org/privacy/'>" + privacy_notice_name + "</a>"
@@ -328,6 +434,10 @@ loop.webapp = (function($, _, OT, mozL10n) {
       var tosClasses = React.addons.classSet({
         "terms-service": true,
         hide: (localStorage.getItem("has-seen-tos") === "true")
+      });
+      var chevronClasses = React.addons.classSet({
+        "btn-chevron": true,
+        "disabled": this.state.disableCallButton
       });
 
       return (
@@ -359,7 +469,7 @@ loop.webapp = (function($, _, OT, mozL10n) {
                       <span className="standalone-call-btn-video-icon"></span>
                     </button>
 
-                    <div className="btn-chevron"
+                    <div className={chevronClasses}
                          onClick={this._toggleCallOptionsMenu}>
                     </div>
 
@@ -386,6 +496,10 @@ loop.webapp = (function($, _, OT, mozL10n) {
             <p className={tosClasses}
                dangerouslySetInnerHTML={{__html: tosHTML}}></p>
           </div>
+
+          <FxOSHiddenMarketplace
+            marketplaceSrc={this.state.marketplaceSrc}
+            onMarketplaceMessage= {this.state.onMarketplaceMessage} />
 
           <ConversationFooter />
         </div>
@@ -433,9 +547,11 @@ loop.webapp = (function($, _, OT, mozL10n) {
   var OutgoingConversationView = React.createClass({
     propTypes: {
       client: React.PropTypes.instanceOf(loop.StandaloneClient).isRequired,
-      conversation: React.PropTypes.instanceOf(sharedModels.ConversationModel)
-                         .isRequired,
-      helper: React.PropTypes.instanceOf(WebappHelper).isRequired,
+      conversation: React.PropTypes.oneOfType([
+        React.PropTypes.instanceOf(sharedModels.ConversationModel),
+        React.PropTypes.instanceOf(FxOSConversationModel)
+      ]).isRequired,
+      helper: React.PropTypes.instanceOf(sharedUtils.Helper).isRequired,
       notifications: React.PropTypes.instanceOf(sharedModels.NotificationCollection)
                           .isRequired,
       sdk: React.PropTypes.object.isRequired,
@@ -688,9 +804,11 @@ loop.webapp = (function($, _, OT, mozL10n) {
   var WebappRootView = React.createClass({
     propTypes: {
       client: React.PropTypes.instanceOf(loop.StandaloneClient).isRequired,
-      conversation: React.PropTypes.instanceOf(sharedModels.ConversationModel)
-                         .isRequired,
-      helper: React.PropTypes.instanceOf(WebappHelper).isRequired,
+      conversation: React.PropTypes.oneOfType([
+        React.PropTypes.instanceOf(sharedModels.ConversationModel),
+        React.PropTypes.instanceOf(FxOSConversationModel)
+      ]).isRequired,
+      helper: React.PropTypes.instanceOf(sharedUtils.Helper).isRequired,
       notifications: React.PropTypes.instanceOf(sharedModels.NotificationCollection)
                           .isRequired,
       sdk: React.PropTypes.object.isRequired,
@@ -727,38 +845,23 @@ loop.webapp = (function($, _, OT, mozL10n) {
   });
 
   /**
-   * Local helpers.
-   */
-  function WebappHelper() {
-    this._iOSRegex = /^(iPad|iPhone|iPod)/;
-  }
-
-  WebappHelper.prototype = {
-    isFirefox: function(platform) {
-      return platform.indexOf("Firefox") !== -1;
-    },
-
-    isIOS: function(platform) {
-      return this._iOSRegex.test(platform);
-    },
-
-    locationHash: function() {
-      return window.location.hash;
-    }
-  };
-
-  /**
    * App initialization.
    */
   function init() {
-    var helper = new WebappHelper();
+    var helper = new sharedUtils.Helper();
     var client = new loop.StandaloneClient({
       baseServerUrl: loop.config.serverUrl
     });
     var notifications = new sharedModels.NotificationCollection();
-    var conversation = new sharedModels.ConversationModel({}, {
-      sdk: OT
-    });
+    var conversation
+    if (helper.isFirefoxOS(navigator.userAgent)) {
+      conversation = new FxOSConversationModel();
+    } else {
+      conversation = new sharedModels.ConversationModel({}, {
+        sdk: OT
+      });
+    }
+
     var feedbackApiClient = new loop.FeedbackAPIClient(
       loop.config.feedbackApiUrl, {
         product: loop.config.feedbackProductName,
@@ -797,7 +900,7 @@ loop.webapp = (function($, _, OT, mozL10n) {
     UnsupportedDeviceView: UnsupportedDeviceView,
     init: init,
     PromoteFirefoxView: PromoteFirefoxView,
-    WebappHelper: WebappHelper,
-    WebappRootView: WebappRootView
+    WebappRootView: WebappRootView,
+    FxOSConversationModel: FxOSConversationModel
   };
 })(jQuery, _, window.OT, navigator.mozL10n);

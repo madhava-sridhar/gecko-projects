@@ -23,7 +23,7 @@
 #include "mozilla/gfx/Logging.h"        // for gfx::TreeLog
 #include "UnitTransforms.h"             // for ViewAs
 #include "gfxPrefs.h"                   // for gfxPrefs
-#include "OverscrollHandoffChain.h"     // for OverscrollHandoffChain
+#include "OverscrollHandoffState.h"     // for OverscrollHandoffState
 #include "LayersLogging.h"              // for Stringify
 
 #define APZCTM_LOG(...)
@@ -588,6 +588,20 @@ APZCTreeManager::GetTouchInputBlockAPZC(const MultiTouchInput& aEvent,
     return apzc.forget();
   }
 
+  { // In this block we flush repaint requests for the entire APZ tree. We need to do this
+    // at the start of an input block for a number of reasons. One of the reasons is so that
+    // after we untransform the event into gecko space, it doesn't end up under something
+    // else. Another reason is that if we hit-test this event and end up on a layer's
+    // dispatch-to-content region we cannot be sure we actually got the correct layer. We
+    // have to fall back to the gecko hit-test to handle this case, but we can't untransform
+    // the event we send to gecko because we don't know the layer to untransform with
+    // respect to.
+    MonitorAutoLock lock(mTreeLock);
+    for (AsyncPanZoomController* apzc = mRootApzc; apzc; apzc = apzc->GetPrevSibling()) {
+      FlushRepaintsRecursively(apzc);
+    }
+  }
+
   apzc = GetTargetAPZC(aEvent.mTouches[0].mScreenPoint, aOutInOverscrolledApzc);
   for (size_t i = 1; i < aEvent.mTouches.Length(); i++) {
     nsRefPtr<AsyncPanZoomController> apzc2 = GetTargetAPZC(aEvent.mTouches[i].mScreenPoint, aOutInOverscrolledApzc);
@@ -707,7 +721,7 @@ APZCTreeManager::ProcessTouchInput(MultiTouchInput& aInput,
   }
 
   // If it's the end of the touch sequence then clear out variables so we
-  // keep dangling references and leak things.
+  // don't keep dangling references and leak things.
   if (mTouchCount == 0) {
     mApzcForInputBlock = nullptr;
     mInOverscrolledApzc = false;
@@ -837,6 +851,17 @@ APZCTreeManager::UpdateZoomConstraintsRecursively(AsyncPanZoomController* aApzc,
 }
 
 void
+APZCTreeManager::FlushRepaintsRecursively(AsyncPanZoomController* aApzc)
+{
+  mTreeLock.AssertCurrentThreadOwns();
+
+  aApzc->FlushRepaintForNewInputBlock();
+  for (AsyncPanZoomController* child = aApzc->GetLastChild(); child; child = child->GetPrevSibling()) {
+    FlushRepaintsRecursively(child);
+  }
+}
+
+void
 APZCTreeManager::CancelAnimation(const ScrollableLayerGuid &aGuid)
 {
   nsRefPtr<AsyncPanZoomController> apzc = GetTargetAPZC(aGuid);
@@ -896,18 +921,19 @@ bool
 APZCTreeManager::DispatchScroll(AsyncPanZoomController* aPrev,
                                 ScreenPoint aStartPoint,
                                 ScreenPoint aEndPoint,
-                                const OverscrollHandoffChain& aOverscrollHandoffChain,
-                                uint32_t aOverscrollHandoffChainIndex)
+                                OverscrollHandoffState& aOverscrollHandoffState)
 {
+  const OverscrollHandoffChain& overscrollHandoffChain = aOverscrollHandoffState.mChain;
+  uint32_t overscrollHandoffChainIndex = aOverscrollHandoffState.mChainIndex;
   nsRefPtr<AsyncPanZoomController> next;
   // If we have reached the end of the overscroll handoff chain, there is
   // nothing more to scroll, so we ignore the rest of the pan gesture.
-  if (aOverscrollHandoffChainIndex >= aOverscrollHandoffChain.Length()) {
+  if (overscrollHandoffChainIndex >= overscrollHandoffChain.Length()) {
     // Nothing more to scroll - ignore the rest of the pan gesture.
     return false;
   }
 
-  next = aOverscrollHandoffChain.GetApzcAtIndex(aOverscrollHandoffChainIndex);
+  next = overscrollHandoffChain.GetApzcAtIndex(overscrollHandoffChainIndex);
 
   if (next == nullptr || next->IsDestroyed()) {
     return false;
@@ -924,8 +950,7 @@ APZCTreeManager::DispatchScroll(AsyncPanZoomController* aPrev,
 
   // Scroll |next|. If this causes overscroll, it will call DispatchScroll()
   // again with an incremented index.
-  return next->AttemptScroll(aStartPoint, aEndPoint, aOverscrollHandoffChain,
-      aOverscrollHandoffChainIndex);
+  return next->AttemptScroll(aStartPoint, aEndPoint, aOverscrollHandoffState);
 }
 
 bool
