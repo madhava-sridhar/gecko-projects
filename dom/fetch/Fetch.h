@@ -77,6 +77,15 @@ DOMFetch(nsIGlobalObject* aGlobal, const RequestOrScalarValueString& aInput,
 nsCString
 GetRequestReferrer(const InternalRequest* aRequest);
 
+/*
+ * Creates an nsIInputStream based on the fetch specifications 'extract a byte
+ * stream algorithm' - http://fetch.spec.whatwg.org/#concept-bodyinit-extract.
+ * Stores content type in out param aContentType.
+ */
+nsresult
+ExtractByteStreamFromBody(const OwningArrayBufferOrArrayBufferViewOrScalarValueStringOrURLSearchParams& aBodyInit,
+                          nsIInputStream** aStream,
+                          nsCString& aContentType);
 } // namespace dom
 } // namespace mozilla
 

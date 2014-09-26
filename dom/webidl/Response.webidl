@@ -4,13 +4,14 @@
  * You can obtain one at http://mozilla.org/MPL/2.0/.
  *
  * The origin of this IDL file is
- * http://fetch.spec.whatwg.org/
+ * https://fetch.spec.whatwg.org/#response-class
  */
 
 [Constructor(optional BodyInit body, optional ResponseInit init),
  Exposed=(Window,Worker),
  Func="mozilla::dom::Headers::PrefEnabled"]
 interface Response {
+  static Response error();
   static Response redirect(ScalarValueString url, optional unsigned short status = 302);
 
   readonly attribute ResponseType type;
@@ -19,13 +20,15 @@ interface Response {
   readonly attribute unsigned short status;
   readonly attribute ByteString statusText;
   readonly attribute Headers headers;
+
+  Response clone();
 };
 
 Response implements Body;
 
 dictionary ResponseInit {
   unsigned short status = 200;
-  // Becase we don't seem to support default values for ByteString.
+  // WebIDL spec doesn't allow default values for ByteString.
   ByteString statusText; // = "OK";
   HeadersInit headers;
 };

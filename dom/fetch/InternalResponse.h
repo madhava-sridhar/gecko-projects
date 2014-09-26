@@ -9,6 +9,7 @@
 #include "nsISupportsImpl.h"
 
 #include "mozilla/dom/Headers.h"
+#include "mozilla/dom/HeadersBinding.h"
 #include "mozilla/dom/ResponseBinding.h"
 #include "nsIDOMFile.h"
 
@@ -39,7 +40,7 @@ public:
     : mType(ResponseType::Default)
     , mStatus(aStatus)
     , mStatusText(aStatusText)
-    , mHeaders(new Headers(nullptr))
+    , mHeaders(new Headers(nullptr, HeadersGuardEnum::MozNone))
     , mError(false)
   { }
 

@@ -31,18 +31,6 @@ NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(Headers)
   NS_INTERFACE_MAP_ENTRY(nsISupports)
 NS_INTERFACE_MAP_END
 
-Headers::Headers(nsISupports* aOwner, const nsTArray<PHeadersEntry>& aHeaders,
-                 HeadersGuardEnum aGuard)
-  : mOwner(aOwner)
-  , mGuard(aGuard)
-{
-  SetIsDOMBinding();
-
-  for (uint32_t i = 0; i < aHeaders.Length(); ++i) {
-    mList.AppendElement(Entry(aHeaders[i].name(), aHeaders[i].value()));
-  }
-}
-
 // static
 bool
 Headers::PrefEnabled(JSContext* aCx, JSObject* aObj)
@@ -67,6 +55,18 @@ Headers::PrefEnabled(JSContext* aCx, JSObject* aObj)
   }
 
   return workerPrivate->DOMFetchEnabled();
+}
+
+Headers::Headers(nsISupports* aOwner, const nsTArray<PHeadersEntry>& aHeaders,
+                 HeadersGuardEnum aGuard)
+  : mOwner(aOwner)
+  , mGuard(aGuard)
+{
+  SetIsDOMBinding();
+
+  for (uint32_t i = 0; i < aHeaders.Length(); ++i) {
+    mList.AppendElement(Entry(aHeaders[i].name(), aHeaders[i].value()));
+  }
 }
 
 // static
@@ -94,6 +94,38 @@ Headers::Constructor(const GlobalObject& aGlobal,
   }
 
   return headers.forget();
+}
+
+// static
+already_AddRefed<Headers>
+Headers::Constructor(const GlobalObject& aGlobal,
+                     const OwningHeadersOrByteStringSequenceSequenceOrByteStringMozMap& aInit,
+                     ErrorResult& aRv)
+{
+  nsRefPtr<Headers> headers = new Headers(aGlobal.GetAsSupports());
+
+  if (aInit.IsHeaders()) {
+    headers->Fill(aInit.GetAsHeaders(), aRv);
+  } else if (aInit.IsByteStringSequenceSequence()) {
+    headers->Fill(aInit.GetAsByteStringSequenceSequence(), aRv);
+  } else if (aInit.IsByteStringMozMap()) {
+    headers->Fill(aInit.GetAsByteStringMozMap(), aRv);
+  }
+
+  if (aRv.Failed()) {
+    return nullptr;
+  }
+
+  return headers.forget();
+}
+
+Headers::Headers(const Headers& aOther)
+  : mOwner(aOther.mOwner)
+  , mGuard(aOther.mGuard)
+{
+  SetIsDOMBinding();
+  ErrorResult result;
+  Fill(aOther, result);
 }
 
 void
@@ -216,6 +248,12 @@ Headers::Set(const nsACString& aName, const nsACString& aValue, ErrorResult& aRv
 }
 
 void
+Headers::Clear()
+{
+  mList.Clear();
+}
+
+void
 Headers::SetGuard(HeadersGuardEnum aGuard, ErrorResult& aRv)
 {
   // Rather than re-validate all current headers, just require code to set
@@ -232,14 +270,6 @@ JSObject*
 Headers::WrapObject(JSContext* aCx)
 {
   return mozilla::dom::HeadersBinding::Wrap(aCx, this);
-}
-
-void
-Headers::GetPHeaders(nsTArray<PHeadersEntry>& aPHeadersOut) const
-{
-  for (uint32_t i = 0; i < mList.Length(); ++i) {
-    aPHeadersOut.AppendElement(PHeadersEntry(mList[i].mName, mList[i].mValue));
-  }
 }
 
 Headers::~Headers()
@@ -318,6 +348,20 @@ Headers::IsForbiddenResponseHeader(const nsACString& aName) const
 }
 
 void
+Headers::GetPHeaders(nsTArray<PHeadersEntry>& aPHeadersOut) const
+{
+  for (uint32_t i = 0; i < mList.Length(); ++i) {
+    aPHeadersOut.AppendElement(PHeadersEntry(mList[i].mName, mList[i].mValue));
+  }
+}
+
+void
+Headers::SwappedFill(Headers* aHeaders, ErrorResult&)
+{
+  mList.SwapElements(aHeaders->mList);
+}
+
+void
 Headers::Fill(const Headers& aInit, ErrorResult&)
 {
   mList = aInit.mList;
@@ -345,6 +389,5 @@ Headers::Fill(const MozMap<nsCString>& aInit, ErrorResult& aRv)
     Append(NS_ConvertUTF16toUTF8(keys[i]), aInit.Get(keys[i]), aRv);
   }
 }
-
 } // namespace dom
 } // namespace mozilla

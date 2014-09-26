@@ -69,11 +69,14 @@ public:
   Headers_() const;
 
   static already_AddRefed<Response>
+  Error(const GlobalObject& aGlobal);
+
+  static already_AddRefed<Response>
   Redirect(const GlobalObject& aGlobal, const nsAString& aUrl, uint16_t aStatus);
 
   static already_AddRefed<Response>
   Constructor(const GlobalObject& aGlobal,
-              const Optional<ArrayBufferOrArrayBufferViewOrBlobOrFormDataOrScalarValueStringOrURLSearchParams>& aBody,
+              const Optional<ArrayBufferOrArrayBufferViewOrScalarValueStringOrURLSearchParams>& aBody,
               const ResponseInit& aInit, ErrorResult& rv);
 
   virtual JSObject*
@@ -87,20 +90,20 @@ public:
     return mOwner;
   }
 
-  already_AddRefed<Promise>
-  ArrayBuffer();
+  already_AddRefed<Response>
+  Clone();
 
   already_AddRefed<Promise>
-  Blob();
+  ArrayBuffer(ErrorResult&);
 
   already_AddRefed<Promise>
-  FormData();
+  Blob(ErrorResult&);
 
   already_AddRefed<Promise>
-  Json();
+  Json(ErrorResult&);
 
   already_AddRefed<Promise>
-  Text();
+  Text(ErrorResult&);
 
   bool
   BodyUsed();

@@ -10,7 +10,10 @@
 #include "mozilla/dom/UnionTypes.h"
 
 #include "nsIContentPolicy.h"
+#include "nsIInputStream.h"
 #include "nsISupportsImpl.h"
+
+#include "Headers.h"
 
 class nsIDocument;
 class nsPIDOMWindow;
@@ -30,10 +33,10 @@ public:
 
   enum ContextFrameType
   {
-    AUXILIARY = 0,
-    TOP_LEVEL,
-    NESTED,
-    NONE,
+    FRAMETYPE_AUXILIARY = 0,
+    FRAMETYPE_TOP_LEVEL,
+    FRAMETYPE_NESTED,
+    FRAMETYPE_NONE,
   };
 
   // Since referrer type can be none, client or a URL.
@@ -44,28 +47,62 @@ public:
     REFERRER_URL,
   };
 
+  enum ResponseTainting
+  {
+    RESPONSETAINT_BASIC,
+    RESPONSETAINT_CORS,
+    RESPONSETAINT_OPAQUE,
+  };
+
   explicit InternalRequest(nsIGlobalObject* aClient)
     : mMethod("GET")
-    //, mUnsafeRequest(false)
-    , mPreserveContentCodings(false)
+    , mHeaders(new Headers(aClient))
     , mClient(aClient)
-    , mSkipServiceWorker(false)
-    //, mContextFrameType(NONE)
-    //, mForceOriginHeader(false)
-    //, mSameOriginDataURL(false)
+    , mContextFrameType(FRAMETYPE_NONE)
     , mReferrerType(REFERRER_CLIENT)
-    //, mAuthenticationFlag(false)
-    , mSynchronous(false)
     , mMode(RequestMode::No_cors)
     , mCredentialsMode(RequestCredentials::Omit)
-    //, mUseURLCredentials(false)
-    //, mManualRedirect(false)
-    //, mRedirectCount(0)
-    //, mResponseTainting(RESPONSETAINT_BASIC)
+    , mResponseTainting(RESPONSETAINT_BASIC)
+    , mRedirectCount(0)
+    , mAuthenticationFlag(false)
+    , mForceOriginHeader(false)
+    , mManualRedirect(false)
+    , mPreserveContentCodings(false)
+    , mSameOriginDataURL(false)
+    , mSkipServiceWorker(false)
+    , mSynchronous(false)
+    , mUnsafeRequest(false)
+    , mUseURLCredentials(false)
   {
   }
 
-  explicit InternalRequest(const InternalRequest& aRequest);
+  explicit InternalRequest(const InternalRequest& aOther)
+    : mMethod(aOther.mMethod)
+    , mURL(aOther.mURL)
+    , mHeaders(aOther.mHeaders)
+    , mBodyStream(aOther.mBodyStream)
+    , mClient(aOther.mClient)
+    , mContext(aOther.mContext)
+    , mOrigin(aOther.mOrigin)
+    , mContextFrameType(aOther.mContextFrameType)
+    , mReferrerType(aOther.mReferrerType)
+    , mReferrerURL(aOther.mReferrerURL)
+    , mMode(aOther.mMode)
+    , mCredentialsMode(aOther.mCredentialsMode)
+    , mResponseTainting(aOther.mResponseTainting)
+    , mRedirectCount(aOther.mRedirectCount)
+    , mAuthenticationFlag(aOther.mAuthenticationFlag)
+    , mForceOriginHeader(aOther.mForceOriginHeader)
+    , mManualRedirect(aOther.mManualRedirect)
+    , mPreserveContentCodings(aOther.mPreserveContentCodings)
+    , mSameOriginDataURL(aOther.mSameOriginDataURL)
+    , mSandboxedStorageAreaURLs(aOther.mSandboxedStorageAreaURLs)
+    , mSkipServiceWorker(aOther.mSkipServiceWorker)
+    , mSynchronous(aOther.mSynchronous)
+    , mUnsafeRequest(aOther.mUnsafeRequest)
+    , mUseURLCredentials(aOther.mUseURLCredentials)
+  {
+  }
 
   void
   GetMethod(nsCString& aMethod) const
@@ -83,13 +120,6 @@ public:
   GetURL(nsCString& aURL) const
   {
     aURL.Assign(mURL);
-  }
-
-  // Should probably restrict this to friends.
-  void
-  SetURL(const nsACString& aURL)
-  {
-    mURL.Assign(aURL);
   }
 
   nsIGlobalObject*
@@ -132,13 +162,6 @@ public:
     mReferrerURL.Assign(aReferrer);
   }
 
-  void
-  SetReferrer(nsIGlobalObject* aClient)
-  {
-    mReferrerType = REFERRER_CLIENT;
-    mReferrerClient = aClient;
-  }
-
   bool
   IsSynchronous() const
   {
@@ -163,52 +186,87 @@ public:
     return mContext;
   }
 
+  Headers*
+  Headers_()
+  {
+    return mHeaders;
+  }
+
+  bool
+  ForceOriginHeader()
+  {
+    return mForceOriginHeader;
+  }
+
+  void
+  GetOrigin(nsCString& aOrigin) const
+  {
+    aOrigin.Assign(mOrigin);
+  }
+
+  void
+  SetBody(nsIInputStream* aStream)
+  {
+    mBodyStream = aStream;
+  }
+
+  // Will return the original stream!
+  // Use a tee or copy if you don't want to erase the original.
+  void
+  GetBody(nsIInputStream** aStream)
+  {
+    nsCOMPtr<nsIInputStream> s = mBodyStream;
+    s.forget(aStream);
+  }
+
   // The global is used as the client for the new object.
   already_AddRefed<InternalRequest>
-  GetRestrictedCopy(nsIGlobalObject* aGlobal) const;
+  GetRequestConstructorCopy(nsIGlobalObject* aGlobal) const;
 
 private:
   ~InternalRequest();
 
+  void
+  SetURL(const nsACString& aURL)
+  {
+    mURL.Assign(aURL);
+  }
+
   nsCString mMethod;
   nsCString mURL;
-  // FIXME(nsm): Do we just use Headers for internal header list?
+  nsRefPtr<Headers> mHeaders;
+  nsCOMPtr<nsIInputStream> mBodyStream;
 
-  //bool mUnsafeRequest;
-  // FIXME(nsm): How do we represent body?
-
-  bool mPreserveContentCodings;
-
-  // FIXME(nsm): Strong ref?
   nsIGlobalObject* mClient;
 
-  bool mSkipServiceWorker;
+  // nsContentPolicyType does not cover the complete set defined in the spec,
+  // but it is a good start.
   nsContentPolicyType mContext;
 
-  //ContextFrameType mContextFrameType;
-
-  // FIXME(nsm): Should the origin be a nsIPrincipal?
   nsCString mOrigin;
 
-  //bool mForceOriginHeader;
-  //bool mSameOriginDataURL;
-
+  ContextFrameType mContextFrameType;
   ReferrerType mReferrerType;
-  nsCString mReferrerURL;
-  nsCOMPtr<nsIGlobalObject> mReferrerClient;
 
-  //bool mAuthenticationFlag;
-  bool mSynchronous;
+  // When mReferrerType is REFERRER_URL.
+  nsCString mReferrerURL;
+
   RequestMode mMode;
   RequestCredentials mCredentialsMode;
-  //bool mUseURLCredentials;
-  //bool mManualRedirect;
-  //uint32_t mRedirectCount;
-  /*enum {
-    RESPONSETAINT_BASIC,
-    RESPONSETAINT_CORS,
-    RESPONSETAINT_OPAQUE,
-  } mResponseTainting;*/
+  ResponseTainting mResponseTainting;
+
+  uint32_t mRedirectCount;
+
+  bool mAuthenticationFlag;
+  bool mForceOriginHeader;
+  bool mManualRedirect;
+  bool mPreserveContentCodings;
+  bool mSameOriginDataURL;
+  bool mSandboxedStorageAreaURLs;
+  bool mSkipServiceWorker;
+  bool mSynchronous;
+  bool mUnsafeRequest;
+  bool mUseURLCredentials;
 };
 
 } // namespace dom

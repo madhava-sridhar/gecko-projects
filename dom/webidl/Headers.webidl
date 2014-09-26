@@ -11,7 +11,7 @@
 typedef (Headers or sequence<sequence<ByteString>> or MozMap<ByteString>) HeadersInit;
 
 enum HeadersGuardEnum {
-  "default",
+  "mozNone",
   "request",
   "request-no-cors",
   "response",

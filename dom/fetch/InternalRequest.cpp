@@ -5,43 +5,28 @@
 
 #include "InternalRequest.h"
 
+#include "nsIContentPolicy.h"
 #include "nsIDocument.h"
 
 #include "mozilla/dom/ScriptSettings.h"
 #include "mozilla/dom/workers/Workers.h"
-#include "mozilla/dom/WorkerPrivate.h"
+
+#include "WorkerPrivate.h"
 
 namespace mozilla {
 namespace dom {
 
-InternalRequest::InternalRequest(const InternalRequest& aRequest)
-  : mMethod(aRequest.mMethod),
-    mURL(aRequest.mURL),
-    mPreserveContentCodings(aRequest.mPreserveContentCodings),
-    mClient(aRequest.mClient),
-    mSkipServiceWorker(aRequest.mSkipServiceWorker),
-    mContext(aRequest.mContext),
-    mOrigin(aRequest.mOrigin),
-    mReferrerType(aRequest.mReferrerType),
-    mReferrerURL(aRequest.mReferrerURL),
-    //mReferrerClient(aRequest.mReferrerClient),
-    mSynchronous(aRequest.mSynchronous),
-    mMode(aRequest.mMode),
-    mCredentialsMode(aRequest.mCredentialsMode)
-{
-  MOZ_ASSERT(ReferrerIsNone() || ReferrerIsURL());
-}
-
 already_AddRefed<InternalRequest>
-InternalRequest::GetRestrictedCopy(nsIGlobalObject* aGlobal) const
+InternalRequest::GetRequestConstructorCopy(nsIGlobalObject* aGlobal) const
 {
   nsRefPtr<InternalRequest> copy = new InternalRequest(aGlobal);
   copy->mURL.Assign(mURL);
   copy->SetMethod(mMethod);
-  // FIXME(nsm): Headers list.
-  // FIXME(nsm): Tee body.
+  copy->mHeaders = new Headers(*mHeaders);
+
+  copy->mBodyStream = mBodyStream;
   copy->mPreserveContentCodings = true;
-  
+
   if (NS_IsMainThread()) {
     nsIPrincipal* principal = aGlobal->PrincipalOrNull();
     MOZ_ASSERT(principal);
@@ -51,14 +36,14 @@ InternalRequest::GetRestrictedCopy(nsIGlobalObject* aGlobal) const
     MOZ_ASSERT(worker);
     worker->AssertIsOnWorkerThread();
 
-    // FIXME(nsm): Set origin.
+    workers::WorkerPrivate::LocationInfo location = worker->GetLocationInfo();
+    copy->mOrigin = NS_ConvertUTF16toUTF8(location.mOrigin);
   }
-
-  copy->SetReferrer(mClient);
-  // FIXME(nsm): Set context;
 
   copy->mMode = mMode;
   copy->mCredentialsMode = mCredentialsMode;
+  // FIXME(nsm): Add ContentType fetch to nsIContentPolicy and friends.
+  // Then set copy's mContext to that.
   return copy.forget();
 }
 

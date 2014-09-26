@@ -57,6 +57,17 @@ Response::Headers_() const
 }
 
 /* static */ already_AddRefed<Response>
+Response::Error(const GlobalObject& aGlobal)
+{
+  ErrorResult result;
+  ResponseInit init;
+  init.mStatus = 0;
+  Optional<ArrayBufferOrArrayBufferViewOrScalarValueStringOrURLSearchParams> body;
+  nsRefPtr<Response> r = Response::Constructor(aGlobal, body, init, result);
+  return r.forget();
+}
+
+/* static */ already_AddRefed<Response>
 Response::Redirect(const GlobalObject& aGlobal, const nsAString& aUrl,
                    uint16_t aStatus)
 {
@@ -65,7 +76,7 @@ Response::Redirect(const GlobalObject& aGlobal, const nsAString& aUrl,
 
 /*static*/ already_AddRefed<Response>
 Response::Constructor(const GlobalObject& aGlobal,
-                      const Optional<ArrayBufferOrArrayBufferViewOrBlobOrFormDataOrScalarValueStringOrURLSearchParams>& aBody,
+                      const Optional<ArrayBufferOrArrayBufferViewOrScalarValueStringOrURLSearchParams>& aBody,
                       const ResponseInit& aInit, ErrorResult& rv)
 {
   nsCOMPtr<nsIGlobalObject> global = do_QueryInterface(aGlobal.GetAsSupports());
@@ -75,12 +86,18 @@ Response::Constructor(const GlobalObject& aGlobal,
   return response.forget();
 }
 
+already_AddRefed<Response>
+Response::Clone()
+{
+  nsRefPtr<Response> response = new Response(mOwner);
+  return response.forget();
+}
+
 already_AddRefed<Promise>
-Response::ArrayBuffer()
+Response::ArrayBuffer(ErrorResult& result)
 {
   nsCOMPtr<nsIGlobalObject> global = do_QueryInterface(GetParentObject());
   MOZ_ASSERT(global);
-  ErrorResult result;
   nsRefPtr<Promise> promise = Promise::Create(global, result);
   if (result.Failed()) {
     return nullptr;
@@ -91,11 +108,10 @@ Response::ArrayBuffer()
 }
 
 already_AddRefed<Promise>
-Response::Blob()
+Response::Blob(ErrorResult& result)
 {
   nsCOMPtr<nsIGlobalObject> global = do_QueryInterface(GetParentObject());
   MOZ_ASSERT(global);
-  ErrorResult result;
   nsRefPtr<Promise> promise = Promise::Create(global, result);
   if (result.Failed()) {
     return nullptr;
@@ -106,28 +122,26 @@ Response::Blob()
   MOZ_ASSERT(blob);
   ThreadsafeAutoJSContext cx;
   JS::Rooted<JS::Value> val(cx);
-  nsresult rv;
   if (NS_IsMainThread()) {
-    rv = nsContentUtils::WrapNative(cx, blob, &val);
+    result = nsContentUtils::WrapNative(cx, blob, &val);
   } else {
     val.setObject(*workers::file::CreateBlob(cx, blob));
-    rv = NS_OK;
+    result = NS_OK;
   }
 
-  if (NS_FAILED(rv)) {
-    promise->MaybeReject(rv);
-  } else {
-    promise->MaybeResolve(cx, val);
+  if (result.Failed()) {
+    return nullptr;
   }
+
+  promise->MaybeResolve(cx, val);
   return promise.forget();
 }
 
 already_AddRefed<Promise>
-Response::FormData()
+Response::Json(ErrorResult& result)
 {
   nsCOMPtr<nsIGlobalObject> global = do_QueryInterface(GetParentObject());
   MOZ_ASSERT(global);
-  ErrorResult result;
   nsRefPtr<Promise> promise = Promise::Create(global, result);
   if (result.Failed()) {
     return nullptr;
@@ -138,26 +152,10 @@ Response::FormData()
 }
 
 already_AddRefed<Promise>
-Response::Json()
+Response::Text(ErrorResult& result)
 {
   nsCOMPtr<nsIGlobalObject> global = do_QueryInterface(GetParentObject());
   MOZ_ASSERT(global);
-  ErrorResult result;
-  nsRefPtr<Promise> promise = Promise::Create(global, result);
-  if (result.Failed()) {
-    return nullptr;
-  }
-
-  promise->MaybeReject(NS_ERROR_NOT_AVAILABLE);
-  return promise.forget();
-}
-
-already_AddRefed<Promise>
-Response::Text()
-{
-  nsCOMPtr<nsIGlobalObject> global = do_QueryInterface(GetParentObject());
-  MOZ_ASSERT(global);
-  ErrorResult result;
   nsRefPtr<Promise> promise = Promise::Create(global, result);
   if (result.Failed()) {
     return nullptr;

@@ -4,7 +4,7 @@
  * You can obtain one at http://mozilla.org/MPL/2.0/.
  *
  * The origin of this IDL file is
- * http://fetch.spec.whatwg.org/
+ * https://fetch.spec.whatwg.org/#request-class
  */
 
 typedef (Request or ScalarValueString) RequestInfo;
@@ -14,13 +14,14 @@ typedef (Request or ScalarValueString) RequestInfo;
  Func="mozilla::dom::Headers::PrefEnabled"]
 interface Request {
   readonly attribute ByteString method;
-  // FIXME: Bug 1025183 attribute ScalarValueString url;
-  readonly attribute DOMString url;
+  readonly attribute ScalarValueString url;
   readonly attribute Headers headers;
 
   readonly attribute DOMString referrer;
   readonly attribute RequestMode mode;
   readonly attribute RequestCredentials credentials;
+
+  Request clone();
 };
 
 Request implements Body;

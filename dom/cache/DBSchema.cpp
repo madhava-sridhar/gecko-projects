@@ -618,7 +618,7 @@ DBSchema::MatchByVaryHeader(mozIStorageConnection* aConn,
   rv = state->BindInt32Parameter(0, entryId);
   if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 
-  nsRefPtr<Headers> cachedHeaders = new Headers(nullptr);
+  nsRefPtr<Headers> cachedHeaders = new Headers(nullptr, HeadersGuardEnum::MozNone);
 
   ErrorResult errorResult;
 

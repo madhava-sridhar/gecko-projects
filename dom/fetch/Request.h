@@ -6,11 +6,13 @@
 #ifndef mozilla_dom_Request_h
 #define mozilla_dom_Request_h
 
+#include "nsISupportsImpl.h"
+#include "nsWrapperCache.h"
+
+// Required here due to certain WebIDL enums/classes being declared in both
+// files.
 #include "mozilla/dom/RequestBinding.h"
 #include "mozilla/dom/UnionTypes.h"
-
-#include "nsWrapperCache.h"
-#include "nsISupportsImpl.h"
 
 #include "InternalRequest.h"
 
@@ -24,16 +26,22 @@ class Promise;
 class Request MOZ_FINAL : public nsISupports
                         , public nsWrapperCache
 {
-NS_DECL_CYCLE_COLLECTING_ISUPPORTS
-NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS(Request)
+  NS_DECL_CYCLE_COLLECTING_ISUPPORTS
+  NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS(Request)
 
 public:
-  Request(nsISupports* aOwner, InternalRequest* aRequest);
+  Request(nsIGlobalObject* aOwner, InternalRequest* aRequest);
+
+  JSObject*
+  WrapObject(JSContext* aCx)
+  {
+    return RequestBinding::Wrap(aCx, this);
+  }
 
   void
   GetUrl(nsString& aUrl) const
   {
-    aUrl = NS_ConvertUTF8toUTF16(mRequest->mURL);
+    aUrl.Assign(NS_ConvertUTF8toUTF16(mRequest->mURL));
   }
 
   void
@@ -57,54 +65,74 @@ public:
   void
   GetReferrer(DOMString& aReferrer) const
   {
-    // FIXME(nsm): deal with client referrers.
+    if (mRequest->ReferrerIsNone()) {
+      aReferrer.AsAString() = EmptyString();
+      return;
+    }
+
+    // FIXME(nsm): Spec doesn't say what to do if referrer is client.
     aReferrer.AsAString() = NS_ConvertUTF8toUTF16(mRequest->mReferrerURL);
   }
 
-  void GetHeader(const nsAString& aHeader, DOMString& aValue) const;
-  already_AddRefed<Headers> Headers_() const;
+  Headers* Headers_() const { return mRequest->Headers_(); }
 
   static already_AddRefed<Request>
   Constructor(const GlobalObject& aGlobal, const RequestOrScalarValueString& aInput,
               const RequestInit& aInit, ErrorResult& rv);
-
-  virtual JSObject*
-  WrapObject(JSContext* aCx)
-  {
-    return mozilla::dom::RequestBinding::Wrap(aCx, this);
-  }
 
   nsISupports* GetParentObject() const
   {
     return mOwner;
   }
 
-  already_AddRefed<Promise>
-  ArrayBuffer();
+  already_AddRefed<Request>
+  Clone() const;
 
   already_AddRefed<Promise>
-  Blob();
+  ArrayBuffer(ErrorResult& aRv);
 
   already_AddRefed<Promise>
-  FormData();
+  Blob(ErrorResult& aRv);
 
   already_AddRefed<Promise>
-  Json();
+  Json(ErrorResult& aRv);
 
   already_AddRefed<Promise>
-  Text();
+  Text(ErrorResult& aRv);
 
   bool
-  BodyUsed();
+  BodyUsed() const
+  {
+    return mBodyUsed;
+  }
 
   already_AddRefed<InternalRequest>
   GetInternalRequest();
 private:
+  enum ConsumeType
+  {
+    CONSUME_ARRAYBUFFER,
+    CONSUME_BLOB,
+    // FormData not supported right now,
+    CONSUME_JSON,
+    CONSUME_TEXT,
+  };
+
   ~Request();
 
-  nsISupports* mOwner;
-  nsRefPtr<Headers> mHeaders;
+  already_AddRefed<Promise>
+  ConsumeBody(ConsumeType aType, ErrorResult& aRv);
+
+  void
+  SetBodyUsed()
+  {
+    mBodyUsed = true;
+  }
+
+  nsCOMPtr<nsIGlobalObject> mOwner;
   nsRefPtr<InternalRequest> mRequest;
+  bool mBodyUsed;
+  nsCString mMimeType;
 };
 
 } // namespace dom
