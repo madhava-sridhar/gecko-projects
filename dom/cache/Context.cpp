@@ -458,8 +458,11 @@ void
 Context::CancelForCacheId(CacheId aCacheId)
 {
   NS_ASSERT_OWNINGTHREAD(Context);
-  mState = STATE_CONTEXT_CANCELED;
-  mPendingActions.Clear();
+  for (uint32_t i = 0; i < mPendingActions.Length(); ++i) {
+    if (mPendingActions[i].mAction->MatchesCacheId(aCacheId)) {
+      mPendingActions.RemoveElementAt(i);
+    }
+  }
   for (uint32_t i = 0; i < mActionRunnables.Length(); ++i) {
     if (mActionRunnables[i]->MatchesCacheId(aCacheId)) {
       mActionRunnables[i]->Cancel();

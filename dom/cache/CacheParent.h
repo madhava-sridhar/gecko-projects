@@ -19,6 +19,8 @@ namespace dom {
 namespace cache {
 
 class CacheDBConnection;
+struct SavedResponse;
+struct StreamHolder;
 
 class CacheParent MOZ_FINAL : public PCacheParent
                             , public Manager::Listener
@@ -54,11 +56,11 @@ public:
 
   // Manager::Listener methods
   virtual void OnCacheMatch(RequestId aRequestId, nsresult aRv,
-                            const PCacheResponseOrVoid& aResponse) MOZ_OVERRIDE;
+                            const SavedResponse* aSavedResponse) MOZ_OVERRIDE;
   virtual void OnCacheMatchAll(RequestId aRequestId, nsresult aRv,
-                       const nsTArray<PCacheResponse>& aResponses) MOZ_OVERRIDE;
+                   const nsTArray<SavedResponse>& aSavedResponses) MOZ_OVERRIDE;
   virtual void OnCachePut(RequestId aRequestId, nsresult aRv,
-                      const PCacheResponseOrVoid& aResponseOrVoid) MOZ_OVERRIDE;
+                          const SavedResponse* aSavedResponse) MOZ_OVERRIDE;
   virtual void OnCacheDelete(RequestId aRequestId, nsresult aRv,
                              bool aSuccess) MOZ_OVERRIDE;
 

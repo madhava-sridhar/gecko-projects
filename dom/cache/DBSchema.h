@@ -14,6 +14,7 @@
 
 class mozIStorageConnection;
 class mozIStorageStatement;
+struct nsID;
 template<class T> class nsTArray;
 
 namespace mozilla {
@@ -25,6 +26,7 @@ class PCacheRequest;
 class PCacheRequestOrVoid;
 class PCacheResponse;
 class PCacheResponseOrVoid;
+struct SavedResponse;
 
 class DBSchema MOZ_FINAL
 {
@@ -42,17 +44,23 @@ public:
   static nsresult CacheMatch(mozIStorageConnection* aConn, CacheId aCacheId,
                              const PCacheRequest& aRequest,
                              const PCacheQueryParams& aParams,
-                             PCacheResponseOrVoid* aResponseOrVoidOut);
+                             bool* aFoundResponseOut,
+                             SavedResponse* aSavedResponseOut);
   static nsresult CacheMatchAll(mozIStorageConnection* aConn, CacheId aCacheId,
                                 const PCacheRequestOrVoid& aRequestOrVoid,
                                 const PCacheQueryParams& aParams,
-                                nsTArray<PCacheResponse>& aResponsesOut);
+                                nsTArray<SavedResponse>& aSavedResponsesOut);
   static nsresult CachePut(mozIStorageConnection* aConn, CacheId aCacheId,
                            const PCacheRequest& aRequest,
-                           const PCacheResponse& aResponse);
+                           const nsID* aRequestBodyId,
+                           const PCacheResponse& aResponse,
+                           const nsID* aResponseBodyId,
+                           nsTArray<nsID>& aDeletedBodyIdListOut,
+                           SavedResponse* aSavedResponseOut);
   static nsresult CacheDelete(mozIStorageConnection* aConn, CacheId aCacheId,
                               const PCacheRequest& aRequest,
                               const PCacheQueryParams& aParams,
+                              nsTArray<nsID>& aDeletedBodyIdListOut,
                               bool* aSuccessOut);
 
   static nsresult StorageGetCacheId(mozIStorageConnection* aConn,
@@ -82,12 +90,16 @@ private:
                                     EntryId entryId, bool* aSuccessOut);
   static nsresult DeleteEntries(mozIStorageConnection* aConn,
                                 const nsTArray<EntryId>& aEntryIdList,
+                                nsTArray<nsID>& aDeletedBodyIdListOut,
                                 uint32_t aPos=0, int32_t aLen=-1);
   static nsresult InsertEntry(mozIStorageConnection* aConn, CacheId aCacheId,
                               const PCacheRequest& aRequest,
-                              const PCacheResponse& aResponse);
-  static nsresult ReadResponse(mozIStorageConnection* aConn,
-                               EntryId aEntryId, PCacheResponse& aResponseOut);
+                              const nsID* aRequestBodyId,
+                              const PCacheResponse& aResponse,
+                              const nsID* aResponseBodyId,
+                              SavedResponse* aSavedResponseOut);
+  static nsresult ReadResponse(mozIStorageConnection* aConn, EntryId aEntryId,
+                               SavedResponse* aSavedResponseOut);
 
   static void AppendListParamsToQuery(nsACString& aQuery,
                                       const nsTArray<EntryId>& aEntryIdList,
@@ -95,6 +107,10 @@ private:
   static nsresult BindListParamsToQuery(mozIStorageStatement* aState,
                                         const nsTArray<EntryId>& aEntryIdList,
                                         uint32_t aPos, int32_t aLen);
+  static nsresult BindId(mozIStorageStatement* aState, uint32_t aPos,
+                         const nsID* aId);
+  static nsresult ExtractId(mozIStorageStatement* aState, uint32_t aPos,
+                            nsID* aIdOut);
 
   DBSchema() MOZ_DELETE;
   ~DBSchema() MOZ_DELETE;

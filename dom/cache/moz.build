@@ -18,8 +18,10 @@ EXPORTS.mozilla.dom.cache += [
     'Context.h',
     'DBAction.h',
     'DBSchema.h',
+    'FileUtils.h',
     'IPCUtils.h',
     'Manager.h',
+    'SavedTypes.h',
     'Types.h',
 ]
 
@@ -35,6 +37,7 @@ SOURCES += [
     'Context.cpp',
     'DBAction.cpp',
     'DBSchema.cpp',
+    'FileUtils.cpp',
     'Manager.cpp',
 ]
 

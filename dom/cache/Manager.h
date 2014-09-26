@@ -9,11 +9,15 @@
 
 #include "mozilla/dom/cache/Context.h"
 #include "mozilla/dom/cache/Types.h"
+#include "mozilla/dom/cache/PCacheRequest.h"
+#include "mozilla/dom/cache/PCacheResponse.h"
 #include "nsCOMPtr.h"
 #include "nsISupportsImpl.h"
 #include "nsString.h"
 #include "nsTArray.h"
 
+class nsIInputStream;
+class nsIOutputStream;
 class nsIThread;
 
 namespace mozilla {
@@ -21,10 +25,7 @@ namespace dom {
 namespace cache {
 
 class PCacheQueryParams;
-class PCacheRequest;
-class PCacheRequestOrVoid;
-class PCacheResponse;
-class PCacheResponseOrVoid;
+struct SavedResponse;
 
 class Manager MOZ_FINAL : public Context::Listener
 {
@@ -35,11 +36,11 @@ public:
     virtual ~Listener() { }
 
     virtual void OnCacheMatch(RequestId aRequestId, nsresult aRv,
-                              const PCacheResponseOrVoid& aResponseOrVoid) { }
+                              const SavedResponse* aResponse) { }
     virtual void OnCacheMatchAll(RequestId aRequestId, nsresult aRv,
-                                 const nsTArray<PCacheResponse>& aResponses) { }
+                             const nsTArray<SavedResponse>& aSavedResponses) { }
     virtual void OnCachePut(RequestId aRequestId, nsresult aRv,
-                            const PCacheResponseOrVoid& aResponseOrVoid) { }
+                            const SavedResponse* aSavedResponse) { }
     virtual void OnCacheDelete(RequestId aRequestId, nsresult aRv,
                                bool aSuccess) { }
 
@@ -61,6 +62,7 @@ public:
   void RemoveListener(Listener* aListener);
   void AddRefCacheId(CacheId aCacheId);
   void ReleaseCacheId(CacheId aCacheId);
+  uint32_t GetCacheIdRefCount(CacheId aCacheId);
 
   // TODO: consider moving CacheId up in the argument lists below
   void CacheMatch(Listener* aListener, RequestId aRequestId, CacheId aCacheId,
@@ -70,10 +72,15 @@ public:
                      CacheId aCacheId, const PCacheRequestOrVoid& aRequestOrVoid,
                      const PCacheQueryParams& aParams);
   void CachePut(Listener* aListener, RequestId aRequestId, CacheId aCacheId,
-                const PCacheRequest& aRequest, const PCacheResponse& aResponse);
-  void CacheDelete(Listener* aListener, const RequestId& aRequestId,
+                const PCacheRequest& aRequest,
+                nsIInputStream* aRequestBodyStream,
+                const PCacheResponse& aResponse,
+                nsIInputStream* aResponseBodyStream);
+  void CacheDelete(Listener* aListener, RequestId aRequestId,
                    CacheId aCacheId, const PCacheRequest& aRequest,
                    const PCacheQueryParams& aParams);
+  void CacheReadBody(CacheId aCacheId, const nsID& aBodyId,
+                     nsIOutputStream* aStream);
 
   void StorageGet(Listener* aListener, RequestId aRequestId,
                   Namespace aNamespace, const nsAString& aKey);
@@ -102,6 +109,7 @@ private:
   class CacheMatchAllAction;
   class CachePutAction;
   class CacheDeleteAction;
+  class CacheReadBodyAction;
 
   class StorageGetAction;
   class StorageHasAction;

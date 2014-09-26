@@ -48,6 +48,7 @@ DBAction::RunOnTarget(Resolver* aResolver, nsIFile* aQuotaDir)
     return;
   }
   MOZ_ASSERT(conn);
+
   RunWithDBOnTarget(aResolver, aQuotaDir, conn);
 }
 

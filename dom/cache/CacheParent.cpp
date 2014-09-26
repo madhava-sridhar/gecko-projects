@@ -7,7 +7,12 @@
 #include "mozilla/dom/cache/CacheParent.h"
 
 #include "mozilla/unused.h"
+#include "mozilla/dom/cache/SavedTypes.h"
 #include "nsCOMPtr.h"
+
+// TODO: remove testing only headers
+#include "../../dom/filehandle/MemoryStreams.h"
+#include "nsStringStream.h"
 
 namespace mozilla {
 namespace dom {
@@ -77,7 +82,26 @@ CacheParent::RecvPut(const RequestId& aRequestId, const PCacheRequest& aRequest,
                      const PCacheResponse& aResponse)
 {
   MOZ_ASSERT(mManager);
-  mManager->CachePut(this, aRequestId, mCacheId, aRequest, aResponse);
+
+  // TODO: remove stream test code
+  nsCOMPtr<nsIInputStream> requestStream;
+  nsresult rv = NS_NewCStringInputStream(getter_AddRefs(requestStream),
+                NS_LITERAL_CSTRING("request body stream beep beep boop!"));
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    OnCachePut(aRequestId, rv, nullptr);
+    return true;
+  }
+
+  nsCOMPtr<nsIInputStream> responseStream;
+  rv = NS_NewCStringInputStream(getter_AddRefs(responseStream),
+                NS_LITERAL_CSTRING("response body stream hooray!"));
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    OnCachePut(aRequestId, rv, nullptr);
+    return true;
+  }
+
+  mManager->CachePut(this, aRequestId, mCacheId,
+                     aRequest, requestStream, aResponse, responseStream);
   return true;
 }
 
@@ -101,23 +125,80 @@ CacheParent::RecvKeys(const RequestId& aRequestId,
 
 void
 CacheParent::OnCacheMatch(RequestId aRequestId, nsresult aRv,
-                          const PCacheResponseOrVoid& aResponse)
+                          const SavedResponse* aSavedResponse)
 {
-  unused << SendMatchResponse(aRequestId, aRv, aResponse);
+  PCacheResponseOrVoid responseOrVoid;
+
+  // no match
+  if (NS_FAILED(aRv) || !aSavedResponse) {
+    responseOrVoid = void_t();
+    unused << SendMatchResponse(aRequestId, aRv, responseOrVoid);
+    return;
+  }
+
+  // match without body data to stream
+  if (!aSavedResponse->mHasBodyId) {
+    responseOrVoid = aSavedResponse->mValue;
+    unused << SendMatchResponse(aRequestId, aRv, responseOrVoid);
+    return;
+  }
+
+  // TODO: remove stream test code
+  nsCOMPtr<nsIOutputStream> stream = MemoryOutputStream::Create(4096);
+
+  mManager->CacheReadBody(mCacheId, aSavedResponse->mBodyId, stream);
+  responseOrVoid = aSavedResponse->mValue;
+  unused << SendMatchResponse(aRequestId, aRv, responseOrVoid);
 }
 
 void
 CacheParent::OnCacheMatchAll(RequestId aRequestId, nsresult aRv,
-                             const nsTArray<PCacheResponse>& aResponses)
+                             const nsTArray<SavedResponse>& aSavedResponses)
 {
-  unused << SendMatchAllResponse(aRequestId, aRv, aResponses);
+  nsTArray<PCacheResponse> responses;
+  nsTArray<nsCOMPtr<nsIOutputStream>> responseStreams;
+  for (uint32_t i = 0; i < aSavedResponses.Length(); ++i) {
+    responses.AppendElement(aSavedResponses[i].mValue);
+
+    if (!aSavedResponses[i].mHasBodyId) {
+      responseStreams.AppendElement();
+    } else {
+      // TODO: remove stream test code
+      responseStreams.AppendElement(MemoryOutputStream::Create(4096));
+      mManager->CacheReadBody(mCacheId, aSavedResponses[i].mBodyId,
+                              responseStreams[i]);
+    }
+  }
+
+  unused << SendMatchAllResponse(aRequestId, aRv, responses);
 }
 
 void
 CacheParent::OnCachePut(RequestId aRequestId, nsresult aRv,
-                        const PCacheResponseOrVoid& aResponseOrVoid)
+                        const SavedResponse* aSavedResponse)
 {
-  unused << SendPutResponse(aRequestId, aRv, aResponseOrVoid);
+  PCacheResponseOrVoid responseOrVoid;
+
+  // no match
+  if (NS_FAILED(aRv) || !aSavedResponse) {
+    responseOrVoid = void_t();
+    unused << SendPutResponse(aRequestId, aRv, responseOrVoid);
+    return;
+  }
+
+  // match without body data to stream
+  if (!aSavedResponse->mHasBodyId) {
+    responseOrVoid = aSavedResponse->mValue;
+    unused << SendPutResponse(aRequestId, aRv, responseOrVoid);
+    return;
+  }
+
+  // TODO: remove stream test code
+  nsCOMPtr<nsIOutputStream> stream = MemoryOutputStream::Create(4096);
+
+  mManager->CacheReadBody(mCacheId, aSavedResponse->mBodyId, stream);
+  responseOrVoid = aSavedResponse->mValue;
+  unused << SendPutResponse(aRequestId, aRv, responseOrVoid);
 }
 
 void

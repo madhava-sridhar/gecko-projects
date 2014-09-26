@@ -29,6 +29,9 @@ protected:
   DBAction(Mode aMode, const nsACString& aOrigin,
            const nsACString& aBaseDomain);
 
+  // Just as the resolver must be ref'd until cancel or resolve, you may also
+  // ref the DB connection.  The connection can only be referenced from the
+  // target thread and must be released upon cancel or resolve.
   virtual void RunWithDBOnTarget(Resolver* aResolver, nsIFile* aDBDir,
                                  mozIStorageConnection* aConn)=0;
 
