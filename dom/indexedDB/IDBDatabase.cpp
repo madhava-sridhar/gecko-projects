@@ -821,7 +821,7 @@ IDBDatabase::GetOrCreateFileActorForBlob(nsIDOMBlob* aBlob)
   PBackgroundIDBDatabaseFileChild* actor = nullptr;
 
   if (!mFileActors.Get(weakRef, &actor)) {
-    nsRefPtr<DOMFileImpl> blobImpl = static_cast<DOMFile*>(aBlob)->Impl();
+    DOMFileImpl* blobImpl = static_cast<DOMFile*>(aBlob)->Impl();
     MOZ_ASSERT(blobImpl);
 
     if (mReceivedBlobs.GetEntry(weakRef)) {
@@ -858,29 +858,16 @@ IDBDatabase::GetOrCreateFileActorForBlob(nsIDOMBlob* aBlob)
         mBackgroundActor->Manager()->Manager();
       MOZ_ASSERT(backgroundManager);
 
-      auto* blobActor =
+      auto* blobChild =
         static_cast<BlobChild*>(
           BackgroundChild::GetOrCreateActorForBlob(backgroundManager, aBlob));
-      MOZ_ASSERT(blobActor);
-
-      blobImpl = blobActor->GetBlobImpl();
-      MOZ_ASSERT(blobImpl);
-
-      nsCOMPtr<nsIInputStream> inputStream;
-      MOZ_ALWAYS_TRUE(NS_SUCCEEDED(
-        blobImpl->GetInternalStream(getter_AddRefs(inputStream))));
-
-      InputStreamParams params;
-      nsTArray<FileDescriptor> fileDescriptors;
-      SerializeInputStream(inputStream, params, fileDescriptors);
-
-      MOZ_ASSERT(fileDescriptors.IsEmpty());
+      MOZ_ASSERT(blobChild);
 
       auto* dbFile = new DatabaseFile(this);
 
       actor =
         mBackgroundActor->SendPBackgroundIDBDatabaseFileConstructor(dbFile,
-                                                                    params);
+                                                                    blobChild);
       if (NS_WARN_IF(!actor)) {
         return nullptr;
       }

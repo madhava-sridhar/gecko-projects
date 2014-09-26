@@ -2974,9 +2974,8 @@ private:
   ActorDestroy(ActorDestroyReason aWhy) MOZ_OVERRIDE;
 
   virtual PBackgroundIDBDatabaseFileParent*
-  AllocPBackgroundIDBDatabaseFileParent(
-                                    const BlobOrInputStream& aBlobOrInputStream)
-                                    MOZ_OVERRIDE;
+  AllocPBackgroundIDBDatabaseFileParent(PBlobParent* aBlobParent)
+                                        MOZ_OVERRIDE;
 
   virtual bool
   DeallocPBackgroundIDBDatabaseFileParent(
@@ -3029,7 +3028,7 @@ class DatabaseFile MOZ_FINAL
 {
   friend class Database;
 
-  InputStreamParams mInputStreamParams;
+  nsRefPtr<DOMFileImpl> mBlobImpl;
   nsRefPtr<FileInfo> mFileInfo;
 
 public:
@@ -3044,10 +3043,27 @@ public:
   }
 
   already_AddRefed<nsIInputStream>
-  GetInputStream() const;
+  GetInputStream() const
+  {
+    AssertIsOnBackgroundThread();
+
+    nsCOMPtr<nsIInputStream> inputStream;
+    if (mBlobImpl) {
+      MOZ_ALWAYS_TRUE(NS_SUCCEEDED(
+        mBlobImpl->GetInternalStream(getter_AddRefs(inputStream))));
+    }
+
+    return inputStream.forget();
+  }
 
   void
-  ClearInputStreamParams();
+  ClearInputStream()
+  {
+    AssertIsOnBackgroundThread();
+    MOZ_ASSERT(mBlobImpl);
+
+    mBlobImpl = nullptr;
+  }
 
 private:
   // Called when sending to the child.
@@ -3059,12 +3075,12 @@ private:
   }
 
   // Called when receiving from the child.
-  DatabaseFile(const InputStreamParams& aInputStreamParams, FileInfo* aFileInfo)
-    : mInputStreamParams(aInputStreamParams)
+  DatabaseFile(DOMFileImpl* aBlobImpl, FileInfo* aFileInfo)
+    : mBlobImpl(aBlobImpl)
     , mFileInfo(aFileInfo)
   {
     AssertIsOnBackgroundThread();
-    MOZ_ASSERT(aInputStreamParams.type() != InputStreamParams::T__None);
+    MOZ_ASSERT(aBlobImpl);
     MOZ_ASSERT(aFileInfo);
   }
 
@@ -3072,7 +3088,13 @@ private:
   { }
 
   virtual void
-  ActorDestroy(ActorDestroyReason aWhy) MOZ_OVERRIDE;
+  ActorDestroy(ActorDestroyReason aWhy) MOZ_OVERRIDE
+  {
+    AssertIsOnBackgroundThread();
+
+    mBlobImpl = nullptr;
+    mFileInfo = nullptr;
+  }
 };
 
 class TransactionBase
@@ -6192,52 +6214,26 @@ Database::ActorDestroy(ActorDestroyReason aWhy)
 }
 
 PBackgroundIDBDatabaseFileParent*
-Database::AllocPBackgroundIDBDatabaseFileParent(
-                                    const BlobOrInputStream& aBlobOrInputStream)
+Database::AllocPBackgroundIDBDatabaseFileParent(PBlobParent* aBlobParent)
 {
   AssertIsOnBackgroundThread();
-  MOZ_ASSERT(aBlobOrInputStream.type() != BlobOrInputStream::T__None);
+  MOZ_ASSERT(aBlobParent);
+
+  nsRefPtr<DOMFileImpl> blobImpl =
+    static_cast<BlobParent*>(aBlobParent)->GetBlobImpl();
+  MOZ_ASSERT(blobImpl);
 
   nsRefPtr<DatabaseFile> actor;
 
-  switch (aBlobOrInputStream.type()) {
-    case BlobOrInputStream::TInputStreamParams: {
-      const InputStreamParams& inputStreamParams =
-        aBlobOrInputStream.get_InputStreamParams();
-      MOZ_ASSERT(inputStreamParams.type() != InputStreamParams::T__None);
+  if (nsRefPtr<FileInfo> fileInfo = blobImpl->GetFileInfo(mFileManager)) {
+    // This blob was previously shared with the child.
+    actor = new DatabaseFile(fileInfo);
+  } else {
+    // This is a blob we haven't seen before.
+    fileInfo = mFileManager->GetNewFileInfo();
+    MOZ_ASSERT(fileInfo);
 
-      nsRefPtr<FileInfo> fileInfo = mFileManager->GetNewFileInfo();
-      MOZ_ASSERT(fileInfo);
-
-      actor = new DatabaseFile(inputStreamParams, fileInfo);
-      break;
-    }
-
-    case BlobOrInputStream::TPBlobParent: {
-      auto* blobParent =
-        static_cast<BlobParent*>(aBlobOrInputStream.get_PBlobParent());
-      if (NS_WARN_IF(!blobParent)) {
-        ASSERT_UNLESS_FUZZING();
-        return nullptr;
-      }
-
-      nsRefPtr<DOMFileImpl> blobImpl = blobParent->GetBlobImpl();
-      MOZ_ASSERT(blobImpl);
-
-      nsRefPtr<FileInfo> fileInfo = blobImpl->GetFileInfo(mFileManager);
-      MOZ_ASSERT(fileInfo);
-
-      actor = new DatabaseFile(fileInfo);
-      break;
-    }
-
-    case BlobOrInputStream::TPBlobChild: {
-      ASSERT_UNLESS_FUZZING();
-      return nullptr;
-    }
-
-    default:
-      MOZ_CRASH("Should never get here!");
+    actor = new DatabaseFile(blobImpl, fileInfo);
   }
 
   MOZ_ASSERT(actor);
@@ -6476,48 +6472,6 @@ Database::RecvClose()
   }
 
   return true;
-}
-
-/*******************************************************************************
- * DatabaseFile
- ******************************************************************************/
-
-already_AddRefed<nsIInputStream>
-DatabaseFile::GetInputStream() const
-{
-  if (mInputStreamParams.type() == InputStreamParams::T__None) {
-    return nullptr;
-  }
-
-  nsTArray<FileDescriptor> fileDescriptors;
-  nsCOMPtr<nsIInputStream> inputStream =
-    DeserializeInputStream(mInputStreamParams, fileDescriptors);
-
-  if (NS_WARN_IF(!inputStream)) {
-    return nullptr;
-  }
-
-  MOZ_ASSERT(fileDescriptors.IsEmpty());
-
-  return inputStream.forget();
-}
-
-void
-DatabaseFile::ClearInputStreamParams()
-{
-  AssertIsOnBackgroundThread();
-  MOZ_ASSERT(mInputStreamParams.type() != InputStreamParams::T__None);
-
-  mInputStreamParams = InputStreamParams();
-}
-
-void
-DatabaseFile::ActorDestroy(ActorDestroyReason aWhy)
-{
-  AssertIsOnBackgroundThread();
-
-  mFileInfo = nullptr;
-  mInputStreamParams = InputStreamParams();
 }
 
 /*******************************************************************************
@@ -14779,7 +14733,7 @@ ObjectStoreAddOrPutRequestOp::Cleanup()
       MOZ_ASSERT_IF(!fileActor, !storedFileInfo.mCopiedSuccessfully);
 
       if (fileActor && storedFileInfo.mCopiedSuccessfully) {
-        fileActor->ClearInputStreamParams();
+        fileActor->ClearInputStream();
       }
     }
 

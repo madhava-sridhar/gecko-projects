@@ -29,12 +29,6 @@ union NullableVersion
   uint64_t;
 };
 
-union BlobOrInputStream
-{
-  PBlob;
-  InputStreamParams;
-};
-
 protocol PBackgroundIDBDatabase
 {
   manager PBackgroundIDBFactory;
@@ -50,7 +44,7 @@ parent:
 
   Close();
 
-  PBackgroundIDBDatabaseFile(BlobOrInputStream blobOrInputStream);
+  PBackgroundIDBDatabaseFile(PBlob blob);
 
   PBackgroundIDBTransaction(nsString[] objectStoreNames, Mode mode);
 

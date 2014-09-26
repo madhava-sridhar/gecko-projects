@@ -1170,7 +1170,7 @@ BackgroundDatabaseChild::ActorDestroy(ActorDestroyReason aWhy)
 
 PBackgroundIDBDatabaseFileChild*
 BackgroundDatabaseChild::AllocPBackgroundIDBDatabaseFileChild(
-                                    const BlobOrInputStream& aBlobOrInputStream)
+                                                         PBlobChild* aBlobChild)
 {
   MOZ_CRASH("PBackgroundIDBFileChild actors should be manually constructed!");
 }

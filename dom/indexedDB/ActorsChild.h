@@ -260,9 +260,8 @@ private:
   ActorDestroy(ActorDestroyReason aWhy) MOZ_OVERRIDE;
 
   virtual PBackgroundIDBDatabaseFileChild*
-  AllocPBackgroundIDBDatabaseFileChild(
-                                    const BlobOrInputStream& aBlobOrInputStream)
-                                    MOZ_OVERRIDE;
+  AllocPBackgroundIDBDatabaseFileChild(PBlobChild* aBlobChild)
+                                       MOZ_OVERRIDE;
 
   virtual bool
   DeallocPBackgroundIDBDatabaseFileChild(
