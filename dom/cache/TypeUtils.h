@@ -14,6 +14,7 @@ namespace dom {
 
 class OwningRequestOrScalarValueString;
 struct QueryParams;
+class InternalRequest;
 class Request;
 class RequestOrScalarValueString;
 class Response;
@@ -53,7 +54,7 @@ public:
   ToResponse(Response& aOut, const PCacheResponse& aIn);
 
   static void
-  ToRequest(Request& aOut, const PCacheRequest& aIn);
+  ToInternalRequest(InternalRequest& aOut, const PCacheRequest& aIn);
 
 private:
   TypeUtils() MOZ_DELETE;

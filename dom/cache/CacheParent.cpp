@@ -120,7 +120,9 @@ CacheParent::RecvKeys(const RequestId& aRequestId,
                       const PCacheRequestOrVoid& aRequest,
                       const PCacheQueryParams& aParams)
 {
-  return false;
+  MOZ_ASSERT(mManager);
+  mManager->CacheKeys(this, aRequestId, mCacheId, aRequest, aParams);
+  return true;
 }
 
 void
@@ -205,6 +207,28 @@ void
 CacheParent::OnCacheDelete(RequestId aRequestId, nsresult aRv, bool aSuccess)
 {
   unused << SendDeleteResponse(aRequestId, aRv, aSuccess);
+}
+
+void
+CacheParent::OnCacheKeys(RequestId aRequestId, nsresult aRv,
+                         const nsTArray<SavedRequest>& aSavedRequests)
+{
+  nsTArray<PCacheRequest> requests;
+  nsTArray<nsCOMPtr<nsIOutputStream>> requestStreams;
+  for (uint32_t i = 0; i < aSavedRequests.Length(); ++i) {
+    requests.AppendElement(aSavedRequests[i].mValue);
+
+    if (!aSavedRequests[i].mHasBodyId) {
+      requestStreams.AppendElement();
+    } else {
+      // TODO: remove stream test code
+      requestStreams.AppendElement(MemoryOutputStream::Create(4096));
+      mManager->CacheReadBody(mCacheId, aSavedRequests[i].mBodyId,
+                              requestStreams[i]);
+    }
+  }
+
+  unused << SendKeysResponse(aRequestId, aRv, requests);
 }
 
 } // namespace cache

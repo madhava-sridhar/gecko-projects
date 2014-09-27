@@ -7,9 +7,7 @@
 #include "mozilla/dom/cache/DBSchema.h"
 
 #include "ipc/IPCMessageUtils.h"
-#include "mozilla/dom/cache/PCacheQueryParams.h"
-#include "mozilla/dom/cache/PCacheRequest.h"
-#include "mozilla/dom/cache/PCacheResponse.h"
+#include "mozilla/dom/cache/PCacheTypes.h"
 #include "mozilla/dom/cache/SavedTypes.h"
 #include "mozIStorageConnection.h"
 #include "mozIStorageStatement.h"
@@ -67,6 +65,8 @@ DBSchema::CreateSchema(mozIStorageConnection* aConn)
         "request_method TEXT NOT NULL, "
         "request_url TEXT NOT NULL, "
         "request_url_no_query TEXT NOT NULL, "
+        "request_referrer TEXT NOT NULL, "
+        "request_headers_guard INTEGER NOT NULL, "
         "request_mode INTEGER NOT NULL, "
         "request_credentials INTEGER NOT NULL, "
         "request_body_id TEXT NULL, "
@@ -74,6 +74,7 @@ DBSchema::CreateSchema(mozIStorageConnection* aConn)
         "response_url TEXT NOT NULL, "
         "response_status INTEGER NOT NULL, "
         "response_status_text TEXT NOT NULL, "
+        "response_headers_guard INTEGER NOT NULL, "
         "response_body_id TEXT NOT NULL, "
         "cache_id INTEGER NOT NULL REFERENCES caches(id) ON DELETE CASCADE"
       ");"
@@ -341,6 +342,36 @@ DBSchema::CacheDelete(mozIStorageConnection* aConn, CacheId aCacheId,
   if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 
   *aSuccessOut = true;
+
+  return rv;
+}
+
+// static
+nsresult
+DBSchema::CacheKeys(mozIStorageConnection* aConn, CacheId aCacheId,
+                    const PCacheRequestOrVoid& aRequestOrVoid,
+                    const PCacheQueryParams& aParams,
+                    nsTArray<SavedRequest>& aSavedRequestsOut)
+{
+  MOZ_ASSERT(aConn);
+  nsresult rv;
+
+  nsTArray<EntryId> matches;
+  if (aRequestOrVoid.type() == PCacheRequestOrVoid::Tvoid_t) {
+    rv = QueryAll(aConn, aCacheId, matches);
+    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
+  } else {
+    rv = QueryCache(aConn, aCacheId, aRequestOrVoid, aParams, matches);
+    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
+  }
+
+  // TODO: replace this with a bulk load using SQL IN clause
+  for (uint32_t i = 0; i < matches.Length(); ++i) {
+    SavedRequest *savedRequest = aSavedRequestsOut.AppendElement();
+    rv = ReadRequest(aConn, matches[i], savedRequest);
+    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
+    savedRequest->mCacheId = aCacheId;
+  }
 
   return rv;
 }
@@ -835,6 +866,8 @@ DBSchema::InsertEntry(mozIStorageConnection* aConn, CacheId aCacheId,
       "request_method, "
       "request_url, "
       "request_url_no_query, "
+      "request_referrer, "
+      "request_headers_guard, "
       "request_mode, "
       "request_credentials, "
       "request_body_id, "
@@ -842,9 +875,10 @@ DBSchema::InsertEntry(mozIStorageConnection* aConn, CacheId aCacheId,
       "response_url, "
       "response_status, "
       "response_status_text, "
+      "response_headers_guard, "
       "response_body_id, "
       "cache_id "
-    ") VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)"
+    ") VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)"
   ), getter_AddRefs(state));
   if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 
@@ -857,32 +891,43 @@ DBSchema::InsertEntry(mozIStorageConnection* aConn, CacheId aCacheId,
   rv = state->BindStringParameter(2, aRequest.urlWithoutQuery());
   if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 
-  rv = state->BindInt32Parameter(3, static_cast<int32_t>(aRequest.mode()));
+  rv = state->BindStringParameter(3, aRequest.referrer());
   if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 
   rv = state->BindInt32Parameter(4,
+    static_cast<int32_t>(aRequest.headersGuard()));
+  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
+
+  rv = state->BindInt32Parameter(5, static_cast<int32_t>(aRequest.mode()));
+  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
+
+  rv = state->BindInt32Parameter(6,
     static_cast<int32_t>(aRequest.credentials()));
   if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 
-  rv = BindId(state, 5, aRequestBodyId);
+  rv = BindId(state, 7, aRequestBodyId);
   if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 
-  rv = state->BindInt32Parameter(6, static_cast<int32_t>(aResponse.type()));
+  rv = state->BindInt32Parameter(8, static_cast<int32_t>(aResponse.type()));
   if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 
-  rv = state->BindStringParameter(7, aResponse.url());
+  rv = state->BindStringParameter(9, aResponse.url());
   if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 
-  rv = state->BindInt32Parameter(8, aResponse.status());
+  rv = state->BindInt32Parameter(10, aResponse.status());
   if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 
-  rv = state->BindUTF8StringParameter(9, aResponse.statusText());
+  rv = state->BindUTF8StringParameter(11, aResponse.statusText());
   if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 
-  rv = BindId(state, 10, aResponseBodyId);
+  rv = state->BindInt32Parameter(12,
+    static_cast<int32_t>(aResponse.headersGuard()));
   if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 
-  rv = state->BindInt32Parameter(11, aCacheId);
+  rv = BindId(state, 13, aResponseBodyId);
+  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
+
+  rv = state->BindInt32Parameter(14, aCacheId);
   if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 
   rv = state->Execute();
@@ -972,6 +1017,7 @@ DBSchema::ReadResponse(mozIStorageConnection* aConn, EntryId aEntryId,
       "response_url, "
       "response_status, "
       "response_status_text, "
+      "response_headers_guard, "
       "response_body_id "
     "FROM entries "
     "WHERE id=?1;"
@@ -1001,13 +1047,19 @@ DBSchema::ReadResponse(mozIStorageConnection* aConn, EntryId aEntryId,
   rv = state->GetString(3, aSavedResponseOut->mValue.url());
   if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 
+  int32_t guard;
+  rv = state->GetInt32(4, &guard);
+  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
+  aSavedResponseOut->mValue.headersGuard() =
+    static_cast<HeadersGuardEnum>(guard);
+
   bool nullBody;
-  rv = state->GetIsNull(4, &nullBody);
+  rv = state->GetIsNull(5, &nullBody);
   if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
   aSavedResponseOut->mHasBodyId = !nullBody;
 
   if (aSavedResponseOut->mHasBodyId) {
-    rv = ExtractId(state, 4, &aSavedResponseOut->mBodyId);
+    rv = ExtractId(state, 5, &aSavedResponseOut->mBodyId);
     if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
   }
 
@@ -1025,6 +1077,101 @@ DBSchema::ReadResponse(mozIStorageConnection* aConn, EntryId aEntryId,
 
   while(NS_SUCCEEDED(state->ExecuteStep(&hasMoreData)) && hasMoreData) {
     PHeadersEntry* header = aSavedResponseOut->mValue.headers().AppendElement();
+
+    rv = state->GetUTF8String(0, header->name());
+    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
+
+    rv = state->GetUTF8String(1, header->value());
+    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
+  }
+
+  return rv;
+}
+
+// static
+nsresult
+DBSchema::ReadRequest(mozIStorageConnection* aConn, EntryId aEntryId,
+                      SavedRequest* aSavedRequestOut)
+{
+  MOZ_ASSERT(aConn);
+  MOZ_ASSERT(aSavedRequestOut);
+
+  nsCOMPtr<mozIStorageStatement> state;
+  nsresult rv = aConn->CreateStatement(NS_LITERAL_CSTRING(
+    "SELECT "
+      "request_method, "
+      "request_url, "
+      "request_url_no_query, "
+      "request_referrer, "
+      "request_headers_guard, "
+      "request_mode, "
+      "request_credentials, "
+      "request_body_id "
+    "FROM entries "
+    "WHERE id=?1;"
+  ), getter_AddRefs(state));
+  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
+
+  rv = state->BindInt32Parameter(0, aEntryId);
+  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
+
+  bool hasMoreData;
+  rv = state->ExecuteStep(&hasMoreData);
+  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
+
+  rv = state->GetUTF8String(0, aSavedRequestOut->mValue.method());
+  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
+
+  rv = state->GetString(1, aSavedRequestOut->mValue.url());
+  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
+
+  rv = state->GetString(2, aSavedRequestOut->mValue.urlWithoutQuery());
+  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
+
+  rv = state->GetString(3, aSavedRequestOut->mValue.referrer());
+  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
+
+  int32_t guard;
+  rv = state->GetInt32(4, &guard);
+  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
+  aSavedRequestOut->mValue.headersGuard() =
+    static_cast<HeadersGuardEnum>(guard);
+
+  int32_t mode;
+  rv = state->GetInt32(5, &mode);
+  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
+  aSavedRequestOut->mValue.mode() = static_cast<RequestMode>(mode);
+
+  int32_t credentials;
+  rv = state->GetInt32(6, &credentials);
+  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
+  aSavedRequestOut->mValue.credentials() =
+    static_cast<RequestCredentials>(credentials);
+
+  bool nullBody;
+  rv = state->GetIsNull(7, &nullBody);
+  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
+  aSavedRequestOut->mHasBodyId = !nullBody;
+
+  if (aSavedRequestOut->mHasBodyId) {
+    rv = ExtractId(state, 7, &aSavedRequestOut->mBodyId);
+    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
+  }
+
+  rv = aConn->CreateStatement(NS_LITERAL_CSTRING(
+    "SELECT "
+      "name, "
+      "value "
+    "FROM request_headers "
+    "WHERE entry_id=?1;"
+  ), getter_AddRefs(state));
+  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
+
+  rv = state->BindInt32Parameter(0, aEntryId);
+  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
+
+  while(NS_SUCCEEDED(state->ExecuteStep(&hasMoreData)) && hasMoreData) {
+    PHeadersEntry* header = aSavedRequestOut->mValue.headers().AppendElement();
 
     rv = state->GetUTF8String(0, header->name());
     if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }

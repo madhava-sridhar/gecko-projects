@@ -4,9 +4,7 @@
 
 include protocol PBackground;
 include protocol PCache;
-include PCacheQueryParams;
-include PCacheRequest;
-include PCacheResponse;
+include PCacheTypes;
 
 using mozilla::dom::cache::RequestId from "mozilla/dom/cache/IPCUtils.h";
 

@@ -9,8 +9,6 @@
 
 #include "mozilla/dom/cache/Context.h"
 #include "mozilla/dom/cache/Types.h"
-#include "mozilla/dom/cache/PCacheRequest.h"
-#include "mozilla/dom/cache/PCacheResponse.h"
 #include "nsCOMPtr.h"
 #include "nsISupportsImpl.h"
 #include "nsString.h"
@@ -25,6 +23,10 @@ namespace dom {
 namespace cache {
 
 class PCacheQueryParams;
+class PCacheRequest;
+class PCacheRequestOrVoid;
+class PCacheResponse;
+struct SavedRequest;
 struct SavedResponse;
 
 class Manager MOZ_FINAL : public Context::Listener
@@ -43,6 +45,8 @@ public:
                             const SavedResponse* aSavedResponse) { }
     virtual void OnCacheDelete(RequestId aRequestId, nsresult aRv,
                                bool aSuccess) { }
+    virtual void OnCacheKeys(RequestId aRequestId, nsresult aRv,
+                             const nsTArray<SavedRequest>& aSavedRequests) { }
 
     virtual void OnStorageMatch(RequestId aRequestId, nsresult aRv,
                                 const SavedResponse* aResponse) { }
@@ -81,6 +85,9 @@ public:
   void CacheDelete(Listener* aListener, RequestId aRequestId,
                    CacheId aCacheId, const PCacheRequest& aRequest,
                    const PCacheQueryParams& aParams);
+  void CacheKeys(Listener* aListener, RequestId aRequestId,
+                 CacheId aCacheId, const PCacheRequestOrVoid& aRequestOrVoid,
+                 const PCacheQueryParams& aParams);
   void CacheReadBody(CacheId aCacheId, const nsID& aBodyId,
                      nsIOutputStream* aStream);
 
@@ -114,6 +121,7 @@ private:
   class CacheMatchAllAction;
   class CachePutAction;
   class CacheDeleteAction;
+  class CacheKeysAction;
   class CacheReadBodyAction;
 
   class StorageMatchAction;

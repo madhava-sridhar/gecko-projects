@@ -7,10 +7,16 @@
 #define mozilla_dom_FetchIPCUtils_h
 
 #include "ipc/IPCMessageUtils.h"
+#include "mozilla/dom/HeadersBinding.h"
 #include "mozilla/dom/Request.h"
 #include "mozilla/dom/Response.h"
 
 namespace IPC {
+  template<>
+  struct ParamTraits<mozilla::dom::HeadersGuardEnum> :
+    public ContiguousTypedEnumSerializer<mozilla::dom::HeadersGuardEnum,
+                                         mozilla::dom::HeadersGuardEnum::MozNone,
+                                         mozilla::dom::HeadersGuardEnum::EndGuard_> {};
   template<>
   struct ParamTraits<mozilla::dom::RequestMode> :
     public ContiguousTypedEnumSerializer<mozilla::dom::RequestMode,

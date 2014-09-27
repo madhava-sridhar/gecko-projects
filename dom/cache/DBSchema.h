@@ -26,6 +26,7 @@ class PCacheRequest;
 class PCacheRequestOrVoid;
 class PCacheResponse;
 class PCacheResponseOrVoid;
+struct SavedRequest;
 struct SavedResponse;
 
 class DBSchema MOZ_FINAL
@@ -62,6 +63,10 @@ public:
                               const PCacheQueryParams& aParams,
                               nsTArray<nsID>& aDeletedBodyIdListOut,
                               bool* aSuccessOut);
+  static nsresult CacheKeys(mozIStorageConnection* aConn, CacheId aCacheId,
+                            const PCacheRequestOrVoid& aRequestOrVoid,
+                            const PCacheQueryParams& aParams,
+                            nsTArray<SavedRequest>& aSavedRequestsOut);
 
   static nsresult StorageMatch(mozIStorageConnection* aConn,
                                Namespace aNamespace,
@@ -106,6 +111,8 @@ private:
                               SavedResponse* aSavedResponseOut);
   static nsresult ReadResponse(mozIStorageConnection* aConn, EntryId aEntryId,
                                SavedResponse* aSavedResponseOut);
+  static nsresult ReadRequest(mozIStorageConnection* aConn, EntryId aEntryId,
+                              SavedRequest* aSavedRequestOut);
 
   static void AppendListParamsToQuery(nsACString& aQuery,
                                       const nsTArray<EntryId>& aEntryIdList,

@@ -63,6 +63,8 @@ public:
                           const SavedResponse* aSavedResponse) MOZ_OVERRIDE;
   virtual void OnCacheDelete(RequestId aRequestId, nsresult aRv,
                              bool aSuccess) MOZ_OVERRIDE;
+  virtual void OnCacheKeys(RequestId aRequestId, nsresult aRv,
+                     const nsTArray<SavedRequest>& aSavedRequests) MOZ_OVERRIDE;
 
 private:
   const CacheId mCacheId;

@@ -450,14 +450,12 @@ Cache::RecvKeysResponse(RequestId aRequestId, nsresult aRv,
 
   nsTArray<nsRefPtr<Request>> requests;
   for (uint32_t i = 0; i < aRequests.Length(); ++i) {
-    MOZ_CRASH("not implemented - can't construct new Request()");
-    //nsRefPtr<Request> request = new Request(mOwner);
-    nsRefPtr<Request> request = nullptr;
-    if (!request) {
-      promise->MaybeReject(NS_ERROR_OUT_OF_MEMORY);
-      return;
-    }
-    TypeUtils::ToRequest(*request, aRequests[i]);
+    nsRefPtr<InternalRequest> internalRequest = new InternalRequest(mGlobal);
+    TypeUtils::ToInternalRequest(*internalRequest, aRequests[i]);
+    // TODO: Should mOwner and mGlobal be just one field? Right now mOwner can
+    //       be null (when on a worker), but mGlobal is always provided.
+    nsCOMPtr<nsIGlobalObject> owner = do_QueryInterface(mOwner);
+    nsRefPtr<Request> request = new Request(owner, internalRequest);
     requests.AppendElement(request);
   }
   promise->MaybeResolve(requests);

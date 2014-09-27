@@ -122,6 +122,12 @@ public:
     aURL.Assign(mURL);
   }
 
+  void
+  SetURL(const nsACString& aURL)
+  {
+    mURL.Assign(aURL);
+  }
+
   nsIGlobalObject*
   GetClient() const
   {
@@ -192,6 +198,13 @@ public:
     return mHeaders;
   }
 
+  void
+  SetHeaders(Headers* aHeaders)
+  {
+    MOZ_ASSERT(aHeaders);
+    mHeaders = aHeaders;
+  }
+
   bool
   ForceOriginHeader()
   {
@@ -225,12 +238,6 @@ public:
 
 private:
   ~InternalRequest();
-
-  void
-  SetURL(const nsACString& aURL)
-  {
-    mURL.Assign(aURL);
-  }
 
   nsCString mMethod;
   nsCString mURL;

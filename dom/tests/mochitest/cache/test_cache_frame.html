@@ -26,6 +26,14 @@
       return c.put(request, response);
     }).then(function(putResponse) {
       success = success && !!putResponse;
+      return c.keys(request);
+    }).then(function(keys) {
+      success = success && !!keys;
+      success = success && keys.length === 1;
+      return c.keys();
+    }).then(function(keys) {
+      success = success && !!keys;
+      success = success && keys.length === 1;
       return c.matchAll(request);
     }).then(function(matchAllResponses) {
       success = success && !!matchAllResponses &&
@@ -46,6 +54,10 @@
       return c.delete(request);
     }).then(function(deleteResult) {
       success = success && deleteResult;
+      return c.keys();
+    }).then(function(keys) {
+      success = success && !!keys;
+      success = success && keys.length === 0;
       return c.matchAll(request);
     }).then(function(matchAll2Responses) {
       success = success && !!matchAll2Responses &&

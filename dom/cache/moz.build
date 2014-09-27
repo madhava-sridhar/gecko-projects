@@ -45,10 +45,8 @@ SOURCES += [
 
 IPDL_SOURCES += [
     'PCache.ipdl',
-    'PCacheQueryParams.ipdlh',
-    'PCacheRequest.ipdlh',
-    'PCacheResponse.ipdlh',
     'PCacheStorage.ipdl',
+    'PCacheTypes.ipdlh',
 ]
 
 include('/ipc/chromium/chromium-config.mozbuild')

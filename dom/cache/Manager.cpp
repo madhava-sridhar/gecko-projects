@@ -9,9 +9,7 @@
 #include "mozilla/dom/cache/DBAction.h"
 #include "mozilla/dom/cache/DBSchema.h"
 #include "mozilla/dom/cache/FileUtils.h"
-#include "mozilla/dom/cache/PCacheQueryParams.h"
-#include "mozilla/dom/cache/PCacheRequest.h"
-#include "mozilla/dom/cache/PCacheResponse.h"
+#include "mozilla/dom/cache/PCacheTypes.h"
 #include "mozilla/dom/cache/SavedTypes.h"
 #include "mozilla/dom/cache/Types.h"
 #include "mozilla/ipc/BackgroundParent.h"
@@ -640,6 +638,46 @@ protected:
   bool mSuccess;
 };
 
+class Manager::CacheKeysAction MOZ_FINAL : public Manager::BaseAction
+{
+public:
+  CacheKeysAction(Manager* aManager, ListenerId aListenerId,
+                    RequestId aRequestId, CacheId aCacheId,
+                    const PCacheRequestOrVoid& aRequestOrVoid,
+                    const PCacheQueryParams& aParams)
+    : BaseAction(aManager, aListenerId, aRequestId)
+    , mCacheId(aCacheId)
+    , mRequestOrVoid(aRequestOrVoid)
+    , mParams(aParams)
+  { }
+
+  virtual nsresult
+  RunSyncWithDBOnTarget(nsIFile* aDBDir,
+                        mozIStorageConnection* aConn) MOZ_OVERRIDE
+  {
+    return DBSchema::CacheKeys(aConn, mCacheId, mRequestOrVoid, mParams,
+                               mSavedRequests);
+  }
+
+  virtual void
+  Complete(Listener* aListener, nsresult aRv) MOZ_OVERRIDE
+  {
+    aListener->OnCacheKeys(mRequestId, aRv, mSavedRequests);
+  }
+
+  virtual bool MatchesCacheId(CacheId aCacheId) MOZ_OVERRIDE
+  {
+    return aCacheId == mCacheId;
+  }
+
+protected:
+  virtual ~CacheKeysAction() { }
+  const CacheId mCacheId;
+  const PCacheRequestOrVoid mRequestOrVoid;
+  const PCacheQueryParams mParams;
+  nsTArray<SavedRequest> mSavedRequests;
+};
+
 class Manager::CacheReadBodyAction MOZ_FINAL : public Action
 {
 public:
@@ -1104,6 +1142,20 @@ Manager::CacheDelete(Listener* aListener, RequestId aRequestId,
   ListenerId listenerId = SaveListener(aListener);
   nsRefPtr<Action> action = new CacheDeleteAction(this, listenerId, aRequestId,
                                                   aCacheId, aRequest, aParams);
+  CurrentContext()->Dispatch(mIOThread, action);
+}
+
+void
+Manager::CacheKeys(Listener* aListener, RequestId aRequestId,
+                   CacheId aCacheId, const PCacheRequestOrVoid& aRequestOrVoid,
+                   const PCacheQueryParams& aParams)
+{
+  NS_ASSERT_OWNINGTHREAD(Manager);
+  MOZ_ASSERT(aListener);
+  ListenerId listenerId = SaveListener(aListener);
+  nsRefPtr<Action> action = new CacheKeysAction(this, listenerId, aRequestId,
+                                                aCacheId, aRequestOrVoid,
+                                                aParams);
   CurrentContext()->Dispatch(mIOThread, action);
 }
 

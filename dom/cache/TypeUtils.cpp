@@ -7,11 +7,10 @@
 #include "mozilla/dom/cache/TypeUtils.h"
 
 #include "mozilla/dom/CacheBinding.h"
+#include "mozilla/dom/InternalRequest.h"
 #include "mozilla/dom/Request.h"
 #include "mozilla/dom/Response.h"
-#include "mozilla/dom/cache/PCacheQueryParams.h"
-#include "mozilla/dom/cache/PCacheRequest.h"
-#include "mozilla/dom/cache/PCacheResponse.h"
+#include "mozilla/dom/cache/PCacheTypes.h"
 #include "nsCOMPtr.h"
 #include "nsString.h"
 #include "nsURLParsers.h"
@@ -78,9 +77,11 @@ TypeUtils::ToPCacheRequest(PCacheRequest& aOut, const Request& aIn)
     // TODO: Should we error out here instead?
     aIn.GetUrl(aOut.urlWithoutQuery());
   }
+  aIn.GetReferrer(aOut.referrer());
   nsRefPtr<Headers> headers = aIn.Headers_();
   MOZ_ASSERT(headers);
   headers->GetPHeaders(aOut.headers());
+  aOut.headersGuard() = headers->Guard();
   aOut.mode() = aIn.Mode();
   aOut.credentials() = aIn.Credentials();
 }
@@ -141,6 +142,7 @@ TypeUtils::ToPCacheResponse(PCacheResponse& aOut, const Response& aIn)
   nsRefPtr<Headers> headers = aIn.Headers_();
   MOZ_ASSERT(headers);
   headers->GetPHeaders(aOut.headers());
+  aOut.headersGuard() = headers->Guard();
 }
 
 // static
@@ -173,10 +175,16 @@ TypeUtils::ToResponse(Response& aOut, const PCacheResponse& aIn)
 
 // static
 void
-TypeUtils::ToRequest(Request& aOut, const PCacheRequest& aIn)
+TypeUtils::ToInternalRequest(InternalRequest& aOut, const PCacheRequest& aIn)
 {
-  // TODO: implement once real Request/Response are available
-  NS_WARNING("Not filling in contents of Request returned from Cache.");
+  aOut.SetMethod(aIn.method());
+  aOut.SetURL(NS_ConvertUTF16toUTF8(aIn.url()));
+  aOut.SetReferrer(NS_ConvertUTF16toUTF8(aIn.referrer()));
+  aOut.SetMode(aIn.mode());
+  aOut.SetCredentialsMode(aIn.credentials());
+  nsRefPtr<Headers> headers = new Headers(aOut.GetClient(), aIn.headers(),
+                                          aIn.headersGuard());
+  aOut.SetHeaders(headers);
 }
 
 } // namespace cache

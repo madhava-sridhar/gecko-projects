@@ -10,8 +10,7 @@
 // NOTE: This cannot be rolled into Types.h because the IPC dependency.
 //       breaks webidl unified builds.
 
-#include "mozilla/dom/cache/PCacheRequest.h"
-#include "mozilla/dom/cache/PCacheResponse.h"
+#include "mozilla/dom/cache/PCacheTypes.h"
 #include "mozilla/dom/cache/Types.h"
 #include "nsCOMPtr.h"
 #include "nsID.h"
