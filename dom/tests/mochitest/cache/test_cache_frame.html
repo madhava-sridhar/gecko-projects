@@ -13,53 +13,55 @@
   addEventListener("message", function messageListener(evt) {
     removeEventListener("message", messageListener);
     var success = true;
+    var c = null
+    var request = new Request("http://example.com/hmm?q=foobar");
+    var response = new Response();
     success = success && !!caches;
     caches.create("foobar").then(function(createCache) {
       success = success && !!createCache;
-      caches.get("foobar").then(function(getCache) {
-        success = success && !!getCache;
-        var request = new Request("http://example.com/hmm?q=foobar");
-        var response = new Response();
-        getCache.put(request, response).then(function(putResponse) {
-          success = success && !!putResponse;
-          getCache.matchAll(request).then(function(matchAllResponses) {
-            success = success && !!matchAllResponses &&
-                      matchAllResponses.length === 1;
-            getCache.match(request).then(function(matchResponse) {
-              success = success && !!matchResponse;
-              var request2 = new Request("http://example.com/hmm?q=snafu");
-              getCache.match(request2, {ignoreSearch:true}).then(function(match2Response) {
-                success = success && !!match2Response;
-                getCache.delete(request).then(function(deleteResult) {
-                  success = success && deleteResult;
-                  getCache.matchAll(request).then(function(matchAll2Responses) {
-                    success = success && !!matchAll2Responses &&
-                              matchAll2Responses.length === 0;
-                    caches.has("foobar").then(function(hasResult) {
-                      success = success && hasResult;
-                      caches.keys().then(function(keys) {
-                        success = success && !!keys;
-                        success = success && keys.length === 1;
-                        success = success && keys.indexOf("foobar") === 0;
-                        caches.delete("foobar").then(function(deleteResult) {
-                          success = success && deleteResult;
-                          caches.get("foobar").then(function(getMissingCache) {
-                            success = success && getMissingCache === undefined;
-                            parent.postMessage({
-                              type: "result",
-                              success: success
-                            }, "*");
-                          });
-                        });
-                      });
-                    });
-                  });
-                });
-              });
-            });
-          });
-        });
-      });
+      return caches.get("foobar");
+    }).then(function(getCache) {
+      success = success && !!getCache;
+      c = getCache;
+      return c.put(request, response);
+    }).then(function(putResponse) {
+      success = success && !!putResponse;
+      return c.matchAll(request);
+    }).then(function(matchAllResponses) {
+      success = success && !!matchAllResponses &&
+                matchAllResponses.length === 1;
+      return c.match(request);
+    }).then(function(matchResponse) {
+      success = success && !!matchResponse;
+      var request2 = new Request("http://example.com/hmm?q=snafu");
+      return c.match(request2, {ignoreSearch:true});
+    }).then(function(match2Response) {
+      success = success && !!match2Response;
+      return c.delete(request);
+    }).then(function(deleteResult) {
+      success = success && deleteResult;
+      return c.matchAll(request);
+    }).then(function(matchAll2Responses) {
+      success = success && !!matchAll2Responses &&
+                matchAll2Responses.length === 0;
+      return caches.has("foobar");
+    }).then(function(hasResult) {
+      success = success && hasResult;
+      return caches.keys();
+    }).then(function(keys) {
+      success = success && !!keys;
+      success = success && keys.length === 1;
+      success = success && keys.indexOf("foobar") === 0;
+      return caches.delete("foobar");
+    }).then(function(deleteResult) {
+      success = success && deleteResult;
+      return caches.get("foobar");
+    }).then(function(getMissingCache) {
+      success = success && getMissingCache === undefined;
+      parent.postMessage({
+        type: "result",
+        success: success
+      }, "*");
     });
   });
 </script>
