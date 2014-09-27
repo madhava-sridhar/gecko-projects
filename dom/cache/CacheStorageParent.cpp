@@ -8,9 +8,13 @@
 
 #include "mozilla/dom/cache/CacheParent.h"
 #include "mozilla/dom/cache/Manager.h"
+#include "mozilla/dom/cache/SavedTypes.h"
 #include "mozilla/ipc/PBackgroundParent.h"
 #include "mozilla/unused.h"
 #include "nsCOMPtr.h"
+
+// TODO: remove testing only headers
+#include "../../dom/filehandle/MemoryStreams.h"
 
 namespace mozilla {
 namespace dom {
@@ -38,6 +42,15 @@ CacheStorageParent::ActorDestroy(ActorDestroyReason aReason)
   MOZ_ASSERT(mManager);
   mManager->RemoveListener(this);
   mManager = nullptr;
+}
+
+bool
+CacheStorageParent::RecvMatch(const RequestId& aRequestId,
+                              const PCacheRequest& aRequest,
+                              const PCacheQueryParams& aParams)
+{
+  mManager->StorageMatch(this, aRequestId, mNamespace, aRequest, aParams);
+  return true;
 }
 
 bool
@@ -75,6 +88,35 @@ CacheStorageParent::RecvKeys(const RequestId& aRequestId)
 {
   mManager->StorageKeys(this, aRequestId, mNamespace);
   return true;
+}
+
+void
+CacheStorageParent::OnStorageMatch(RequestId aRequestId, nsresult aRv,
+                                   const SavedResponse* aSavedResponse)
+{
+  PCacheResponseOrVoid responseOrVoid;
+
+  // no match
+  if (NS_FAILED(aRv) || !aSavedResponse) {
+    responseOrVoid = void_t();
+    unused << SendMatchResponse(aRequestId, aRv, responseOrVoid);
+    return;
+  }
+
+  // match without body data to stream
+  if (!aSavedResponse->mHasBodyId) {
+    responseOrVoid = aSavedResponse->mValue;
+    unused << SendMatchResponse(aRequestId, aRv, responseOrVoid);
+    return;
+  }
+
+  // TODO: remove stream test code
+  nsCOMPtr<nsIOutputStream> stream = MemoryOutputStream::Create(4096);
+
+  mManager->CacheReadBody(aSavedResponse->mCacheId, aSavedResponse->mBodyId,
+                          stream);
+  responseOrVoid = aSavedResponse->mValue;
+  unused << SendMatchResponse(aRequestId, aRv, responseOrVoid);
 }
 
 void

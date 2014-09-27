@@ -23,6 +23,7 @@ EXPORTS.mozilla.dom.cache += [
     'Manager.h',
     'SavedTypes.h',
     'Types.h',
+    'TypeUtils.h',
 ]
 
 SOURCES += [
@@ -39,6 +40,7 @@ SOURCES += [
     'DBSchema.cpp',
     'FileUtils.cpp',
     'Manager.cpp',
+    'TypeUtils.cpp',
 ]
 
 IPDL_SOURCES += [

@@ -63,6 +63,12 @@ public:
                               nsTArray<nsID>& aDeletedBodyIdListOut,
                               bool* aSuccessOut);
 
+  static nsresult StorageMatch(mozIStorageConnection* aConn,
+                               Namespace aNamespace,
+                               const PCacheRequest& aRequest,
+                               const PCacheQueryParams& aParams,
+                               bool* aFoundResponseOut,
+                               SavedResponse* aSavedResponseOut);
   static nsresult StorageGetCacheId(mozIStorageConnection* aConn,
                                     Namespace aNamespace, const nsAString& aKey,
                                     bool* aFoundCacheOut, CacheId* aCacheIdOut);

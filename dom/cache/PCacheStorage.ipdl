@@ -4,6 +4,9 @@
 
 include protocol PBackground;
 include protocol PCache;
+include PCacheQueryParams;
+include PCacheRequest;
+include PCacheResponse;
 
 using mozilla::dom::cache::RequestId from "mozilla/dom/cache/IPCUtils.h";
 
@@ -16,6 +19,8 @@ protocol PCacheStorage
   manager PBackground;
 
 parent:
+  Match(RequestId aRequestId, PCacheRequest aRequest,
+        PCacheQueryParams aParams);
   Get(RequestId aRequestId, nsString aKey);
   Has(RequestId aRequestId, nsString aKey);
   Create(RequestId aRequestId, nsString aKey);
@@ -23,6 +28,8 @@ parent:
   Keys(RequestId aRequestId);
 
 child:
+  MatchResponse(RequestId aRequestId, nsresult aRv,
+                PCacheResponseOrVoid aResponseOrVoid);
   GetResponse(RequestId aRequestId, nsresult aRv, nullable PCache aActor);
   HasResponse(RequestId aRequestId, nsresult aRv, bool aSuccess);
   CreateResponse(RequestId aRequestId, nsresult aRv, nullable PCache aActor);

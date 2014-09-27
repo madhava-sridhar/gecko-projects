@@ -253,6 +253,7 @@ DBSchema::CacheMatch(mozIStorageConnection* aConn, CacheId aCacheId,
   rv = ReadResponse(aConn, matches[0], aSavedResponseOut);
   if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 
+  aSavedResponseOut->mCacheId = aCacheId;
   *aFoundResponseOut = true;
 
   return rv;
@@ -282,6 +283,7 @@ DBSchema::CacheMatchAll(mozIStorageConnection* aConn, CacheId aCacheId,
     SavedResponse *savedResponse = aSavedResponsesOut.AppendElement();
     rv = ReadResponse(aConn, matches[i], savedResponse);
     if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
+    savedResponse->mCacheId = aCacheId;
   }
 
   return rv;
@@ -341,6 +343,73 @@ DBSchema::CacheDelete(mozIStorageConnection* aConn, CacheId aCacheId,
   *aSuccessOut = true;
 
   return rv;
+}
+
+// static
+nsresult
+DBSchema::StorageMatch(mozIStorageConnection* aConn,
+                       Namespace aNamespace,
+                       const PCacheRequest& aRequest,
+                       const PCacheQueryParams& aParams,
+                       bool* aFoundResponseOut,
+                       SavedResponse* aSavedResponseOut)
+{
+  MOZ_ASSERT(aConn);
+  MOZ_ASSERT(aFoundResponseOut);
+  MOZ_ASSERT(aSavedResponseOut);
+
+  nsresult rv;
+
+  // If we are given a cache to check, then simply find its cache ID
+  // and perform the match.
+  if (!aParams.cacheName().EqualsLiteral("")) {
+    bool foundCache;
+    CacheId cacheId;
+    rv = StorageGetCacheId(aConn, aNamespace, aParams.cacheName(), &foundCache,
+                           &cacheId);
+    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
+    if (!foundCache) { return NS_ERROR_DOM_NOT_FOUND_ERR; }
+
+    rv = CacheMatch(aConn, cacheId, aRequest, aParams, aFoundResponseOut,
+                    aSavedResponseOut);
+    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
+
+    return rv;
+  }
+
+  // Otherwise we need to get a list of all the cache IDs in this namespace.
+
+  nsCOMPtr<mozIStorageStatement> state;
+  rv = aConn->CreateStatement(NS_LITERAL_CSTRING(
+    "SELECT cache_id FROM storage WHERE namespace=?1 ORDER BY rowid;"
+  ), getter_AddRefs(state));
+  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
+
+  rv = state->BindInt32Parameter(0, aNamespace);
+  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
+
+  nsTArray<CacheId> cacheIdList;
+
+  bool hasMoreData;
+  while(NS_SUCCEEDED(state->ExecuteStep(&hasMoreData)) && hasMoreData) {
+    CacheId* cacheId = cacheIdList.AppendElement();
+    rv = state->GetInt32(0, cacheId);
+    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
+  }
+
+  // Now try to find a match in each cache in order
+  for (uint32_t i = 0; i < cacheIdList.Length(); ++i) {
+    rv = CacheMatch(aConn, cacheIdList[i], aRequest, aParams, aFoundResponseOut,
+                    aSavedResponseOut);
+    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
+
+    if (*aFoundResponseOut) {
+      aSavedResponseOut->mCacheId = cacheIdList[i];
+      return rv;
+    }
+  }
+
+  return NS_ERROR_DOM_NOT_FOUND_ERR;
 }
 
 // static
@@ -882,6 +951,8 @@ DBSchema::InsertEntry(mozIStorageConnection* aConn, CacheId aCacheId,
 
   rv = ReadResponse(aConn, entryId, aSavedResponseOut);
   if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
+
+  aSavedResponseOut->mCacheId = aCacheId;
 
   return NS_OK;
 }

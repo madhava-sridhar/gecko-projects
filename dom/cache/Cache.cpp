@@ -11,12 +11,12 @@
 #include "mozilla/dom/WorkerPrivate.h"
 #include "mozilla/dom/CacheBinding.h"
 #include "mozilla/dom/cache/CacheChild.h"
+#include "mozilla/dom/cache/TypeUtils.h"
 #include "mozilla/ErrorResult.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/unused.h"
 #include "nsIGlobalObject.h"
 #include "nsNetUtil.h"
-#include "nsURLParsers.h"
 
 namespace mozilla {
 namespace dom {
@@ -24,149 +24,6 @@ namespace cache {
 
 using mozilla::ErrorResult;
 using mozilla::unused;
-using mozilla::void_t;
-
-// Utility function to remove the query from a URL.  We're not using nsIURL
-// or URL to do this because they require going to the main thread.
-static nsresult
-GetURLWithoutQuery(const nsAString& aUrl, nsAString& aUrlWithoutQueryOut)
-{
-  NS_ConvertUTF16toUTF8 flatURL(aUrl);
-  const char* url = flatURL.get();
-
-  nsCOMPtr<nsIURLParser> urlParser = new nsStdURLParser();
-  NS_ENSURE_TRUE(urlParser, NS_ERROR_OUT_OF_MEMORY);
-
-  uint32_t pathPos;
-  int32_t pathLen;
-
-  nsresult rv = urlParser->ParseURL(url, flatURL.Length(),
-                                    nullptr, nullptr,       // ignore scheme
-                                    nullptr, nullptr,       // ignore authority
-                                    &pathPos, &pathLen);
-  NS_ENSURE_SUCCESS(rv, rv);
-
-  uint32_t queryPos;
-  int32_t queryLen;
-
-  rv = urlParser->ParsePath(url + pathPos, flatURL.Length() - pathPos,
-                            nullptr, nullptr,               // ignore filepath
-                            &queryPos, &queryLen,
-                            nullptr, nullptr);              // ignore ref
-  NS_ENSURE_SUCCESS(rv, rv);
-
-  // ParsePath gives us query position relative to the start of the path
-  queryPos += pathPos;
-
-  // We want everything before and after the query
-  aUrlWithoutQueryOut = Substring(aUrl, 0, queryPos);
-  aUrlWithoutQueryOut.Append(Substring(aUrl, queryPos + queryLen,
-                                       aUrl.Length() - queryPos - queryLen));
-
-  return NS_OK;
-}
-
-static void
-ToPCacheRequest(PCacheRequest& aOut, const Request& aIn)
-{
-  aIn.GetMethod(aOut.method());
-  aIn.GetUrl(aOut.url());
-  if(NS_WARN_IF(NS_FAILED(GetURLWithoutQuery(aOut.url(),
-                                              aOut.urlWithoutQuery())))) {
-    // Fallback to just not providing ignoreSearch support
-    // TODO: Should we error out here instead?
-    aIn.GetUrl(aOut.urlWithoutQuery());
-  }
-  nsRefPtr<Headers> headers = aIn.Headers_();
-  MOZ_ASSERT(headers);
-  headers->GetPHeaders(aOut.headers());
-  aOut.mode() = aIn.Mode();
-  aOut.credentials() = aIn.Credentials();
-}
-
-static void
-ToPCacheRequest(PCacheRequest& aOut, const RequestOrScalarValueString& aIn)
-{
-  nsRefPtr<Request> request;
-  if (aIn.IsRequest()) {
-    request = &aIn.GetAsRequest();
-  } else {
-    MOZ_ASSERT(aIn.IsScalarValueString());
-    // TODO: see nsIStandardURL.init() if Request does not provide something...
-    MOZ_CRASH("implement me");
-  }
-  ToPCacheRequest(aOut, *request);
-}
-
-static void
-ToPCacheRequestOrVoid(PCacheRequestOrVoid& aOut,
-                      const Optional<RequestOrScalarValueString>& aIn)
-{
-  if (!aIn.WasPassed()) {
-    aOut = void_t();
-    return;
-  }
-  PCacheRequest request;
-  ToPCacheRequest(request, aIn.Value());
-  aOut = request;
-}
-
-static void
-ToPCacheRequest(PCacheRequest& aOut,
-                const OwningRequestOrScalarValueString& aIn)
-{
-  nsRefPtr<Request> request;
-  if (aIn.IsRequest()) {
-    request = &static_cast<Request&>(aIn.GetAsRequest());
-  } else {
-    MOZ_ASSERT(aIn.IsScalarValueString());
-    MOZ_CRASH("implement me");
-  }
-  ToPCacheRequest(aOut, *request);
-}
-
-static void
-ToPCacheResponse(PCacheResponse& aOut, const Response& aIn)
-{
-  aOut.type() = aIn.Type();
-  aIn.GetUrl(aOut.url());
-  aOut.status() = aIn.Status();
-  aIn.GetStatusText(aOut.statusText());
-  nsRefPtr<Headers> headers = aIn.Headers_();
-  MOZ_ASSERT(headers);
-  headers->GetPHeaders(aOut.headers());
-}
-
-static void
-ToPCacheQueryParams(PCacheQueryParams& aOut, const QueryParams& aIn)
-{
-  aOut.ignoreSearch() = aIn.mIgnoreSearch.WasPassed() &&
-                        aIn.mIgnoreSearch.Value();
-  aOut.ignoreMethod() = aIn.mIgnoreMethod.WasPassed() &&
-                        aIn.mIgnoreMethod.Value();
-  aOut.ignoreVary() = aIn.mIgnoreVary.WasPassed() &&
-                      aIn.mIgnoreVary.Value();
-  aOut.prefixMatch() = aIn.mPrefixMatch.WasPassed() &&
-                       aIn.mPrefixMatch.Value();
-  aOut.cacheNameSet() = aIn.mCacheName.WasPassed();
-  if (aOut.cacheNameSet()) {
-    aOut.cacheName() = aIn.mCacheName.Value();
-  }
-}
-
-static void
-ToResponse(Response& aOut, const PCacheResponse& aIn)
-{
-  // TODO: implement once real Request/Response are available
-  NS_WARNING("Not filling in contents of Response returned from Cache.");
-}
-
-static void
-ToRequest(Request& aOut, const PCacheRequest& aIn)
-{
-  // TODO: implement once real Request/Response are available
-  NS_WARNING("Not filling in contents of Request returned from Cache.");
-}
 
 NS_IMPL_CYCLE_COLLECTING_ADDREF(mozilla::dom::cache::Cache);
 NS_IMPL_CYCLE_COLLECTING_RELEASE(mozilla::dom::cache::Cache);
@@ -208,10 +65,10 @@ Cache::Match(const RequestOrScalarValueString& aRequest,
   }
 
   PCacheRequest request;
-  ToPCacheRequest(request, aRequest);
+  TypeUtils::ToPCacheRequest(request, aRequest);
 
   PCacheQueryParams params;
-  ToPCacheQueryParams(params, aParams);
+  TypeUtils::ToPCacheQueryParams(params, aParams);
 
   unused << mActor->SendMatch(requestId, request, params);
 
@@ -235,10 +92,10 @@ Cache::MatchAll(const Optional<RequestOrScalarValueString>& aRequest,
   }
 
   PCacheRequestOrVoid request;
-  ToPCacheRequestOrVoid(request, aRequest);
+  TypeUtils::ToPCacheRequestOrVoid(request, aRequest);
 
   PCacheQueryParams params;
-  ToPCacheQueryParams(params, aParams);
+  TypeUtils::ToPCacheQueryParams(params, aParams);
 
   unused << mActor->SendMatchAll(requestId, request, params);
 
@@ -261,7 +118,7 @@ Cache::Add(const RequestOrScalarValueString& aRequest, ErrorResult& aRv)
   }
 
   PCacheRequest request;
-  ToPCacheRequest(request, aRequest);
+  TypeUtils::ToPCacheRequest(request, aRequest);
 
   unused << mActor->SendAdd(requestId, request);
 
@@ -291,7 +148,7 @@ Cache::AddAll(const Sequence<OwningRequestOrScalarValueString>& aRequests,
       aRv.Throw(NS_ERROR_OUT_OF_MEMORY);
       return nullptr;
     }
-    ToPCacheRequest(*request, aRequests[i]);
+    TypeUtils::ToPCacheRequest(*request, aRequests[i]);
   }
 
   unused << mActor->SendAddAll(requestId, requests);
@@ -316,10 +173,10 @@ Cache::Put(const RequestOrScalarValueString& aRequest,
   }
 
   PCacheRequest request;
-  ToPCacheRequest(request, aRequest);
+  TypeUtils::ToPCacheRequest(request, aRequest);
 
   PCacheResponse response;
-  ToPCacheResponse(response, aResponse);
+  TypeUtils::ToPCacheResponse(response, aResponse);
 
   unused << mActor->SendPut(requestId, request, response);
 
@@ -343,10 +200,10 @@ Cache::Delete(const RequestOrScalarValueString& aRequest,
   }
 
   PCacheRequest request;
-  ToPCacheRequest(request, aRequest);
+  TypeUtils::ToPCacheRequest(request, aRequest);
 
   PCacheQueryParams params;
-  ToPCacheQueryParams(params, aParams);
+  TypeUtils::ToPCacheQueryParams(params, aParams);
 
   unused << mActor->SendDelete(requestId, request, params);
 
@@ -370,10 +227,10 @@ Cache::Keys(const Optional<RequestOrScalarValueString>& aRequest,
   }
 
   PCacheRequestOrVoid request;
-  ToPCacheRequestOrVoid(request, aRequest);
+  TypeUtils::ToPCacheRequestOrVoid(request, aRequest);
 
   PCacheQueryParams params;
-  ToPCacheQueryParams(params, aParams);
+  TypeUtils::ToPCacheQueryParams(params, aParams);
 
   unused << mActor->SendKeys(requestId, request, params);
 
@@ -453,7 +310,7 @@ Cache::RecvMatchResponse(RequestId aRequestId, nsresult aRv,
     promise->MaybeReject(NS_ERROR_OUT_OF_MEMORY);
     return;
   }
-  ToResponse(*response, aResponse);
+  TypeUtils::ToResponse(*response, aResponse);
   promise->MaybeResolve(response);
 }
 
@@ -478,7 +335,7 @@ Cache::RecvMatchAllResponse(RequestId aRequestId, nsresult aRv,
       promise->MaybeReject(NS_ERROR_OUT_OF_MEMORY);
       return;
     }
-    ToResponse(*response, aResponses[i]);
+    TypeUtils::ToResponse(*response, aResponses[i]);
     responses.AppendElement(response);
   }
   promise->MaybeResolve(responses);
@@ -503,7 +360,7 @@ Cache::RecvAddResponse(RequestId aRequestId, nsresult aRv,
     promise->MaybeReject(NS_ERROR_OUT_OF_MEMORY);
     return;
   }
-  ToResponse(*response, aResponse);
+  TypeUtils::ToResponse(*response, aResponse);
   promise->MaybeResolve(response);
 }
 
@@ -528,7 +385,7 @@ Cache::RecvAddAllResponse(RequestId aRequestId, nsresult aRv,
       promise->MaybeReject(NS_ERROR_OUT_OF_MEMORY);
       return;
     }
-    ToResponse(*response, aResponses[i]);
+    TypeUtils::ToResponse(*response, aResponses[i]);
     responses.AppendElement(response);
   }
   promise->MaybeResolve(responses);
@@ -557,7 +414,7 @@ Cache::RecvPutResponse(RequestId aRequestId, nsresult aRv,
     promise->MaybeReject(NS_ERROR_OUT_OF_MEMORY);
     return;
   }
-  ToResponse(*response, aResponse);
+  TypeUtils::ToResponse(*response, aResponse);
   promise->MaybeResolve(response);
 }
 
@@ -600,7 +457,7 @@ Cache::RecvKeysResponse(RequestId aRequestId, nsresult aRv,
       promise->MaybeReject(NS_ERROR_OUT_OF_MEMORY);
       return;
     }
-    ToRequest(*request, aRequests[i]);
+    TypeUtils::ToRequest(*request, aRequests[i]);
     requests.AppendElement(request);
   }
   promise->MaybeResolve(requests);

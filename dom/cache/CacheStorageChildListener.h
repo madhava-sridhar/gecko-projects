@@ -23,12 +23,15 @@ namespace dom {
 namespace cache {
 
 class PCacheChild;
+class PCacheResponseOrVoid;
 
 class CacheStorageChildListener
 {
 public:
   virtual ~CacheStorageChildListener() { }
   virtual void ActorDestroy(mozilla::ipc::IProtocol& aActor)=0;
+  virtual void RecvMatchResponse(RequestId aRequestId, nsresult aRv,
+                                 const PCacheResponseOrVoid& aResponse)=0;
   virtual void RecvGetResponse(cache::RequestId aRequestId,
                                nsresult aRv, PCacheChild* aActor)=0;
   virtual void RecvHasResponse(cache::RequestId aRequestId, nsresult aRv,

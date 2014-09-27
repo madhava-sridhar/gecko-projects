@@ -33,6 +33,12 @@
       return c.match(request);
     }).then(function(matchResponse) {
       success = success && !!matchResponse;
+      return caches.match(request);
+    }).then(function(storageMatchResponse) {
+      success = success && !!storageMatchResponse;
+      return caches.match(request, {cacheName:"foobar"});
+    }).then(function(storageMatchResponse) {
+      success = success && !!storageMatchResponse;
       var request2 = new Request("http://example.com/hmm?q=snafu");
       return c.match(request2, {ignoreSearch:true});
     }).then(function(match2Response) {

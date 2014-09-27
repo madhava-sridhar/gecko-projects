@@ -752,6 +752,47 @@ private:
   nsCOMPtr<nsISupports> mCopyContext;
 };
 
+class Manager::StorageMatchAction MOZ_FINAL : public Manager::BaseAction
+{
+public:
+  StorageMatchAction(Manager* aManager, ListenerId aListenerId,
+                     RequestId aRequestId, Namespace aNamespace,
+                     const PCacheRequest& aRequest,
+                     const PCacheQueryParams& aParams)
+    : BaseAction(aManager, aListenerId, aRequestId)
+    , mNamespace(aNamespace)
+    , mRequest(aRequest)
+    , mParams(aParams)
+    , mFoundResponse(false)
+  { }
+
+  virtual nsresult
+  RunSyncWithDBOnTarget(nsIFile* aDBDir,
+                        mozIStorageConnection* aConn) MOZ_OVERRIDE
+  {
+    return DBSchema::StorageMatch(aConn, mNamespace, mRequest, mParams,
+                                  &mFoundResponse, &mSavedResponse);
+  }
+
+  virtual void
+  Complete(Listener* aListener, nsresult aRv) MOZ_OVERRIDE
+  {
+    if (!mFoundResponse) {
+      aListener->OnStorageMatch(mRequestId, aRv, nullptr);
+    } else {
+      aListener->OnStorageMatch(mRequestId, aRv, &mSavedResponse);
+    }
+  }
+
+protected:
+  virtual ~StorageMatchAction() { }
+  const Namespace mNamespace;
+  const PCacheRequest mRequest;
+  const PCacheQueryParams mParams;
+  bool mFoundResponse;
+  SavedResponse mSavedResponse;
+};
+
 class Manager::StorageGetAction : public Manager::BaseAction
 {
 public:
@@ -1074,6 +1115,20 @@ Manager::CacheReadBody(CacheId aCacheId, const nsID& aBodyId,
   MOZ_ASSERT(aStream);
   nsRefPtr<Action> action = new CacheReadBodyAction(this, aCacheId, aBodyId,
                                                     aStream);
+  CurrentContext()->Dispatch(mIOThread, action);
+}
+
+void
+Manager::StorageMatch(Listener* aListener, RequestId aRequestId,
+                      Namespace aNamespace, const PCacheRequest& aRequest,
+                      const PCacheQueryParams& aParams)
+{
+  NS_ASSERT_OWNINGTHREAD(Manager);
+  MOZ_ASSERT(aListener);
+  ListenerId listenerId = SaveListener(aListener);
+  nsRefPtr<Action> action = new StorageMatchAction(this, listenerId, aRequestId,
+                                                   aNamespace, aRequest,
+                                                   aParams);
   CurrentContext()->Dispatch(mIOThread, action);
 }
 

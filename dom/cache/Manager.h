@@ -44,6 +44,8 @@ public:
     virtual void OnCacheDelete(RequestId aRequestId, nsresult aRv,
                                bool aSuccess) { }
 
+    virtual void OnStorageMatch(RequestId aRequestId, nsresult aRv,
+                                const SavedResponse* aResponse) { }
     virtual void OnStorageGet(RequestId aRequestId, nsresult aRv,
                               bool aCacheFound, CacheId aCacheId) { }
     virtual void OnStorageHas(RequestId aRequestId, nsresult aRv,
@@ -82,6 +84,9 @@ public:
   void CacheReadBody(CacheId aCacheId, const nsID& aBodyId,
                      nsIOutputStream* aStream);
 
+  void StorageMatch(Listener* aListener, RequestId aRequestId,
+                    Namespace aNamespace, const PCacheRequest& aRequest,
+                    const PCacheQueryParams& aParams);
   void StorageGet(Listener* aListener, RequestId aRequestId,
                   Namespace aNamespace, const nsAString& aKey);
   void StorageHas(Listener* aListener, RequestId aRequestId,
@@ -111,6 +116,7 @@ private:
   class CacheDeleteAction;
   class CacheReadBodyAction;
 
+  class StorageMatchAction;
   class StorageGetAction;
   class StorageHasAction;
   class StorageCreateAction;

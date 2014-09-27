@@ -8,10 +8,12 @@
 
 #include "mozilla/unused.h"
 #include "mozilla/dom/Promise.h"
+#include "mozilla/dom/Response.h"
 #include "mozilla/dom/CacheStorageBinding.h"
 #include "mozilla/dom/cache/Cache.h"
 #include "mozilla/dom/cache/PCacheChild.h"
 #include "mozilla/dom/cache/CacheStorageChild.h"
+#include "mozilla/dom/cache/TypeUtils.h"
 #include "mozilla/ipc/BackgroundChild.h"
 #include "mozilla/ipc/PBackgroundChild.h"
 #include "nsIGlobalObject.h"
@@ -74,7 +76,27 @@ already_AddRefed<Promise>
 CacheStorage::Match(const RequestOrScalarValueString& aRequest,
                     const QueryParams& aParams, ErrorResult& aRv)
 {
-  MOZ_CRASH("not implemented");
+  MOZ_ASSERT(mActor);
+
+  nsRefPtr<Promise> promise = Promise::Create(mGlobal, aRv);
+  if (!promise) {
+    return nullptr;
+  }
+
+  RequestId requestId = AddRequestPromise(promise, aRv);
+  if (requestId == INVALID_REQUEST_ID) {
+    return nullptr;
+  }
+
+  PCacheRequest request;
+  TypeUtils::ToPCacheRequest(request, aRequest);
+
+  PCacheQueryParams params;
+  TypeUtils::ToPCacheQueryParams(params, aParams);
+
+  unused << mActor->SendMatch(requestId, request, params);
+
+  return promise.forget();
 }
 
 already_AddRefed<Promise>
@@ -235,6 +257,30 @@ CacheStorage::ActorDestroy(IProtocol& aActor)
   MOZ_ASSERT(mActor == &aActor);
   mActor->ClearListener();
   mActor = nullptr;
+}
+
+void
+CacheStorage::RecvMatchResponse(RequestId aRequestId, nsresult aRv,
+                                const PCacheResponseOrVoid& aResponse)
+{
+  nsRefPtr<Promise> promise = RemoveRequestPromise(aRequestId);
+  if (NS_WARN_IF(!promise)) {
+    return;
+  }
+
+  if (NS_FAILED(aRv)) {
+    promise->MaybeReject(aRv);
+    return;
+  }
+
+  if (aResponse.type() == PCacheResponseOrVoid::Tvoid_t) {
+    promise->MaybeReject(NS_ERROR_DOM_NOT_FOUND_ERR);
+    return;
+  }
+
+  nsRefPtr<Response> response = new Response(mOwner);
+  TypeUtils::ToResponse(*response, aResponse);
+  promise->MaybeResolve(response);
 }
 
 void

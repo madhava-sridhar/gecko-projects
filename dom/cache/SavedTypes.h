@@ -12,6 +12,7 @@
 
 #include "mozilla/dom/cache/PCacheRequest.h"
 #include "mozilla/dom/cache/PCacheResponse.h"
+#include "mozilla/dom/cache/Types.h"
 #include "nsCOMPtr.h"
 #include "nsID.h"
 #include "nsIOutputStream.h"
@@ -31,6 +32,7 @@ struct SavedRequest
   PCacheRequest mValue;
   bool mHasBodyId;
   nsID mBodyId;
+  CacheId mCacheId;
 };
 
 struct SavedResponse
@@ -39,6 +41,7 @@ struct SavedResponse
   PCacheResponse mValue;
   bool mHasBodyId;
   nsID mBodyId;
+  CacheId mCacheId;
 };
 
 } // namespace cache
