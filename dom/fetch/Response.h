@@ -42,9 +42,9 @@ public:
   }
 
   void
-  GetUrl(DOMString& aUrl) const
+  GetUrl(nsAString& aUrl) const
   {
-    aUrl.AsAString() = NS_ConvertUTF8toUTF16(mInternalResponse->GetUrl());
+    aUrl = NS_ConvertUTF8toUTF16(mInternalResponse->GetUrl());
   }
 
 

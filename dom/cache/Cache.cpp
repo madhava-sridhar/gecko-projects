@@ -129,6 +129,7 @@ static void
 ToPCacheResponse(PCacheResponse& aOut, const Response& aIn)
 {
   aOut.type() = aIn.Type();
+  aIn.GetUrl(aOut.url());
   aOut.status() = aIn.Status();
   aIn.GetStatusText(aOut.statusText());
   nsRefPtr<Headers> headers = aIn.Headers_();

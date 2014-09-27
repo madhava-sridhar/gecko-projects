@@ -71,6 +71,7 @@ DBSchema::CreateSchema(mozIStorageConnection* aConn)
         "request_credentials INTEGER NOT NULL, "
         "request_body_id TEXT NULL, "
         "response_type INTEGER NOT NULL, "
+        "response_url TEXT NOT NULL, "
         "response_status INTEGER NOT NULL, "
         "response_status_text TEXT NOT NULL, "
         "response_body_id TEXT NOT NULL, "
@@ -769,11 +770,12 @@ DBSchema::InsertEntry(mozIStorageConnection* aConn, CacheId aCacheId,
       "request_credentials, "
       "request_body_id, "
       "response_type, "
+      "response_url, "
       "response_status, "
       "response_status_text, "
       "response_body_id, "
       "cache_id "
-    ") VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)"
+    ") VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)"
   ), getter_AddRefs(state));
   if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 
@@ -799,16 +801,19 @@ DBSchema::InsertEntry(mozIStorageConnection* aConn, CacheId aCacheId,
   rv = state->BindInt32Parameter(6, static_cast<int32_t>(aResponse.type()));
   if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 
-  rv = state->BindInt32Parameter(7, aResponse.status());
+  rv = state->BindStringParameter(7, aResponse.url());
   if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 
-  rv = state->BindUTF8StringParameter(8, aResponse.statusText());
+  rv = state->BindInt32Parameter(8, aResponse.status());
   if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 
-  rv = BindId(state, 9, aResponseBodyId);
+  rv = state->BindUTF8StringParameter(9, aResponse.statusText());
   if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 
-  rv = state->BindInt32Parameter(10, aCacheId);
+  rv = BindId(state, 10, aResponseBodyId);
+  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
+
+  rv = state->BindInt32Parameter(11, aCacheId);
   if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 
   rv = state->Execute();
@@ -893,6 +898,7 @@ DBSchema::ReadResponse(mozIStorageConnection* aConn, EntryId aEntryId,
   nsresult rv = aConn->CreateStatement(NS_LITERAL_CSTRING(
     "SELECT "
       "response_type, "
+      "response_url, "
       "response_status, "
       "response_status_text, "
       "response_body_id "
@@ -921,13 +927,16 @@ DBSchema::ReadResponse(mozIStorageConnection* aConn, EntryId aEntryId,
   rv = state->GetUTF8String(2, aSavedResponseOut->mValue.statusText());
   if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 
+  rv = state->GetString(3, aSavedResponseOut->mValue.url());
+  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
+
   bool nullBody;
-  rv = state->GetIsNull(3, &nullBody);
+  rv = state->GetIsNull(4, &nullBody);
   if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
   aSavedResponseOut->mHasBodyId = !nullBody;
 
   if (aSavedResponseOut->mHasBodyId) {
-    rv = ExtractId(state, 3, &aSavedResponseOut->mBodyId);
+    rv = ExtractId(state, 4, &aSavedResponseOut->mBodyId);
     if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
   }
 
