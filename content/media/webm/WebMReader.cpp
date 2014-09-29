@@ -556,8 +556,8 @@ bool WebMReader::DecodeAudioPacket(nestegg_packet* aPacket, int64_t aOffset)
 #ifdef DEBUG
     CheckedInt64 usecs = FramesToUsecs(tstamp_frames.value() - decoded_frames.value(), rate);
     LOG(PR_LOG_DEBUG, ("WebMReader detected gap of %lld, %lld frames, in audio stream\n",
-      usecs.isValid() ? usecs.value() : -1,
-      tstamp_frames.value() - decoded_frames.value()));
+                       usecs.isValid() ? usecs.value() : -1,
+                       tstamp_frames.value() - decoded_frames.value()));
 #endif
     mPacketCount++;
     mAudioStartUsec = tstamp_usecs;
@@ -585,8 +585,16 @@ bool WebMReader::DecodeAudioPacket(nestegg_packet* aPacket, int64_t aOffset)
       }
 
       VorbisPCMValue** pcm = 0;
-      int32_t frames = 0;
-      while ((frames = vorbis_synthesis_pcmout(&mVorbisDsp, &pcm)) > 0) {
+      int32_t frames = vorbis_synthesis_pcmout(&mVorbisDsp, &pcm);
+      // If the first packet of audio in the media produces no data, we
+      // still need to produce an AudioData for it so that the correct media
+      // start time is calculated.  Otherwise we'd end up with a media start
+      // time derived from the timecode of the first packet that produced
+      // data.
+      if (frames == 0 && mAudioFrames == 0) {
+        AudioQueue().Push(new AudioData(aOffset, tstamp_usecs, 0, 0, nullptr, mChannels, rate));
+      }
+      while (frames > 0) {
         nsAutoArrayPtr<AudioDataValue> buffer(new AudioDataValue[frames * mChannels]);
         for (uint32_t j = 0; j < mChannels; ++j) {
           VorbisPCMValue* channel = pcm[j];
@@ -624,6 +632,8 @@ bool WebMReader::DecodeAudioPacket(nestegg_packet* aPacket, int64_t aOffset)
         if (vorbis_synthesis_read(&mVorbisDsp, frames) != 0) {
           return false;
         }
+
+        frames = vorbis_synthesis_pcmout(&mVorbisDsp, &pcm);
       }
     } else if (mAudioCodec == NESTEGG_CODEC_OPUS) {
 #ifdef MOZ_OPUS
@@ -671,8 +681,7 @@ bool WebMReader::DecodeAudioPacket(nestegg_packet* aPacket, int64_t aOffset)
         int32_t keepFrames = frames - skipFrames;
         int samples = keepFrames * channels;
         nsAutoArrayPtr<AudioDataValue> trimBuffer(new AudioDataValue[samples]);
-        for (int i = 0; i < samples; i++)
-          trimBuffer[i] = buffer[skipFrames*channels + i];
+        PodCopy(trimBuffer.get(), buffer.get() + skipFrames*channels, samples);
         startTime = startTime + FramesToUsecs(skipFrames, rate);
         frames = keepFrames;
         buffer = trimBuffer;
@@ -684,24 +693,23 @@ bool WebMReader::DecodeAudioPacket(nestegg_packet* aPacket, int64_t aOffset)
       int64_t discardPadding = 0;
       r = nestegg_packet_discard_padding(aPacket, &discardPadding);
       if (discardPadding > 0) {
-        CheckedInt64 discardFrames = UsecsToFrames(discardPadding * NS_PER_USEC, rate);
+        CheckedInt64 discardFrames = UsecsToFrames(discardPadding / NS_PER_USEC, rate);
         if (!discardFrames.isValid()) {
           NS_WARNING("Int overflow in DiscardPadding");
           return false;
         }
-        int32_t keepFrames = frames - discardFrames.value();
-        if (keepFrames > 0) {
-          int samples = keepFrames * channels;
-          nsAutoArrayPtr<AudioDataValue> trimBuffer(new AudioDataValue[samples]);
-          for (int i = 0; i < samples; i++)
-            trimBuffer[i] = buffer[i];
-          frames = keepFrames;
-          buffer = trimBuffer;
-        } else {
+        if (discardFrames.value() >= frames) {
           LOG(PR_LOG_DEBUG, ("Opus decoder discarding whole packet"
-                             " ( %d frames) as padding", frames));
+                             " (%d frames) as padding (%lld discarded)",
+                             frames, discardFrames.value()));
           return true;
         }
+        int32_t keepFrames = frames - discardFrames.value();
+        int32_t samples = keepFrames * channels;
+        nsAutoArrayPtr<AudioDataValue> trimBuffer(new AudioDataValue[samples]);
+        PodCopy(trimBuffer.get(), buffer.get(), samples);
+        frames = keepFrames;
+        buffer = trimBuffer;
       }
 
       // Apply the header gain if one was specified.
@@ -865,7 +873,6 @@ bool WebMReader::DecodeVideoFrame(bool &aKeyframeSkip,
   if (r == -1) {
     return false;
   }
-  mLastVideoFrameTime = tstamp;
 
   // The end time of this frame is the start time of the next frame.  Fetch
   // the timestamp of the next packet for this track.  If we've reached the
@@ -883,6 +890,7 @@ bool WebMReader::DecodeVideoFrame(bool &aKeyframeSkip,
     next_tstamp = tstamp;
     next_tstamp += tstamp - mLastVideoFrameTime;
   }
+  mLastVideoFrameTime = tstamp;
 
   int64_t tstamp_usecs = tstamp / NS_PER_USEC;
   for (uint32_t i = 0; i < count; ++i) {
@@ -927,7 +935,7 @@ bool WebMReader::DecodeVideoFrame(bool &aKeyframeSkip,
     vpx_image_t      *img;
 
     while ((img = vpx_codec_get_frame(&mVPX, &iter))) {
-      NS_ASSERTION(img->fmt == IMG_FMT_I420, "WebM image format is not I420");
+      NS_ASSERTION(img->fmt == VPX_IMG_FMT_I420, "WebM image format is not I420");
 
       // Chroma shifts are rounded down as per the decoding examples in the VP8 SDK
       VideoData::YCbCrBuffer b;
@@ -1054,8 +1062,14 @@ nsresult WebMReader::GetBuffered(dom::TimeRanges* aBuffered, int64_t aStartTime)
                                                         ranges[index].mEnd,
                                                         &start, &end);
     if (rv) {
-      double startTime = start / NS_PER_S - aStartTime;
-      double endTime = end / NS_PER_S - aStartTime;
+      int64_t startOffset = aStartTime * NS_PER_USEC;
+      NS_ASSERTION(startOffset >= 0 && uint64_t(startOffset) <= start,
+                   "startOffset negative or larger than start time");
+      if (!(startOffset >= 0 && uint64_t(startOffset) <= start)) {
+        startOffset = 0;
+      }
+      double startTime = (start - startOffset) / NS_PER_S;
+      double endTime = (end - startOffset) / NS_PER_S;
       // If this range extends to the end of the file, the true end time
       // is the file's duration.
       if (mContext && resource->IsDataCachedToEndOfResource(ranges[index].mStart)) {

@@ -24,6 +24,9 @@
 #include "marketplace-dev-reviewers.inc"
 #include "marketplace-stage.inc"
 #include "xpcshell.inc"
+// Trusted Hosted Apps Certificates
+#include "manifest-signing-root.inc"
+#include "manifest-signing-test-root.inc"
 
 using namespace mozilla::pkix;
 
@@ -77,6 +80,16 @@ AppTrustDomain::SetTrustedRoot(AppTrustedRoot trustedRoot)
     case nsIX509CertDB::AppXPCShellRoot:
       trustedDER.data = const_cast<uint8_t*>(xpcshellRoot);
       trustedDER.len = mozilla::ArrayLength(xpcshellRoot);
+      break;
+
+    case nsIX509CertDB::TrustedHostedAppPublicRoot:
+      trustedDER.data = const_cast<uint8_t*>(trustedAppPublicRoot);
+      trustedDER.len = mozilla::ArrayLength(trustedAppPublicRoot);
+      break;
+
+    case nsIX509CertDB::TrustedHostedAppTestRoot:
+      trustedDER.data = const_cast<uint8_t*>(trustedAppTestRoot);
+      trustedDER.len = mozilla::ArrayLength(trustedAppTestRoot);
       break;
 
     default:
@@ -225,7 +238,7 @@ AppTrustDomain::CheckRevocation(EndEntityOrCA, const CertID&, Time,
 }
 
 Result
-AppTrustDomain::IsChainValid(const DERArray& certChain)
+AppTrustDomain::IsChainValid(const DERArray& certChain, Time time)
 {
   SECStatus srv = ConstructCERTCertListFromReversedDERArray(certChain,
                                                             mCertChain);

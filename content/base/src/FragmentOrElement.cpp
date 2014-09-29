@@ -88,7 +88,6 @@
 
 #include "nsNodeInfoManager.h"
 #include "nsICategoryManager.h"
-#include "nsIDOMUserDataHandler.h"
 #include "nsGenericHTMLElement.h"
 #include "nsIEditor.h"
 #include "nsIEditorIMESupport.h"
@@ -1394,6 +1393,10 @@ NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(FragmentOrElement)
     unbind the child nodes.
   } */
 
+  // Clear flag here because unlinking slots will clear the
+  // containing shadow root pointer.
+  tmp->UnsetFlags(NODE_IS_IN_SHADOW_TREE);
+
   // Unlink any DOM slots of interest.
   {
     nsDOMSlots *slots = tmp->GetExistingDOMSlots();
@@ -1421,13 +1424,6 @@ FragmentOrElement::MarkUserData(void* aObject, nsIAtom* aKey, void* aChild,
 }
 
 void
-FragmentOrElement::MarkUserDataHandler(void* aObject, nsIAtom* aKey,
-                                      void* aChild, void* aData)
-{
-  xpc_TryUnmarkWrappedGrayObject(static_cast<nsISupports*>(aChild));
-}
-
-void
 FragmentOrElement::MarkNodeChildren(nsINode* aNode)
 {
   JSObject* o = GetJSObjectChild(aNode);
@@ -1444,9 +1440,6 @@ FragmentOrElement::MarkNodeChildren(nsINode* aNode)
     nsIDocument* ownerDoc = aNode->OwnerDoc();
     ownerDoc->PropertyTable(DOM_USER_DATA)->
       Enumerate(aNode, FragmentOrElement::MarkUserData,
-                &nsCCUncollectableMarker::sGeneration);
-    ownerDoc->PropertyTable(DOM_USER_DATA_HANDLER)->
-      Enumerate(aNode, FragmentOrElement::MarkUserDataHandler,
                 &nsCCUncollectableMarker::sGeneration);
   }
 }

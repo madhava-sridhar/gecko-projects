@@ -493,10 +493,6 @@ class MOZ_STACK_CLASS TokenStream
     void seek(const Position &pos);
     bool seek(const Position &pos, const TokenStream &other);
 
-    size_t positionToOffset(const Position &pos) const {
-        return pos.buf - userbuf.base();
-    }
-
     const char16_t *rawBase() const {
         return userbuf.base();
     }
@@ -781,6 +777,9 @@ class MOZ_STACK_CLASS TokenStream
 // Steal one JSREPORT_* bit (see jsapi.h) to tell that arguments to the error
 // message have const char16_t* type, not const char*.
 #define JSREPORT_UC 0x100
+
+extern const char *
+TokenKindToDesc(TokenKind tt);
 
 } // namespace frontend
 } // namespace js

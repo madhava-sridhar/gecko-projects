@@ -149,10 +149,10 @@ IsSubFunc(WebGLTexImageFunc func)
  * returns true is target is a texture cube map target.
  */
 static bool
-IsTexImageCubemapTarget(GLenum target)
+IsTexImageCubemapTarget(GLenum texImageTarget)
 {
-    return (target >= LOCAL_GL_TEXTURE_CUBE_MAP_POSITIVE_X &&
-            target <= LOCAL_GL_TEXTURE_CUBE_MAP_NEGATIVE_Z);
+    return (texImageTarget >= LOCAL_GL_TEXTURE_CUBE_MAP_POSITIVE_X &&
+            texImageTarget <= LOCAL_GL_TEXTURE_CUBE_MAP_NEGATIVE_Z);
 }
 
 /*
@@ -521,6 +521,34 @@ bool WebGLContext::ValidateGLSLString(const nsAString& string, const char *info)
 }
 
 /**
+ * Return true if the framebuffer attachment is valid. Attachment must
+ * be one of depth/stencil/depth_stencil/color attachment.
+ */
+bool
+WebGLContext::ValidateFramebufferAttachment(GLenum attachment, const char* funcName)
+{
+    if (attachment == LOCAL_GL_DEPTH_ATTACHMENT ||
+        attachment == LOCAL_GL_STENCIL_ATTACHMENT ||
+        attachment == LOCAL_GL_DEPTH_STENCIL_ATTACHMENT)
+    {
+        return true;
+    }
+
+    GLenum colorAttachCount = 1;
+    if (IsExtensionEnabled(WebGLExtensionID::WEBGL_draw_buffers))
+        colorAttachCount = mGLMaxColorAttachments;
+
+    if (attachment >= LOCAL_GL_COLOR_ATTACHMENT0 &&
+        attachment < GLenum(LOCAL_GL_COLOR_ATTACHMENT0 + colorAttachCount))
+    {
+        return true;
+    }
+
+    ErrorInvalidEnum("%s: attachment: invalid enum value 0x%x.", funcName, attachment);
+    return false;
+}
+
+/**
  * Return true if format is a valid texture image format for source,
  * taking into account enabled WebGL extensions.
  */
@@ -712,7 +740,7 @@ WebGLContext::ValidateTexImageType(GLenum type, WebGLTexImageFunc func)
  */
 // TODO: WebGL 2
 bool
-WebGLContext::ValidateCompTexImageSize(GLenum target, GLint level, GLenum format,
+WebGLContext::ValidateCompTexImageSize(GLint level, GLenum format,
                                        GLint xoffset, GLint yoffset,
                                        GLsizei width, GLsizei height,
                                        GLsizei levelWidth, GLsizei levelHeight,
@@ -884,7 +912,7 @@ WebGLContext::ValidateCompTexImageDataSize(GLint level, GLenum format,
  * Target and level must have been validated before calling.
  */
 bool
-WebGLContext::ValidateTexImageSize(GLenum target, GLint level,
+WebGLContext::ValidateTexImageSize(TexImageTarget texImageTarget, GLint level,
                                    GLint width, GLint height, GLint depth,
                                    WebGLTexImageFunc func)
 {
@@ -903,8 +931,8 @@ WebGLContext::ValidateTexImageSize(GLenum target, GLint level,
     if (level > 31)
         level = 31;
 
-    const GLuint maxTexImageSize = MaxTextureSizeForTarget(target) >> level;
-    const bool isCubemapTarget = IsTexImageCubemapTarget(target);
+    const GLuint maxTexImageSize = MaxTextureSizeForTarget(TexImageTargetToTexTarget(texImageTarget)) >> level;
+    const bool isCubemapTarget = IsTexImageCubemapTarget(texImageTarget.get());
     const bool isSub = IsSubFunc(func);
 
     if (!isSub && isCubemapTarget && (width != height)) {
@@ -918,7 +946,7 @@ WebGLContext::ValidateTexImageSize(GLenum target, GLint level,
         return false;
     }
 
-    if (target == LOCAL_GL_TEXTURE_2D || isCubemapTarget)
+    if (texImageTarget == LOCAL_GL_TEXTURE_2D || isCubemapTarget)
     {
         /* GL ES Version 2.0.25 - 3.7.1 Texture Image Specification
          *   "If wt and ht are the specified image width and height,
@@ -978,7 +1006,7 @@ WebGLContext::ValidateTexImageSize(GLenum target, GLint level,
     }
 
     // TODO: WebGL 2
-    if (target == LOCAL_GL_TEXTURE_3D) {
+    if (texImageTarget == LOCAL_GL_TEXTURE_3D) {
         if (depth < 0) {
             ErrorInvalidValue("%s: depth must be >= 0", InfoFrom(func));
             return false;
@@ -1039,13 +1067,8 @@ WebGLContext::ValidateTexSubImageSize(GLint xoffset, GLint yoffset, GLint /*zoff
  * ValidateTexImageFormatAndType().
  */
 uint32_t
-WebGLContext::GetBitsPerTexel(GLenum format, GLenum type)
+WebGLContext::GetBitsPerTexel(TexInternalFormat format, TexType type)
 {
-    // If there is no defined format or type, we're not taking up any memory
-    if (!format || !type) {
-        return 0;
-    }
-
     /* Known fixed-sized types */
     if (type == LOCAL_GL_UNSIGNED_SHORT_4_4_4_4 ||
         type == LOCAL_GL_UNSIGNED_SHORT_5_5_5_1 ||
@@ -1058,7 +1081,7 @@ WebGLContext::GetBitsPerTexel(GLenum format, GLenum type)
         return 32;
 
     int bitsPerComponent = 0;
-    switch (type) {
+    switch (type.get()) {
     case LOCAL_GL_UNSIGNED_BYTE:
         bitsPerComponent = 8;
         break;
@@ -1079,7 +1102,7 @@ WebGLContext::GetBitsPerTexel(GLenum format, GLenum type)
         break;
     }
 
-    switch (format) {
+    switch (format.get()) {
         // Uncompressed formats
     case LOCAL_GL_ALPHA:
     case LOCAL_GL_LUMINANCE:
@@ -1308,18 +1331,14 @@ WebGLContext::ValidateCopyTexImage(GLenum format, WebGLTexImageFunc func)
  */
 // TODO: Texture dims is here for future expansion in WebGL 2.0
 bool
-WebGLContext::ValidateTexImage(GLuint dims, GLenum target,
-                               GLint level, GLint internalFormat,
+WebGLContext::ValidateTexImage(GLuint dims, TexImageTarget texImageTarget,
+                               GLint level, GLenum internalFormat,
                                GLint xoffset, GLint yoffset, GLint zoffset,
                                GLint width, GLint height, GLint depth,
                                GLint border, GLenum format, GLenum type,
                                WebGLTexImageFunc func)
 {
     const char* info = InfoFrom(func);
-
-    /* Check target */
-    if (!ValidateTexImageTarget(dims, target, func))
-        return false;
 
     /* Check level */
     if (level < 0) {
@@ -1343,7 +1362,7 @@ WebGLContext::ValidateTexImage(GLuint dims, GLenum target,
      * (e.g., GL_FLOAT requires GL_OES_texture_float) are filtered
      * elsewhere.
      */
-    if ((GLint) format != internalFormat) {
+    if (format != internalFormat) {
         ErrorInvalidOperation("%s: format does not match internalformat", info);
         return false;
     }
@@ -1357,7 +1376,7 @@ WebGLContext::ValidateTexImage(GLuint dims, GLenum target,
     }
 
     /* Check texture image size */
-    if (!ValidateTexImageSize(target, level, width, height, 0, func))
+    if (!ValidateTexImageSize(texImageTarget, level, width, height, 0, func))
         return false;
 
     /* 5.14.8 Texture objects - WebGL Spec.
@@ -1365,21 +1384,21 @@ WebGLContext::ValidateTexImage(GLuint dims, GLenum target,
      *    WebGLTexture bound (see above), an INVALID_OPERATION error
      *    is generated."
      */
-    WebGLTexture* tex = activeBoundTextureForTexImageTarget(target);
+    WebGLTexture* tex = activeBoundTextureForTexImageTarget(texImageTarget);
     if (!tex) {
         ErrorInvalidOperation("%s: no texture is bound to target %s",
-                              info, WebGLContext::EnumName(target));
+                              info, WebGLContext::EnumName(texImageTarget.get()));
         return false;
     }
 
     if (IsSubFunc(func)) {
-        if (!tex->HasImageInfoAt(target, level)) {
+        if (!tex->HasImageInfoAt(texImageTarget, level)) {
             ErrorInvalidOperation("%s: no texture image previously defined for target %s at level %d",
-                                  info, WebGLContext::EnumName(target), level);
+                                  info, WebGLContext::EnumName(texImageTarget.get()), level);
             return false;
         }
 
-        const WebGLTexture::ImageInfo& imageInfo = tex->ImageInfoAt(target, level);
+        const WebGLTexture::ImageInfo& imageInfo = tex->ImageInfoAt(texImageTarget, level);
         if (!ValidateTexSubImageSize(xoffset, yoffset, zoffset,
                                      width, height, depth,
                                      imageInfo.Width(), imageInfo.Height(), 0,
@@ -1401,7 +1420,7 @@ WebGLContext::ValidateTexImage(GLuint dims, GLenum target,
     }
 
     /* Additional checks for depth textures */
-    if (target != LOCAL_GL_TEXTURE_2D &&
+    if (texImageTarget != LOCAL_GL_TEXTURE_2D &&
         (format == LOCAL_GL_DEPTH_COMPONENT ||
          format == LOCAL_GL_DEPTH_STENCIL))
     {
@@ -1447,8 +1466,8 @@ WebGLContext::ValidateUniformLocation(const char* info, WebGLUniformLocation *lo
 bool
 WebGLContext::ValidateSamplerUniformSetter(const char* info, WebGLUniformLocation *location, GLint value)
 {
-    if (location->Info().type != SH_SAMPLER_2D &&
-        location->Info().type != SH_SAMPLER_CUBE)
+    if (location->Info().type != LOCAL_GL_SAMPLER_2D &&
+        location->Info().type != LOCAL_GL_SAMPLER_CUBE)
     {
         return true;
     }

@@ -196,20 +196,19 @@ this.FxAccountsManager = {
               }
             );
           }
-        }
-      );
-
-      // Otherwise, the account was deleted, so ask for Sign In/Up
-      return this._localSignOut().then(
-        () => {
-          return this._uiRequest(UI_REQUEST_SIGN_IN_FLOW, aAudience,
-                                 aPrincipal);
-        },
-        (reason) => {
-          // reject primary problem, not signout failure
-          log.error("Signing out in response to server error threw: " +
-                    reason);
-          return this._error(reason);
+          // ... otherwise, the account was deleted, so ask for Sign In/Up
+          return this._localSignOut().then(
+            () => {
+              return this._uiRequest(UI_REQUEST_SIGN_IN_FLOW, aAudience,
+                                     aPrincipal);
+            },
+            (reason) => {
+              // reject primary problem, not signout failure
+              log.error("Signing out in response to server error threw: " +
+                        reason);
+              return this._error(reason);
+            }
+          );
         }
       );
     }
@@ -567,6 +566,10 @@ this.FxAccountsManager = {
           } else if (permission == Ci.nsIPermissionManager.DENY_ACTION &&
                      !this._refreshing) {
             return this._error(ERROR_PERMISSION_DENIED);
+          } else if (this._refreshing) {
+            // If we are blocked asking for a password we should not continue
+            // the getAssertion process.
+            return Promise.resolve(null);
           }
           return this._getAssertion(aAudience, principal);
         }

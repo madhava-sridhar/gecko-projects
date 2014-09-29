@@ -232,6 +232,7 @@ struct JSCompartment
                                 size_t *tiObjectTypeTables,
                                 size_t *compartmentObject,
                                 size_t *compartmentTables,
+                                size_t *innerViews,
                                 size_t *crossCompartmentWrappers,
                                 size_t *regexpCompartment,
                                 size_t *savedStacksSet);
@@ -274,6 +275,10 @@ struct JSCompartment
      */
     js::ReadBarrieredScriptSourceObject selfHostingScriptSource;
 
+    // Information mapping objects which own their own storage to other objects
+    // sharing that storage.
+    js::InnerViewTable innerViews;
+
     /* During GC, stores the index of this compartment in rt->compartments. */
     unsigned                     gcIndex;
 
@@ -286,13 +291,13 @@ struct JSCompartment
      */
     JSObject                     *gcIncomingGrayPointers;
 
-    /* During GC, list of live array buffers with >1 view accumulated during tracing. */
-    js::ArrayBufferVector        gcLiveArrayBuffers;
-
     /* Linked list of live weakmaps in this compartment. */
     js::WeakMapBase              *gcWeakMapList;
 
   private:
+    /* Whether to preserve JIT code on non-shrinking GCs. */
+    bool                         gcPreserveJitCode;
+
     enum {
         DebugMode = 1 << 0,
         DebugNeedDelazification = 1 << 1
@@ -312,12 +317,9 @@ struct JSCompartment
     inline bool wrap(JSContext *cx, JS::MutableHandleValue vp,
                      JS::HandleObject existing = js::NullPtr());
 
-    bool wrap(JSContext *cx, JSString **strp);
-    bool wrap(JSContext *cx, js::HeapPtrString *strp);
+    bool wrap(JSContext *cx, js::MutableHandleString strp);
     bool wrap(JSContext *cx, JS::MutableHandleObject obj,
               JS::HandleObject existingArg = js::NullPtr());
-    bool wrap(JSContext *cx, js::PropertyOp *op);
-    bool wrap(JSContext *cx, js::StrictPropertyOp *op);
     bool wrap(JSContext *cx, JS::MutableHandle<js::PropertyDescriptor> desc);
     bool wrap(JSContext *cx, JS::MutableHandle<js::PropDesc> desc);
 
@@ -345,7 +347,7 @@ struct JSCompartment
 
     void trace(JSTracer *trc);
     void markRoots(JSTracer *trc);
-    bool isDiscardingJitCode(JSTracer *trc);
+    bool preserveJitCode() { return gcPreserveJitCode; }
     void sweep(js::FreeOp *fop, bool releaseTypes);
     void sweepCrossCompartmentWrappers();
     void purge();

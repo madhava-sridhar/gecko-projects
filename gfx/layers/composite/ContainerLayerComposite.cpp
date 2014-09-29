@@ -35,6 +35,10 @@
 #include "nsTArray.h"                   // for nsAutoTArray
 #include "TextRenderer.h"               // for TextRenderer
 #include <vector>
+#include "GeckoProfiler.h"              // for GeckoProfiler
+#ifdef MOZ_ENABLE_PROFILER_SPS
+#include "ProfilerMarkers.h"            // for ProfilerMarkers
+#endif
 
 #define CULLING_LOG(...)
 // #define CULLING_LOG(...) printf_stderr("CULLING: " __VA_ARGS__)
@@ -43,6 +47,24 @@ namespace mozilla {
 namespace layers {
 
 using namespace gfx;
+
+static bool
+LayerHasCheckerboardingAPZC(Layer* aLayer, gfxRGBA* aOutColor)
+{
+  for (LayerMetricsWrapper i(aLayer, LayerMetricsWrapper::StartAt::BOTTOM); i; i = i.GetParent()) {
+    if (!i.Metrics().IsScrollable()) {
+      continue;
+    }
+    if (i.GetApzc() && i.GetApzc()->IsCurrentlyCheckerboarding()) {
+      if (aOutColor) {
+        *aOutColor = i.Metrics().GetBackgroundColor();
+      }
+      return true;
+    }
+    break;
+  }
+  return false;
+}
 
 /**
  * Returns a rectangle of content painted opaquely by aLayer. Very consertative;
@@ -53,7 +75,7 @@ GetOpaqueRect(Layer* aLayer)
 {
   nsIntRect result;
   gfx::Matrix matrix;
-  bool is2D = aLayer->GetBaseTransform().Is2D(&matrix);
+  bool is2D = aLayer->AsLayerComposite()->GetShadowTransform().Is2D(&matrix);
 
   // Just bail if there's anything difficult to handle.
   if (!is2D || aLayer->GetMaskLayer() ||
@@ -115,7 +137,10 @@ static void DrawLayerInfo(const RenderTargetIntRect& aClipRect,
 
 static void PrintUniformityInfo(Layer* aLayer)
 {
-  static TimeStamp t0 = TimeStamp::Now();
+#ifdef MOZ_ENABLE_PROFILER_SPS
+  if (!profiler_is_active()) {
+    return;
+  }
 
   // Don't want to print a log for smaller layers
   if (aLayer->GetEffectiveVisibleRegion().GetBounds().width < 300 ||
@@ -127,10 +152,11 @@ static void PrintUniformityInfo(Layer* aLayer)
   if (!transform.Is2D()) {
     return;
   }
+
   Point translation = transform.As2D().GetTranslation();
-  printf_stderr("UniformityInfo Layer_Move %llu %p %s\n",
-      (unsigned long long)(TimeStamp::Now() - t0).ToMilliseconds(), aLayer,
-      ToString(translation).c_str());
+  LayerTranslationPayload* payload = new LayerTranslationPayload(aLayer, translation);
+  PROFILER_MARKER_PAYLOAD("LayerTranslation", payload);
+#endif
 }
 
 /* all of the per-layer prepared data we need to maintain */
@@ -172,12 +198,14 @@ ContainerPrepare(ContainerT* aContainer,
 
     if (layerToRender->GetLayer()->GetEffectiveVisibleRegion().IsEmpty() &&
         !layerToRender->GetLayer()->AsContainerLayer()) {
+      CULLING_LOG("Sublayer %p has no effective visible region\n", layerToRender->GetLayer());
       continue;
     }
 
     RenderTargetIntRect clipRect = layerToRender->GetLayer()->
-        CalculateScissorRect(aClipRect, &aManager->GetWorldTransform());
+        CalculateScissorRect(aClipRect);
     if (clipRect.IsEmpty()) {
+      CULLING_LOG("Sublayer %p has an empty world clip rect\n", layerToRender->GetLayer());
       continue;
     }
 
@@ -187,7 +215,9 @@ ContainerPrepare(ContainerT* aContainer,
 
     Compositor* compositor = aManager->GetCompositor();
     if (!layerToRender->GetLayer()->AsContainerLayer() &&
-        !quad.Intersects(compositor->ClipRectInLayersCoordinates(layerToRender->GetLayer(), clipRect))) {
+        !quad.Intersects(compositor->ClipRectInLayersCoordinates(layerToRender->GetLayer(), clipRect)) &&
+        !LayerHasCheckerboardingAPZC(layerToRender->GetLayer(), nullptr)) {
+      CULLING_LOG("Sublayer %p is clipped entirely\n", layerToRender->GetLayer());
       continue;
     }
 
@@ -261,6 +291,24 @@ RenderLayers(ContainerT* aContainer,
     PreparedLayer& preparedData = aContainer->mPrepared->mLayers[i];
     LayerComposite* layerToRender = preparedData.mLayer;
     const RenderTargetIntRect& clipRect = preparedData.mClipRect;
+    Layer* layer = layerToRender->GetLayer();
+
+    gfxRGBA color;
+    if (LayerHasCheckerboardingAPZC(layer, &color)) {
+      // Ideally we would want to intersect the checkerboard region from the APZ with the layer bounds
+      // and only fill in that area. However the layer bounds takes into account the base translation
+      // for the painted layer whereas the checkerboard region does not. One does not simply
+      // intersect areas in different coordinate spaces. So we do this a little more permissively
+      // and only fill in the background when we know there is checkerboard, which in theory
+      // should only occur transiently.
+      nsIntRect layerBounds = layer->GetLayerBounds();
+      EffectChain effectChain(layer);
+      effectChain.mPrimaryEffect = new EffectSolidColor(ToColor(color));
+      aManager->GetCompositor()->DrawQuad(gfx::Rect(layerBounds.x, layerBounds.y, layerBounds.width, layerBounds.height),
+                                          gfx::Rect(clipRect.ToUnknownRect()),
+                                          effectChain, layer->GetEffectiveOpacity(),
+                                          layer->GetEffectiveTransform());
+    }
 
     if (layerToRender->HasLayerBeenComposited()) {
       // Composer2D will compose this layer so skip GPU composition
@@ -282,7 +330,6 @@ RenderLayers(ContainerT* aContainer,
       layerToRender->SetShadowVisibleRegion(preparedData.mSavedVisibleRegion);
     }
 
-    Layer* layer = layerToRender->GetLayer();
     if (gfxPrefs::UniformityInfo()) {
       PrintUniformityInfo(layer);
     }
@@ -435,7 +482,8 @@ ContainerRender(ContainerT* aContainer,
     // underlying layer.
     for (LayerMetricsWrapper i(aContainer); i; i = i.GetFirstChild()) {
       if (AsyncPanZoomController* apzc = i.GetApzc()) {
-        if (!Matrix4x4(apzc->GetCurrentAsyncTransform()).IsIdentity()) {
+        if (!apzc->GetAsyncTransformAppliedToContent()
+            && !Matrix4x4(apzc->GetCurrentAsyncTransform()).IsIdentity()) {
           aManager->UnusedApzTransformWarning();
           break;
         }

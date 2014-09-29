@@ -50,7 +50,7 @@ struct nsID
       (((uint32_t*)&m0)[3] == ((uint32_t*)&aOther.m0)[3]);
   }
 
-  bool operator==(const nsID& aOther) const
+  inline bool operator==(const nsID& aOther) const
   {
     return Equals(aOther);
   }

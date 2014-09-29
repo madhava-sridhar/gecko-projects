@@ -41,6 +41,10 @@ const OPENH264_OPTIONS_URL     = "chrome://mozapps/content/extensions/openH264Pr
 
 const GMP_PREF_LASTCHECK       = "media.gmp-manager.lastCheck";
 
+// The following is part of an awful hack to include the OpenH264 license
+// without having bug 624602 fixed yet, and intentionally ignores localisation.
+const OPENH264_FULLDESCRIPTION = "<xhtml:a href=\"chrome://mozapps/content/extensions/OpenH264-license.txt\" target=\"_blank\">License information</xhtml:a>.";
+
 XPCOMUtils.defineLazyGetter(this, "pluginsBundle",
   () => Services.strings.createBundle("chrome://global/locale/plugins.properties"));
 XPCOMUtils.defineLazyGetter(this, "prefs",
@@ -93,6 +97,7 @@ let OpenH264Wrapper = {
   get homepageURL() { return OPENH264_HOMEPAGE_URL; },
 
   get description() { return pluginsBundle.GetStringFromName("openH264_description"); },
+  get fullDescription() { return OPENH264_FULLDESCRIPTION; },
 
   get version() { return prefs.get(OPENH264_PREF_VERSION, ""); },
 
@@ -240,6 +245,8 @@ let OpenH264Wrapper = {
 };
 
 let OpenH264Provider = {
+  get name() "OpenH264Provider",
+
   startup: function() {
     configureLogging();
     this._log = Log.repository.getLoggerWithMessagePrefix("Toolkit.OpenH264Provider",
@@ -263,7 +270,11 @@ let OpenH264Provider = {
 
     if (this.gmpPath && enabled) {
       this._log.info("startup() - adding gmp directory " + this.gmpPath);
-      gmpService.addPluginDirectory(this.gmpPath);
+      try {
+        gmpService.addPluginDirectory(this.gmpPath);
+      } catch (e if e.name == 'NS_ERROR_NOT_AVAILABLE') {
+        this._log.warning("startup() - adding gmp directory failed with " + e.name + " - sandboxing not available?");
+      }
     }
   },
 

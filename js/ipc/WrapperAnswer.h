@@ -48,6 +48,7 @@ class WrapperAnswer : public virtual JavaScriptShared
     bool AnswerCallOrConstruct(const ObjectId &objId, const nsTArray<JSParam> &argv,
                                const bool &construct, ReturnStatus *rs, JSVariant *result,
                                nsTArray<JSParam> *outparams);
+    bool AnswerHasInstance(const ObjectId &objId, const JSVariant &v, ReturnStatus *rs, bool *bp);
     bool AnswerObjectClassIs(const ObjectId &objId, const uint32_t &classValue,
                              bool *result);
     bool AnswerClassName(const ObjectId &objId, nsString *result);
@@ -58,6 +59,9 @@ class WrapperAnswer : public virtual JavaScriptShared
                           ReturnStatus *rs, bool *instanceof);
     bool AnswerDOMInstanceOf(const ObjectId &objId, const int &prototypeID, const int &depth,
                              ReturnStatus *rs, bool *instanceof);
+
+    bool AnswerIsCallable(const ObjectId &objId, bool *result);
+    bool AnswerIsConstructor(const ObjectId &objId, bool *result);
 
     bool RecvDropObject(const ObjectId &objId);
 

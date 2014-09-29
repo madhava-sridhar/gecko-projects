@@ -82,6 +82,7 @@
 #include "mozilla/dom/VideoTrack.h"
 #include "mozilla/dom/VideoTrackList.h"
 #include "mozilla/dom/TextTrack.h"
+#include "nsIContentPolicy.h"
 
 #include "ImageContainer.h"
 #include "nsRange.h"
@@ -1196,13 +1197,16 @@ nsresult HTMLMediaElement::LoadResource()
   nsCOMPtr<nsIChannel> channel;
   rv = NS_NewChannel(getter_AddRefs(channel),
                      mLoadingSrc,
-                     nullptr,
+                     static_cast<Element*>(this),
+                     nsILoadInfo::SEC_NORMAL,
+                     nsIContentPolicy::TYPE_MEDIA,
+                     channelPolicy,
                      loadGroup,
-                     nullptr,
+                     nullptr,   // aCallbacks
                      nsICachingChannel::LOAD_BYPASS_LOCAL_CACHE_IF_BUSY |
                      nsIChannel::LOAD_MEDIA_SNIFFER_OVERRIDES_CONTENT_TYPE |
-                     nsIChannel::LOAD_CALL_CONTENT_SNIFFERS,
-                     channelPolicy);
+                     nsIChannel::LOAD_CALL_CONTENT_SNIFFERS);
+
   NS_ENSURE_SUCCESS(rv,rv);
 
   // The listener holds a strong reference to us.  This creates a
@@ -3489,6 +3493,7 @@ void HTMLMediaElement::NotifyOwnerDocumentActivityChanged()
   // CanPlayChanged callback.
   if (UseAudioChannelService() && mPlayingThroughTheAudioChannel &&
       mAudioChannelAgent) {
+    AutoNoJSAPI nojsapi;
     mAudioChannelAgent->SetVisibilityState(!ownerDoc->Hidden());
   }
   bool suspendEvents = !ownerDoc->IsActive() || !ownerDoc->IsVisible();
@@ -3937,7 +3942,9 @@ void HTMLMediaElement::UpdateAudioChannelPlayingState()
      (!mPaused &&
       (HasAttr(kNameSpaceID_None, nsGkAtoms::loop) ||
        (mReadyState >= nsIDOMHTMLMediaElement::HAVE_CURRENT_DATA &&
-        !IsPlaybackEnded()) ||
+        !IsPlaybackEnded() &&
+        !(mSrcStream && !(mSrcStream->GetTrackTypesAvailable() &
+                          DOMMediaStream::HINT_CONTENTS_AUDIO))) ||
        mPlayingThroughTheAudioChannelBeforeSeek));
   if (playingThroughTheAudioChannel != mPlayingThroughTheAudioChannel) {
     mPlayingThroughTheAudioChannel = playingThroughTheAudioChannel;

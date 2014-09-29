@@ -25,6 +25,12 @@ class gfxASurface;
 class nsIFrame;
 class nsSVGFilterPaintCallback;
 
+namespace mozilla {
+namespace dom {
+class UserSpaceMetrics;
+}
+}
+
 /**
  * This class performs all filter processing.
  *
@@ -47,8 +53,23 @@ class nsFilterInstance
   typedef mozilla::gfx::SourceSurface SourceSurface;
   typedef mozilla::gfx::DrawTarget DrawTarget;
   typedef mozilla::gfx::FilterPrimitiveDescription FilterPrimitiveDescription;
+  typedef mozilla::gfx::FilterDescription FilterDescription;
+  typedef mozilla::dom::UserSpaceMetrics UserSpaceMetrics;
 
 public:
+  /**
+   * Create a FilterDescription for the supplied filter. All coordinates in
+   * the description are in filter space.
+   * @param aOutAdditionalImages Will contain additional images needed to
+   *   render the filter (from feImage primitives).
+   * @return A FilterDescription describing the filter.
+   */
+  static FilterDescription GetFilterDescription(nsIContent* aFilteredElement,
+                                                const nsTArray<nsStyleFilter>& aFilterChain,
+                                                const UserSpaceMetrics& aMetrics,
+                                                const gfxRect& aBBox,
+                                                nsTArray<mozilla::RefPtr<SourceSurface>>& aOutAdditionalImages);
+
   /**
    * Paint the given filtered frame.
    * @param aDirtyArea The area than needs to be painted, in aFilteredFrame's
@@ -92,7 +113,11 @@ public:
                                     const nsRect *aPreFilterBounds = nullptr);
 
   /**
-   * @param aTargetFrame The frame of the filtered element under consideration.
+   * @param aTargetFrame The frame of the filtered element under consideration,
+   *   may be null.
+   * @param aTargetContent The filtered element itself.
+   * @param aMetrics The metrics to resolve SVG lengths against.
+   * @param aFilterChain The list of filters to apply.
    * @param aPaintCallback [optional] The callback that Render() should use to
    *   paint. Only required if you will call Render().
    * @param aPaintTransform The transform to apply to convert to
@@ -106,9 +131,12 @@ public:
    * @param aOverridePreFilterVisualOverflowRect [optional] Use a different
    *   visual overflow rect for the target element.
    * @param aOverrideBBox [optional] Use a different SVG bbox for the target
-   *   element.
+   *   element. Must be non-null if aTargetFrame is null.
    */
   nsFilterInstance(nsIFrame *aTargetFrame,
+                   nsIContent* aTargetContent,
+                   const UserSpaceMetrics& aMetrics,
+                   const nsTArray<nsStyleFilter>& aFilterChain,
                    nsSVGFilterPaintCallback *aPaintCallback,
                    const gfxMatrix& aPaintTransform,
                    const nsRegion *aPostFilterDirtyRegion = nullptr,
@@ -128,6 +156,12 @@ public:
    * nsFilterInstance constructor.
    */
   nsresult Render(gfxContext* aContext);
+
+  const FilterDescription& ExtractDescriptionAndAdditionalImages(nsTArray<mozilla::RefPtr<SourceSurface>>& aOutAdditionalImages)
+  {
+    mInputImages.SwapElements(aOutAdditionalImages);
+    return mFilterDescription;
+  }
 
   /**
    * Sets the aPostFilterDirtyRegion outparam to the post-filter area in frame
@@ -204,7 +238,7 @@ private:
    * filter primitives and their connections. This populates
    * mPrimitiveDescriptions and mInputImages.
    */
-  nsresult BuildPrimitives();
+  nsresult BuildPrimitives(const nsTArray<nsStyleFilter>& aFilterChain);
 
   /**
    * Add to the list of FilterPrimitiveDescriptions for a particular SVG
@@ -266,6 +300,16 @@ private:
    */
   nsIFrame* mTargetFrame;
 
+  /**
+   * The filtered element.
+   */
+  nsIContent* mTargetContent;
+
+  /**
+   * The user space metrics of the filtered frame.
+   */
+  const UserSpaceMetrics& mMetrics;
+
   nsSVGFilterPaintCallback* mPaintCallback;
 
   /**
@@ -322,7 +366,7 @@ private:
 
   nsTArray<mozilla::RefPtr<SourceSurface>> mInputImages;
   nsTArray<FilterPrimitiveDescription> mPrimitiveDescriptions;
-  int32_t mAppUnitsPerCSSPx;
+  FilterDescription mFilterDescription;
   bool mInitialized;
 };
 

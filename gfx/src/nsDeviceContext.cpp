@@ -143,7 +143,7 @@ nsFontCache::GetMetricsFor(const nsFont& aFont, nsIAtom* aLanguage,
                 mFontMetrics.RemoveElementAt(i);
                 mFontMetrics.AppendElement(fm);
             }
-            fm->GetThebesFontGroup()->UpdateFontList();
+            fm->GetThebesFontGroup()->UpdateUserFonts();
             NS_ADDREF(aMetrics = fm);
             return NS_OK;
         }
@@ -405,7 +405,8 @@ nsDeviceContext::CreateRenderingContext()
 
     pContext->Init(this, dt);
     pContext->ThebesContext()->SetFlag(gfxContext::FLAG_DISABLE_SNAPPING);
-    pContext->Scale(mPrintingScale, mPrintingScale);
+    pContext->ThebesContext()->SetMatrix(gfxMatrix::Scaling(mPrintingScale,
+                                                            mPrintingScale));
 
     return pContext.forget();
 }

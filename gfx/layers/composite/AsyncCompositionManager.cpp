@@ -32,6 +32,7 @@
 #include "nsRegion.h"                   // for nsIntRegion
 #include "nsTArray.h"                   // for nsTArray, nsTArray_Impl, etc
 #include "nsTArrayForwardDeclare.h"     // for InfallibleTArray
+#include "UnitTransforms.h"             // for TransformTo
 #if defined(MOZ_WIDGET_ANDROID)
 # include <android/log.h>
 # include "AndroidBridge.h"
@@ -74,7 +75,7 @@ WalkTheTree(Layer* aLayer,
           dom::ScreenOrientation chromeOrientation = aTargetConfig.orientation();
           dom::ScreenOrientation contentOrientation = state->mTargetConfig.orientation();
           if (!IsSameDimension(chromeOrientation, contentOrientation) &&
-              ContentMightReflowOnOrientationChange(aTargetConfig.clientBounds())) {
+              ContentMightReflowOnOrientationChange(aTargetConfig.naturalBounds())) {
             aReady = false;
           }
         }
@@ -122,9 +123,9 @@ void
 AsyncCompositionManager::ComputeRotation()
 {
   if (!mTargetConfig.naturalBounds().IsEmpty()) {
-    mLayerManager->SetWorldTransform(
+    mWorldTransform =
       ComputeTransformForRotation(mTargetConfig.naturalBounds(),
-                                  mTargetConfig.rotation()));
+                                  mTargetConfig.rotation());
   }
 }
 
@@ -137,8 +138,22 @@ GetBaseTransform2D(Layer* aLayer, Matrix* aTransform)
 }
 
 static void
+TransformClipRect(Layer* aLayer,
+                  const Matrix4x4& aTransform)
+{
+  const nsIntRect* clipRect = aLayer->GetClipRect();
+  if (clipRect) {
+    LayerIntRect transformed = TransformTo<LayerPixel>(
+        aTransform, LayerIntRect::FromUntyped(*clipRect));
+    nsIntRect shadowClip = LayerIntRect::ToUntyped(transformed);
+    aLayer->AsLayerComposite()->SetShadowClipRect(&shadowClip);
+  }
+}
+
+static void
 TranslateShadowLayer2D(Layer* aLayer,
-                       const gfxPoint& aTranslation)
+                       const gfxPoint& aTranslation,
+                       bool aAdjustClipRect)
 {
   // This layer might also be a scrollable layer and have an async transform.
   // To make sure we don't clobber that, we start with the shadow transform.
@@ -172,11 +187,8 @@ TranslateShadowLayer2D(Layer* aLayer,
   layerComposite->SetShadowTransform(layerTransform3D);
   layerComposite->SetShadowTransformSetByAnimation(false);
 
-  const nsIntRect* clipRect = aLayer->GetClipRect();
-  if (clipRect) {
-    nsIntRect transformedClipRect(*clipRect);
-    transformedClipRect.MoveBy(aTranslation.x, aTranslation.y);
-    layerComposite->SetShadowClipRect(&transformedClipRect);
+  if (aAdjustClipRect) {
+    TransformClipRect(aLayer, Matrix4x4().Translate(aTranslation.x, aTranslation.y, 0));
   }
 }
 
@@ -257,7 +269,7 @@ AsyncCompositionManager::AlignFixedAndStickyLayers(Layer* aLayer,
   // aTransformedSubtreeRoot. Also, once we do encounter such a child, we don't
   // need to recurse any deeper because the fixed layers are relative to their
   // nearest scrollable layer.
-  if (aLayer == aTransformedSubtreeRoot || !isFixedOrSticky) {
+  if (!isFixedOrSticky) {
     // ApplyAsyncContentTransformToTree will call this function again for
     // nested scrollable layers, so we don't need to recurse if the layer is
     // scrollable.
@@ -349,8 +361,15 @@ AsyncCompositionManager::AlignFixedAndStickyLayers(Layer* aLayer,
                     IntervalOverlap(translation.x, stickyInner.x, stickyInner.XMost());
   }
 
-  // Finally, apply the 2D translation to the layer transform.
-  TranslateShadowLayer2D(aLayer, ThebesPoint(translation));
+  // Finally, apply the 2D translation to the layer transform. Note that in
+  // general we need to apply the same translation to the layer's clip rect, so
+  // that the effective transform on the clip rect takes it back to where it was
+  // originally, had there been no async scroll. In the case where the
+  // fixed/sticky layer is the same as aTransformedSubtreeRoot, then the clip
+  // rect is not affected by the scroll-induced async scroll transform anyway
+  // (since the clip is applied post-transform) so we don't need to make the
+  // adjustment.
+  TranslateShadowLayer2D(aLayer, ThebesPoint(translation), aLayer != aTransformedSubtreeRoot);
 }
 
 static void
@@ -504,16 +523,16 @@ SampleAnimations(Layer* aLayer, TimeStamp aPoint)
 }
 
 static bool
-SampleAPZAnimations(const LayerMetricsWrapper& aLayer, TimeStamp aPoint)
+SampleAPZAnimations(const LayerMetricsWrapper& aLayer, TimeStamp aSampleTime)
 {
   bool activeAnimations = false;
   for (LayerMetricsWrapper child = aLayer.GetFirstChild(); child;
         child = child.GetNextSibling()) {
-    activeAnimations |= SampleAPZAnimations(child, aPoint);
+    activeAnimations |= SampleAPZAnimations(child, aSampleTime);
   }
 
   if (AsyncPanZoomController* apzc = aLayer.GetApzc()) {
-    activeAnimations |= apzc->AdvanceAnimations(aPoint);
+    activeAnimations |= apzc->AdvanceAnimations(aSampleTime);
   }
 
   return activeAnimations;
@@ -573,6 +592,10 @@ AsyncCompositionManager::ApplyAsyncContentTransformToTree(Layer *aLayer)
     controller->SampleContentTransformForFrame(&asyncTransformWithoutOverscroll,
                                                scrollOffset,
                                                &overscrollTransform);
+
+    if (!aLayer->IsScrollInfoLayer()) {
+      controller->MarkAsyncTransformAppliedToContent();
+    }
 
     const FrameMetrics& metrics = aLayer->GetFrameMetrics(i);
     CSSToLayerScale paintScale = metrics.LayersPixelsPerCSSPixel();
@@ -654,7 +677,7 @@ LayerIsScrollbarTarget(const LayerMetricsWrapper& aTarget, Layer* aScrollbar)
   if (metrics.GetScrollId() != aScrollbar->GetScrollbarTargetContainerId()) {
     return false;
   }
-  return true;
+  return !aTarget.IsScrollInfoLayer();
 }
 
 static void
@@ -715,6 +738,14 @@ ApplyAsyncTransformToScrollbarForContent(Layer* aScrollbar,
     // as the content scrolls.
     transientTransform.Invert();
     transform = transform * transientTransform;
+
+    // We also need to make a corresponding change on the clip rect of all the
+    // layers on the ancestor chain from the scrollbar layer up to but not
+    // including the layer with the async transform. Otherwise the scrollbar
+    // shifts but gets clipped and so appears to flicker.
+    for (Layer* ancestor = aScrollbar; ancestor != aContent.GetLayer(); ancestor = ancestor->GetParent()) {
+      TransformClipRect(ancestor, transientTransform);
+    }
   }
 
   // GetTransform already takes the pre- and post-scale into account.  Since we
@@ -732,34 +763,41 @@ ApplyAsyncTransformToScrollbarForContent(Layer* aScrollbar,
 }
 
 static LayerMetricsWrapper
-FindScrolledLayerForScrollbar(Layer* aScrollbar, bool* aOutIsAncestor)
+FindScrolledLayerRecursive(Layer* aScrollbar, const LayerMetricsWrapper& aSubtreeRoot)
 {
-  // XXX: once bug 967844 is implemented there might be multiple scrolled layers
-  // that correspond to the scrollbar's scrollId. Verify that we deal with those
-  // cases correctly.
-
-  // Search all siblings of aScrollbar and of its ancestors.
-  LayerMetricsWrapper scrollbar(aScrollbar, LayerMetricsWrapper::StartAt::BOTTOM);
-  for (LayerMetricsWrapper ancestor = scrollbar; ancestor; ancestor = ancestor.GetParent()) {
-    for (LayerMetricsWrapper scrollTarget = ancestor;
-         scrollTarget;
-         scrollTarget = scrollTarget.GetPrevSibling()) {
-      if (scrollTarget != scrollbar &&
-          LayerIsScrollbarTarget(scrollTarget, aScrollbar)) {
-        *aOutIsAncestor = (scrollTarget == ancestor);
-        return scrollTarget;
-      }
-    }
-    for (LayerMetricsWrapper scrollTarget = ancestor.GetNextSibling();
-         scrollTarget;
-         scrollTarget = scrollTarget.GetNextSibling()) {
-      if (LayerIsScrollbarTarget(scrollTarget, aScrollbar)) {
-        *aOutIsAncestor = false;
-        return scrollTarget;
-      }
+  if (LayerIsScrollbarTarget(aSubtreeRoot, aScrollbar)) {
+    return aSubtreeRoot;
+  }
+  for (LayerMetricsWrapper child = aSubtreeRoot.GetFirstChild(); child;
+         child = child.GetNextSibling()) {
+    LayerMetricsWrapper target = FindScrolledLayerRecursive(aScrollbar, child);
+    if (target) {
+      return target;
     }
   }
   return LayerMetricsWrapper();
+}
+
+static LayerMetricsWrapper
+FindScrolledLayerForScrollbar(Layer* aScrollbar, bool* aOutIsAncestor)
+{
+  // Search ancestors first.
+  LayerMetricsWrapper scrollbar(aScrollbar);
+  for (LayerMetricsWrapper ancestor = scrollbar; ancestor; ancestor = ancestor.GetParent()) {
+    if (LayerIsScrollbarTarget(ancestor, aScrollbar)) {
+      *aOutIsAncestor = true;
+      return ancestor;
+    }
+  }
+
+  // If the scrolled target is not an ancestor, search the whole layer tree.
+  // XXX It would be much better to search the APZC tree instead of the layer
+  // tree. That way we would ignore non-scrollable layers, and we'd only visit
+  // each scroll ID once. In the end we only need the APZC and the FrameMetrics
+  // of the scrolled target.
+  *aOutIsAncestor = false;
+  LayerMetricsWrapper root(aScrollbar->Manager()->GetRoot());
+  return FindScrolledLayerRecursive(aScrollbar, root);
 }
 
 void
@@ -939,6 +977,7 @@ AsyncCompositionManager::TransformShadowTree(TimeStamp aCurrentFrame)
     return false;
   }
 
+
   // NB: we must sample animations *before* sampling pan/zoom
   // transforms.
   bool wantNextFrame = SampleAnimations(root, aCurrentFrame);
@@ -975,6 +1014,13 @@ AsyncCompositionManager::TransformShadowTree(TimeStamp aCurrentFrame)
       }
     }
   }
+
+  LayerComposite* rootComposite = root->AsLayerComposite();
+
+  gfx::Matrix4x4 trans = rootComposite->GetShadowTransform();
+  trans *= gfx::Matrix4x4::From2D(mWorldTransform);
+  rootComposite->SetShadowTransform(trans);
+
 
   return wantNextFrame;
 }

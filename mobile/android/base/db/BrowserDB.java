@@ -21,7 +21,6 @@ import android.content.ContentValues;
 import android.content.Context;
 import android.database.ContentObserver;
 import android.database.Cursor;
-import android.graphics.Color;
 import android.graphics.drawable.BitmapDrawable;
 
 /**
@@ -174,13 +173,6 @@ public class BrowserDB {
         return (sAreContentProvidersEnabled && sDb.isReadingListItem(cr, uri));
     }
 
-    public static int getItemFlags(ContentResolver cr, String uri) {
-        if (!sAreContentProvidersEnabled) {
-            return 0;
-        }
-        return sDb.getItemFlags(cr, uri);
-    }
-
     public static void addBookmark(ContentResolver cr, String title, String uri) {
         sDb.addBookmark(cr, title, uri);
     }
@@ -207,8 +199,11 @@ public class BrowserDB {
         return sDb.getFaviconForUrl(cr, faviconURL);
     }
 
-    public static String getFaviconUrlForHistoryUrl(ContentResolver cr, String url) {
-        return sDb.getFaviconUrlForHistoryUrl(cr, url);
+    /**
+     * Try to find a usable favicon URL in the history or bookmarks table.
+     */
+    public static String getFaviconURLFromPageURL(ContentResolver cr, String url) {
+        return sDb.getFaviconURLFromPageURL(cr, url);
     }
 
     public static void updateFaviconForUrl(ContentResolver cr, String pageUri, byte[] encodedFavicon, String faviconUri) {
@@ -256,22 +251,5 @@ public class BrowserDB {
 
     public static void setEnableContentProviders(boolean enableContentProviders) {
         sAreContentProvidersEnabled = enableContentProviders;
-    }
-
-    public static boolean hasSuggestedImageUrl(String url) {
-        return sSuggestedSites.contains(url);
-    }
-
-    public static String getSuggestedImageUrlForUrl(String url) {
-        return sSuggestedSites.getImageUrlForUrl(url);
-    }
-
-    public static int getSuggestedBackgroundColorForUrl(String url) {
-        final String bgColor = sSuggestedSites.getBackgroundColorForUrl(url);
-        if (bgColor != null) {
-            return Color.parseColor(bgColor);
-        }
-
-        return 0;
     }
 }

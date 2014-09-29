@@ -29,11 +29,9 @@
 #include <stdint.h> // Some Mozilla-supported compilers lack <cstdint>
 #include <string>
 
-#include "keyhi.h"
 #include "pkix/enumclass.h"
 #include "pkix/pkixtypes.h"
 #include "pkix/ScopedPtr.h"
-#include "seccomon.h"
 
 namespace mozilla { namespace pkix { namespace test {
 
@@ -65,22 +63,6 @@ public:
   }
 };
 
-namespace {
-
-inline void
-SECITEM_FreeItem_true(SECItem* item)
-{
-  SECITEM_FreeItem(item, true);
-}
-
-} // unnamed namespace
-
-typedef mozilla::pkix::ScopedPtr<SECItem, SECITEM_FreeItem_true> ScopedSECItem;
-typedef mozilla::pkix::ScopedPtr<SECKEYPublicKey, SECKEY_DestroyPublicKey>
-  ScopedSECKEYPublicKey;
-typedef mozilla::pkix::ScopedPtr<SECKEYPrivateKey, SECKEY_DestroyPrivateKey>
-  ScopedSECKEYPrivateKey;
-
 // python DottedOIDToCode.py --tlv id-kp-OCSPSigning 1.3.6.1.5.5.7.3.9
 static const uint8_t tlv_id_kp_OCSPSigning[] = {
   0x06, 0x08, 0x2b, 0x06, 0x01, 0x05, 0x05, 0x07, 0x03, 0x09
@@ -97,10 +79,49 @@ extern const Input sha256WithRSAEncryption;
 mozilla::pkix::Time YMDHMS(int16_t year, int16_t month, int16_t day,
                            int16_t hour, int16_t minutes, int16_t seconds);
 
-Result GenerateKeyPair(/*out*/ ScopedSECKEYPublicKey& publicKey,
-                       /*out*/ ScopedSECKEYPrivateKey& privateKey);
 
 ByteString CNToDERName(const char* cn);
+
+class TestKeyPair
+{
+public:
+  virtual ~TestKeyPair() { }
+
+  // The DER encoding of the entire SubjectPublicKeyInfo structure. This is
+  // what is encoded in certificates.
+  const ByteString subjectPublicKeyInfo;
+
+  // The DER encoding of subjectPublicKeyInfo.subjectPublicKey. This is what is
+  // hashed to create CertIDs for OCSP.
+  const ByteString subjectPublicKey;
+
+  virtual Result SignData(const ByteString& tbs,
+                          SignatureAlgorithm signatureAlgorithm,
+                          /*out*/ ByteString& signature) const = 0;
+
+  virtual TestKeyPair* Clone() const = 0;
+protected:
+  TestKeyPair(const ByteString& spki, const ByteString& spk)
+    : subjectPublicKeyInfo(spki)
+    , subjectPublicKey(spk)
+  {
+  }
+
+  TestKeyPair(const TestKeyPair&) /*= delete*/;
+  void operator=(const TestKeyPair&) /*= delete*/;
+};
+
+TestKeyPair* GenerateKeyPair();
+inline void DeleteTestKeyPair(TestKeyPair* keyPair) { delete keyPair; }
+typedef ScopedPtr<TestKeyPair, DeleteTestKeyPair> ScopedTestKeyPair;
+
+ByteString SHA1(const ByteString& toHash);
+
+Result TestCheckPublicKey(Input subjectPublicKeyInfo);
+Result TestVerifySignedData(const SignedDataWithSignature& signedData,
+                            Input subjectPublicKeyInfo);
+Result TestDigestBuf(Input item, /*out*/ uint8_t* digestBuf,
+                     size_t digestBufLen);
 
 // Replace one substring in item with another of the same length, but only if
 // the substring was found exactly once. The "same length" restriction is
@@ -122,22 +143,22 @@ enum Version { v1 = 0, v2 = 1, v3 = 2 };
 // serialNumber is assumed to be the DER encoding of an INTEGER.
 //
 // If extensions is null, then no extensions will be encoded. Otherwise,
-// extensions must point to a null-terminated array of SECItem*. If the first
-// item of the array is null then an empty Extensions sequence will be encoded.
+// extensions must point to an array of ByteStrings, terminated with an empty
+// ByteString. (If the first item of the array is empty then an empty
+// Extensions sequence will be encoded.)
 //
 // If issuerPrivateKey is null, then the certificate will be self-signed.
 // Parameter order is based on the order of the attributes of the certificate
 // in RFC 5280.
-ByteString CreateEncodedCertificate(long version,
-                                    Input signature,
+ByteString CreateEncodedCertificate(long version, Input signature,
                                     const ByteString& serialNumber,
                                     const ByteString& issuerNameDER,
-                                    std::time_t notBefore, std::time_t notAfter,
+                                    time_t notBefore, time_t notAfter,
                                     const ByteString& subjectNameDER,
-                       /*optional*/ const ByteString* extensions,
-                       /*optional*/ SECKEYPrivateKey* issuerPrivateKey,
+                                    /*optional*/ const ByteString* extensions,
+                                    /*optional*/ TestKeyPair* issuerKeyPair,
                                     SignatureAlgorithm signatureAlgorithm,
-                            /*out*/ ScopedSECKEYPrivateKey& privateKey);
+                                    /*out*/ ScopedTestKeyPair& keyPairResult);
 
 ByteString CreateEncodedSerialNumber(long value);
 
@@ -196,7 +217,7 @@ public:
   bool includeEmptyExtensions; // If true, include the extension wrapper
                                // regardless of if there are any actual
                                // extensions.
-  ScopedSECKEYPrivateKey signerPrivateKey;
+  ScopedTestKeyPair signerKeyPair;
   bool badSignature; // If true, alter the signature to fail verification
   const ByteString* certs; // optional; array terminated by an empty string
 

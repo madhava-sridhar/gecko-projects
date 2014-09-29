@@ -289,6 +289,7 @@ template <class> struct TypeToDataType { /* Unexpected return type for a VMFunct
 template <> struct TypeToDataType<bool> { static const DataType result = Type_Bool; };
 template <> struct TypeToDataType<JSObject *> { static const DataType result = Type_Object; };
 template <> struct TypeToDataType<DeclEnvObject *> { static const DataType result = Type_Object; };
+template <> struct TypeToDataType<ArrayObject *> { static const DataType result = Type_Object; };
 template <> struct TypeToDataType<JSString *> { static const DataType result = Type_Object; };
 template <> struct TypeToDataType<JSFlatString *> { static const DataType result = Type_Object; };
 template <> struct TypeToDataType<HandleObject> { static const DataType result = Type_Handle; };
@@ -586,13 +587,13 @@ class AutoDetectInvalidation
 {
     JSContext *cx_;
     IonScript *ionScript_;
-    Value *rval_;
+    MutableHandleValue rval_;
     bool disabled_;
 
     void setReturnOverride();
 
   public:
-    AutoDetectInvalidation(JSContext *cx, Value *rval, IonScript *ionScript = nullptr);
+    AutoDetectInvalidation(JSContext *cx, MutableHandleValue rval, IonScript *ionScript = nullptr);
 
     void disable() {
         JS_ASSERT(!disabled_);
@@ -631,11 +632,8 @@ bool GreaterThanOrEqual(JSContext *cx, MutableHandleValue lhs, MutableHandleValu
 template<bool Equal>
 bool StringsEqual(JSContext *cx, HandleString left, HandleString right, bool *res);
 
-bool IteratorMore(JSContext *cx, HandleObject obj, bool *res);
-
 // Allocation functions for JSOP_NEWARRAY and JSOP_NEWOBJECT and parallel array inlining
 JSObject *NewInitParallelArray(JSContext *cx, HandleObject templateObj);
-JSObject *NewInitArray(JSContext *cx, uint32_t count, types::TypeObject *type);
 JSObject *NewInitObject(JSContext *cx, HandleObject templateObject);
 JSObject *NewInitObjectWithClassPrototype(JSContext *cx, HandleObject templateObject);
 
@@ -746,6 +744,10 @@ IonMarkFunction(MIRType type)
       default: MOZ_CRASH();
     }
 }
+
+bool ObjectIsCallable(JSObject *obj);
+
+bool ThrowUninitializedLexical(JSContext *cx);
 
 } // namespace jit
 } // namespace js

@@ -66,6 +66,7 @@ class ScopeCoordinate;
 // InterpreterActivation) is a local var of js::Interpret.
 
 enum MaybeCheckAliasing { CHECK_ALIASING = true, DONT_CHECK_ALIASING = false };
+enum MaybeCheckLexical { CheckLexical = true, DontCheckLexical = false };
 
 /*****************************************************************************/
 
@@ -423,8 +424,12 @@ class InterpreterFrame
 
     bool initFunctionScopeObjects(JSContext *cx);
 
-    /* Initialize local variables of newly-pushed frame. */
-    void initVarsToUndefined();
+    /*
+     * Initialize local variables of newly-pushed frame. 'var' bindings are
+     * initialized to undefined and lexical bindings are initialized to
+     * JS_UNINITIALIZED_LEXICAL.
+     */
+    void initLocals();
 
     /*
      * Stack frame type
@@ -1313,6 +1318,16 @@ class JitActivation : public Activation
     typedef HashMap<uint8_t *, RematerializedFrameVector> RematerializedFrameTable;
     RematerializedFrameTable *rematerializedFrames_;
 
+    // This vector is used to remember the outcome of the evaluation of recover
+    // instructions.
+    //
+    // RInstructionResults are appended into this vector when Snapshot values
+    // have to be read, or when the evaluation has to run before some mutating
+    // code.  Each RInstructionResults belongs to one frame which has to bailout
+    // as soon as we get back to it.
+    typedef Vector<RInstructionResults, 1> IonRecoveryMap;
+    IonRecoveryMap ionRecovery_;
+
     void clearRematerializedFrames();
 
 #ifdef CHECK_OSIPOINT_REGISTERS
@@ -1387,6 +1402,20 @@ class JitActivation : public Activation
     void removeRematerializedFrame(uint8_t *top);
 
     void markRematerializedFrames(JSTracer *trc);
+
+
+    // Register the results of on Ion frame recovery.
+    bool registerIonFrameRecovery(IonJSFrameLayout *fp, RInstructionResults&& results);
+
+    // Return the pointer to the Ion frame recovery, if it is already registered.
+    RInstructionResults *maybeIonFrameRecovery(IonJSFrameLayout *fp);
+
+    // If an Ion frame recovery exists for the |fp| frame exists on the
+    // activation, then move its content to the |results| argument, and remove
+    // it from the activation.
+    void maybeTakeIonFrameRecovery(IonJSFrameLayout *fp, RInstructionResults *results);
+
+    void markIonRecovery(JSTracer *trc);
 };
 
 // A filtering of the ActivationIterator to only stop at JitActivations.
@@ -1645,7 +1674,7 @@ class FrameIter
     // Both methods exist because of speed. thisv() will never rematerialize
     // an Ion frame, whereas computedThisValue() will.
     Value       computedThisValue() const;
-    Value       thisv() const;
+    Value       thisv(JSContext *cx);
 
     Value       returnValue() const;
     void        setReturnValue(const Value &v);

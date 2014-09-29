@@ -1675,8 +1675,6 @@ nsCSSFrameConstructor::CreateGeneratedContent(nsFrameConstructorState& aState,
       nsCSSValue::Array* counters = data.mContent.mCounters;
       nsCounterList* counterList = mCounterManager.CounterListFor(
           nsDependentString(counters->Item(0).GetStringBufferValue()));
-      if (!counterList)
-        return nullptr;
 
       nsCounterUseNode* node =
         new nsCounterUseNode(mPresShell->GetPresContext(),
@@ -7805,7 +7803,7 @@ nsCSSFrameConstructor::ContentRemoved(nsIContent* aContainer,
 #ifdef ACCESSIBILITY
     nsAccessibilityService* accService = nsIPresShell::AccService();
     if (accService) {
-      accService->ContentRemoved(mPresShell, aContainer, aChild);
+      accService->ContentRemoved(mPresShell, aChild);
     }
 #endif
 

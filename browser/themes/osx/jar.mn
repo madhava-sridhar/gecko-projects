@@ -72,6 +72,8 @@ browser.jar:
   skin/classic/browser/bad-content-blocked-64@2x.png
   skin/classic/browser/bad-content-unblocked-16.png
   skin/classic/browser/bad-content-unblocked-16@2x.png
+  skin/classic/browser/bad-content-unblocked-64.png
+  skin/classic/browser/bad-content-unblocked-64@2x.png
   skin/classic/browser/panel-expander-closed.png
   skin/classic/browser/panel-expander-closed@2x.png
   skin/classic/browser/panel-expander-open.png
@@ -80,10 +82,6 @@ browser.jar:
   skin/classic/browser/page-livemarks.png
   skin/classic/browser/page-livemarks@2x.png
   skin/classic/browser/pageInfo.css
-  skin/classic/browser/pluginInstall-16.png
-  skin/classic/browser/pluginInstall-16@2x.png
-  skin/classic/browser/pluginInstall-64.png
-  skin/classic/browser/pluginInstall-64@2x.png
   skin/classic/browser/pointerLock-16.png
   skin/classic/browser/pointerLock-16@2x.png
   skin/classic/browser/pointerLock-64.png
@@ -204,6 +202,12 @@ browser.jar:
   skin/classic/browser/setDesktopBackground.css
   skin/classic/browser/monitor.png
   skin/classic/browser/monitor_16-10.png
+  skin/classic/browser/panic-panel/header.png               (../shared/panic-panel/header.png)
+  skin/classic/browser/panic-panel/header@2x.png            (../shared/panic-panel/header@2x.png)
+  skin/classic/browser/panic-panel/header-small.png         (../shared/panic-panel/header-small.png)
+  skin/classic/browser/panic-panel/header-small@2x.png      (../shared/panic-panel/header-small@2x.png)
+  skin/classic/browser/panic-panel/icons.png                (../shared/panic-panel/icons.png)
+  skin/classic/browser/panic-panel/icons@2x.png             (../shared/panic-panel/icons@2x.png)
   skin/classic/browser/places/allBookmarks.png              (places/allBookmarks.png)
 * skin/classic/browser/places/places.css                    (places/places.css)
 * skin/classic/browser/places/organizer.css                 (places/organizer.css)
@@ -374,6 +378,7 @@ browser.jar:
   skin/classic/browser/devtools/eyedropper.css              (../shared/devtools/eyedropper.css)
 * skin/classic/browser/devtools/netmonitor.css              (devtools/netmonitor.css)
 * skin/classic/browser/devtools/profiler.css                (devtools/profiler.css)
+* skin/classic/browser/devtools/timeline.css                (devtools/timeline.css)
 * skin/classic/browser/devtools/scratchpad.css              (devtools/scratchpad.css)
 * skin/classic/browser/devtools/shadereditor.css            (devtools/shadereditor.css)
 * skin/classic/browser/devtools/splitview.css               (../shared/devtools/splitview.css)
@@ -541,6 +546,9 @@ browser.jar:
   skin/classic/browser/devtools/tooltip/arrow-horizontal-light@2x.png   (../shared/devtools/tooltip/arrow-horizontal-light@2x.png)
   skin/classic/browser/devtools/tooltip/arrow-vertical-light.png   (../shared/devtools/tooltip/arrow-vertical-light.png)
   skin/classic/browser/devtools/tooltip/arrow-vertical-light@2x.png   (../shared/devtools/tooltip/arrow-vertical-light@2x.png)
+#ifdef E10S_TESTING_ONLY
+  skin/classic/browser/e10s-64@2x.png (../shared/e10s-64@2x.png)
+#endif
 
 % override chrome://browser/skin/toolbarbutton-dropmarker.png              chrome://browser/skin/lion/toolbarbutton-dropmarker.png                 os=Darwin osversion>=10.7
 % override chrome://browser/skin/tabbrowser/alltabs-box-bkgnd-icon.png     chrome://browser/skin/lion/tabbrowser/alltabs-box-bkgnd-icon.png        os=Darwin osversion>=10.7

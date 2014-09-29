@@ -361,8 +361,8 @@ ForkJoinNursery::shouldMoveObject(void **thingp)
     // The main reason for that restriction is so that we can call a
     // method here that can check the chunk trailer for the cell (a
     // future optimization).
-    Cell *cell = static_cast<Cell *>(*thingp);
-    return isInsideFromspace(cell) && !getForwardedPointer(thingp);
+    Cell **cellp = reinterpret_cast<Cell **>(thingp);
+    return isInsideFromspace(*cellp) && !getForwardedPointer(cellp);
 }
 
 /* static */ void
@@ -554,7 +554,7 @@ ForkJoinNursery::allocateSlots(JSObject *obj, uint32_t nslots)
         return nullptr;
 
     if (!isInsideNewspace(obj))
-        return obj->pod_malloc<HeapSlot>(nslots);
+        return obj->zone()->pod_malloc<HeapSlot>(nslots);
 
     if (nslots > MaxNurserySlots)
         return allocateHugeSlots(obj, nslots);
@@ -576,7 +576,7 @@ ForkJoinNursery::reallocateSlots(JSObject *obj, HeapSlot *oldSlots,
 
     if (!isInsideNewspace(obj)) {
         JS_ASSERT_IF(oldSlots, !isInsideNewspace(oldSlots));
-        return obj->pod_realloc<HeapSlot>(oldSlots, oldCount, newCount);
+        return obj->zone()->pod_realloc<HeapSlot>(oldSlots, oldCount, newCount);
     }
 
     if (!isInsideNewspace(oldSlots))
@@ -626,7 +626,7 @@ ForkJoinNursery::allocateHugeSlots(JSObject *obj, size_t nslots)
     if (nslots & mozilla::tl::MulOverflowMask<sizeof(HeapSlot)>::value)
         return nullptr;
 
-    HeapSlot *slots = obj->pod_malloc<HeapSlot>(nslots);
+    HeapSlot *slots = obj->zone()->pod_malloc<HeapSlot>(nslots);
     if (!slots)
         return slots;
 
@@ -639,7 +639,7 @@ HeapSlot *
 ForkJoinNursery::reallocateHugeSlots(JSObject *obj, HeapSlot *oldSlots,
                                      uint32_t oldCount, uint32_t newCount)
 {
-    HeapSlot *newSlots = obj->pod_realloc<HeapSlot>(oldSlots, oldCount, newCount);
+    HeapSlot *newSlots = obj->zone()->pod_realloc<HeapSlot>(oldSlots, oldCount, newCount);
     if (!newSlots)
         return newSlots;
 
@@ -791,7 +791,7 @@ ForkJoinNursery::moveObjectToTospace(JSObject *src)
 
     movedSize_ += copyObjectToTospace(dst, src, dstKind);
 
-    RelocationOverlay *overlay = reinterpret_cast<RelocationOverlay *>(src);
+    RelocationOverlay *overlay = RelocationOverlay::fromCell(src);
     overlay->forwardTo(dst);
     insertIntoFixupList(overlay);
 

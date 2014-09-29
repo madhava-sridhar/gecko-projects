@@ -15,6 +15,7 @@
 #include "jit/MIRGenerator.h"
 #include "jit/MIRGraph.h"
 #include "vm/NumericConversions.h"
+#include "vm/TypedArrayCommon.h"
 
 #include "jsopcodeinlines.h"
 
@@ -1489,9 +1490,9 @@ MLoadTypedArrayElementStatic::computeRange(TempAllocator &alloc)
 {
     // We don't currently use MLoadTypedArrayElementStatic for uint32, so we
     // don't have to worry about it returning a value outside our type.
-    JS_ASSERT(typedArray_->type() != Scalar::Uint32);
+    JS_ASSERT(AnyTypedArrayType(someTypedArray_) != Scalar::Uint32);
 
-    setRange(GetTypedArrayRange(alloc, typedArray_->type()));
+    setRange(GetTypedArrayRange(alloc, AnyTypedArrayType(someTypedArray_)));
 }
 
 void
@@ -2061,6 +2062,12 @@ RangeAnalysis::addRangeAssertions()
                 continue;
             }
 
+            // MIsNoIter is fused with the MTest that follows it and emitted as
+            // LIsNoIterAndBranch. Skip it to avoid complicating MIsNoIter
+            // lowering.
+            if (ins->isIsNoIter())
+                continue;
+
             Range r(ins);
 
             // Don't insert assertions if there's nothing interesting to assert.
@@ -2492,11 +2499,10 @@ ComputeRequestedTruncateKind(MDefinition *candidate)
     MDefinition::TruncateKind kind = MDefinition::Truncate;
     for (MUseIterator use(candidate->usesBegin()); use != candidate->usesEnd(); use++) {
         if (!use->consumer()->isDefinition()) {
-            // We can only skip testing resume points, if all original uses are
-            // still present, or if the value does not need conversion.
-            // Otherwise a branch removed by UCE might rely on the non-truncated
-            // value, and any bailout with a truncated value might lead an
-            // incorrect value.
+            // Truncation is a destructive optimization, as such, we need to pay
+            // attention to removed branches and prevent optimization
+            // destructive optimizations if we have no alternative. (see
+            // UseRemoved flag)
             if (candidate->isUseRemoved() && needsConversion)
                 kind = Min(kind, MDefinition::TruncateAfterBailouts);
             continue;

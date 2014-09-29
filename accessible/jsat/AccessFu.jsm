@@ -664,7 +664,7 @@ var Input = {
       case 'doubletap1':
         this.activateCurrent();
         break;
-      case 'doubletaphold1':
+      case 'taphold1':
         this.sendContextMenuMessage();
         break;
       case 'swiperight1':
@@ -885,6 +885,7 @@ var Input = {
   },
 
   setEditState: function setEditState(aEditState) {
+    Logger.debug(() => { return ['setEditState', JSON.stringify(aEditState)] });
     this.editState = aEditState;
   },
 

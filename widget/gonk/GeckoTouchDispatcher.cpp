@@ -19,6 +19,7 @@
 #include "GeckoProfiler.h"
 #include "GeckoTouchDispatcher.h"
 #include "InputData.h"
+#include "ProfilerMarkers.h"
 #include "base/basictypes.h"
 #include "gfxPrefs.h"
 #include "libui/Input.h"
@@ -53,7 +54,6 @@ static StaticRefPtr<GeckoTouchDispatcher> sTouchDispatcher;
 GeckoTouchDispatcher::GeckoTouchDispatcher()
   : mTouchQueueLock("GeckoTouchDispatcher::mTouchQueueLock")
   , mTouchEventsFiltered(false)
-  , mTouchDownCount(0)
   , mTouchTimeDiff(0)
   , mLastTouchTime(0)
 {
@@ -349,26 +349,9 @@ IsExpired(const MultiTouchInput& aTouch)
 void
 GeckoTouchDispatcher::DispatchTouchEvent(MultiTouchInput& aMultiTouch)
 {
-  if (!mTouchDownCount) {
+  if (aMultiTouch.mType == MultiTouchInput::MULTITOUCH_START &&
+      aMultiTouch.mTouches.Length() == 1) {
     mTouchEventsFiltered = IsExpired(aMultiTouch);
-  }
-
-  switch (aMultiTouch.mType) {
-    case MultiTouchInput::MULTITOUCH_START:
-      mTouchDownCount++;
-      break;
-    case MultiTouchInput::MULTITOUCH_MOVE:
-      break;
-    case MultiTouchInput::MULTITOUCH_END:
-    case MultiTouchInput::MULTITOUCH_CANCEL:
-      mTouchDownCount--;
-      if (mTouchDownCount == 0) {
-        MutexAutoLock lock(mTouchQueueLock);
-        mTouchMoveEvents.clear();
-      }
-      break;
-    default:
-      break;
   }
 
   if (mTouchEventsFiltered) {
@@ -379,7 +362,7 @@ GeckoTouchDispatcher::DispatchTouchEvent(MultiTouchInput& aMultiTouch)
   WidgetTouchEvent event = aMultiTouch.ToWidgetTouchEvent(nullptr);
   nsEventStatus status = nsWindow::DispatchInputEvent(event, &captured);
 
-  if (mEnabledUniformityInfo) {
+  if (mEnabledUniformityInfo && profiler_is_active()) {
     const char* touchAction = "Invalid";
     switch (aMultiTouch.mType) {
       case MultiTouchInput::MULTITOUCH_START:
@@ -394,11 +377,9 @@ GeckoTouchDispatcher::DispatchTouchEvent(MultiTouchInput& aMultiTouch)
         break;
     }
 
-    const SingleTouchData& firstTouch = aMultiTouch.mTouches[0];
-    const ScreenIntPoint& touchPoint = firstTouch.mScreenPoint;
-
-    LOG("UniformityInfo %s %llu %d %d", touchAction, systemTime(SYSTEM_TIME_MONOTONIC),
-        touchPoint.x, touchPoint.y);
+    const ScreenIntPoint& touchPoint = aMultiTouch.mTouches[0].mScreenPoint;
+    TouchDataPayload* payload = new TouchDataPayload(touchPoint);
+    PROFILER_MARKER_PAYLOAD(touchAction, payload);
   }
 
   if (!captured && (aMultiTouch.mTouches.Length() == 1)) {

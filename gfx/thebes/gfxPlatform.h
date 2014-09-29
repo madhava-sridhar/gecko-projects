@@ -236,6 +236,16 @@ public:
                               int32_t aStride, mozilla::gfx::SurfaceFormat aFormat);
 
     /**
+     * Returns true if rendering to data surfaces produces the same results as
+     * rendering to offscreen surfaces on this platform, making it safe to
+     * render content to data surfaces. This is generally false on platforms
+     * which use different backends for each type of DrawTarget.
+     */
+    virtual bool CanRenderContentToDataSurface() const {
+      return false;
+    }
+
+    /**
      * Returns true if we should use Azure to render content with aTarget. For
      * example, it is possible that we are using Direct2D for rendering and thus
      * using Azure. But we want to render to a CairoDrawTarget, in which case
@@ -251,7 +261,9 @@ public:
     virtual bool UseAcceleratedSkiaCanvas();
     virtual void InitializeSkiaCacheLimits();
 
-    virtual bool UseTiling() { return gfxPrefs::LayersTilesEnabled(); }
+    /// This should be used instead of directly accessing the preference,
+    /// as different platforms may override the behaviour.
+    virtual bool UseTiling() { return gfxPrefs::LayersTilesEnabledDoNotUseDirectly(); }
 
     void GetAzureBackendInfo(mozilla::widget::InfoObject &aObj) {
       aObj.DefineProperty("AzureCanvasBackend", GetBackendName(mPreferredCanvasBackend));
@@ -398,6 +410,8 @@ public:
 
     // check whether format is supported on a platform or not (if unclear, returns true)
     virtual bool IsFontFormatSupported(nsIURI *aFontURI, uint32_t aFormatFlags) { return false; }
+
+    virtual bool DidRenderingDeviceReset() { return false; }
 
     void GetPrefFonts(nsIAtom *aLanguage, nsString& array, bool aAppendUnicode = true);
 
@@ -547,6 +561,7 @@ public:
 
     static bool UsesOffMainThreadCompositing();
 
+    bool HasEnoughTotalSystemMemoryForSkiaGL();
 protected:
     gfxPlatform();
     virtual ~gfxPlatform();
@@ -615,6 +630,8 @@ protected:
 
     // max number of entries in word cache
     int32_t mWordCacheMaxEntries;
+
+    uint32_t mTotalSystemMemory;
 
 private:
     /**

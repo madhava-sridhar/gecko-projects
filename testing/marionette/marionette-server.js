@@ -966,7 +966,6 @@ MarionetteServerConnection.prototype = {
 
     let curWindow = this.getCurrentWindow();
     let original_onerror = curWindow.onerror;
-    let that = this;
     that.timeout = timeout;
     let marionette = new Marionette(this, curWindow, "chrome",
                                     this.marionetteLog,
@@ -1254,6 +1253,45 @@ MarionetteServerConnection.prototype = {
       res.push(winId);
     }
     this.sendResponse(res, this.command_id);
+  },
+
+  /**
+   * Get the current window position.
+   */
+  getWindowPosition: function MDA_getWindowPosition() {
+    this.command_id = this.getCommandId();
+    let curWindow = this.getCurrentWindow();
+    this.sendResponse({ x: curWindow.screenX, y: curWindow.screenY}, this.command_id);
+  },
+
+  /**
+  * Set the window position of the browser on the OS Window Manager
+  *
+  * @param object aRequest
+  *        'x': the x co-ordinate of the top/left of the window that
+  *             it will be moved to
+  *        'y': the y co-ordinate of the top/left of the window that
+  *             it will be moved to
+  */
+  setWindowPosition: function MDA_setWindowPosition(aRequest) {
+    let command_id = this.command_id = this.getCommandId();
+    if (appName !== "Firefox") {
+      this.sendError("Unable to set the window position on mobile", 61, null,
+                      command_id);
+
+    }
+    else {
+      let x = parseInt(aRequest.parameters.x);;
+      let y  = parseInt(aRequest.parameters.y);
+
+      if (isNaN(x) || isNaN(y)) {
+        this.sendError("x and y arguments should be integers", 13, null, command_id);
+        return;
+      }
+      let curWindow = this.getCurrentWindow();
+      curWindow.moveTo(x, y);
+      this.sendOk(command_id);
+    }
   },
 
   /**
@@ -1584,6 +1622,26 @@ MarionetteServerConnection.prototype = {
   },
 
   /**
+   * Find element using the indicated search strategy
+   * starting from a known element. Used for WebDriver Compatibility only.
+   * @param  {object} aRequest
+   *         'using' member indicates which search method to use
+   *         'value' member is the value the client is looking for
+   *         'id' member is the value of the element to start from
+   */
+  findChildElement: function MDA_findChildElement(aRequest) {
+    let command_id = this.command_id = this.getCommandId();
+    this.sendAsync("findElementContent",
+                    {
+                       value: aRequest.parameters.value,
+                       using: aRequest.parameters.using,
+                       element: aRequest.parameters.id,
+                       searchTimeout: this.searchTimeout
+                     },
+                     command_id);
+  },
+
+  /**
    * Find elements using the indicated search strategy.
    *
    * @param object aRequest
@@ -1620,6 +1678,26 @@ MarionetteServerConnection.prototype = {
                      },
                      command_id);
     }
+  },
+
+  /**
+   * Find elements using the indicated search strategy
+   * starting from a known element. Used for WebDriver Compatibility only.
+   * @param  {object} aRequest
+   *         'using' member indicates which search method to use
+   *         'value' member is the value the client is looking for
+   *         'id' member is the value of the element to start from
+   */
+  findChildElements: function MDA_findChildElement(aRequest) {
+    let command_id = this.command_id = this.getCommandId();
+    this.sendAsync("findElementsContent",
+                    {
+                       value: aRequest.parameters.value,
+                       using: aRequest.parameters.using,
+                       element: aRequest.parameters.id,
+                       searchTimeout: this.searchTimeout
+                     },
+                     command_id);
   },
 
   /**
@@ -2382,8 +2460,8 @@ MarionetteServerConnection.prototype = {
   setWindowSize: function MDA_setWindowSize(aRequest) {
     this.command_id = this.getCommandId();
 
-    if (appName == "B2G") {
-      this.sendError("Not supported on B2G", 405, null, this.command_id);
+    if (appName !== "Firefox") {
+      this.sendError("Not supported on mobile", 405, null, this.command_id);
       return;
     }
 
@@ -2403,6 +2481,25 @@ MarionetteServerConnection.prototype = {
     }
 
     curWindow.resizeTo(width, height);
+    this.sendOk(this.command_id);
+  },
+
+  /**
+   * Maximizes the Browser Window as if the user pressed the maximise button
+   *
+   * Not Supported on B2G or Fennec
+   */
+  maximizeWindow: function MDA_maximizeWindow (aRequest) {
+    this.command_id = this.getCommandId();
+
+    if (appName !== "Firefox") {
+      this.sendError("Not supported for mobile", 405, null, this.command_id);
+      return;
+    }
+
+    let curWindow = this.getCurrentWindow();
+    curWindow.moveTo(0,0);
+    curWindow.resizeTo(curWindow.screen.availWidth, curWindow.screen.availHeight);
     this.sendOk(this.command_id);
   },
 
@@ -2558,7 +2655,9 @@ MarionetteServerConnection.prototype.requestTypes = {
   "executeJSScript": MarionetteServerConnection.prototype.executeJSScript,
   "setSearchTimeout": MarionetteServerConnection.prototype.setSearchTimeout,
   "findElement": MarionetteServerConnection.prototype.findElement,
+  "findChildElement": MarionetteServerConnection.prototype.findChildElements, // Needed for WebDriver compat
   "findElements": MarionetteServerConnection.prototype.findElements,
+  "findChildElements":MarionetteServerConnection.prototype.findChildElements, // Needed for WebDriver compat
   "clickElement": MarionetteServerConnection.prototype.clickElement,
   "getElementAttribute": MarionetteServerConnection.prototype.getElementAttribute,
   "getElementText": MarionetteServerConnection.prototype.getElementText,
@@ -2590,6 +2689,8 @@ MarionetteServerConnection.prototype.requestTypes = {
   "getWindowHandles": MarionetteServerConnection.prototype.getWindowHandles,
   "getCurrentWindowHandles": MarionetteServerConnection.prototype.getWindowHandles,  // Selenium 2 compat
   "getWindows":  MarionetteServerConnection.prototype.getWindowHandles,  // deprecated
+  "getWindowPosition": MarionetteServerConnection.prototype.getWindowPosition,
+  "setWindowPosition": MarionetteServerConnection.prototype.setWindowPosition,
   "getActiveFrame": MarionetteServerConnection.prototype.getActiveFrame,
   "switchToFrame": MarionetteServerConnection.prototype.switchToFrame,
   "switchToWindow": MarionetteServerConnection.prototype.switchToWindow,
@@ -2613,7 +2714,8 @@ MarionetteServerConnection.prototype.requestTypes = {
   "getScreenOrientation": MarionetteServerConnection.prototype.getScreenOrientation,
   "setScreenOrientation": MarionetteServerConnection.prototype.setScreenOrientation,
   "getWindowSize": MarionetteServerConnection.prototype.getWindowSize,
-  "setWindowSize": MarionetteServerConnection.prototype.setWindowSize
+  "setWindowSize": MarionetteServerConnection.prototype.setWindowSize,
+  "maximizeWindow": MarionetteServerConnection.prototype.maximizeWindow
 };
 
 /**

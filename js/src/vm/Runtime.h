@@ -348,30 +348,6 @@ class NewObjectCache
     }
 };
 
-class RegExpObject;
-
-// One slot cache for speeding up RegExp.test() executions, by stripping
-// unnecessary leading or trailing .* from the RegExp.
-struct RegExpTestCache
-{
-    RegExpObject *key;
-    RegExpObject *value;
-
-    RegExpTestCache()
-      : key(nullptr), value(nullptr)
-    {}
-
-    void purge() {
-        key = nullptr;
-        value = nullptr;
-    }
-
-    void fill(RegExpObject *key, RegExpObject *value) {
-        this->key = key;
-        this->value = value;
-    }
-};
-
 /*
  * A FreeOp can do one thing: free memory. For convenience, it has delete_
  * convenience methods that also call destructors.
@@ -1095,6 +1071,9 @@ struct JSRuntime : public JS::shadow::Runtime,
     /* Call this to accumulate telemetry data. */
     JSAccumulateTelemetryDataCallback telemetryCallback;
 
+    /* Optional error reporter. */
+    JSErrorReporter     errorReporter;
+
     /* AsmJSCache callbacks are runtime-wide. */
     JS::AsmJSCacheOps asmJSCacheOps;
 
@@ -1130,7 +1109,6 @@ struct JSRuntime : public JS::shadow::Runtime,
     js::UncompressedSourceCache uncompressedSourceCache;
     js::EvalCache       evalCache;
     js::LazyScriptCache lazyScriptCache;
-    js::RegExpTestCache regExpTestCache;
 
     js::CompressedSourceSet compressedSourceSet;
     js::DateTimeInfo    dateTimeInfo;
@@ -1424,6 +1402,12 @@ struct JSRuntime : public JS::shadow::Runtime,
         }
         return (T *)onOutOfMemoryCanGC(p, newSize * sizeof(T));
     }
+
+    /*
+     * Debugger.Memory functions like takeCensus use this embedding-provided
+     * function to assess the size of malloc'd blocks of memory.
+     */
+    mozilla::MallocSizeOf debuggerMallocSizeOf;
 };
 
 namespace js {

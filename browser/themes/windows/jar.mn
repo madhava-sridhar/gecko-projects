@@ -56,6 +56,7 @@ browser.jar:
         skin/classic/browser/bad-content-blocked-16.png
         skin/classic/browser/bad-content-blocked-64.png
         skin/classic/browser/bad-content-unblocked-16.png
+        skin/classic/browser/bad-content-unblocked-64.png
         skin/classic/browser/monitor.png
         skin/classic/browser/monitor_16-10.png
         skin/classic/browser/notification-16.png
@@ -63,8 +64,6 @@ browser.jar:
         skin/classic/browser/pageInfo.css
         skin/classic/browser/pageInfo.png
         skin/classic/browser/page-livemarks.png                      (feeds/feedIcon16.png)
-        skin/classic/browser/pluginInstall-16.png
-        skin/classic/browser/pluginInstall-64.png
         skin/classic/browser/pointerLock-16.png
         skin/classic/browser/pointerLock-64.png
         skin/classic/browser/Privacy-16.png
@@ -146,6 +145,9 @@ browser.jar:
         skin/classic/browser/feeds/subscribe-ui.css                  (feeds/subscribe-ui.css)
 *       skin/classic/browser/newtab/newTab.css                       (newtab/newTab.css)
         skin/classic/browser/newtab/controls.svg                     (../shared/newtab/controls.svg)
+        skin/classic/browser/panic-panel/header.png                  (../shared/panic-panel/header.png)
+        skin/classic/browser/panic-panel/header-small.png            (../shared/panic-panel/header-small.png)
+        skin/classic/browser/panic-panel/icons.png                   (../shared/panic-panel/icons.png)
         skin/classic/browser/places/places.css                       (places/places.css)
 *       skin/classic/browser/places/organizer.css                    (places/organizer.css)
         skin/classic/browser/places/bookmark.png                     (places/bookmark.png)
@@ -284,6 +286,7 @@ browser.jar:
 *       skin/classic/browser/devtools/debugger.css                  (devtools/debugger.css)
 *       skin/classic/browser/devtools/netmonitor.css                (devtools/netmonitor.css)
 *       skin/classic/browser/devtools/profiler.css                  (devtools/profiler.css)
+*       skin/classic/browser/devtools/timeline.css                  (devtools/timeline.css)
 *       skin/classic/browser/devtools/scratchpad.css                (devtools/scratchpad.css)
 *       skin/classic/browser/devtools/shadereditor.css              (devtools/shadereditor.css)
         skin/classic/browser/devtools/storage.css                   (../shared/devtools/storage.css)
@@ -419,6 +422,9 @@ browser.jar:
         skin/classic/browser/devtools/tooltip/arrow-horizontal-light@2x.png   (../shared/devtools/tooltip/arrow-horizontal-light@2x.png)
         skin/classic/browser/devtools/tooltip/arrow-vertical-light.png   (../shared/devtools/tooltip/arrow-vertical-light.png)
         skin/classic/browser/devtools/tooltip/arrow-vertical-light@2x.png   (../shared/devtools/tooltip/arrow-vertical-light@2x.png)
+#ifdef E10S_TESTING_ONLY
+        skin/classic/browser/e10s-64@2x.png (../shared/e10s-64@2x.png)
+#endif
 
 #ifdef XP_WIN
 browser.jar:
@@ -474,6 +480,7 @@ browser.jar:
         skin/classic/aero/browser/bad-content-blocked-16.png
         skin/classic/aero/browser/bad-content-blocked-64.png
         skin/classic/aero/browser/bad-content-unblocked-16.png
+        skin/classic/aero/browser/bad-content-unblocked-64.png
         skin/classic/aero/browser/monitor.png
         skin/classic/aero/browser/monitor_16-10.png
         skin/classic/aero/browser/notification-16.png
@@ -481,8 +488,6 @@ browser.jar:
         skin/classic/aero/browser/pageInfo.css
         skin/classic/aero/browser/pageInfo.png                       (pageInfo-aero.png)
         skin/classic/aero/browser/page-livemarks.png                 (feeds/feedIcon16-aero.png)
-        skin/classic/aero/browser/pluginInstall-16.png
-        skin/classic/aero/browser/pluginInstall-64.png
         skin/classic/aero/browser/pointerLock-16.png
         skin/classic/aero/browser/pointerLock-64.png
         skin/classic/aero/browser/Privacy-16.png                     (Privacy-16-aero.png)
@@ -567,6 +572,9 @@ browser.jar:
         skin/classic/aero/browser/feeds/subscribe-ui.css             (feeds/subscribe-ui.css)
 *       skin/classic/aero/browser/newtab/newTab.css                  (newtab/newTab.css)
         skin/classic/aero/browser/newtab/controls.svg                (../shared/newtab/controls.svg)
+        skin/classic/aero/browser/panic-panel/header.png             (../shared/panic-panel/header.png)
+        skin/classic/aero/browser/panic-panel/header-small.png       (../shared/panic-panel/header-small.png)
+        skin/classic/aero/browser/panic-panel/icons.png              (../shared/panic-panel/icons.png)
 *       skin/classic/aero/browser/places/places.css                  (places/places-aero.css)
 *       skin/classic/aero/browser/places/organizer.css               (places/organizer-aero.css)
         skin/classic/aero/browser/places/bookmark.png                (places/bookmark-aero.png)
@@ -704,6 +712,7 @@ browser.jar:
         skin/classic/aero/browser/devtools/eyedropper.css            (../shared/devtools/eyedropper.css)
 *       skin/classic/aero/browser/devtools/netmonitor.css            (devtools/netmonitor.css)
 *       skin/classic/aero/browser/devtools/profiler.css              (devtools/profiler.css)
+*       skin/classic/aero/browser/devtools/timeline.css              (devtools/timeline.css)
 *       skin/classic/aero/browser/devtools/scratchpad.css            (devtools/scratchpad.css)
 *       skin/classic/aero/browser/devtools/shadereditor.css          (devtools/shadereditor.css)
 *       skin/classic/aero/browser/devtools/splitview.css             (../shared/devtools/splitview.css)
@@ -839,6 +848,9 @@ browser.jar:
         skin/classic/aero/browser/devtools/tooltip/arrow-horizontal-light@2x.png   (../shared/devtools/tooltip/arrow-horizontal-light@2x.png)
         skin/classic/aero/browser/devtools/tooltip/arrow-vertical-light.png   (../shared/devtools/tooltip/arrow-vertical-light.png)
         skin/classic/aero/browser/devtools/tooltip/arrow-vertical-light@2x.png   (../shared/devtools/tooltip/arrow-vertical-light@2x.png)
+#ifdef E10S_TESTING_ONLY
+        skin/classic/aero/browser/e10s-64@2x.png (../shared/e10s-64@2x.png)
+#endif
 
 % override chrome://browser/skin/Toolbar.png               chrome://browser/skin/Toolbar-aero.png                  os=WINNT osversion=6
 % override chrome://browser/skin/Toolbar.png               chrome://browser/skin/Toolbar-aero.png                  os=WINNT osversion=6.1

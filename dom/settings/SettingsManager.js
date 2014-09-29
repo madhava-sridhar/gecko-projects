@@ -57,6 +57,9 @@ function SettingsLock(aSettingsManager) {
                                                             "Settings:Finalize:OK", "Settings:Finalize:KO"]);
   this.sendMessage("Settings:CreateLock", {lockID: this._id, isServiceLock: false});
   Services.tm.currentThread.dispatch(this._closeHelper.bind(this), Ci.nsIThread.DISPATCH_NORMAL);
+
+  // We only want to file closeHelper once per set of receiveMessage calls.
+  this._closeCalled = true;
 }
 
 SettingsLock.prototype = {
@@ -83,9 +86,18 @@ SettingsLock.prototype = {
 
   _closeHelper: function() {
     if (DEBUG) debug("closing lock " + this._id);
+    // sendMessage can get queued to run later in a thread via
+    // _closeHelper, but the SettingsManager may have died in between
+    // the time it was scheduled and the time it runs. Make sure our
+    // window is valid before sending, otherwise just ignore.
+    if (!this._settingsManager._window) {
+      if (DEBUG) debug("SettingsManager died, cannot send " + aMessageName + " message window principal.");
+      return;
+    }
     this._open = false;
+    this._closeCalled = false;
     if (!this._requests || Object.keys(this._requests).length == 0) {
-      if (DEBUG) debug("Requests exhausted, finalizing");
+      if (DEBUG) debug("Requests exhausted, finalizing " + this._id);
       this._settingsManager.unregisterLock(this._id);
       this.sendMessage("Settings:Finalize", {lockID: this._id});
     } else {
@@ -118,6 +130,11 @@ SettingsLock.prototype = {
 
     // Finalizing a transaction does not return a request ID since we are
     // supposed to fire callbacks.
+    //
+    // We also destroy the DOMRequestHelper after we've received the
+    // finalize message. At this point, we will be guarenteed no more
+    // request returns are coming from the SettingsRequestManager.
+
     if (!msg.requestID) {
       let event;
       switch (aMessage.name) {
@@ -125,6 +142,7 @@ SettingsLock.prototype = {
           if (DEBUG) debug("Lock finalize ok: " + this._id);
           event = new this._window.MozSettingsTransactionEvent("settingstransactionsuccess", {});
           this.__DOM_IMPL__.dispatchEvent(event);
+          this.destroyDOMRequestHelper();
           break;
         case "Settings:Finalize:KO":
           if (DEBUG) debug("Lock finalize failed: " + this._id);
@@ -132,12 +150,13 @@ SettingsLock.prototype = {
             error: msg.errorMsg
           });
           this.__DOM_IMPL__.dispatchEvent(event);
+          this.destroyDOMRequestHelper();
           break;
         default:
           if (DEBUG) debug("Message type " + aMessage.name + " is missing a requestID");
-                }
-          return;
-            }
+      }
+      return;
+    }
 
 
     let req = this.getRequest(msg.requestID);
@@ -150,7 +169,11 @@ SettingsLock.prototype = {
     // things like marionetteScriptFinished in them. Make sure we file
     // our call to run/finalize BEFORE opening the lock and fulfilling
     // DOMRequests.
-    Services.tm.currentThread.dispatch(this._closeHelper.bind(this), Ci.nsIThread.DISPATCH_NORMAL);
+    if (!this._closeCalled) {
+      // We only want to file closeHelper once per set of receiveMessage calls.
+      Services.tm.currentThread.dispatch(this._closeHelper.bind(this), Ci.nsIThread.DISPATCH_NORMAL);
+      this._closeCalled = true;
+    }
     if (DEBUG) debug("receiveMessage: " + aMessage.name);
     switch (aMessage.name) {
       case "Settings:Get:OK":
@@ -256,7 +279,7 @@ SettingsManager.prototype = {
     let lock_index = this._locks.indexOf(aLockID);
     if (lock_index != -1) {
       if (DEBUG) debug("Unregistering lock " + aLockID);
-      this._locks.splice(lock_index, -1);
+      this._locks.splice(lock_index, 1);
     }
   },
   
@@ -351,16 +374,15 @@ SettingsManager.prototype = {
     cpmm.addMessageListener("Settings:Change:Return:OK", this);
     this._window = aWindow;
     this._principal = this._window.document.nodePrincipal;
-    Services.obs.addObserver(this, "inner-window-destroyed", false);
+    Services.obs.addObserver(this, "dom-window-destroyed", false);
     let util = aWindow.QueryInterface(Ci.nsIInterfaceRequestor).getInterface(Ci.nsIDOMWindowUtils);
     this.innerWindowID = util.currentInnerWindowID;
   },
 
   observe: function(aSubject, aTopic, aData) {
-    if (aTopic == "inner-window-destroyed") {
-      let wId = aSubject.QueryInterface(Ci.nsISupportsPRUint64).data;
-      if (wId == this.innerWindowID) {
-        if (DEBUG) debug("Topic: " + aTopic);
+    if (aTopic == "dom-window-destroyed") {
+      let window = aSubject.QueryInterface(Ci.nsIDOMWindow);
+      if (window == this._window) {
         this.cleanup();
       }
     }
@@ -391,7 +413,7 @@ SettingsManager.prototype = {
   },
 
   cleanup: function() {
-    Services.obs.removeObserver(this, "inner-window-destroyed");
+    Services.obs.removeObserver(this, "dom-window-destroyed");
     cpmm.removeMessageListener("Settings:Change:Return:OK", this);
     mrm.unregisterStrongReporter(this);
     // At this point, the window is dying, so there's nothing left

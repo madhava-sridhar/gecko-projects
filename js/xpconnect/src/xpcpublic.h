@@ -425,12 +425,6 @@ bool
 Throw(JSContext *cx, nsresult rv);
 
 /**
- * Every global should hold a native that implements the nsIGlobalObject interface.
- */
-nsIGlobalObject *
-GetNativeForGlobal(JSObject *global);
-
-/**
  * Returns the nsISupports native behind a given reflector (either DOM or
  * XPCWN).
  */
@@ -459,6 +453,12 @@ JSObject *
 CompilationScope();
 
 /**
+ * Returns the nsIGlobalObject corresponding to |aObj|'s JS global.
+ */
+nsIGlobalObject*
+NativeGlobal(JSObject *aObj);
+
+/**
  * If |aObj| is a window, returns the associated nsGlobalWindow.
  * Otherwise, returns null.
  */
@@ -471,6 +471,14 @@ WindowOrNull(JSObject *aObj);
  */
 nsGlobalWindow*
 WindowGlobalOrNull(JSObject *aObj);
+
+/**
+ * If |aObj| is in an addon scope and that addon scope is associated with a
+ * live DOM Window, returns the associated nsGlobalWindow. Otherwise, returns
+ * null.
+ */
+nsGlobalWindow*
+AddonWindowOrNull(JSObject *aObj);
 
 // Error reporter used when there is no associated DOM window on to which to
 // report errors and warnings.

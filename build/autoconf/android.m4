@@ -239,7 +239,7 @@ if test "$OS_TARGET" = "Android" -a -z "$gonkdir"; then
                 AC_MSG_ERROR([Couldn't find path to gnu-libstdc++ in the android ndk])
             fi
         else
-            STLPORT_CPPFLAGS="-isystem $_topsrcdir/build/stlport/stlport -isystem $android_ndk/sources/cxx-stl/system/include"
+            STLPORT_CPPFLAGS="-isystem $_topsrcdir/build/stlport/stlport -isystem $_topsrcdir/build/stlport/overrides -isystem $android_ndk/sources/cxx-stl/system/include"
             STLPORT_LIBS="$_objdir/build/stlport/libstlport_static.a -static-libstdc++"
         fi
     fi
@@ -412,6 +412,16 @@ case "$target" in
     fi
     ;;
 esac
+
+MOZ_ARG_DISABLE_BOOL(android-include-fonts,
+[  --disable-android-include-fonts
+                          disable the inclusion of fonts into the final APK],
+    MOZ_ANDROID_EXCLUDE_FONTS=1)
+
+if test -n "$MOZ_ANDROID_EXCLUDE_FONTS"; then
+    AC_DEFINE(MOZ_ANDROID_EXCLUDE_FONTS, $MOZ_ANDROID_EXCLUDE_FONTS)
+    AC_SUBST(MOZ_ANDROID_EXCLUDE_FONTS)
+fi
 
 MOZ_ARG_ENABLE_BOOL(android-resource-constrained,
 [  --enable-android-resource-constrained

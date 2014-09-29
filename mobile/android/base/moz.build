@@ -28,7 +28,6 @@ mgjar = add_java_jar('gecko-mozglue')
 mgjar.sources += [
     'mozglue/ByteBufferInputStream.java',
     'mozglue/DirectBufferAllocator.java',
-    'mozglue/generatorannotations/GeneratorOptions.java',
     'mozglue/generatorannotations/OptionalGeneratedParameter.java',
     'mozglue/generatorannotations/WrapElementForJNI.java',
     'mozglue/generatorannotations/WrapEntireClassForJNI.java',
@@ -43,13 +42,6 @@ mgjar.generated_sources += [
     'org/mozilla/gecko/mozglue/GeckoLoader.java',
 ]
 mgjar.javac_flags += ['-Xlint:all']
-
-wsjar = add_java_jar('websockets')
-wsjar.sources += [ thirdparty_source_dir + f for f in [
-    'com/codebutler/android_websockets/HybiParser.java',
-    'com/codebutler/android_websockets/WebSocketClient.java',
-] ]
-wsjar.javac_flags += ['-Xlint:all,-serial']
 
 gujar = add_java_jar('gecko-util')
 gujar.sources += [
@@ -258,6 +250,7 @@ gbjar.sources += [
     'gfx/ViewTransform.java',
     'gfx/VirtualLayer.java',
     'GlobalHistory.java',
+    'GuestSession.java',
     'health/BrowserHealthRecorder.java',
     'health/BrowserHealthReporter.java',
     'health/HealthRecorder.java',
@@ -301,6 +294,7 @@ gbjar.sources += [
     'home/ReadingListRow.java',
     'home/RecentTabsPanel.java',
     'home/RemoteTabsExpandableListFragment.java',
+    'home/RemoteTabsExpandableListState.java',
     'home/RemoteTabsPanel.java',
     'home/RemoteTabsStaticFragment.java',
     'home/SearchEngine.java',
@@ -333,6 +327,7 @@ gbjar.sources += [
     'menu/MenuPanel.java',
     'menu/MenuPopup.java',
     'MotionEventInterceptor.java',
+    'NewTabletUI.java',
     'NotificationClient.java',
     'NotificationHandler.java',
     'NotificationHelper.java',
@@ -374,8 +369,10 @@ gbjar.sources += [
     'prompts/PromptService.java',
     'prompts/TabInput.java',
     'ReaderModeUtils.java',
+    'RemoteClientsDialogFragment.java',
     'RemoteTabsExpandableListAdapter.java',
     'Restarter.java',
+    'RestrictedProfiles.java',
     'ScrollAnimator.java',
     'ServiceNotificationClient.java',
     'SessionParser.java',
@@ -398,8 +395,15 @@ gbjar.sources += [
     'tabs/RemoteTabsSetupPanel.java',
     'tabs/RemoteTabsVerificationPanel.java',
     'tabs/TabCurve.java',
+    'tabs/TabsGridLayout.java',
+    'tabs/TabsLayoutAdapter.java',
+    'tabs/TabsLayoutItemView.java',
+    'tabs/TabsListLayout.java',
     'tabs/TabsPanel.java',
-    'tabs/TabsTray.java',
+    'tabs/TabStrip.java',
+    'tabs/TabStripAdapter.java',
+    'tabs/TabStripItemView.java',
+    'tabs/TabStripView.java',
     'TabsAccessor.java',
     'Telemetry.java',
     'TelemetryContract.java',
@@ -409,6 +413,12 @@ gbjar.sources += [
     'toolbar/AutocompleteHandler.java',
     'toolbar/BackButton.java',
     'toolbar/BrowserToolbar.java',
+    'toolbar/BrowserToolbarNewTablet.java',
+    'toolbar/BrowserToolbarPhone.java',
+    'toolbar/BrowserToolbarPhoneBase.java',
+    'toolbar/BrowserToolbarPreHC.java',
+    'toolbar/BrowserToolbarTablet.java',
+    'toolbar/BrowserToolbarTabletBase.java',
     'toolbar/CanvasDelegate.java',
     'toolbar/ForwardButton.java',
     'toolbar/PageActionLayout.java',
@@ -458,6 +468,7 @@ gbjar.sources += [
     'widget/GeckoViewFlipper.java',
     'widget/IconTabWidget.java',
     'widget/SquaredImageView.java',
+    'widget/SwipeDismissListViewTouchListener.java',
     'widget/TabRow.java',
     'widget/TabThumbnailWrapper.java',
     'widget/ThumbnailView.java',
@@ -489,11 +500,13 @@ if CONFIG['MOZ_ANDROID_SHARE_OVERLAY']:
     gbjar.sources += [
         'overlays/OverlayConstants.java',
         'overlays/service/OverlayActionService.java',
+        'overlays/service/ShareData.java',
         'overlays/service/sharemethods/AddBookmark.java',
         'overlays/service/sharemethods/AddToReadingList.java',
         'overlays/service/sharemethods/ParcelableClientRecord.java',
         'overlays/service/sharemethods/SendTab.java',
         'overlays/service/sharemethods/ShareMethod.java',
+        'overlays/ui/OverlayDialogButton.java',
         'overlays/ui/OverlayToastHelper.java',
         'overlays/ui/SendTabDeviceListArrayAdapter.java',
         'overlays/ui/SendTabList.java',
@@ -506,11 +519,9 @@ gbjar.generated_sources += sync_generated_java_files
 gbjar.extra_jars = [
     'gecko-R.jar',
     'gecko-mozglue.jar',
+    'gecko-thirdparty.jar',
     'gecko-util.jar',
-    'nineoldandroids.jar',
-    'squareup-picasso.jar',
     'sync-thirdparty.jar',
-    'websockets.jar',
 ]
 
 moz_native_devices_jars = [
@@ -527,10 +538,11 @@ if CONFIG['MOZ_NATIVE_DEVICES']:
     gbjar.extra_jars += moz_native_devices_jars
     gbjar.sources += moz_native_devices_sources
 
-gbjar.javac_flags += ['-Xlint:all,-deprecation,-fallthrough']
+gbjar.javac_flags += ['-Xlint:all,-deprecation,-fallthrough', '-J-Xmx512m', '-J-Xms128m']
 
-noajar = add_java_jar('nineoldandroids')
-noajar.sources += [ thirdparty_source_dir + f for f in [
+# gecko-thirdparty is a good place to put small independent libraries
+gtjar = add_java_jar('gecko-thirdparty')
+gtjar.sources += [ thirdparty_source_dir + f for f in [
     'com/nineoldandroids/animation/Animator.java',
     'com/nineoldandroids/animation/AnimatorInflater.java',
     'com/nineoldandroids/animation/AnimatorListenerAdapter.java',
@@ -558,12 +570,8 @@ noajar.sources += [ thirdparty_source_dir + f for f in [
     'com/nineoldandroids/view/ViewPropertyAnimator.java',
     'com/nineoldandroids/view/ViewPropertyAnimatorHC.java',
     'com/nineoldandroids/view/ViewPropertyAnimatorICS.java',
-    'com/nineoldandroids/view/ViewPropertyAnimatorPreHC.java'
-] ]
-#noajar.javac_flags += ['-Xlint:all']
-
-spjar = add_java_jar('squareup-picasso')
-spjar.sources += [ thirdparty_source_dir + f for f in [
+    'com/nineoldandroids/view/ViewPropertyAnimatorPreHC.java',
+    'com/readystatesoftware/systembartint/SystemBarTintManager.java',
     'com/squareup/picasso/Action.java',
     'com/squareup/picasso/AssetBitmapHunter.java',
     'com/squareup/picasso/BitmapHunter.java',
@@ -594,9 +602,10 @@ spjar.sources += [ thirdparty_source_dir + f for f in [
     'com/squareup/picasso/TargetAction.java',
     'com/squareup/picasso/Transformation.java',
     'com/squareup/picasso/UrlConnectionDownloader.java',
-    'com/squareup/picasso/Utils.java',
+    'com/squareup/picasso/Utils.java'
 ] ]
-#spjar.javac_flags += ['-Xlint:all']
+#gtjar.javac_flags += ['-Xlint:all']
+
 
 ANDROID_RES_DIRS += [
     SRCDIR + '/resources',
@@ -611,7 +620,7 @@ ANDROID_GENERATED_RESFILES += [
 
 for var in ('MOZ_ANDROID_ANR_REPORTER', 'MOZ_LINKER_EXTRACT', 'MOZILLA_OFFICIAL', 'MOZ_DEBUG',
             'MOZ_ANDROID_SEARCH_ACTIVITY', 'MOZ_NATIVE_DEVICES', 'MOZ_ANDROID_MLS_STUMBLER',
-            'MOZ_ANDROID_SHARE_OVERLAY'):
+            'MOZ_ANDROID_SHARE_OVERLAY', 'MOZ_ANDROID_DOWNLOADS_INTEGRATION'):
     if CONFIG[var]:
         DEFINES[var] = 1
 
@@ -653,8 +662,8 @@ if CONFIG['MOZ_ANDROID_SEARCH_ACTIVITY']:
         'gecko-R.jar',
         'gecko-browser.jar',
         'gecko-mozglue.jar',
-        'gecko-util.jar',
-        'nineoldandroids.jar'
+        'gecko-thirdparty.jar',
+        'gecko-util.jar'
     ]
 
 generated_recursive_make_targets = ['.aapt.deps', '.locales.deps'] # Captures dependencies on Android manifest and all resources.

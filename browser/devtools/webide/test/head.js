@@ -85,9 +85,11 @@ function closeWebIDE(win) {
 function removeAllProjects() {
   return Task.spawn(function* () {
     yield AppProjects.load();
-    let projects = AppProjects.store.object.projects;
+    // use a new array so we're not iterating over the same
+    // underlying array that's being modified by AppProjects
+    let projects = AppProjects.store.object.projects.map(p => p.location);
     for (let i = 0; i < projects.length; i++) {
-      yield AppProjects.remove(projects[i].location);
+      yield AppProjects.remove(projects[i]);
     }
   });
 }
@@ -98,6 +100,18 @@ function nextTick() {
     deferred.resolve();
   });
 
+  return deferred.promise;
+}
+
+function waitForUpdate(win, update) {
+  let deferred = promise.defer();
+  win.AppManager.on("app-manager-update", function onUpdate(e, what) {
+    if (what !== update) {
+      return;
+    }
+    win.AppManager.off("app-manager-update", onUpdate);
+    deferred.resolve(win.UI._updatePromise);
+  });
   return deferred.promise;
 }
 
@@ -152,4 +166,9 @@ function removeTab(aTab, aWindow) {
 
   targetBrowser.removeTab(aTab);
   return deferred.promise;
+}
+
+function handleError(aError) {
+  ok(false, "Got an error: " + aError.message + "\n" + aError.stack);
+  finish();
 }

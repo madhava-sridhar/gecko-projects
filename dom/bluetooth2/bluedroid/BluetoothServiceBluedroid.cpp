@@ -19,6 +19,7 @@
 #include "BluetoothServiceBluedroid.h"
 
 #include "BluetoothA2dpManager.h"
+#include "BluetoothGattManager.h"
 #include "BluetoothHfpManager.h"
 #include "BluetoothOppManager.h"
 #include "BluetoothProfileController.h"
@@ -167,7 +168,8 @@ public:
   {
     static void (* const sDeinitManager[])(BluetoothProfileResultHandler*) = {
       BluetoothHfpManager::DeinitHfpInterface,
-      BluetoothA2dpManager::DeinitA2dpInterface
+      BluetoothA2dpManager::DeinitA2dpInterface,
+      BluetoothGattManager::DeinitGattInterface
     };
 
     MOZ_ASSERT(NS_IsMainThread());
@@ -304,7 +306,8 @@ public:
   {
     static void (* const sInitManager[])(BluetoothProfileResultHandler*) = {
       BluetoothHfpManager::InitHfpInterface,
-      BluetoothA2dpManager::InitA2dpInterface
+      BluetoothA2dpManager::InitA2dpInterface,
+      BluetoothGattManager::InitGattInterface
     };
 
     MOZ_ASSERT(NS_IsMainThread());
@@ -1363,6 +1366,10 @@ BluetoothServiceBluedroid::RemoteDevicePropertiesNotification(
       }
       BT_APPEND_NAMED_VALUE(propertiesArray, "UUIDs", uuids);
 
+    } else if (p.mType == PROPERTY_TYPE_OF_DEVICE) {
+      BT_APPEND_NAMED_VALUE(propertiesArray, "Type",
+                            static_cast<uint32_t>(p.mTypeOfDevice));
+
     } else {
       BT_LOGD("Other non-handled device properties. Type: %d", p.mType);
     }
@@ -1455,6 +1462,10 @@ BluetoothServiceBluedroid::DeviceFoundNotification(
         }
       }
       BT_APPEND_NAMED_VALUE(propertiesArray, "UUIDs", uuids);
+
+    } else if (p.mType == PROPERTY_TYPE_OF_DEVICE) {
+      BT_APPEND_NAMED_VALUE(propertiesArray, "Type",
+                            static_cast<uint32_t>(p.mTypeOfDevice));
 
     } else {
       BT_LOGD("Not handled remote device property: %d", p.mType);

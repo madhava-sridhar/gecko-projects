@@ -27,6 +27,7 @@ function* cleanup() {
   Services.prefs.clearUserPref("browser.urlbar.autocomplete.enabled");
   Services.prefs.clearUserPref("browser.urlbar.autoFill");
   Services.prefs.clearUserPref("browser.urlbar.autoFill.typed");
+  Services.prefs.clearUserPref("browser.urlbar.autoFill.searchEngines");
   remove_all_bookmarks();
   yield promiseClearHistory();
 }
@@ -279,4 +280,9 @@ function stripPrefix(spec)
     spec = spec.slice(4);
   }
   return spec;
+}
+
+function makeActionURI(action, params) {
+  let url = "moz-action:" + action + "," + JSON.stringify(params);
+  return NetUtil.newURI(url);
 }

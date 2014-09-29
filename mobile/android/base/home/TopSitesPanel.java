@@ -25,6 +25,7 @@ import org.mozilla.gecko.db.URLMetadata;
 import org.mozilla.gecko.favicons.Favicons;
 import org.mozilla.gecko.favicons.OnFaviconLoadedListener;
 import org.mozilla.gecko.gfx.BitmapUtils;
+import org.mozilla.gecko.home.HomeContextMenuInfo.RemoveItemType;
 import org.mozilla.gecko.home.HomePager.OnUrlOpenListener;
 import org.mozilla.gecko.home.PinSiteDialog.OnSiteSelectedListener;
 import org.mozilla.gecko.home.TopSitesGridView.OnEditPinnedSiteListener;
@@ -179,6 +180,7 @@ public class TopSitesPanel extends HomeFragment {
                 info.url = cursor.getString(cursor.getColumnIndexOrThrow(TopSites.URL));
                 info.title = cursor.getString(cursor.getColumnIndexOrThrow(TopSites.TITLE));
                 info.historyId = cursor.getInt(cursor.getColumnIndexOrThrow(TopSites.HISTORY_ID));
+                info.itemType = RemoveItemType.HISTORY;
                 final int bookmarkIdCol = cursor.getColumnIndexOrThrow(TopSites.BOOKMARK_ID);
                 if (cursor.isNull(bookmarkIdCol)) {
                     // If this is a combined cursor, we may get a history item without a
@@ -361,17 +363,16 @@ public class TopSitesPanel extends HomeFragment {
 
         @Override
         public void onEditPinnedSite(int position, String searchTerm) {
-            mPosition = position;
-
             final FragmentManager manager = getChildFragmentManager();
             PinSiteDialog dialog = (PinSiteDialog) manager.findFragmentByTag(TAG_PIN_SITE);
             if (dialog == null) {
-                dialog = PinSiteDialog.newInstance();
-            }
+                mPosition = position;
 
-            dialog.setOnSiteSelectedListener(this);
-            dialog.setSearchTerm(searchTerm);
-            dialog.show(manager, TAG_PIN_SITE);
+                dialog = PinSiteDialog.newInstance();
+                dialog.setOnSiteSelectedListener(this);
+                dialog.setSearchTerm(searchTerm);
+                dialog.show(manager, TAG_PIN_SITE);
+            }
         }
 
         @Override
@@ -524,15 +525,12 @@ public class TopSitesPanel extends HomeFragment {
                 return;
             }
 
-            // Make sure we query suggested images without the user-entered wrapper.
-            final String decodedUrl = StringUtils.decodeUserEnteredUrl(url);
-
             // Suggested images have precedence over thumbnails, no need to wait
             // for them to be loaded. See: CursorLoaderCallbacks.onLoadFinished()
-            final String imageUrl = BrowserDB.getSuggestedImageUrlForUrl(decodedUrl);
+            final String imageUrl = cursor.getString(cursor.getColumnIndexOrThrow(TopSites.IMAGEURL));
             if (!TextUtils.isEmpty(imageUrl)) {
-                final int bgColor = BrowserDB.getSuggestedBackgroundColorForUrl(decodedUrl);
-                view.displayThumbnail(imageUrl, bgColor);
+                final String bgColor = cursor.getString(cursor.getColumnIndexOrThrow(TopSites.BGCOLOR));
+                view.displayThumbnail(imageUrl, Color.parseColor(bgColor));
                 return;
             }
 
@@ -623,10 +621,11 @@ public class TopSitesPanel extends HomeFragment {
             int i = 1;
             do {
                 final String url = c.getString(col);
+                final String imageUrl = c.getString(c.getColumnIndexOrThrow(TopSites.IMAGEURL));
 
                 // Only try to fetch thumbnails for non-empty URLs that
                 // don't have an associated suggested image URL.
-                if (TextUtils.isEmpty(url) || BrowserDB.hasSuggestedImageUrl(url)) {
+                if (TextUtils.isEmpty(url) || !TextUtils.isEmpty(imageUrl)) {
                     continue;
                 }
 
@@ -674,6 +673,10 @@ public class TopSitesPanel extends HomeFragment {
         }
 
         public static ThumbnailInfo fromMetadata(final Map<String, Object> data) {
+            if (data == null) {
+                return null;
+            }
+
             final String imageUrl = (String) data.get(TILE_IMAGE_URL_COLUMN);
             if (imageUrl == null) {
                 return null;
@@ -720,22 +723,16 @@ public class TopSitesPanel extends HomeFragment {
             final Map<String, Map<String, Object>> metadata = URLMetadata.getForUrls(cr, mUrls, COLUMNS);
 
             // Keep a list of urls that don't have tiles images. We'll use thumbnails for them instead.
-            final List<String> thumbnailUrls;
-            if (metadata != null) {
-                thumbnailUrls = new ArrayList<String>();
-
-                for (String url : metadata.keySet()) {
-                    ThumbnailInfo info = ThumbnailInfo.fromMetadata(metadata.get(url));
-                    if (info == null) {
-                        // If we didn't find metadata, we'll look for a thumbnail for this url.
-                        thumbnailUrls.add(url);
-                        continue;
-                    }
-
-                    thumbnails.put(url, info);
+            final List<String> thumbnailUrls = new ArrayList<String>();
+            for (String url : mUrls) {
+                ThumbnailInfo info = ThumbnailInfo.fromMetadata(metadata.get(url));
+                if (info == null) {
+                    // If we didn't find metadata, we'll look for a thumbnail for this url.
+                    thumbnailUrls.add(url);
+                    continue;
                 }
-            } else {
-                thumbnailUrls = new ArrayList<String>(mUrls);
+
+                thumbnails.put(url, info);
             }
 
             if (thumbnailUrls.size() == 0) {

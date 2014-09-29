@@ -38,7 +38,7 @@ public class Tab {
     private long mLastUsed;
     private String mUrl;
     private String mBaseDomain;
-    private String mUserSearch;
+    private String mUserRequested; // The original url requested. May be typed by the user or sent by an extneral app for example.
     private String mTitle;
     private Bitmap mFavicon;
     private String mFaviconUrl;
@@ -53,7 +53,6 @@ public class Tab {
     private int mParentId;
     private boolean mExternal;
     private boolean mBookmark;
-    private boolean mReadingListItem;
     private int mFaviconLoadId;
     private String mContentType;
     private boolean mHasTouchListeners;
@@ -98,7 +97,7 @@ public class Tab {
         mId = id;
         mUrl = url;
         mBaseDomain = "";
-        mUserSearch = "";
+        mUserRequested = "";
         mExternal = external;
         mParentId = parentId;
         mTitle = title == null ? "" : title;
@@ -148,9 +147,9 @@ public class Tab {
         return mUrl;
     }
 
-    // mUserSearch should never be null, but it may be an empty string
-    public synchronized String getUserSearch() {
-        return mUserSearch;
+    // mUserRequested should never be null, but it may be an empty string
+    public synchronized String getUserRequested() {
+        return mUserRequested;
     }
 
     // mTitle should never be null, but it may be an empty string
@@ -259,10 +258,6 @@ public class Tab {
         return mBookmark;
     }
 
-    public boolean isReadingListItem() {
-        return mReadingListItem;
-    }
-
     public boolean isExternal() {
         return mExternal;
     }
@@ -273,8 +268,8 @@ public class Tab {
         }
     }
 
-    private synchronized void updateUserSearch(String userSearch) {
-        mUserSearch = userSearch;
+    public synchronized void updateUserRequested(String userRequested) {
+        mUserRequested = userRequested;
     }
 
     public void setErrorType(String type) {
@@ -442,9 +437,7 @@ public class Tab {
                     return;
                 }
 
-                final int flags = BrowserDB.getItemFlags(getContentResolver(), url);
-                mBookmark = (flags & Bookmarks.FLAG_BOOKMARK) > 0;
-                mReadingListItem = (flags & Bookmarks.FLAG_READING) > 0;
+                mBookmark = BrowserDB.isBookmark(getContentResolver(), url);
                 Tabs.getInstance().notifyListeners(Tab.this, Tabs.TabEvents.MENU_UPDATED);
             }
         });
@@ -661,7 +654,7 @@ public class Tab {
         }
 
         setContentType(message.getString("contentType"));
-        updateUserSearch(message.getString("userSearch"));
+        updateUserRequested(message.getString("userRequested"));
         mBaseDomain = message.optString("baseDomain");
 
         setHasFeeds(false);

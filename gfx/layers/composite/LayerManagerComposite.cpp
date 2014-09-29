@@ -18,7 +18,7 @@
 #include "Layers.h"                     // for Layer, ContainerLayer, etc
 #include "LayerScope.h"                 // for LayerScope Tool
 #include "protobuf/LayerScopePacket.pb.h" // for protobuf (LayerScope)
-#include "ThebesLayerComposite.h"       // for ThebesLayerComposite
+#include "PaintedLayerComposite.h"      // for PaintedLayerComposite
 #include "TiledLayerBuffer.h"           // for TiledLayerComposer
 #include "Units.h"                      // for ScreenIntRect
 #include "gfx2DGlue.h"                  // for ToMatrix4x4
@@ -212,7 +212,7 @@ LayerManagerComposite::EndEmptyTransaction(EndTransactionFlags aFlags)
 }
 
 void
-LayerManagerComposite::EndTransaction(DrawThebesLayerCallback aCallback,
+LayerManagerComposite::EndTransaction(DrawPaintedLayerCallback aCallback,
                                       void* aCallbackData,
                                       EndTransactionFlags aFlags)
 {
@@ -280,8 +280,8 @@ LayerManagerComposite::CreateOptimalMaskDrawTarget(const IntSize &aSize)
   return nullptr;
 }
 
-already_AddRefed<ThebesLayer>
-LayerManagerComposite::CreateThebesLayer()
+already_AddRefed<PaintedLayer>
+LayerManagerComposite::CreatePaintedLayer()
 {
   NS_RUNTIMEABORT("Should only be called on the drawing side");
   return nullptr;
@@ -601,14 +601,14 @@ LayerManagerComposite::Render()
     composer2D = mCompositor->GetWidget()->GetComposer2D();
   }
 
-  if (!mTarget && composer2D && composer2D->TryRender(mRoot, mWorldMatrix, mGeometryChanged)) {
+  if (!mTarget && composer2D && composer2D->TryRender(mRoot, mGeometryChanged)) {
     if (mFPS) {
       double fps = mFPS->mCompositionFps.AddFrameAndGetFps(TimeStamp::Now());
       if (gfxPrefs::LayersDrawFPS()) {
         printf_stderr("HWComposer: FPS is %g\n", fps);
       }
     }
-    mCompositor->EndFrameForExternalComposition(mWorldMatrix);
+    mCompositor->EndFrameForExternalComposition(Matrix());
     // Reset the invalid region as compositing is done
     mInvalidRegion.SetEmpty();
     mLastFrameMissedHWC = false;
@@ -643,12 +643,11 @@ LayerManagerComposite::Render()
 
   if (mRoot->GetClipRect()) {
     clipRect = *mRoot->GetClipRect();
-    WorldTransformRect(clipRect);
     Rect rect(clipRect.x, clipRect.y, clipRect.width, clipRect.height);
-    mCompositor->BeginFrame(invalid, &rect, mWorldMatrix, bounds, nullptr, &actualBounds);
+    mCompositor->BeginFrame(invalid, &rect, bounds, nullptr, &actualBounds);
   } else {
     gfx::Rect rect;
-    mCompositor->BeginFrame(invalid, nullptr, mWorldMatrix, bounds, &rect, &actualBounds);
+    mCompositor->BeginFrame(invalid, nullptr, bounds, &rect, &actualBounds);
     clipRect = nsIntRect(rect.x, rect.y, rect.width, rect.height);
   }
 
@@ -710,31 +709,6 @@ LayerManagerComposite::Render()
   RecordFrame();
 }
 
-void
-LayerManagerComposite::SetWorldTransform(const gfx::Matrix& aMatrix)
-{
-  NS_ASSERTION(aMatrix.PreservesAxisAlignedRectangles(),
-               "SetWorldTransform only accepts matrices that satisfy PreservesAxisAlignedRectangles");
-  NS_ASSERTION(!aMatrix.HasNonIntegerScale(),
-               "SetWorldTransform only accepts matrices with integer scale");
-
-  mWorldMatrix = aMatrix;
-}
-
-gfx::Matrix&
-LayerManagerComposite::GetWorldTransform(void)
-{
-  return mWorldMatrix;
-}
-
-void
-LayerManagerComposite::WorldTransformRect(nsIntRect& aRect)
-{
-  gfx::Rect grect(aRect.x, aRect.y, aRect.width, aRect.height);
-  grect = mWorldMatrix.TransformBounds(grect);
-  aRect.SetRect(grect.X(), grect.Y(), grect.Width(), grect.Height());
-}
-
 static void
 SubtractTransformedRegion(nsIntRegion& aRegion,
                           const nsIntRegion& aRegionToSubtract,
@@ -783,15 +757,15 @@ LayerManagerComposite::ComputeRenderIntegrityInternal(Layer* aLayer,
     return;
   }
 
-  // Only thebes layers can be incomplete
-  ThebesLayer* thebesLayer = aLayer->AsThebesLayer();
-  if (!thebesLayer) {
+  // Only painted layers can be incomplete
+  PaintedLayer* paintedLayer = aLayer->AsPaintedLayer();
+  if (!paintedLayer) {
     return;
   }
 
   // See if there's any incomplete rendering
   nsIntRegion incompleteRegion = aLayer->GetEffectiveVisibleRegion();
-  incompleteRegion.Sub(incompleteRegion, thebesLayer->GetValidRegion());
+  incompleteRegion.Sub(incompleteRegion, paintedLayer->GetValidRegion());
 
   if (!incompleteRegion.IsEmpty()) {
     // Calculate the transform to get between screen and layer space
@@ -948,14 +922,14 @@ LayerManagerComposite::ComputeRenderIntegrity()
   return 1.f;
 }
 
-already_AddRefed<ThebesLayerComposite>
-LayerManagerComposite::CreateThebesLayerComposite()
+already_AddRefed<PaintedLayerComposite>
+LayerManagerComposite::CreatePaintedLayerComposite()
 {
   if (mDestroyed) {
     NS_WARNING("Call on destroyed layer manager");
     return nullptr;
   }
-  return nsRefPtr<ThebesLayerComposite>(new ThebesLayerComposite(this)).forget();
+  return nsRefPtr<PaintedLayerComposite>(new PaintedLayerComposite(this)).forget();
 }
 
 already_AddRefed<ContainerLayerComposite>

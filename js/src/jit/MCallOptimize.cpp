@@ -19,6 +19,8 @@
 
 #include "vm/StringObject-inl.h"
 
+using mozilla::ArrayLength;
+
 namespace js {
 namespace jit {
 
@@ -178,20 +180,24 @@ IonBuilder::inlineNativeCall(CallInfo &callInfo, JSFunction *target)
 
     // TypedObject intrinsics.
     if (native == intrinsic_ObjectIsTypedObject)
-        return inlineHasClasses(callInfo,
-                                &TransparentTypedObject::class_, &OpaqueTypedObject::class_);
+        return inlineHasClass(callInfo,
+                              &TransparentTypedObject::class_,
+                              &OutlineOpaqueTypedObject::class_,
+                              &InlineOpaqueTypedObject::class_);
     if (native == intrinsic_ObjectIsTransparentTypedObject)
         return inlineHasClass(callInfo, &TransparentTypedObject::class_);
     if (native == intrinsic_ObjectIsOpaqueTypedObject)
-        return inlineHasClass(callInfo, &OpaqueTypedObject::class_);
+        return inlineHasClass(callInfo,
+                              &OutlineOpaqueTypedObject::class_,
+                              &InlineOpaqueTypedObject::class_);
     if (native == intrinsic_ObjectIsTypeDescr)
         return inlineObjectIsTypeDescr(callInfo);
     if (native == intrinsic_TypeDescrIsSimpleType)
-        return inlineHasClasses(callInfo,
-                                &ScalarTypeDescr::class_, &ReferenceTypeDescr::class_);
+        return inlineHasClass(callInfo,
+                              &ScalarTypeDescr::class_, &ReferenceTypeDescr::class_);
     if (native == intrinsic_TypeDescrIsArrayType)
-        return inlineHasClasses(callInfo,
-                                &SizedArrayTypeDescr::class_, &UnsizedArrayTypeDescr::class_);
+        return inlineHasClass(callInfo,
+                              &SizedArrayTypeDescr::class_, &UnsizedArrayTypeDescr::class_);
     if (native == intrinsic_TypeDescrIsSizedArrayType)
         return inlineHasClass(callInfo, &SizedArrayTypeDescr::class_);
     if (native == intrinsic_TypeDescrIsUnsizedArrayType)
@@ -226,12 +232,22 @@ IonBuilder::inlineNativeGetter(CallInfo &callInfo, JSFunction *target)
     types::TemporaryTypeSet *thisTypes = callInfo.thisArg()->resultTypeSet();
     JS_ASSERT(callInfo.argc() == 0);
 
-    // Try to optimize typed array lengths. There is one getter for each
-    // typed array prototype, and make sure we are accessing the right one
-    // for the type of the instance object.
+    // Try to optimize typed array lengths. There is one getter on
+    // %TypedArray%.prototype for typed arrays and one getter on
+    // SharedTypedArray.prototype for shared typed arrays.  Make sure we're
+    // accessing the right one for the type of the instance object.
     if (thisTypes) {
-        Scalar::Type type = thisTypes->getTypedArrayType();
-        if (type != Scalar::TypeMax && TypedArrayObject::isOriginalLengthGetter(type, native)) {
+        Scalar::Type type;
+
+        type = thisTypes->getTypedArrayType();
+        if (type != Scalar::TypeMax && TypedArrayObject::isOriginalLengthGetter(native)) {
+            MInstruction *length = addTypedArrayLength(callInfo.thisArg());
+            current->push(length);
+            return InliningStatus_Inlined;
+        }
+
+        type = thisTypes->getSharedTypedArrayType();
+        if (type != Scalar::TypeMax && SharedTypedArrayObject::isOriginalLengthGetter(type, native)) {
             MInstruction *length = addTypedArrayLength(callInfo.thisArg());
             current->push(length);
             return InliningStatus_Inlined;
@@ -1494,7 +1510,7 @@ IonBuilder::inlineUnsafePutElements(CallInfo &callInfo)
         // barriers and on typed arrays and on typed object arrays.
         Scalar::Type arrayType;
         if ((!isDenseNative || writeNeedsBarrier) &&
-            !ElementAccessIsTypedArray(obj, id, &arrayType) &&
+            !ElementAccessIsAnyTypedArray(obj, id, &arrayType) &&
             !elementAccessIsTypedObjectArrayOfScalarType(obj, id, &arrayType))
         {
             return InliningStatus_NotInlined;
@@ -1523,7 +1539,7 @@ IonBuilder::inlineUnsafePutElements(CallInfo &callInfo)
         }
 
         Scalar::Type arrayType;
-        if (ElementAccessIsTypedArray(obj, id, &arrayType)) {
+        if (ElementAccessIsAnyTypedArray(obj, id, &arrayType)) {
             if (!inlineUnsafeSetTypedArrayElement(callInfo, base, arrayType))
                 return InliningStatus_Error;
             continue;
@@ -1749,11 +1765,8 @@ IonBuilder::inlineNewDenseArrayForParallelExecution(CallInfo &callInfo)
 }
 
 IonBuilder::InliningStatus
-IonBuilder::inlineHasClasses(CallInfo &callInfo, const Class *clasp1, const Class *clasp2)
+IonBuilder::inlineHasClass(CallInfo &callInfo, const Class *clasp1, const Class *clasp2, const Class *clasp3)
 {
-    // Thus far there has been no reason to complicate this beyond two classes,
-    // though it generalizes pretty well.
-    // clasp2 may be NULL.
     if (callInfo.constructing() || callInfo.argc() != 1)
         return InliningStatus_NotInlined;
 
@@ -1765,21 +1778,27 @@ IonBuilder::inlineHasClasses(CallInfo &callInfo, const Class *clasp1, const Clas
     types::TemporaryTypeSet *types = callInfo.getArg(0)->resultTypeSet();
     const Class *knownClass = types ? types->getKnownClass() : nullptr;
     if (knownClass) {
-        pushConstant(BooleanValue(knownClass == clasp1 || knownClass == clasp2));
+        pushConstant(BooleanValue(knownClass == clasp1 || knownClass == clasp2 || knownClass == clasp3));
     } else {
         MHasClass *hasClass1 = MHasClass::New(alloc(), callInfo.getArg(0), clasp1);
         current->add(hasClass1);
-        if (clasp2 == nullptr) {
+
+        if (!clasp2 && !clasp3) {
             current->push(hasClass1);
         } else {
-            // The following turns into branch-free, box-free code on x86, and should do so on ARM.
-            MHasClass *hasClass2 = MHasClass::New(alloc(), callInfo.getArg(0), clasp2);
-            current->add(hasClass2);
-            MBitOr *either = MBitOr::New(alloc(), hasClass1, hasClass2);
-            either->infer(inspector, pc);
-            current->add(either);
+            const Class *remaining[] = { clasp2, clasp3 };
+            MDefinition *last = hasClass1;
+            for (size_t i = 0; i < ArrayLength(remaining); i++) {
+                MHasClass *hasClass = MHasClass::New(alloc(), callInfo.getArg(0), remaining[i]);
+                current->add(hasClass);
+                MBitOr *either = MBitOr::New(alloc(), last, hasClass);
+                either->infer(inspector, pc);
+                current->add(either);
+                last = either;
+            }
+
             // Convert to bool with the '!!' idiom
-            MNot *resultInverted = MNot::New(alloc(), either);
+            MNot *resultInverted = MNot::New(alloc(), last);
             resultInverted->cacheOperandMightEmulateUndefined();
             current->add(resultInverted);
             MNot *result = MNot::New(alloc(), resultInverted);
@@ -1982,9 +2001,9 @@ IonBuilder::inlineIsCallable(CallInfo &callInfo)
     } else {
         types::TemporaryTypeSet *types = callInfo.getArg(0)->resultTypeSet();
         const Class *clasp = types ? types->getKnownClass() : nullptr;
-        if (clasp) {
+        if (clasp && !clasp->isProxy()) {
             isCallableKnown = true;
-            isCallableConstant = clasp->isCallable();
+            isCallableConstant = clasp->nonProxyCallable();
         }
     }
 
@@ -2044,7 +2063,13 @@ IonBuilder::inlineToInteger(CallInfo &callInfo)
     if (callInfo.argc() != 1 || callInfo.constructing())
         return InliningStatus_NotInlined;
 
-    // Only fast-path if we know the input is in integer in the int32 range.
+    MIRType type = callInfo.getArg(0)->type();
+
+    // Only optimize cases where input is number, null, or boolean
+    if (!IsNumberType(type) && type != MIRType_Null && type != MIRType_Boolean)
+        return InliningStatus_NotInlined;
+
+    // Only optimize cases where output is int32
     if (getInlineReturnType() != MIRType_Int32)
         return InliningStatus_NotInlined;
 

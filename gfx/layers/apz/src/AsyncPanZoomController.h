@@ -45,6 +45,7 @@ class FlingAnimation;
 class InputBlockState;
 class TouchBlockState;
 class OverscrollHandoffChain;
+class StateChangeNotificationBlocker;
 
 /**
  * Controller for all panning and zooming logic. Any time a user input is
@@ -240,6 +241,14 @@ public:
   Matrix4x4 GetTransformToLastDispatchedPaint() const;
 
   /**
+   * Returns whether or not the APZC is currently in a state of checkerboarding.
+   * This is a simple computation based on the last-painted content and whether
+   * the async transform has pushed it so far that it doesn't fully contain the
+   * composition bounds.
+   */
+  bool IsCurrentlyCheckerboarding() const;
+
+  /**
    * Recalculates the displayport. Ideally, this should paint an area bigger
    * than the composite-to dimensions so that when you scroll down, you don't
    * checkerboard immediately. This includes a bunch of logic, including
@@ -350,27 +359,6 @@ public:
                                 const ScreenPoint& aAnchor) const;
 
 protected:
-  enum PanZoomState {
-    NOTHING,                  /* no touch-start events received */
-    FLING,                    /* all touches removed, but we're still scrolling page */
-    TOUCHING,                 /* one touch-start event received */
-
-    PANNING,                  /* panning the frame */
-    PANNING_LOCKED_X,         /* touch-start followed by move (i.e. panning with axis lock) X axis */
-    PANNING_LOCKED_Y,         /* as above for Y axis */
-
-    CROSS_SLIDING_X,          /* Panning disabled while user does a horizontal gesture
-                                 on a vertically-scrollable view. This used for the
-                                 Windows Metro "cross-slide" gesture. */
-    CROSS_SLIDING_Y,          /* as above for Y axis */
-
-    PINCHING,                 /* nth touch-start, where n > 1. this mode allows pan and zoom */
-    ANIMATING_ZOOM,           /* animated zoom to a new rect */
-    SNAP_BACK,                /* snap-back animation to relieve overscroll */
-    SMOOTH_SCROLL,            /* Smooth scrolling to destination. Used by
-                                 CSSOM-View smooth scroll-behavior */
-  };
-
   // Protected destructor, to discourage deletion outside of Release():
   ~AsyncPanZoomController();
 
@@ -557,9 +545,12 @@ protected:
 
   /**
    * Tell the paint throttler to request a content repaint with the given
-   * metrics.  (Helper function used by RequestContentRepaint.)
+   * metrics.  (Helper function used by RequestContentRepaint.) If aThrottled
+   * is set to false, the repaint request is sent directly without going through
+   * the paint throttler. In particular, the GeckoContentController::RequestContentRepaint
+   * function will be invoked before this function returns.
    */
-  void RequestContentRepaint(FrameMetrics& aFrameMetrics);
+  void RequestContentRepaint(FrameMetrics& aFrameMetrics, bool aThrottled = true);
 
   /**
    * Actually send the next pending paint request to gecko.
@@ -571,6 +562,13 @@ protected:
    * layers code.
    */
   const FrameMetrics& GetFrameMetrics() const;
+
+  /**
+   * Gets the pointer to the apzc tree manager. All the access to tree manager
+   * should be made via this method and not via private variable since this method
+   * ensures that no lock is set.
+   */
+  APZCTreeManager* GetApzcTreeManager() const;
 
   /**
    * Timeout function for mozbrowserasyncscroll event. Because we throttle
@@ -590,25 +588,12 @@ private:
   bool ArePointerEventsConsumable(TouchBlockState* aBlock, uint32_t aTouchPoints);
 
   /**
-   * Helper to set the current state. Holds the monitor before actually setting
-   * it and fires content controller events based on state changes. Always set
-   * the state using this call, do not set it directly.
-   */
-  void SetState(PanZoomState aState);
-
-  /**
    * Convert ScreenPoint relative to this APZC to CSSPoint relative
    * to the parent document. This excludes the transient compositor transform.
    * NOTE: This must be converted to CSSPoint relative to the child
    * document before sending over IPC.
    */
   bool ConvertToGecko(const ScreenPoint& aPoint, CSSPoint* aOut);
-
-  /**
-   * Internal helpers for checking general state of this apzc.
-   */
-  static bool IsTransformingState(PanZoomState aState);
-  bool IsInPanningState() const;
 
   /**
    * Return in |aTransform| a visual effect that reflects this apzc's
@@ -675,10 +660,6 @@ protected:
   // would significantly limit what methods could be 'const'.
   mutable ReentrantMonitor mMonitor;
 
-  // Stores the state of panning and zooming this frame. This is protected by
-  // |mMonitor|; that is, it should be held whenever this is updated.
-  PanZoomState mState;
-
 private:
   // Metrics of the container layer corresponding to this APZC. This is
   // stored here so that it is accessible from the UI/controller thread.
@@ -734,6 +715,66 @@ private:
 
   friend class Axis;
 
+
+
+  /* ===================================================================
+   * The functions and members in this section are used to manage
+   * the state that tracks what this APZC is doing with the input events.
+   */
+protected:
+  enum PanZoomState {
+    NOTHING,                  /* no touch-start events received */
+    FLING,                    /* all touches removed, but we're still scrolling page */
+    TOUCHING,                 /* one touch-start event received */
+
+    PANNING,                  /* panning the frame */
+    PANNING_LOCKED_X,         /* touch-start followed by move (i.e. panning with axis lock) X axis */
+    PANNING_LOCKED_Y,         /* as above for Y axis */
+
+    CROSS_SLIDING_X,          /* Panning disabled while user does a horizontal gesture
+                                 on a vertically-scrollable view. This used for the
+                                 Windows Metro "cross-slide" gesture. */
+    CROSS_SLIDING_Y,          /* as above for Y axis */
+
+    PINCHING,                 /* nth touch-start, where n > 1. this mode allows pan and zoom */
+    ANIMATING_ZOOM,           /* animated zoom to a new rect */
+    SNAP_BACK,                /* snap-back animation to relieve overscroll */
+    SMOOTH_SCROLL,            /* Smooth scrolling to destination. Used by
+                                 CSSOM-View smooth scroll-behavior */
+  };
+
+  // This is in theory protected by |mMonitor|; that is, it should be held whenever
+  // this is updated. In practice though... see bug 897017.
+  PanZoomState mState;
+
+private:
+  friend class StateChangeNotificationBlocker;
+  /**
+   * A counter of how many StateChangeNotificationBlockers are active.
+   * A non-zero count will prevent state change notifications from
+   * being dispatched. Only code that holds mMonitor should touch this.
+   */
+  int mNotificationBlockers;
+
+  /**
+   * Helper to set the current state. Holds the monitor before actually setting
+   * it and fires content controller events based on state changes. Always set
+   * the state using this call, do not set it directly.
+   */
+  void SetState(PanZoomState aState);
+  /**
+   * Fire content controller notifications about state changes, assuming no
+   * StateChangeNotificationBlocker has been activated.
+   */
+  void DispatchStateChangeNotification(PanZoomState aOldState, PanZoomState aNewState);
+  /**
+   * Internal helpers for checking general state of this apzc.
+   */
+  static bool IsTransformingState(PanZoomState aState);
+  bool IsInPanningState() const;
+
+
+
   /* ===================================================================
    * The functions and members in this section are used to manage
    * blocks of touch events and the state needed to deal with content
@@ -757,6 +798,12 @@ public:
    * touch session.
    */
   void SetAllowedTouchBehavior(const nsTArray<TouchBehaviorFlags>& aBehaviors);
+
+  /**
+   * Flush a repaint request if one is needed, without throttling it with the
+   * paint throttler.
+   */
+  void FlushRepaintForNewInputBlock();
 
 private:
   void ScheduleContentResponseTimeout();
@@ -914,6 +961,14 @@ public:
   AsyncPanZoomController* GetPrevSibling() const { return mPrevSibling; }
   AsyncPanZoomController* GetParent() const { return mParent; }
 
+  AsyncPanZoomController* GetFirstChild() const {
+    AsyncPanZoomController* child = GetLastChild();
+    while (child && child->GetPrevSibling()) {
+      child = child->GetPrevSibling();
+    }
+    return child;
+  }
+
   /* Returns true if there is no APZC higher in the tree with the same
    * layers id.
    */
@@ -964,8 +1019,7 @@ public:
    * an overscrolled state itself if it can.
    */
   bool AttemptScroll(const ScreenPoint& aStartPoint, const ScreenPoint& aEndPoint,
-                     const OverscrollHandoffChain& aOverscrollHandoffChain,
-                     uint32_t aOverscrollHandoffChainIndex = 0);
+                     OverscrollHandoffState& aOverscrollHandoffState);
 
   void FlushRepaintForOverscrollHandoff();
 
@@ -983,8 +1037,15 @@ private:
    */
   bool CallDispatchScroll(const ScreenPoint& aStartPoint,
                           const ScreenPoint& aEndPoint,
-                          const OverscrollHandoffChain& aOverscrollHandoffChain,
-                          uint32_t aOverscrollHandoffChainIndex);
+                          OverscrollHandoffState& aOverscrollHandoffState);
+
+  /**
+   * A helper function for overscrolling during panning. This is a wrapper
+   * around OverscrollBy() that also implements restrictions on entering
+   * overscroll based on the pan angle.
+   */
+  bool OverscrollForPanning(ScreenPoint aOverscroll,
+                            const ScreenPoint& aPanDistance);
 
   /**
    * Try to overscroll by 'aOverscroll'.
@@ -992,7 +1053,7 @@ private:
    * and the function returns true.
    * Otherwise, nothing happens and the function return false.
    */
-  bool OverscrollBy(const CSSPoint& aOverscroll);
+  bool OverscrollBy(const ScreenPoint& aOverscroll);
 
   /**
    * Build the chain of APZCs along which scroll will be handed off when
@@ -1098,10 +1159,16 @@ public:
   static bool GetThreadAssertionsEnabled();
   /**
    * This can be used to assert that the current thread is the
-   * controller/UI thread (on which input events are received.
+   * controller/UI thread (on which input events are received).
    * This does nothing if thread assertions are disabled.
    */
   static void AssertOnControllerThread();
+  /**
+   * This can be used to assert that the current thread is the
+   * compositor thread (which applies the async transform).
+   * This does nothing if thread assertions are disabled.
+   */
+  static void AssertOnCompositorThread();
   /**
    * Set an extra offset for testing async scrolling.
    */
@@ -1110,9 +1177,22 @@ public:
     mTestAsyncScrollOffset = aPoint;
   }
 
+  void MarkAsyncTransformAppliedToContent()
+  {
+    mAsyncTransformAppliedToContent = true;
+  }
+
+  bool GetAsyncTransformAppliedToContent() const
+  {
+    return mAsyncTransformAppliedToContent;
+  }
+
 private:
   // Extra offset to add in SampleContentTransformForFrame for testing
   CSSPoint mTestAsyncScrollOffset;
+  // Flag to track whether or not the APZ transform is not used. This
+  // flag is recomputed for every composition frame.
+  bool mAsyncTransformAppliedToContent;
 };
 
 class AsyncPanZoomAnimation {

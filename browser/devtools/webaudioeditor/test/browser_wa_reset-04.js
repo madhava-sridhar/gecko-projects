@@ -8,7 +8,7 @@
 function spawnTest() {
   Services.prefs.setBoolPref("devtools.command-button-frames.enabled", true);
 
-  let [target, debuggee, panel, toolbox] = yield initWebAudioEditor(IFRAME_CONTEXT_URL);
+  let { target, panel, toolbox } = yield initWebAudioEditor(IFRAME_CONTEXT_URL);
   let { gFront, $ } = panel.panelWin;
 
   is($("#reload-notice").hidden, false,
@@ -37,7 +37,7 @@ function spawnTest() {
   is($("#content").hidden, true,
     "The tool's content should still be hidden.");
 
-  let navigating = once(target, "will-navigate");
+  navigating = once(target, "will-navigate");
   let started = once(gFront, "start-context");
 
   reload(target);

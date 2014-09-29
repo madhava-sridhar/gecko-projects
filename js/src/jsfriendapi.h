@@ -54,6 +54,7 @@ class Heap;
 
 namespace js {
 class JS_FRIEND_API(BaseProxyHandler);
+class InterpreterFrame;
 } /* namespace js */
 
 extern JS_FRIEND_API(void)
@@ -86,6 +87,10 @@ JS_GetCustomIteratorCount(JSContext *cx);
 
 extern JS_FRIEND_API(bool)
 JS_NondeterministicGetWeakMapKeys(JSContext *cx, JS::HandleObject obj, JS::MutableHandleObject ret);
+
+// Raw JSScript* because this needs to be callable from a signal handler.
+extern JS_FRIEND_API(unsigned)
+JS_PCToLineNumber(JSScript *script, jsbytecode *pc);
 
 /*
  * Determine whether the given object is backed by a DeadObjectProxy.
@@ -156,10 +161,6 @@ JS_CloneObject(JSContext *cx, JS::HandleObject obj, JS::HandleObject proto,
 extern JS_FRIEND_API(JSString *)
 JS_BasicObjectToString(JSContext *cx, JS::HandleObject obj);
 
-extern JS_FRIEND_API(bool)
-js_GetterOnlyPropertyStub(JSContext *cx, JS::HandleObject obj, JS::HandleId id, bool strict,
-                          JS::MutableHandleValue vp);
-
 JS_FRIEND_API(void)
 js_ReportOverRecursed(JSContext *maybecx);
 
@@ -198,7 +199,28 @@ js_DumpObject(JSObject *obj);
 
 extern JS_FRIEND_API(void)
 js_DumpChars(const char16_t *s, size_t n);
+
+extern JS_FRIEND_API(void)
+js_DumpValue(const JS::Value &val);
+
+extern JS_FRIEND_API(void)
+js_DumpId(jsid id);
+
+extern JS_FRIEND_API(void)
+js_DumpInterpreterFrame(JSContext *cx, js::InterpreterFrame *start = nullptr);
+
 #endif
+
+extern JS_FRIEND_API(void)
+js_DumpBacktrace(JSContext *cx);
+
+namespace JS {
+
+// Exposed for DumpJSStack
+extern JS_FRIEND_API(char *)
+FormatStackDump(JSContext *cx, char *buf, bool showArgs, bool showLocals, bool showThisProps);
+
+} // namespace JS
 
 /*
  * Copies all own properties from |obj| to |target|. |obj| must be a "native"
@@ -222,9 +244,6 @@ JS_CopyPropertyFrom(JSContext *cx, JS::HandleId id, JS::HandleObject target,
 
 extern JS_FRIEND_API(bool)
 JS_WrapPropertyDescriptor(JSContext *cx, JS::MutableHandle<JSPropertyDescriptor> desc);
-
-extern JS_FRIEND_API(bool)
-JS_WrapAutoIdVector(JSContext *cx, JS::AutoIdVector &props);
 
 extern JS_FRIEND_API(bool)
 JS_EnumerateState(JSContext *cx, JS::HandleObject obj, JSIterateOp enum_op,
@@ -256,17 +275,17 @@ namespace js {
  *     allow for potention JSClass extensions.
  */
 #define PROXY_MAKE_EXT(outerObject, innerObject, iteratorObject,        \
-                       isWrappedNative)                                 \
+                       isWrappedNative, objectMoved)                    \
     {                                                                   \
         outerObject,                                                    \
         innerObject,                                                    \
         iteratorObject,                                                 \
         isWrappedNative,                                                \
         js::proxy_WeakmapKeyDelegate,                                   \
-        js::proxy_ObjectMoved                                           \
+        objectMoved                                                     \
     }
 
-#define PROXY_CLASS_WITH_EXT(name, extraSlots, flags, callOp, constructOp, ext)         \
+#define PROXY_CLASS_WITH_EXT(name, extraSlots, flags, ext)                              \
     {                                                                                   \
         name,                                                                           \
         js::Class::NON_NATIVE |                                                         \
@@ -282,9 +301,9 @@ namespace js {
         JS_ResolveStub,                                                                 \
         js::proxy_Convert,                                                              \
         js::proxy_Finalize,      /* finalize    */                                      \
-        callOp,                  /* call        */                                      \
+        nullptr,                  /* call        */                                     \
         js::proxy_HasInstance,   /* hasInstance */                                      \
-        constructOp,             /* construct   */                                      \
+        nullptr,             /* construct   */                                          \
         js::proxy_Trace,         /* trace       */                                      \
         JS_NULL_CLASS_SPEC,                                                             \
         ext,                                                                            \
@@ -311,13 +330,14 @@ namespace js {
         }                                                                               \
     }
 
-#define PROXY_CLASS_DEF(name, extraSlots, flags, callOp, constructOp)   \
-  PROXY_CLASS_WITH_EXT(name, extraSlots, flags, callOp, constructOp,    \
+#define PROXY_CLASS_DEF(name, extraSlots, flags)                        \
+  PROXY_CLASS_WITH_EXT(name, extraSlots, flags,                         \
                        PROXY_MAKE_EXT(                                  \
                          nullptr, /* outerObject */                     \
                          nullptr, /* innerObject */                     \
                          nullptr, /* iteratorObject */                  \
-                         false    /* isWrappedNative */                 \
+                         false,   /* isWrappedNative */                 \
+                         js::proxy_ObjectMoved                          \
                        ))
 
 /*
@@ -636,17 +656,14 @@ JS_FRIEND_API(const Class *)
 ProtoKeyToClass(JSProtoKey key);
 
 // Returns true if the standard class identified by |key| inherits from
-// another standard class with the same js::Class. This basically means
-// that the various properties described by our js::Class are intended
-// to live higher up on the proto chain.
+// another standard class (in addition to Object) along its proto chain.
 //
 // In practice, this only returns true for Error subtypes.
 inline bool
 StandardClassIsDependent(JSProtoKey key)
 {
-    JSProtoKey keyFromClass = JSCLASS_CACHED_PROTO_KEY(ProtoKeyToClass(key));
-    MOZ_ASSERT(keyFromClass);
-    return key != keyFromClass;
+    const Class *clasp = ProtoKeyToClass(key);
+    return clasp->spec.defined() && clasp->spec.dependent();
 }
 
 // Returns the key for the class inherited by a given standard class (that
@@ -663,10 +680,9 @@ ParentKeyForStandardClass(JSProtoKey key)
     if (key == JSProto_Object)
         return JSProto_Null;
 
-    // If we're dependent (i.e. an Error subtype), return the key of the class
-    // we depend on.
+    // If we're dependent, return the key of the class we depend on.
     if (StandardClassIsDependent(key))
-        return JSCLASS_CACHED_PROTO_KEY(ProtoKeyToClass(key));
+        return ProtoKeyToClass(key)->spec.parentKey();
 
     // Otherwise, we inherit [Object].
     return JSProto_Object;
@@ -709,6 +725,9 @@ GetObjectParentMaybeScope(JSObject *obj);
 
 JS_FRIEND_API(JSObject *)
 GetGlobalForObjectCrossCompartment(JSObject *obj);
+
+JS_FRIEND_API(JSObject *)
+GetPrototypeNoProxy(JSObject *obj);
 
 // Sidestep the activeContext checking implicitly performed in
 // JS_SetPendingException.
@@ -1478,7 +1497,6 @@ extern JS_FRIEND_API(JSObject *)
 JS_NewUint8Array(JSContext *cx, uint32_t nelements);
 extern JS_FRIEND_API(JSObject *)
 JS_NewUint8ClampedArray(JSContext *cx, uint32_t nelements);
-
 extern JS_FRIEND_API(JSObject *)
 JS_NewInt16Array(JSContext *cx, uint32_t nelements);
 extern JS_FRIEND_API(JSObject *)
@@ -1491,6 +1509,25 @@ extern JS_FRIEND_API(JSObject *)
 JS_NewFloat32Array(JSContext *cx, uint32_t nelements);
 extern JS_FRIEND_API(JSObject *)
 JS_NewFloat64Array(JSContext *cx, uint32_t nelements);
+
+extern JS_FRIEND_API(JSObject *)
+JS_NewSharedInt8Array(JSContext *cx, uint32_t nelements);
+extern JS_FRIEND_API(JSObject *)
+JS_NewSharedUint8Array(JSContext *cx, uint32_t nelements);
+extern JS_FRIEND_API(JSObject *)
+JS_NewSharedUint8ClampedArray(JSContext *cx, uint32_t nelements);
+extern JS_FRIEND_API(JSObject *)
+JS_NewSharedInt16Array(JSContext *cx, uint32_t nelements);
+extern JS_FRIEND_API(JSObject *)
+JS_NewSharedUint16Array(JSContext *cx, uint32_t nelements);
+extern JS_FRIEND_API(JSObject *)
+JS_NewSharedInt32Array(JSContext *cx, uint32_t nelements);
+extern JS_FRIEND_API(JSObject *)
+JS_NewSharedUint32Array(JSContext *cx, uint32_t nelements);
+extern JS_FRIEND_API(JSObject *)
+JS_NewSharedFloat32Array(JSContext *cx, uint32_t nelements);
+extern JS_FRIEND_API(JSObject *)
+JS_NewSharedFloat64Array(JSContext *cx, uint32_t nelements);
 
 /*
  * Create a new typed array and copy in values from the given object. The
@@ -1553,6 +1590,37 @@ extern JS_FRIEND_API(JSObject *)
 JS_NewFloat64ArrayWithBuffer(JSContext *cx, JS::HandleObject arrayBuffer,
                              uint32_t byteOffset, int32_t length);
 
+// As for the above, passing length==(uint32_t)-1 signifies "up to the
+// end of the buffer".
+
+extern JS_FRIEND_API(JSObject *)
+JS_NewSharedInt8ArrayWithBuffer(JSContext *cx, JS::HandleObject arrayBuffer,
+                                uint32_t byteOffset, uint32_t length);
+extern JS_FRIEND_API(JSObject *)
+JS_NewSharedUint8ArrayWithBuffer(JSContext *cx, JS::HandleObject arrayBuffer,
+                                 uint32_t byteOffset, uint32_t length);
+extern JS_FRIEND_API(JSObject *)
+JS_NewSharedUint8ClampedArrayWithBuffer(JSContext *cx, JS::HandleObject arrayBuffer,
+                                        uint32_t byteOffset, uint32_t length);
+extern JS_FRIEND_API(JSObject *)
+JS_NewSharedInt16ArrayWithBuffer(JSContext *cx, JS::HandleObject arrayBuffer,
+                                 uint32_t byteOffset, uint32_t length);
+extern JS_FRIEND_API(JSObject *)
+JS_NewSharedUint16ArrayWithBuffer(JSContext *cx, JS::HandleObject arrayBuffer,
+                                  uint32_t byteOffset, uint32_t length);
+extern JS_FRIEND_API(JSObject *)
+JS_NewSharedInt32ArrayWithBuffer(JSContext *cx, JS::HandleObject arrayBuffer,
+                                 uint32_t byteOffset, uint32_t length);
+extern JS_FRIEND_API(JSObject *)
+JS_NewSharedUint32ArrayWithBuffer(JSContext *cx, JS::HandleObject arrayBuffer,
+                                  uint32_t byteOffset, uint32_t length);
+extern JS_FRIEND_API(JSObject *)
+JS_NewSharedFloat32ArrayWithBuffer(JSContext *cx, JS::HandleObject arrayBuffer,
+                                   uint32_t byteOffset, uint32_t length);
+extern JS_FRIEND_API(JSObject *)
+JS_NewSharedFloat64ArrayWithBuffer(JSContext *cx, JS::HandleObject arrayBuffer,
+                                   uint32_t byteOffset, uint32_t length);
+
 /*
  * Create a new ArrayBuffer with the given byte length.
  */
@@ -1567,6 +1635,12 @@ JS_NewArrayBuffer(JSContext *cx, uint32_t nbytes);
  */
 extern JS_FRIEND_API(bool)
 JS_IsTypedArrayObject(JSObject *obj);
+
+/*
+ * Ditto for JS_GetSharedTypedArray* APIs.
+ */
+extern JS_FRIEND_API(bool)
+JS_IsSharedTypedArrayObject(JSObject *obj);
 
 /*
  * Check whether obj supports JS_GetArrayBufferView* APIs. Note that this may
@@ -1601,6 +1675,25 @@ JS_IsFloat32Array(JSObject *obj);
 extern JS_FRIEND_API(bool)
 JS_IsFloat64Array(JSObject *obj);
 
+extern JS_FRIEND_API(bool)
+JS_IsSharedInt8Array(JSObject *obj);
+extern JS_FRIEND_API(bool)
+JS_IsSharedUint8Array(JSObject *obj);
+extern JS_FRIEND_API(bool)
+JS_IsSharedUint8ClampedArray(JSObject *obj);
+extern JS_FRIEND_API(bool)
+JS_IsSharedInt16Array(JSObject *obj);
+extern JS_FRIEND_API(bool)
+JS_IsSharedUint16Array(JSObject *obj);
+extern JS_FRIEND_API(bool)
+JS_IsSharedInt32Array(JSObject *obj);
+extern JS_FRIEND_API(bool)
+JS_IsSharedUint32Array(JSObject *obj);
+extern JS_FRIEND_API(bool)
+JS_IsSharedFloat32Array(JSObject *obj);
+extern JS_FRIEND_API(bool)
+JS_IsSharedFloat64Array(JSObject *obj);
+
 /*
  * Test for specific typed array types (ArrayBufferView subtypes) and return
  * the unwrapped object if so, else nullptr.  Never throws.
@@ -1633,6 +1726,25 @@ UnwrapArrayBuffer(JSObject *obj);
 extern JS_FRIEND_API(JSObject *)
 UnwrapArrayBufferView(JSObject *obj);
 
+extern JS_FRIEND_API(JSObject *)
+UnwrapSharedInt8Array(JSObject *obj);
+extern JS_FRIEND_API(JSObject *)
+UnwrapSharedUint8Array(JSObject *obj);
+extern JS_FRIEND_API(JSObject *)
+UnwrapSharedUint8ClampedArray(JSObject *obj);
+extern JS_FRIEND_API(JSObject *)
+UnwrapSharedInt16Array(JSObject *obj);
+extern JS_FRIEND_API(JSObject *)
+UnwrapSharedUint16Array(JSObject *obj);
+extern JS_FRIEND_API(JSObject *)
+UnwrapSharedInt32Array(JSObject *obj);
+extern JS_FRIEND_API(JSObject *)
+UnwrapSharedUint32Array(JSObject *obj);
+extern JS_FRIEND_API(JSObject *)
+UnwrapSharedFloat32Array(JSObject *obj);
+extern JS_FRIEND_API(JSObject *)
+UnwrapSharedFloat64Array(JSObject *obj);
+
 namespace detail {
 
 extern JS_FRIEND_DATA(const Class* const) Int8ArrayClassPtr;
@@ -1644,6 +1756,16 @@ extern JS_FRIEND_DATA(const Class* const) Int32ArrayClassPtr;
 extern JS_FRIEND_DATA(const Class* const) Uint32ArrayClassPtr;
 extern JS_FRIEND_DATA(const Class* const) Float32ArrayClassPtr;
 extern JS_FRIEND_DATA(const Class* const) Float64ArrayClassPtr;
+
+extern JS_FRIEND_DATA(const Class* const) SharedInt8ArrayClassPtr;
+extern JS_FRIEND_DATA(const Class* const) SharedUint8ArrayClassPtr;
+extern JS_FRIEND_DATA(const Class* const) SharedUint8ClampedArrayClassPtr;
+extern JS_FRIEND_DATA(const Class* const) SharedInt16ArrayClassPtr;
+extern JS_FRIEND_DATA(const Class* const) SharedUint16ArrayClassPtr;
+extern JS_FRIEND_DATA(const Class* const) SharedInt32ArrayClassPtr;
+extern JS_FRIEND_DATA(const Class* const) SharedUint32ArrayClassPtr;
+extern JS_FRIEND_DATA(const Class* const) SharedFloat32ArrayClassPtr;
+extern JS_FRIEND_DATA(const Class* const) SharedFloat64ArrayClassPtr;
 
 const size_t TypedArrayLengthSlot = 1;
 
@@ -1734,6 +1856,9 @@ JS_GetArrayBufferViewType(JSObject *obj);
  */
 extern JS_FRIEND_API(bool)
 JS_IsArrayBufferObject(JSObject *obj);
+
+extern JS_FRIEND_API(bool)
+JS_IsSharedArrayBufferObject(JSObject *obj);
 
 /*
  * Return the available byte length of an array buffer.
@@ -2475,6 +2600,9 @@ UnsafeDefineElement(JSContext *cx, JS::HandleObject obj, uint32_t index, JS::Han
 JS_FRIEND_API(bool)
 SliceSlowly(JSContext* cx, JS::HandleObject obj, JS::HandleObject receiver,
             uint32_t begin, uint32_t end, JS::HandleObject result);
+
+JS_FRIEND_API(bool)
+ForwardToNative(JSContext *cx, JSNative native, const JS::CallArgs &args);
 
 /* ES5 8.12.8. */
 extern JS_FRIEND_API(bool)

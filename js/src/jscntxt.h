@@ -460,9 +460,6 @@ struct JSContext : public js::ExclusiveContext,
     /* State for object and array toSource conversion. */
     js::ObjectSet       cycleDetectorSet;
 
-    /* Per-context optional error reporter. */
-    JSErrorReporter     errorReporter;
-
     /* Client opaque pointers. */
     void                *data;
     void                *data2;
@@ -492,9 +489,6 @@ struct JSContext : public js::ExclusiveContext,
     unsigned            outstandingRequests;/* number of JS_BeginRequest calls
                                                without the corresponding
                                                JS_EndRequest. */
-
-    /* Location to stash the iteration value between JSOP_MOREITER and JSOP_ITERNEXT. */
-    js::Value           iterValue;
 
     bool jitIsBroken;
 

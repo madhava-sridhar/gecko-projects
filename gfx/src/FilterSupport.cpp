@@ -438,7 +438,7 @@ ComputeColorMatrix(uint32_t aColorMatrixType, const nsTArray<float>& aValues,
 
       aOutMatrix[5] = lumR - lumR * c + hueRotateR * s;
       aOutMatrix[6] = lumG + oneMinusLumG * c + hueRotateG * s;
-      aOutMatrix[7] = lumB - oneMinusLumB * c - hueRotateB * s;
+      aOutMatrix[7] = lumB - lumB * c - hueRotateB * s;
 
       aOutMatrix[10] = lumR - lumR * c - oneMinusLumR * s;
       aOutMatrix[11] = lumG - lumG * c + lumG * s;
@@ -673,13 +673,24 @@ FilterNodeFromPrimitiveDescription(const FilterPrimitiveDescription& aDescriptio
         filter->SetInput(IN_COMPOSITE_IN_START + 1, aSources[0]);
       } else {
         filter = aDT->CreateFilter(FilterType::BLEND);
-        static const uint8_t blendModes[SVG_FEBLEND_MODE_LIGHTEN + 1] = {
+        static const uint8_t blendModes[SVG_FEBLEND_MODE_LUMINOSITY + 1] = {
           0,
           0,
           BLEND_MODE_MULTIPLY,
           BLEND_MODE_SCREEN,
           BLEND_MODE_DARKEN,
-          BLEND_MODE_LIGHTEN
+          BLEND_MODE_LIGHTEN,
+          BLEND_MODE_OVERLAY,
+          BLEND_MODE_COLOR_DODGE,
+          BLEND_MODE_COLOR_BURN,
+          BLEND_MODE_HARD_LIGHT,
+          BLEND_MODE_SOFT_LIGHT,
+          BLEND_MODE_DIFFERENCE,
+          BLEND_MODE_EXCLUSION,
+          BLEND_MODE_HUE,
+          BLEND_MODE_SATURATION,
+          BLEND_MODE_COLOR,
+          BLEND_MODE_LUMINOSITY
         };
         filter->SetAttribute(ATT_BLEND_BLENDMODE, (uint32_t)blendModes[mode]);
         filter->SetInput(IN_BLEND_IN, aSources[0]);
@@ -1226,14 +1237,16 @@ FilterSupport::RenderFilterDescription(DrawTarget* aDT,
                                        const IntRect& aFillPaintRect,
                                        SourceSurface* aStrokePaint,
                                        const IntRect& aStrokePaintRect,
-                                       nsTArray<RefPtr<SourceSurface>>& aAdditionalImages)
+                                       nsTArray<RefPtr<SourceSurface>>& aAdditionalImages,
+                                       const Point& aDestPoint,
+                                       const DrawOptions& aOptions)
 {
   RefPtr<FilterNode> resultFilter =
     FilterNodeGraphFromDescription(aDT, aFilter, aRenderRect,
                                    aSourceGraphic, aSourceGraphicRect, aFillPaint, aFillPaintRect,
                                    aStrokePaint, aStrokePaintRect, aAdditionalImages);
 
-  aDT->DrawFilter(resultFilter, aRenderRect, Point(0, 0));
+  aDT->DrawFilter(resultFilter, aRenderRect, aDestPoint, aOptions);
 }
 
 static nsIntRegion
@@ -1307,7 +1320,7 @@ ResultChangeRegionForPrimitive(const FilterPrimitiveDescription& aDescription,
 
     case PrimitiveType::DisplacementMap:
     {
-      int32_t scale = ceil(abs(atts.GetFloat(eDisplacementMapScale)));
+      int32_t scale = ceil(std::abs(atts.GetFloat(eDisplacementMapScale)));
       return aInputChangeRegions[0].Inflated(nsIntMargin(scale, scale, scale, scale));
     }
 
@@ -1536,7 +1549,7 @@ SourceNeededRegionForPrimitive(const FilterPrimitiveDescription& aDescription,
       if (aInputIndex == 1) {
         return aResultNeededRegion;
       }
-      int32_t scale = ceil(abs(atts.GetFloat(eDisplacementMapScale)));
+      int32_t scale = ceil(std::abs(atts.GetFloat(eDisplacementMapScale)));
       return aResultNeededRegion.Inflated(nsIntMargin(scale, scale, scale, scale));
     }
 

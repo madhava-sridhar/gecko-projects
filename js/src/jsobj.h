@@ -241,6 +241,11 @@ class JSObject : public js::ObjectImpl
                                    js::HandleShape shape,
                                    js::HandleTypeObject type);
 
+    static inline JSObject *copy(js::ExclusiveContext *cx,
+                                 js::gc::AllocKind kind,
+                                 js::gc::InitialHeap heap,
+                                 js::HandleObject templateObject);
+
     /* Make an array object with the specified initial state. */
     static inline js::ArrayObject *createArray(js::ExclusiveContext *cx,
                                                js::gc::AllocKind kind,
@@ -851,10 +856,10 @@ class JSObject : public js::ObjectImpl
     /*
      * Back to generic stuff.
      */
-    bool isCallable() {
-        return getClass()->isCallable();
-    }
+    bool isCallable() const;
     bool isConstructor() const;
+    JSNative callHook() const;
+    JSNative constructHook() const;
 
     inline void finish(js::FreeOp *fop);
     MOZ_ALWAYS_INLINE void finalize(js::FreeOp *fop);
@@ -1166,13 +1171,13 @@ class JSObject : public js::ObjectImpl
 
     template <class T>
     T &as() {
-        JS_ASSERT(is<T>());
+        JS_ASSERT(this->is<T>());
         return *static_cast<T *>(this);
     }
 
     template <class T>
     const T &as() const {
-        JS_ASSERT(is<T>());
+        JS_ASSERT(this->is<T>());
         return *static_cast<const T *>(this);
     }
 
@@ -1311,7 +1316,7 @@ GetBuiltinPrototypePure(GlobalObject *global, JSProtoKey protoKey);
 
 extern bool
 SetClassAndProto(JSContext *cx, HandleObject obj,
-                 const Class *clasp, Handle<TaggedProto> proto, bool *succeeded);
+                 const Class *clasp, Handle<TaggedProto> proto, bool crashOnFailure);
 
 /*
  * Property-lookup-based access to interface and prototype objects for classes.
@@ -1471,11 +1476,12 @@ LookupNameWithGlobalDefault(JSContext *cx, HandlePropertyName name, HandleObject
                             MutableHandleObject objp);
 
 /*
- * Like LookupName except returns the unqualified var object if 'name' is not found in
- * any preceding scope. Normally the unqualified var object is the global.
+ * Like LookupName except returns the unqualified var object if 'name' is not
+ * found in any preceding scope. Normally the unqualified var object is the
+ * global. If the value for the name in the looked-up scope is an
+ * uninitialized lexical, an UninitializedLexicalObject is returned.
  *
- * Additionally, pobjp and propp are not needed by callers so they are not
- * returned.
+ * Additionally, pobjp is not needed by callers so it is not returned.
  */
 extern bool
 LookupNameUnqualified(JSContext *cx, HandlePropertyName name, HandleObject scopeChain,

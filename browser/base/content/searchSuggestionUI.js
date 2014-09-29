@@ -96,22 +96,22 @@ SearchSuggestionUIController.prototype = {
         row.classList.add("selected");
         row.firstChild.setAttribute("aria-selected", "true");
         this._table.setAttribute("aria-activedescendant", row.firstChild.id);
-        this.input.value = this.suggestionAtIndex(i);
       }
       else {
         row.classList.remove("selected");
         row.firstChild.setAttribute("aria-selected", "false");
       }
     }
-
-    // Update the input when there is no selection.
-    if (idx < 0) {
-      this.input.value = this._stickyInputValue;
-    }
   },
 
   get numSuggestions() {
     return this._table.children.length;
+  },
+
+  selectAndUpdateInput: function (idx) {
+    this.selectedIndex = idx;
+    this.input.value = idx >= 0 ? this.suggestionAtIndex(idx) :
+                       this._stickyInputValue;
   },
 
   suggestionAtIndex: function (idx) {
@@ -125,7 +125,7 @@ SearchSuggestionUIController.prototype = {
       let suggestionStr = this.suggestionAtIndex(idx);
       this._sendMsg("RemoveFormHistoryEntry", suggestionStr);
       this._table.children[idx].remove();
-      this.selectedIndex = -1;
+      this.selectAndUpdateInput(-1);
     }
   },
 
@@ -150,7 +150,7 @@ SearchSuggestionUIController.prototype = {
       this._stickyInputValue = "";
       this._hideSuggestions();
     }
-    this.selectedIndex = -1;
+    this.selectAndUpdateInput(-1);
   },
 
   _onKeypress: function (event) {
@@ -179,6 +179,13 @@ SearchSuggestionUIController.prototype = {
     case event.DOM_VK_RETURN:
       if (this.selectedIndex >= 0) {
         this.input.value = this.suggestionAtIndex(this.selectedIndex);
+        this.input.setAttribute("selection-index", this.selectedIndex);
+        this.input.setAttribute("selection-kind", "key");
+      } else {
+        // If we didn't select anything, make sure to remove the attributes
+        // in case they were populated last time.
+        this.input.removeAttribute("selection-index");
+        this.input.removeAttribute("selection-kind");
       }
       this._stickyInputValue = this.input.value;
       this._hideSuggestions();
@@ -201,7 +208,7 @@ SearchSuggestionUIController.prototype = {
       else if (this.numSuggestions <= newSelectedIndex) {
         newSelectedIndex = -1;
       }
-      this.selectedIndex = newSelectedIndex;
+      this.selectAndUpdateInput(newSelectedIndex);
 
       // Prevent the input's caret from moving.
       event.preventDefault();
@@ -217,9 +224,6 @@ SearchSuggestionUIController.prototype = {
   },
 
   _onMousemove: function (event) {
-    // It's important to listen for mousemove, not mouseover or mouseenter.  The
-    // latter two are triggered when the user is typing and the mouse happens to
-    // be over the suggestions popup.
     this.selectedIndex = this._indexOfTableRowOrDescendent(event.target);
   },
 
@@ -228,6 +232,8 @@ SearchSuggestionUIController.prototype = {
     let suggestion = this.suggestionAtIndex(idx);
     this._stickyInputValue = suggestion;
     this.input.value = suggestion;
+    this.input.setAttribute("selection-index", idx);
+    this.input.setAttribute("selection-kind", "mouse");
     this._hideSuggestions();
     if (this.onClick) {
       this.onClick.call(null);
@@ -342,7 +348,7 @@ SearchSuggestionUIController.prototype = {
     while (this._table.firstElementChild) {
       this._table.firstElementChild.remove();
     }
-    this.selectedIndex = -1;
+    this.selectAndUpdateInput(-1);
   },
 
   _indexOfTableRowOrDescendent: function (row) {

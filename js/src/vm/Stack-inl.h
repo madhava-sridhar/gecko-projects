@@ -88,13 +88,24 @@ InterpreterFrame::initCallFrame(JSContext *cx, InterpreterFrame *prev, jsbytecod
     prevpc_ = prevpc;
     prevsp_ = prevsp;
 
-    initVarsToUndefined();
+    initLocals();
 }
 
 inline void
-InterpreterFrame::initVarsToUndefined()
+InterpreterFrame::initLocals()
 {
-    SetValueRangeToUndefined(slots(), script()->nfixed());
+    SetValueRangeToUndefined(slots(), script()->nfixedvars());
+
+    // Lexical bindings throw ReferenceErrors if they are used before
+    // initialization. See ES6 8.1.1.1.6.
+    //
+    // For completeness, lexical bindings are initialized in ES6 by calling
+    // InitializeBinding, after which touching the binding will no longer
+    // throw reference errors. See 13.1.11, 9.2.13, 13.6.3.4, 13.6.4.6,
+    // 13.6.4.8, 13.14.5, 15.1.8, and 15.2.0.15.
+    Value *lexicalEnd = slots() + script()->fixedLexicalEnd();
+    for (Value *lexical = slots() + script()->fixedLexicalBegin(); lexical != lexicalEnd; ++lexical)
+        lexical->setMagic(JS_UNINITIALIZED_LEXICAL);
 }
 
 inline Value &
@@ -338,7 +349,8 @@ FrameIter::unaliasedForEachActual(JSContext *cx, Op op)
         return;
       case JIT:
         if (data_.jitFrames_.isIonJS()) {
-            ionInlineFrames_.unaliasedForEachActual(cx, op, jit::ReadFrame_Actuals);
+            jit::MaybeReadFallback recover(cx, activation()->asJit(), &data_.jitFrames_);
+            ionInlineFrames_.unaliasedForEachActual(cx, op, jit::ReadFrame_Actuals, recover);
         } else {
             JS_ASSERT(data_.jitFrames_.isBaselineJS());
             data_.jitFrames_.unaliasedForEachActual(op, jit::ReadFrame_Actuals);
@@ -744,20 +756,14 @@ Activation::Activation(ThreadSafeContext *cx, Kind kind)
     kind_(kind)
 {
     cx->perThreadData->activation_ = this;
-
-    // Link the activation into the list of profiling activations if needed.
-    if (isProfiling())
-        registerProfiling();
 }
 
 Activation::~Activation()
 {
+    JS_ASSERT_IF(isProfiling(), this != cx_->perThreadData->profilingActivation_);
     JS_ASSERT(cx_->perThreadData->activation_ == this);
     JS_ASSERT(hideScriptedCallerCount_ == 0);
     cx_->perThreadData->activation_ = prev_;
-
-    if (isProfiling())
-        unregisterProfiling();
 }
 
 bool

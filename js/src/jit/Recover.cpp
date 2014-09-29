@@ -14,6 +14,8 @@
 #include "builtin/RegExp.h"
 #include "builtin/TypedObject.h"
 
+#include "gc/Heap.h"
+
 #include "jit/JitFrameIterator.h"
 #include "jit/JitSpewer.h"
 #include "jit/MIR.h"
@@ -115,11 +117,11 @@ MResumePoint::writeRecoverData(CompactBufferWriter &writer) const
     uint32_t formalArgs = CountArgSlots(script, fun);
     uint32_t nallocs = formalArgs + script->nfixed() + exprStack;
 
-    JitSpew(JitSpew_Snapshots, "Starting frame; implicit %u, formals %u, fixed %u, exprs %u",
+    JitSpew(JitSpew_IonSnapshots, "Starting frame; implicit %u, formals %u, fixed %u, exprs %u",
             implicit, formalArgs - implicit, script->nfixed(), exprStack);
 
     uint32_t pcoff = script->pcToOffset(pc());
-    JitSpew(JitSpew_Snapshots, "Writing pc offset %u, nslots %u", pcoff, nallocs);
+    JitSpew(JitSpew_IonSnapshots, "Writing pc offset %u, nslots %u", pcoff, nallocs);
     writer.writeUnsigned(pcoff);
     writer.writeUnsigned(nallocs);
     return true;
@@ -129,7 +131,7 @@ RResumePoint::RResumePoint(CompactBufferReader &reader)
 {
     pcOffset_ = reader.readUnsigned();
     numOperands_ = reader.readUnsigned();
-    JitSpew(JitSpew_Snapshots, "Read RResumePoint (pc offset %u, nslots %u)",
+    JitSpew(JitSpew_IonSnapshots, "Read RResumePoint (pc offset %u, nslots %u)",
             pcOffset_, numOperands_);
 }
 
@@ -874,6 +876,10 @@ RStringSplit::recover(JSContext *cx, SnapshotIterator &iter) const
 
     RootedValue result(cx);
 
+    // Use AutoEnterAnalysis to avoid invoking the object metadata callback,
+    // which could try to walk the stack while bailing out.
+    types::AutoEnterAnalysis enter(cx);
+
     JSObject *res = str_split_string(cx, typeObj, str, sep);
     if (!res)
         return false;
@@ -929,6 +935,53 @@ RRegExpTest::recover(JSContext *cx, SnapshotIterator &iter) const
 
     RootedValue result(cx);
     result.setBoolean(resultBool);
+    iter.storeInstructionResult(result);
+    return true;
+}
+
+bool
+MRegExpReplace::writeRecoverData(CompactBufferWriter &writer) const
+{
+    MOZ_ASSERT(canRecoverOnBailout());
+    writer.writeUnsigned(uint32_t(RInstruction::Recover_RegExpReplace));
+    return true;
+}
+
+RRegExpReplace::RRegExpReplace(CompactBufferReader &reader)
+{ }
+
+bool
+RRegExpReplace::recover(JSContext *cx, SnapshotIterator &iter) const
+{
+    RootedString string(cx, iter.read().toString());
+    RootedObject regexp(cx, &iter.read().toObject());
+    RootedString repl(cx, iter.read().toString());
+    RootedValue result(cx);
+
+    if (!js::str_replace_regexp_raw(cx, string, regexp, repl, &result))
+        return false;
+
+    iter.storeInstructionResult(result);
+    return true;
+}
+
+bool
+MTypeOf::writeRecoverData(CompactBufferWriter &writer) const
+{
+    MOZ_ASSERT(canRecoverOnBailout());
+    writer.writeUnsigned(uint32_t(RInstruction::Recover_TypeOf));
+    return true;
+}
+
+RTypeOf::RTypeOf(CompactBufferReader &reader)
+{ }
+
+bool
+RTypeOf::recover(JSContext *cx, SnapshotIterator &iter) const
+{
+    RootedValue v(cx, iter.read());
+
+    RootedValue result(cx, StringValue(TypeOfOperation(v, cx->runtime())));
     iter.storeInstructionResult(result);
     return true;
 }
@@ -1034,11 +1087,47 @@ RNewDerivedTypedObject::recover(JSContext *cx, SnapshotIterator &iter) const
     // while bailing out, which could try to walk the stack.
     types::AutoEnterAnalysis enter(cx);
 
-    JSObject *obj = TypedObject::createDerived(cx, descr, owner, offset);
+    JSObject *obj = OutlineTypedObject::createDerived(cx, descr, owner, offset);
     if (!obj)
         return false;
 
     RootedValue result(cx, ObjectValue(*obj));
+    iter.storeInstructionResult(result);
+    return true;
+}
+
+bool
+MCreateThisWithTemplate::writeRecoverData(CompactBufferWriter &writer) const
+{
+    MOZ_ASSERT(canRecoverOnBailout());
+    writer.writeUnsigned(uint32_t(RInstruction::Recover_CreateThisWithTemplate));
+    writer.writeByte(bool(initialHeap() == gc::TenuredHeap));
+    return true;
+}
+
+RCreateThisWithTemplate::RCreateThisWithTemplate(CompactBufferReader &reader)
+{
+    tenuredHeap_ = reader.readByte();
+}
+
+bool
+RCreateThisWithTemplate::recover(JSContext *cx, SnapshotIterator &iter) const
+{
+    RootedObject templateObject(cx, &iter.read().toObject());
+
+    // Use AutoEnterAnalysis to avoid invoking the object metadata callback
+    // while bailing out, which could try to walk the stack.
+    types::AutoEnterAnalysis enter(cx);
+
+    // See CodeGenerator::visitCreateThisWithTemplate
+    gc::AllocKind allocKind = templateObject->asTenured()->getAllocKind();
+    gc::InitialHeap initialHeap = tenuredHeap_ ? gc::TenuredHeap : gc::DefaultHeap;
+    JSObject *resultObject = JSObject::copy(cx, allocKind, initialHeap, templateObject);
+    if (!resultObject)
+        return false;
+
+    RootedValue result(cx);
+    result.setObject(*resultObject);
     iter.storeInstructionResult(result);
     return true;
 }

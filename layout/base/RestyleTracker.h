@@ -15,6 +15,7 @@
 #include "nsClassHashtable.h"
 #include "nsContainerFrame.h"
 #include "mozilla/SplayTree.h"
+#include "mozilla/RestyleLogging.h"
 
 namespace mozilla {
 
@@ -233,9 +234,9 @@ public:
 
   friend class ElementRestyler; // for AddPendingRestyleToTable
 
-  explicit RestyleTracker(Element::FlagsType aRestyleBits) :
-    mRestyleBits(aRestyleBits),
-    mHaveLaterSiblingRestyles(false)
+  explicit RestyleTracker(Element::FlagsType aRestyleBits)
+    : mRestyleBits(aRestyleBits)
+    , mHaveLaterSiblingRestyles(false)
   {
     NS_PRECONDITION((mRestyleBits & ~ELEMENT_ALL_RESTYLE_FLAGS) == 0,
                     "Why do we have these bits set?");
@@ -287,7 +288,12 @@ public:
     return mRestyleBits & ~ELEMENT_PENDING_RESTYLE_FLAGS;
   }
 
-  struct RestyleData {
+  struct Hints {
+    nsRestyleHint mRestyleHint;       // What we want to restyle
+    nsChangeHint mChangeHint;         // The minimal change hint for "self"
+  };
+
+  struct RestyleData : Hints {
     RestyleData() {
       mRestyleHint = nsRestyleHint(0);
       mChangeHint = NS_STYLE_HINT_NONE;
@@ -297,9 +303,6 @@ public:
       mRestyleHint = aRestyleHint;
       mChangeHint = aChangeHint;
     }
-
-    nsRestyleHint mRestyleHint;       // What we want to restyle
-    nsChangeHint mChangeHint;         // The minimal change hint for "self"
 
     // Descendant elements we must check that we ended up restyling, ordered
     // with the same invariant as mRestyleRoots.  The elements here are those
@@ -340,9 +343,11 @@ public:
    */
   inline nsIDocument* Document() const;
 
-  struct RestyleEnumerateData : public RestyleData {
-    nsRefPtr<Element> mElement;
-  };
+#ifdef RESTYLE_LOGGING
+  // Defined in RestyleTrackerInlines.h.
+  inline bool ShouldLogRestyle();
+  inline int32_t& LoggingDepth();
+#endif
 
 private:
   bool AddPendingRestyleToTable(Element* aElement, nsRestyleHint aRestyleHint,
@@ -474,7 +479,12 @@ RestyleTracker::AddPendingRestyle(Element* aElement,
       RestyleData* curData;
       mPendingRestyles.Get(cur, &curData);
       NS_ASSERTION(curData, "expected to find a RestyleData for cur");
-      curData->mDescendants.AppendElement(aElement);
+      // If cur has an eRestyle_ForceDescendants restyle hint, then we
+      // know that we will get to all descendants.  Don't bother
+      // recording the descendant to restyle in that case.
+      if (!(curData->mRestyleHint & eRestyle_ForceDescendants)) {
+        curData->mDescendants.AppendElement(aElement);
+      }
     }
   }
 

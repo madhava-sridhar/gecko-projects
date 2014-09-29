@@ -34,8 +34,8 @@
 #include "mozilla/dom/PermissionMessageUtils.h"
 #include "mozilla/dom/ScriptSettings.h"
 #include "mozilla/dom/StructuredCloneUtils.h"
-#include "mozilla/dom/PBlobChild.h"
-#include "mozilla/dom/PBlobParent.h"
+#include "mozilla/dom/ipc/BlobChild.h"
+#include "mozilla/dom/ipc/BlobParent.h"
 #include "JavaScriptChild.h"
 #include "JavaScriptParent.h"
 #include "mozilla/dom/DOMStringList.h"
@@ -925,7 +925,6 @@ nsFrameMessageManager::ReceiveMessage(nsISupports* aTarget,
                                       nsIPrincipal* aPrincipal,
                                       InfallibleTArray<nsString>* aJSONRetVal)
 {
-  AutoSafeJSContext cx;
   nsAutoTObserverArray<nsMessageListenerInfo, 1>* listeners =
     mListeners.Get(aMessage);
   if (listeners) {
@@ -956,11 +955,23 @@ nsFrameMessageManager::ReceiveMessage(nsISupports* aTarget,
       if (!wrappedJS) {
         continue;
       }
-      JS::Rooted<JSObject*> object(cx, wrappedJS->GetJSObject());
-      if (!object) {
+
+      if (!wrappedJS->GetJSObject()) {
         continue;
       }
-      JSAutoCompartment ac(cx, object);
+
+      // Note - The ergonomics here will get a lot better with bug 971673:
+      //
+      // AutoEntryScript aes;
+      // if (!aes.Init(wrappedJS->GetJSObject())) {
+      //   continue;
+      // }
+      // JSContext* cx = aes.cx();
+      nsIGlobalObject* nativeGlobal =
+        xpc::NativeGlobal(js::GetGlobalForObjectCrossCompartment(wrappedJS->GetJSObject()));
+      AutoEntryScript aes(nativeGlobal);
+      JSContext* cx = aes.cx();
+      JS::Rooted<JSObject*> object(cx, wrappedJS->GetJSObject());
 
       // The parameter for the listener function.
       JS::Rooted<JSObject*> param(cx,
@@ -1022,7 +1033,7 @@ nsFrameMessageManager::ReceiveMessage(nsISupports* aTarget,
       JS::Rooted<JS::Value> thisValue(cx, JS::UndefinedValue());
 
       JS::Rooted<JS::Value> funval(cx);
-      if (JS_ObjectIsCallable(cx, object)) {
+      if (JS::IsCallable(object)) {
         // If the listener is a JS function:
         funval.setObject(*object);
 
@@ -1044,7 +1055,7 @@ nsFrameMessageManager::ReceiveMessage(nsISupports* aTarget,
           return NS_ERROR_UNEXPECTED;
 
         // Check if the object is even callable.
-        NS_ENSURE_STATE(JS_ObjectIsCallable(cx, &funval.toObject()));
+        NS_ENSURE_STATE(JS::IsCallable(&funval.toObject()));
         thisValue.setObject(*object);
       }
 
@@ -1481,7 +1492,12 @@ nsFrameScriptExecutor::TryCacheLoadAndCompileScript(const nsAString& aURL,
   }
 
   nsCOMPtr<nsIChannel> channel;
-  NS_NewChannel(getter_AddRefs(channel), uri);
+  NS_NewChannel(getter_AddRefs(channel),
+                uri,
+                nsContentUtils::GetSystemPrincipal(),
+                nsILoadInfo::SEC_NORMAL,
+                nsIContentPolicy::TYPE_OTHER);
+
   if (!channel) {
     return;
   }

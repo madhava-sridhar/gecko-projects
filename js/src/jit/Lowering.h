@@ -236,8 +236,8 @@ class LIRGenerator : public LIRGeneratorSpecific
     bool visitSetElementCache(MSetElementCache *ins);
     bool visitCallSetProperty(MCallSetProperty *ins);
     bool visitIteratorStart(MIteratorStart *ins);
-    bool visitIteratorNext(MIteratorNext *ins);
     bool visitIteratorMore(MIteratorMore *ins);
+    bool visitIsNoIter(MIsNoIter *ins);
     bool visitIteratorEnd(MIteratorEnd *ins);
     bool visitStringLength(MStringLength *ins);
     bool visitArgumentsLength(MArgumentsLength *ins);
@@ -269,16 +269,21 @@ class LIRGenerator : public LIRGeneratorSpecific
     bool visitGetDOMMember(MGetDOMMember *ins);
     bool visitRecompileCheck(MRecompileCheck *ins);
     bool visitSimdExtractElement(MSimdExtractElement *ins);
+    bool visitSimdInsertElement(MSimdInsertElement *ins);
     bool visitSimdSignMask(MSimdSignMask *ins);
     bool visitSimdBinaryComp(MSimdBinaryComp *ins);
     bool visitSimdBinaryArith(MSimdBinaryArith *ins);
     bool visitSimdBinaryBitwise(MSimdBinaryBitwise *ins);
-    bool visitSimdValueX4(MSimdValueX4 *ins);
     bool visitSimdConstant(MSimdConstant *ins);
+    bool visitSimdConvert(MSimdConvert *ins);
+    bool visitSimdReinterpretCast(MSimdReinterpretCast *ins);
     bool visitPhi(MPhi *ins);
     bool visitBeta(MBeta *ins);
     bool visitObjectState(MObjectState *ins);
     bool visitArrayState(MArrayState *ins);
+    bool visitUnknownValue(MUnknownValue *ins);
+    bool visitLexicalCheck(MLexicalCheck *ins);
+    bool visitThrowUninitializedLexical(MThrowUninitializedLexical *ins);
 };
 
 } // namespace jit

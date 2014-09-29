@@ -16,6 +16,16 @@ extern bool gBluetoothDebugFlag;
 
 #define SWITCH_BT_DEBUG(V) (gBluetoothDebugFlag = V)
 
+#if MOZ_IS_GCC && MOZ_GCC_VERSION_AT_LEAST(4, 7, 0)
+/* use designated array initializers if supported */
+#define CONVERT(in_, out_) \
+  [in_] = out_
+#else
+/* otherwise init array element by position */
+#define CONVERT(in_, out_) \
+  out_
+#endif
+
 #undef BT_LOG
 #if defined(MOZ_WIDGET_GONK)
 #include <android/log.h>
@@ -178,6 +188,12 @@ extern bool gBluetoothDebugFlag;
 // Bluetooth stack internal error, such as I/O error
 #define ERR_INTERNAL_ERROR "InternalError"
 
+/**
+ * BT specification v4.1 defines the maximum attribute length as 512 octets.
+ * Currently use 600 here to conform to bluedroid's BTGATT_MAX_ATTR_LEN.
+ */
+#define BLUETOOTH_GATT_MAX_ATTR_LEN 600
+
 BEGIN_BLUETOOTH_NAMESPACE
 
 enum BluetoothStatus {
@@ -200,10 +216,10 @@ enum BluetoothBondState {
   BOND_STATE_BONDED
 };
 
-enum BluetoothDeviceType {
-  DEVICE_TYPE_BREDR,
-  DEVICE_TYPE_BLE,
-  DEVICE_TYPE_DUAL
+enum BluetoothTypeOfDevice {
+  TYPE_OF_DEVICE_BREDR,
+  TYPE_OF_DEVICE_BLE,
+  TYPE_OF_DEVICE_DUAL
 };
 
 enum BluetoothPropertyType {
@@ -276,8 +292,8 @@ struct BluetoothProperty {
   /* PROPERTY_RSSI_VALUE */
   int32_t mInt32;
 
-  /* PROPERTY_DEVICE_TYPE */
-  BluetoothDeviceType mDeviceType;
+  /* PROPERTY_TYPE_OF_DEVICE */
+  BluetoothTypeOfDevice mTypeOfDevice;
 
   /* PROPERTY_SERVICE_RECORD */
   BluetoothServiceRecord mServiceRecord;
@@ -417,6 +433,10 @@ enum ControlPlayStatus {
   PLAYSTATUS_ERROR    = 0xFF,
 };
 
+enum {
+  AVRCP_UID_SIZE = 8
+};
+
 enum BluetoothAvrcpMediaAttribute {
   AVRCP_MEDIA_ATTRIBUTE_TITLE,
   AVRCP_MEDIA_ATTRIBUTE_ARTIST,
@@ -481,6 +501,46 @@ struct BluetoothAvrcpPlayerSettings {
   uint8_t mNumAttr;
   uint8_t mIds[256];
   uint8_t mValues[256];
+};
+
+struct BluetoothGattAdvData {
+  uint8_t mAdvData[62];
+};
+
+struct BluetoothGattId {
+  BluetoothUuid mUuid;
+  uint8_t mInstanceId;
+};
+
+struct BluetoothGattServiceId {
+  BluetoothGattId mId;
+  uint8_t mIsPrimary;
+};
+
+struct BluetoothGattReadParam {
+  BluetoothGattServiceId mServiceId;
+  BluetoothGattId mCharId;
+  BluetoothGattId mDescriptorId;
+  uint8_t mValue[BLUETOOTH_GATT_MAX_ATTR_LEN];
+  uint16_t mValueLength;
+  uint16_t mValueType;
+  uint8_t mStatus;
+};
+
+struct BluetoothGattWriteParam {
+  BluetoothGattServiceId mServiceId;
+  BluetoothGattId mCharId;
+  BluetoothGattId mDescriptorId;
+  uint8_t mStatus;
+};
+
+struct BluetoothGattNotifyParam {
+  uint8_t mValue[BLUETOOTH_GATT_MAX_ATTR_LEN];
+  nsString mBdAddr;
+  BluetoothGattServiceId mServiceId;
+  BluetoothGattId mCharId;
+  uint16_t mLength;
+  uint8_t mIsNotify;
 };
 
 END_BLUETOOTH_NAMESPACE

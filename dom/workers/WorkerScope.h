@@ -17,6 +17,7 @@ namespace dom {
 
 class Console;
 class Function;
+class Promise;
 
 namespace cache {
 class CacheStorage;
@@ -211,11 +212,8 @@ public:
     // FIXME(nsm): Bug 982728
   }
 
-  void
-  Unregister()
-  {
-    // FIXME(nsm): Bug 982728
-  }
+  already_AddRefed<Promise>
+  Unregister(ErrorResult& aRv);
 
   ServiceWorkerClients*
   Clients();

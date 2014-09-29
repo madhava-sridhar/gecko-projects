@@ -16,7 +16,7 @@
 #include "mozilla/dom/devicestorage/PDeviceStorageRequestChild.h"
 #include "mozilla/dom/Directory.h"
 #include "mozilla/dom/FileSystemUtils.h"
-#include "mozilla/dom/ipc/Blob.h"
+#include "mozilla/dom/ipc/BlobChild.h"
 #include "mozilla/dom/PBrowserChild.h"
 #include "mozilla/dom/PermissionMessageUtils.h"
 #include "mozilla/dom/Promise.h"
@@ -1661,6 +1661,13 @@ DeviceStorageFile::GetStatus(nsAString& aStatus)
   rv = vol->GetIsFormatting(&isFormatting);
   NS_ENSURE_SUCCESS_VOID(rv);
   if (isFormatting) {
+    aStatus.AssignLiteral("unavailable");
+    return;
+  }
+  bool isUnmounting;
+  rv = vol->GetIsUnmounting(&isUnmounting);
+  NS_ENSURE_SUCCESS_VOID(rv);
+  if (isUnmounting) {
     aStatus.AssignLiteral("unavailable");
     return;
   }

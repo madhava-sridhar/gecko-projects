@@ -8,6 +8,7 @@ package org.mozilla.gecko.favicons;
 import org.mozilla.gecko.AboutPages;
 import org.mozilla.gecko.AppConstants;
 import org.mozilla.gecko.GeckoAppShell;
+import org.mozilla.gecko.NewTabletUI;
 import org.mozilla.gecko.R;
 import org.mozilla.gecko.Tab;
 import org.mozilla.gecko.Tabs;
@@ -17,6 +18,7 @@ import org.mozilla.gecko.util.GeckoJarReader;
 import org.mozilla.gecko.util.NonEvictingLruCache;
 import org.mozilla.gecko.util.ThreadUtils;
 
+import android.content.ContentResolver;
 import android.content.Context;
 import android.content.res.Resources;
 import android.graphics.Bitmap;
@@ -53,8 +55,6 @@ public class Favicons {
 
     public static final int NOT_LOADING  = 0;
     public static final int LOADED       = 1;
-    public static final int FLAG_PERSIST = 2;
-    public static final int FLAG_SCALE   = 4;
 
     // The default Favicon to show if no other can be found.
     public static Bitmap defaultFavicon;
@@ -260,12 +260,15 @@ public class Favicons {
             }
         }
 
-        targetURL = BrowserDB.getFaviconUrlForHistoryUrl(context.getContentResolver(), pageURL);
-        if (targetURL == null) {
-            // Nothing in the history database. Fall back to the default URL and hope for the best.
-            targetURL = guessDefaultFaviconURL(pageURL);
+        // Try to find the faviconURL in the history and/or bookmarks table.
+        final ContentResolver resolver = context.getContentResolver();
+        targetURL = BrowserDB.getFaviconURLFromPageURL(resolver, pageURL);
+        if (targetURL != null) {
+            return targetURL;
         }
-        return targetURL;
+
+        // If we still can't find it, fall back to the default URL and hope for the best.
+        return guessDefaultFaviconURL(pageURL);
     }
 
     /**
@@ -391,15 +394,23 @@ public class Favicons {
             return;
         }
 
+        final boolean isNewTabletEnabled = NewTabletUI.isEnabled(context);
         final Resources res = context.getResources();
 
-        // Decode the default Favicon ready for use.
-        defaultFavicon = BitmapFactory.decodeResource(res, R.drawable.favicon);
+        // Decode the default Favicon ready for use. We'd preferably override the drawable for
+        // different screen sizes, but since we need phone's default favicon on tablet (in
+        // ToolbarDisplayLayout), we can't.
+        final int defaultFaviconDrawableID =
+                isNewTabletEnabled ? R.drawable.new_tablet_default_favicon : R.drawable.favicon;
+        defaultFavicon = BitmapFactory.decodeResource(res, defaultFaviconDrawableID);
         if (defaultFavicon == null) {
             throw new IllegalStateException("Null default favicon was returned from the resources system!");
         }
 
-        defaultFaviconSize = res.getDimensionPixelSize(R.dimen.favicon_bg);
+        // TODO: Remove this branch when old tablet is removed.
+        final int defaultFaviconSizeDimenID =
+                isNewTabletEnabled ? R.dimen.tab_strip_favicon_size : R.dimen.favicon_bg;
+        defaultFaviconSize = res.getDimensionPixelSize(defaultFaviconSizeDimenID);
 
         // Screen-density-adjusted upper limit on favicon size. Favicons larger than this are
         // downscaled to this size or discarded.

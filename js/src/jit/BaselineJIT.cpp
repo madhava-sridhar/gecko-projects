@@ -258,17 +258,17 @@ CanEnterBaselineJIT(JSContext *cx, HandleScript script, bool osr)
     if (script->hasBaselineScript())
         return Method_Compiled;
 
-    // Check script use count.
+    // Check script warm-up counter.
     //
     // Also eagerly compile if we are in parallel warmup, the point of which
     // is to gather type information so that the script may be compiled for
     // parallel execution. We want to avoid the situation of OSRing during
-    // warmup and only gathering type information for the loop, and not the
+    // warm-up and only gathering type information for the loop, and not the
     // rest of the function.
     if (cx->runtime()->forkJoinWarmup > 0) {
         if (osr)
             return Method_Skipped;
-    } else if (script->incUseCount() <= js_JitOptions.baselineUsesBeforeCompile) {
+    } else if (script->incWarmUpCounter() <= js_JitOptions.baselineWarmUpThreshold) {
         return Method_Skipped;
     }
 
@@ -361,7 +361,7 @@ BaselineScript::New(JSScript *jsscript, uint32_t prologueOffset, uint32_t epilog
                         paddedPCMappingSize +
                         paddedBytecodeTypesMapSize;
 
-    BaselineScript *script = jsscript->pod_malloc_with_extra<BaselineScript, uint8_t>(allocBytes);
+    BaselineScript *script = jsscript->zone()->pod_malloc_with_extra<BaselineScript, uint8_t>(allocBytes);
     if (!script)
         return nullptr;
     new (script) BaselineScript(prologueOffset, epilogueOffset,

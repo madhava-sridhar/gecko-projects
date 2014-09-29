@@ -15,6 +15,8 @@
 #include "mozilla/dom/ContentChild.h"
 #include "mozilla/dom/Element.h"
 #include "mozilla/dom/TabChild.h"
+#include "mozilla/dom/ProfileTimelineMarkerBinding.h"
+#include "mozilla/dom/ToJSValue.h"
 #include "mozilla/EventStateManager.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/Services.h"
@@ -88,6 +90,10 @@
 #include "nsDocShellEnumerator.h"
 #include "nsSHistory.h"
 #include "nsDocShellEditorData.h"
+#include "GeckoProfiler.h"
+#ifdef MOZ_ENABLE_PROFILER_SPS
+#include "ProfilerMarkers.h"
+#endif
 
 // Helper Classes
 #include "nsError.h"
@@ -106,6 +112,7 @@
 #include "nsIWindowWatcher.h"
 #include "nsIPromptFactory.h"
 #include "nsITransportSecurityInfo.h"
+#include "nsINode.h"
 #include "nsINSSErrorsService.h"
 #include "nsIApplicationCacheChannel.h"
 #include "nsIApplicationCacheContainer.h"
@@ -1322,8 +1329,12 @@ nsDocShell::LoadURI(nsIURI * aURI,
     NS_PRECONDITION((aLoadFlags & 0xf) == 0, "Should not have these flags set");
     
     // Note: we allow loads to get through here even if mFiredUnloadEvent is
-    // true; that case will get handled in LoadInternal or LoadHistoryEntry.
-    if (IsPrintingOrPP()) {
+    // true; that case will get handled in LoadInternal or LoadHistoryEntry,
+    // so we pass false as the second parameter to IsNavigationAllowed.
+    // However, we don't allow the page to change location *in the middle of*
+    // firing beforeunload, so we do need to check if *beforeunload* is currently
+    // firing, so we call IsNavigationAllowed rather than just IsPrintingOrPP.
+    if (!IsNavigationAllowed(true, false)) {
       return NS_OK; // JS may not handle returning of an error code
     }
     nsCOMPtr<nsIURI> referrer;
@@ -2787,6 +2798,154 @@ nsDocShell::HistoryTransactionRemoved(int32_t aIndex)
     return NS_OK;
 }
 
+unsigned long nsDocShell::gProfileTimelineRecordingsCount = 0;
+
+NS_IMETHODIMP
+nsDocShell::SetRecordProfileTimelineMarkers(bool aValue)
+{
+#ifdef MOZ_ENABLE_PROFILER_SPS
+  bool currentValue;
+  GetRecordProfileTimelineMarkers(&currentValue);
+  if (currentValue != aValue) {
+    if (aValue) {
+      ++gProfileTimelineRecordingsCount;
+      mProfileTimelineStartTime = TimeStamp::Now();
+    } else {
+      --gProfileTimelineRecordingsCount;
+      mProfileTimelineStartTime = TimeStamp();
+      ClearProfileTimelineMarkers();
+    }
+  }
+
+  return NS_OK;
+#else
+  return NS_ERROR_FAILURE;
+#endif
+}
+
+NS_IMETHODIMP
+nsDocShell::GetRecordProfileTimelineMarkers(bool* aValue)
+{
+  *aValue = !mProfileTimelineStartTime.IsNull();
+  return NS_OK;
+}
+
+nsresult
+nsDocShell::PopProfileTimelineMarkers(JSContext* aCx,
+                          JS::MutableHandle<JS::Value> aProfileTimelineMarkers)
+{
+#ifdef MOZ_ENABLE_PROFILER_SPS
+  // Looping over all markers gathered so far at the docShell level, whenever a
+  // START marker is found, look for the corresponding END marker and build a
+  // {name,start,end} JS object.
+  // Paint markers are different because paint is handled at root docShell level
+  // in the information that a paint was done is then stored at each sub
+  // docShell level but we can only be sure that a paint did happen in a
+  // docShell if an Layer marker type was recorded too.
+
+  nsTArray<mozilla::dom::ProfileTimelineMarker> profileTimelineMarkers;
+
+  for (uint32_t i = 0; i < mProfileTimelineMarkers.Length(); ++i) {
+    ProfilerMarkerTracing* startPayload = static_cast<ProfilerMarkerTracing*>(
+      mProfileTimelineMarkers[i]->mPayload);
+    const char* startMarkerName = mProfileTimelineMarkers[i]->mName;
+
+    bool hasSeenPaintedLayer = false;
+
+    if (startPayload->GetMetaData() == TRACING_INTERVAL_START) {
+      // The assumption is that the devtools timeline flushes markers frequently
+      // enough for the amount of markers to always be small enough that the
+      // nested for loop isn't going to be a performance problem.
+      for (uint32_t j = i + 1; j < mProfileTimelineMarkers.Length(); ++j) {
+        ProfilerMarkerTracing* endPayload = static_cast<ProfilerMarkerTracing*>(
+          mProfileTimelineMarkers[j]->mPayload);
+        const char* endMarkerName = mProfileTimelineMarkers[j]->mName;
+
+        // Look for Layer markers to stream out paint markers.
+        if (strcmp(endMarkerName, "Layer") == 0) {
+          hasSeenPaintedLayer = true;
+        }
+
+        bool isSameMarkerType = strcmp(startMarkerName, endMarkerName) == 0;
+        bool isPaint = strcmp(startMarkerName, "Paint") == 0;
+
+        // Pair start and end markers.
+        if (endPayload->GetMetaData() == TRACING_INTERVAL_END && isSameMarkerType) {
+          // But ignore paint start/end if no layer has been painted.
+          if (!isPaint || (isPaint && hasSeenPaintedLayer)) {
+            mozilla::dom::ProfileTimelineMarker marker;
+            marker.mName = NS_ConvertUTF8toUTF16(startMarkerName);
+            marker.mStart = mProfileTimelineMarkers[i]->mTime;
+            marker.mEnd = mProfileTimelineMarkers[j]->mTime;
+            profileTimelineMarkers.AppendElement(marker);
+          }
+
+          break;
+        }
+      }
+    }
+  }
+
+  ToJSValue(aCx, profileTimelineMarkers, aProfileTimelineMarkers);
+
+  ClearProfileTimelineMarkers();
+
+  return NS_OK;
+#else
+  return NS_ERROR_FAILURE;
+#endif
+}
+
+float
+nsDocShell::GetProfileTimelineDelta()
+{
+  return (TimeStamp::Now() - mProfileTimelineStartTime).ToMilliseconds();
+}
+
+void
+nsDocShell::AddProfileTimelineMarker(const char* aName,
+                                     TracingMetadata aMetaData)
+{
+#ifdef MOZ_ENABLE_PROFILER_SPS
+  if (!mProfileTimelineStartTime.IsNull()) {
+    float delta = GetProfileTimelineDelta();
+    ProfilerMarkerTracing* payload = new ProfilerMarkerTracing("Timeline",
+                                                               aMetaData);
+    mProfileTimelineMarkers.AppendElement(
+      new InternalProfileTimelineMarker(aName, payload, delta));
+  }
+#endif
+}
+
+void
+nsDocShell::AddProfileTimelineMarker(const char* aName,
+                                     ProfilerBacktrace* aCause,
+                                     TracingMetadata aMetaData)
+{
+#ifdef MOZ_ENABLE_PROFILER_SPS
+  if (!mProfileTimelineStartTime.IsNull()) {
+    float delta = GetProfileTimelineDelta();
+    ProfilerMarkerTracing* payload = new ProfilerMarkerTracing("Timeline",
+                                                               aMetaData,
+                                                               aCause);
+    mProfileTimelineMarkers.AppendElement(
+      new InternalProfileTimelineMarker(aName, payload, delta));
+  }
+#endif
+}
+
+void
+nsDocShell::ClearProfileTimelineMarkers()
+{
+#ifdef MOZ_ENABLE_PROFILER_SPS
+  for (uint32_t i = 0; i < mProfileTimelineMarkers.Length(); ++i) {
+    delete mProfileTimelineMarkers[i]->mPayload;
+    mProfileTimelineMarkers[i]->mPayload = nullptr;
+  }
+  mProfileTimelineMarkers.Clear();
+#endif
+}
+
 nsIDOMStorageManager*
 nsDocShell::TopSessionStorageManager()
 {
@@ -2897,14 +3056,14 @@ nsDocShell::RemoveWeakScrollObserver(nsIScrollObserver* aObserver)
 }
 
 void
-nsDocShell::NotifyAsyncPanZoomStarted()
+nsDocShell::NotifyAsyncPanZoomStarted(const mozilla::CSSIntPoint aScrollPos)
 {
     nsTObserverArray<nsWeakPtr>::ForwardIterator iter(mScrollObservers);
     while (iter.HasMore()) {
         nsWeakPtr ref = iter.GetNext();
         nsCOMPtr<nsIScrollObserver> obs = do_QueryReferent(ref);
         if (obs) {
-            obs->AsyncPanZoomStarted();
+            obs->AsyncPanZoomStarted(aScrollPos);
         } else {
             mScrollObservers.RemoveElement(ref);
         }
@@ -2912,14 +3071,14 @@ nsDocShell::NotifyAsyncPanZoomStarted()
 }
 
 void
-nsDocShell::NotifyAsyncPanZoomStopped()
+nsDocShell::NotifyAsyncPanZoomStopped(const mozilla::CSSIntPoint aScrollPos)
 {
     nsTObserverArray<nsWeakPtr>::ForwardIterator iter(mScrollObservers);
     while (iter.HasMore()) {
         nsWeakPtr ref = iter.GetNext();
         nsCOMPtr<nsIScrollObserver> obs = do_QueryReferent(ref);
         if (obs) {
-            obs->AsyncPanZoomStopped();
+            obs->AsyncPanZoomStopped(aScrollPos);
         } else {
             mScrollObservers.RemoveElement(ref);
         }
@@ -4279,9 +4438,11 @@ nsDocShell::IsPrintingOrPP(bool aDisplayErrorDialog)
 }
 
 bool
-nsDocShell::IsNavigationAllowed(bool aDisplayPrintErrorDialog)
+nsDocShell::IsNavigationAllowed(bool aDisplayPrintErrorDialog,
+                                bool aCheckIfUnloadFired)
 {
-  bool isAllowed = !IsPrintingOrPP(aDisplayPrintErrorDialog) && !mFiredUnloadEvent;
+  bool isAllowed = !IsPrintingOrPP(aDisplayPrintErrorDialog) &&
+                   (!aCheckIfUnloadFired || !mFiredUnloadEvent);
   if (!isAllowed) {
     return false;
   }
@@ -5353,6 +5514,9 @@ nsDocShell::Destroy()
     }
     
     mIsBeingDestroyed = true;
+
+    // Make sure we don't record profile timeline markers anymore
+    SetRecordProfileTimelineMarkers(false);
 
     // Remove our pref observers
     if (mObserveErrorPages) {
@@ -9017,6 +9181,29 @@ nsDocShell::JustStartedNetworkLoad()
            mDocumentRequest != GetCurrentDocChannel();
 }
 
+nsresult
+nsDocShell::CreatePrincipalFromReferrer(nsIURI*        aReferrer,
+                                        nsIPrincipal** outPrincipal)
+{
+  nsresult rv;
+  nsCOMPtr<nsIScriptSecurityManager> secMan =
+    do_GetService(NS_SCRIPTSECURITYMANAGER_CONTRACTID, &rv);
+  NS_ENSURE_SUCCESS(rv, rv);
+
+  uint32_t appId;
+  rv = GetAppId(&appId);
+  NS_ENSURE_SUCCESS(rv, rv);
+  bool isInBrowserElement;
+  rv = GetIsInBrowserElement(&isInBrowserElement);
+  NS_ENSURE_SUCCESS(rv, rv);
+  rv = secMan->GetAppCodebasePrincipal(aReferrer,
+                                       appId,
+                                       isInBrowserElement,
+                                       outPrincipal);
+  NS_ENSURE_SUCCESS(rv, rv);
+  return NS_OK;
+}
+
 NS_IMETHODIMP
 nsDocShell::InternalLoad(nsIURI * aURI,
                          nsIURI * aReferrer,
@@ -9135,12 +9322,8 @@ nsDocShell::InternalLoad(nsIURI * aURI,
     // XXXbz would be nice to know the loading principal here... but we don't
     nsCOMPtr<nsIPrincipal> loadingPrincipal = do_QueryInterface(aOwner);
     if (!loadingPrincipal && aReferrer) {
-        nsCOMPtr<nsIScriptSecurityManager> secMan =
-            do_GetService(NS_SCRIPTSECURITYMANAGER_CONTRACTID, &rv);
-        NS_ENSURE_SUCCESS(rv, rv);
-
-        rv = secMan->GetSimpleCodebasePrincipal(aReferrer,
-                                                getter_AddRefs(loadingPrincipal));
+      rv = CreatePrincipalFromReferrer(aReferrer, getter_AddRefs(loadingPrincipal));
+      NS_ENSURE_SUCCESS(rv, rv);
     }
 
     rv = NS_CheckContentLoadPolicy(contentType,
@@ -9188,7 +9371,7 @@ nsDocShell::InternalLoad(nsIURI * aURI,
     {
         bool willInherit;
         // This condition needs to match the one in
-        // nsContentUtils::SetUpChannelOwner.
+        // nsContentUtils::ChannelShouldInheritPrincipal.
         // Except we reverse the rv check to be safe in case
         // nsContentUtils::URIInheritsSecurityContext fails here and
         // succeeds there.
@@ -9655,7 +9838,18 @@ nsDocShell::InternalLoad(nsIURI * aURI,
             return NS_OK;
         }
     }
-    
+
+    // Check if the webbrowser chrome wants the load to proceed; this can be
+    // used to cancel attempts to load URIs in the wrong process.
+    nsCOMPtr<nsIWebBrowserChrome3> browserChrome3 = do_GetInterface(mTreeOwner);
+    if (browserChrome3) {
+        bool shouldLoad;
+        rv = browserChrome3->ShouldLoadURI(this, aURI, aReferrer, &shouldLoad);
+        if (NS_SUCCEEDED(rv) && !shouldLoad) {
+            return NS_OK;
+        }
+    }
+
     // mContentViewer->PermitUnload can destroy |this| docShell, which
     // causes the next call of CanSavePresentation to crash. 
     // Hold onto |this| until we return, to prevent a crash from happening. 
@@ -9806,7 +10000,7 @@ nsDocShell::InternalLoad(nsIURI * aURI,
                    (aFlags & INTERNAL_LOAD_FLAGS_FIRST_LOAD) != 0,
                    (aFlags & INTERNAL_LOAD_FLAGS_BYPASS_CLASSIFIER) != 0,
                    (aFlags & INTERNAL_LOAD_FLAGS_FORCE_ALLOW_COOKIES) != 0,
-                   srcdoc, aBaseURI);
+                   srcdoc, aBaseURI, contentType);
     if (req && aRequest)
         NS_ADDREF(*aRequest = req);
 
@@ -9886,7 +10080,8 @@ nsDocShell::DoURILoad(nsIURI * aURI,
                       bool aBypassClassifier,
                       bool aForceAllowCookies,
                       const nsAString &aSrcdoc,
-                      nsIURI * aBaseURI)
+                      nsIURI * aBaseURI,
+                      nsContentPolicyType aContentPolicyType)
 {
 #ifdef MOZ_VISUAL_EVENT_TRACER
     nsAutoCString urlSpec;
@@ -9957,14 +10152,55 @@ nsDocShell::DoURILoad(nsIURI * aURI,
     nsCOMPtr<nsIChannel> channel;
 
     bool isSrcdoc = !aSrcdoc.IsVoid();
+
+    nsCOMPtr<nsINode> requestingNode;
+    if (mScriptGlobal) {
+      requestingNode = mScriptGlobal->GetFrameElementInternal();
+      if (!requestingNode) {
+        requestingNode = mScriptGlobal->GetExtantDoc();
+      }
+    }
+
+    bool isSandBoxed = mSandboxFlags & SANDBOXED_ORIGIN;
+    // only inherit if we have a requestingPrincipal
+    bool inherit = false;
+
+    nsCOMPtr<nsIPrincipal> requestingPrincipal = do_QueryInterface(aOwner);
+    if (requestingPrincipal) {
+      inherit = nsContentUtils::ChannelShouldInheritPrincipal(requestingPrincipal,
+                                                              aURI,
+                                                              true, // aInheritForAboutBlank
+                                                              isSrcdoc);
+    }
+    else if (!requestingPrincipal && aReferrerURI) {
+      rv = CreatePrincipalFromReferrer(aReferrerURI,
+                                       getter_AddRefs(requestingPrincipal));
+      NS_ENSURE_SUCCESS(rv, rv);
+    }
+    else {
+      requestingPrincipal = nsContentUtils::GetSystemPrincipal();
+    }
+
+    nsSecurityFlags securityFlags = nsILoadInfo::SEC_NORMAL;
+    if (inherit) {
+      securityFlags |= nsILoadInfo::SEC_FORCE_INHERIT_PRINCIPAL;
+    }
+    if (isSandBoxed) {
+      securityFlags |= nsILoadInfo::SEC_SANDBOXED;
+    }
+
     if (!isSrcdoc) {
-        rv = NS_NewChannel(getter_AddRefs(channel),
-                           aURI,
-                           nullptr,
-                           nullptr,
-                           static_cast<nsIInterfaceRequestor *>(this),
-                           loadFlags,
-                           channelPolicy);
+        rv = NS_NewChannelInternal(getter_AddRefs(channel),
+                                   aURI,
+                                   requestingNode,
+                                   requestingPrincipal,
+                                   securityFlags,
+                                   aContentPolicyType,
+                                   channelPolicy,
+                                   nullptr,   // loadGroup
+                                   static_cast<nsIInterfaceRequestor*>(this),
+                                   loadFlags);
+
         if (NS_FAILED(rv)) {
             if (rv == NS_ERROR_UNKNOWN_PROTOCOL) {
                 // This is a uri with a protocol scheme we don't know how
@@ -10012,6 +10248,14 @@ nsDocShell::DoURILoad(nsIURI * aURI,
             MOZ_ASSERT(isc);
             isc->SetBaseURI(aBaseURI);
         }
+        // NS_NewInputStreamChannel does not yet attach the loadInfo in nsNetutil.h,
+        // hence we have to manually attach the loadInfo for that channel.
+        nsCOMPtr<nsILoadInfo> loadInfo =
+          new LoadInfo(requestingPrincipal,
+                       requestingNode,
+                       securityFlags,
+                       aContentPolicyType);
+        channel->SetLoadInfo(loadInfo);
     }
 
     nsCOMPtr<nsIApplicationCacheChannel> appCacheChannel =
@@ -10173,11 +10417,6 @@ nsDocShell::DoURILoad(nsIURI * aURI,
             httpChannel->SetReferrer(aReferrerURI);
         }
     }
-
-    nsCOMPtr<nsIPrincipal> ownerPrincipal = do_QueryInterface(aOwner);
-    nsContentUtils::SetUpChannelOwner(ownerPrincipal, channel, aURI, true,
-                                      mSandboxFlags & SANDBOXED_ORIGIN,
-                                      isSrcdoc);
 
     nsCOMPtr<nsIScriptChannel> scriptChannel = do_QueryInterface(channel);
     if (scriptChannel) {

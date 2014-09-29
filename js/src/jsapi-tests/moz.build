@@ -17,7 +17,6 @@ UNIFIED_SOURCES += [
     'testChromeBuffer.cpp',
     'testClassGetter.cpp',
     'testCloneScript.cpp',
-    'testConservativeGC.cpp',
     'testContexts.cpp',
     'testCustomIterator.cpp',
     'testDebugger.cpp',
@@ -58,6 +57,7 @@ UNIFIED_SOURCES += [
     'testOriginPrincipals.cpp',
     'testParseJSON.cpp',
     'testPersistentRooted.cpp',
+    'testPreserveJitCode.cpp',
     'testProfileStrings.cpp',
     'testPropCache.cpp',
     'testRegExp.cpp',
@@ -86,6 +86,8 @@ if CONFIG['ENABLE_ION']:
     UNIFIED_SOURCES += [
         'testJitDCEinGVN.cpp',
         'testJitFoldsTo.cpp',
+        'testJitGVN.cpp',
+        'testJitMoveEmitterCycles-mips.cpp',
         'testJitMoveEmitterCycles.cpp',
         'testJitRValueAlloc.cpp',
     ]

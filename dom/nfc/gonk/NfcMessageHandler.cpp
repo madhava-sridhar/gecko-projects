@@ -4,6 +4,7 @@
 
 #include "NfcMessageHandler.h"
 #include <binder/Parcel.h>
+#include "mozilla/dom/MozNDEFRecordBinding.h"
 #include "nsDebug.h"
 #include "NfcGonkMessage.h"
 #include "NfcOptions.h"
@@ -13,6 +14,7 @@
 
 using namespace android;
 using namespace mozilla;
+using namespace mozilla::dom;
 
 static const char* kConfigRequest = "config";
 static const char* kGetDetailsNDEF = "getDetailsNDEF";
@@ -128,6 +130,9 @@ NfcMessageHandler::GeneralResponse(const Parcel& aParcel, EventOptions& aOptions
     case NfcRequest::CloseReq:
       type = kCloseResponse;
       break;
+    default:
+      CHROMIUM_LOG("Nfcd, unknown general response %d", pendingReq);
+      return false;
   }
 
   aOptions.mType = NS_ConvertUTF8toUTF16(type);
@@ -291,6 +296,15 @@ NfcMessageHandler::TechDiscoveredNotification(const Parcel& aParcel, EventOption
   if (ndefMsgCount != 0) {
     ReadNDEFMessage(aParcel, aOptions);
   }
+
+  int32_t ndefInfo = aParcel.readInt32();
+  if (ndefInfo) {
+    NdefType type = static_cast<NdefType>(aParcel.readInt32());
+    int32_t maxSupportLength = aParcel.readInt32();
+    int32_t isReadOnly = aParcel.readInt32();
+    int32_t isFormatable = aParcel.readInt32();
+  }
+
   return true;
 }
 
@@ -330,7 +344,7 @@ NfcMessageHandler::ReadNDEFMessage(const Parcel& aParcel, EventOptions& aOptions
   for (int i = 0; i < recordCount; i++) {
     int32_t tnf = aParcel.readInt32();
     NDEFRecordStruct record;
-    record.mTnf = tnf;
+    record.mTnf = static_cast<TNF>(tnf);
 
     int32_t typeLength = aParcel.readInt32();
     record.mType.AppendElements(
@@ -357,7 +371,7 @@ NfcMessageHandler::WriteNDEFMessage(Parcel& aParcel, const CommandOptions& aOpti
   aParcel.writeInt32(recordCount);
   for (int i = 0; i < recordCount; i++) {
     const NDEFRecordStruct& record = aOptions.mRecords[i];
-    aParcel.writeInt32(record.mTnf);
+    aParcel.writeInt32(static_cast<int32_t>(record.mTnf));
 
     void* data;
 

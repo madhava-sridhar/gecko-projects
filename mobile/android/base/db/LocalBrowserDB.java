@@ -58,6 +58,8 @@ public class LocalBrowserDB {
     // Calculate these once, at initialization. isLoggable is too expensive to
     // have in-line in each log call.
     private static final String LOGTAG = "GeckoLocalBrowserDB";
+    private static final Integer FAVICON_ID_NOT_FOUND = Integer.MIN_VALUE;
+
     private static final boolean logDebug = Log.isLoggable(LOGTAG, Log.DEBUG);
     protected static void debug(String message) {
         if (logDebug) {
@@ -68,14 +70,13 @@ public class LocalBrowserDB {
     private final String mProfile;
 
     // Map of folder GUIDs to IDs. Used for caching.
-    private HashMap<String, Long> mFolderIdMap;
+    private final HashMap<String, Long> mFolderIdMap;
 
     // Use wrapped Boolean so that we can have a null state
     private Boolean mDesktopBookmarksExist;
 
     private final Uri mBookmarksUriWithProfile;
     private final Uri mParentsUriWithProfile;
-    private final Uri mFlagsUriWithProfile;
     private final Uri mHistoryUriWithProfile;
     private final Uri mHistoryExpireUriWithProfile;
     private final Uri mCombinedUriWithProfile;
@@ -98,7 +99,6 @@ public class LocalBrowserDB {
 
         mBookmarksUriWithProfile = appendProfile(Bookmarks.CONTENT_URI);
         mParentsUriWithProfile = appendProfile(Bookmarks.PARENTS_CONTENT_URI);
-        mFlagsUriWithProfile = appendProfile(Bookmarks.FLAGS_URI);
         mHistoryUriWithProfile = appendProfile(History.CONTENT_URI);
         mHistoryExpireUriWithProfile = appendProfile(History.CONTENT_OLD_URI);
         mCombinedUriWithProfile = appendProfile(Combined.CONTENT_URI);
@@ -132,7 +132,8 @@ public class LocalBrowserDB {
                 names.put(name, ours);
                 return ours;
             }
-            return mapping.intValue();
+
+            return mapping;
         }
 
         public boolean has(final String name) {
@@ -793,33 +794,6 @@ public class LocalBrowserDB {
         }
     }
 
-    /**
-     * For a given URI, we want to return a number of things:
-     *
-     * * Is this URI the URI of a bookmark?
-     * * ... a reading list item?
-     *
-     * This will expand as necessary to eliminate multiple consecutive queries.
-     */
-    public int getItemFlags(ContentResolver cr, String uri) {
-        final Cursor c = cr.query(mFlagsUriWithProfile,
-                                  null,
-                                  null,
-                                  new String[] { uri },
-                                  null);
-        if (c == null) {
-            return 0;
-        }
-
-        try {
-            // This should never fail: it returns a single `flags` row.
-            c.moveToFirst();
-            return Bookmarks.FLAG_SUCCESS | c.getInt(0);
-        } finally {
-            c.close();
-        }
-    }
-
     public String getUrlForKeyword(ContentResolver cr, String keyword) {
         final Cursor c = cr.query(mBookmarksUriWithProfile,
                                   new String[] { Bookmarks.URL },
@@ -1026,19 +1000,38 @@ public class LocalBrowserDB {
         return FaviconDecoder.decodeFavicon(b);
     }
 
-    public String getFaviconUrlForHistoryUrl(ContentResolver cr, String uri) {
-        final Cursor c = cr.query(mHistoryUriWithProfile,
-                                  new String[] { History.FAVICON_URL },
-                                  Combined.URL + " = ?",
-                                  new String[] { uri },
-                                  null);
+    /**
+     * Try to find a usable favicon URL in the history or bookmarks table.
+     */
+    public String getFaviconURLFromPageURL(ContentResolver cr, String uri) {
+        // Check first in the history table.
+        Cursor c = cr.query(mHistoryUriWithProfile,
+                            new String[] { History.FAVICON_URL },
+                            Combined.URL + " = ?",
+                            new String[] { uri },
+                            null);
 
         try {
-            if (!c.moveToFirst()) {
-                return null;
+            if (c.moveToFirst()) {
+                return c.getString(c.getColumnIndexOrThrow(History.FAVICON_URL));
+            }
+        } finally {
+            c.close();
+        }
+
+        // If that fails, check in the bookmarks table.
+        c = cr.query(mBookmarksUriWithProfile,
+                     new String[] { Bookmarks.FAVICON_URL },
+                     Bookmarks.URL + " = ?",
+                     new String[] { uri },
+                     null);
+
+        try {
+            if (c.moveToFirst()) {
+                return c.getString(c.getColumnIndexOrThrow(Bookmarks.FAVICON_URL));
             }
 
-            return c.getString(c.getColumnIndexOrThrow(History.FAVICON_URL));
+            return null;
         } finally {
             c.close();
         }
@@ -1055,10 +1048,66 @@ public class LocalBrowserDB {
         Uri faviconsUri = getAllFaviconsUri().buildUpon().
                 appendQueryParameter(BrowserContract.PARAM_INSERT_IF_NEEDED, "true").build();
 
-        cr.update(faviconsUri,
-                  values,
-                  Favicons.URL + " = ?",
-                  new String[] { faviconUri });
+        final int updated = cr.update(faviconsUri,
+                                      values,
+                                      Favicons.URL + " = ?",
+                                      new String[] { faviconUri });
+
+        if (updated == 0) {
+            return;
+        }
+
+        // After writing the encodedFavicon, ensure that the favicon_id in both the bookmark and
+        // history tables are also up-to-date.
+        final Integer id = getIDForFaviconURL(cr, faviconUri);
+        if (id == FAVICON_ID_NOT_FOUND) {
+            return;
+        }
+
+        updateHistoryAndBookmarksFaviconID(cr, pageUri, id);
+    }
+
+    /**
+     * Locates and returns the favicon ID of a target URL as an Integer.
+     */
+    private Integer getIDForFaviconURL(ContentResolver cr, String faviconURL) {
+        final Cursor c = cr.query(mFaviconsUriWithProfile,
+                                  new String[] { Favicons._ID },
+                                  Favicons.URL + " = ? AND " + Favicons.DATA + " IS NOT NULL",
+                                  new String[] { faviconURL },
+                                  null);
+
+        try {
+            final int col = c.getColumnIndexOrThrow(Favicons._ID);
+            if (c.moveToFirst() && !c.isNull(col)) {
+                return c.getInt(col);
+            }
+
+            // IDs can be negative, so we return a sentinel value indicating "not found".
+            return FAVICON_ID_NOT_FOUND;
+        } finally {
+            c.close();
+        }
+    }
+
+    /**
+     * Update the favicon ID in the history and bookmark tables after a new
+     * favicon table entry is added.
+     */
+    private void updateHistoryAndBookmarksFaviconID(ContentResolver cr, String pageURL, int id) {
+        final ContentValues bookmarkValues = new ContentValues();
+        bookmarkValues.put(Bookmarks.FAVICON_ID, id);
+        cr.update(mBookmarksUriWithProfile,
+                  bookmarkValues,
+                  Bookmarks.URL + " = ?",
+                  new String[] { pageURL });
+
+        final ContentValues historyValues = new ContentValues();
+        historyValues.put(History.FAVICON_ID, id);
+        cr.update(mHistoryUriWithProfile,
+                  historyValues,
+                  History.URL + " = ?",
+                  new String[] { pageURL });
     }
 
     public void updateThumbnailForUrl(ContentResolver cr, String uri,

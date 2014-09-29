@@ -13,16 +13,22 @@ let Cr = Components.results;
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 Cu.import("resource://gre/modules/Services.jsm");
 Cu.import("resource://gre/modules/AddonManager.jsm");
-Cu.import("resource://gre/modules/FileUtils.jsm");
-Cu.import("resource://gre/modules/JNI.jsm");
 Cu.import('resource://gre/modules/Payment.jsm');
 Cu.import("resource://gre/modules/NotificationDB.jsm");
 Cu.import("resource://gre/modules/SpatialNavigation.jsm");
-Cu.import("resource://gre/modules/UITelemetry.jsm");
 
 #ifdef ACCESSIBILITY
 Cu.import("resource://gre/modules/accessibility/AccessFu.jsm");
 #endif
+
+XPCOMUtils.defineLazyModuleGetter(this, "FileUtils",
+                                  "resource://gre/modules/FileUtils.jsm");
+
+XPCOMUtils.defineLazyModuleGetter(this, "JNI",
+                                  "resource://gre/modules/JNI.jsm");
+
+XPCOMUtils.defineLazyModuleGetter(this, "UITelemetry",
+                                  "resource://gre/modules/UITelemetry.jsm");
 
 XPCOMUtils.defineLazyModuleGetter(this, "PluralForm",
                                   "resource://gre/modules/PluralForm.jsm");
@@ -88,6 +94,9 @@ XPCOMUtils.defineLazyModuleGetter(this, "CharsetMenu",
 
 XPCOMUtils.defineLazyModuleGetter(this, "NetErrorHelper",
                                   "resource://gre/modules/NetErrorHelper.jsm");
+
+XPCOMUtils.defineLazyModuleGetter(this, "PermissionsUtils",
+                                  "resource://gre/modules/PermissionsUtils.jsm");
 
 // Lazily-loaded browser scripts:
 [
@@ -157,6 +166,9 @@ XPCOMUtils.defineLazyModuleGetter(this, "NetErrorHelper",
 
 XPCOMUtils.defineLazyServiceGetter(this, "Haptic",
   "@mozilla.org/widget/hapticfeedback;1", "nsIHapticFeedback");
+
+XPCOMUtils.defineLazyServiceGetter(this, "ParentalControls",
+  "@mozilla.org/parental-controls-service;1", "nsIParentalControlsService");
 
 XPCOMUtils.defineLazyServiceGetter(this, "DOMUtils",
   "@mozilla.org/inspector/dom-utils;1", "inIDOMUtils");
@@ -281,7 +293,6 @@ var BrowserApp = {
   _tabs: [],
   _selectedTab: null,
   _prefObservers: [],
-  isGuest: false,
 
   get isTablet() {
     let sysInfo = Cc["@mozilla.org/system-info;1"].getService(Ci.nsIPropertyBag2);
@@ -428,8 +439,6 @@ var BrowserApp = {
         gScreenHeight = window.arguments[2];
       if (window.arguments[3])
         pinned = window.arguments[3];
-      if (window.arguments[4])
-        this.isGuest = window.arguments[4];
     }
 
     if (pinned) {
@@ -453,7 +462,7 @@ var BrowserApp = {
     if (this._startupStatus)
       this.onAppUpdated();
 
-    if (this.isGuest) {
+    if (!ParentalControls.isAllowed(ParentalControls.INSTALL_EXTENSIONS)) {
       // Disable extension installs
       Services.prefs.setIntPref("extensions.enabledScopes", 1);
       Services.prefs.setIntPref("extensions.autoDisableScopes", 1);
@@ -575,7 +584,7 @@ var BrowserApp = {
     NativeWindow.contextmenus.add({
       label: Strings.browser.GetStringFromName("contextmenu.shareLink"),
       order: NativeWindow.contextmenus.DEFAULT_HTML5_ORDER - 1, // Show above HTML5 menu items
-      selector: NativeWindow.contextmenus._disableInGuest(NativeWindow.contextmenus.linkShareableContext),
+      selector: NativeWindow.contextmenus._disableRestricted("SHARE", NativeWindow.contextmenus.linkShareableContext),
       showAsActions: function(aElement) {
         return {
           title: aElement.textContent.trim() || aElement.title.trim(),
@@ -591,7 +600,7 @@ var BrowserApp = {
     NativeWindow.contextmenus.add({
       label: Strings.browser.GetStringFromName("contextmenu.shareEmailAddress"),
       order: NativeWindow.contextmenus.DEFAULT_HTML5_ORDER - 1,
-      selector: NativeWindow.contextmenus._disableInGuest(NativeWindow.contextmenus.emailLinkContext),
+      selector: NativeWindow.contextmenus._disableRestricted("SHARE", NativeWindow.contextmenus.emailLinkContext),
       showAsActions: function(aElement) {
         let url = NativeWindow.contextmenus._getLinkURL(aElement);
         let emailAddr = NativeWindow.contextmenus._stripScheme(url);
@@ -610,7 +619,7 @@ var BrowserApp = {
     NativeWindow.contextmenus.add({
       label: Strings.browser.GetStringFromName("contextmenu.sharePhoneNumber"),
       order: NativeWindow.contextmenus.DEFAULT_HTML5_ORDER - 1,
-      selector: NativeWindow.contextmenus._disableInGuest(NativeWindow.contextmenus.phoneNumberLinkContext),
+      selector: NativeWindow.contextmenus._disableRestricted("SHARE", NativeWindow.contextmenus.phoneNumberLinkContext),
       showAsActions: function(aElement) {
         let url = NativeWindow.contextmenus._getLinkURL(aElement);
         let phoneNumber = NativeWindow.contextmenus._stripScheme(url);
@@ -627,7 +636,7 @@ var BrowserApp = {
     });
 
     NativeWindow.contextmenus.add(Strings.browser.GetStringFromName("contextmenu.addToContacts"),
-      NativeWindow.contextmenus._disableInGuest(NativeWindow.contextmenus.emailLinkContext),
+      NativeWindow.contextmenus._disableRestricted("ADD_CONTACT", NativeWindow.contextmenus.emailLinkContext),
       function(aTarget) {
         UITelemetry.addEvent("action.1", "contextmenu", null, "web_contact_email");
 
@@ -639,7 +648,7 @@ var BrowserApp = {
       });
 
     NativeWindow.contextmenus.add(Strings.browser.GetStringFromName("contextmenu.addToContacts"),
-      NativeWindow.contextmenus._disableInGuest(NativeWindow.contextmenus.phoneNumberLinkContext),
+      NativeWindow.contextmenus._disableRestricted("ADD_CONTACT", NativeWindow.contextmenus.phoneNumberLinkContext),
       function(aTarget) {
         UITelemetry.addEvent("action.1", "contextmenu", null, "web_contact_phone");
 
@@ -651,7 +660,7 @@ var BrowserApp = {
       });
 
     NativeWindow.contextmenus.add(Strings.browser.GetStringFromName("contextmenu.bookmarkLink"),
-      NativeWindow.contextmenus._disableInGuest(NativeWindow.contextmenus.linkBookmarkableContext),
+      NativeWindow.contextmenus._disableRestricted("BOOKMARK", NativeWindow.contextmenus.linkBookmarkableContext),
       function(aTarget) {
         UITelemetry.addEvent("action.1", "contextmenu", null, "web_bookmark");
 
@@ -688,7 +697,7 @@ var BrowserApp = {
     NativeWindow.contextmenus.add({
       label: Strings.browser.GetStringFromName("contextmenu.shareMedia"),
       order: NativeWindow.contextmenus.DEFAULT_HTML5_ORDER - 1,
-      selector: NativeWindow.contextmenus._disableInGuest(NativeWindow.contextmenus.SelectorContext("video")),
+      selector: NativeWindow.contextmenus._disableRestricted("SHARE", NativeWindow.contextmenus.SelectorContext("video")),
       showAsActions: function(aElement) {
         let url = (aElement.currentSrc || aElement.src);
         let title = aElement.textContent || aElement.title;
@@ -736,7 +745,7 @@ var BrowserApp = {
 
     NativeWindow.contextmenus.add({
       label: Strings.browser.GetStringFromName("contextmenu.shareImage"),
-      selector: NativeWindow.contextmenus._disableInGuest(NativeWindow.contextmenus.imageSaveableContext),
+      selector: NativeWindow.contextmenus._disableRestricted("SHARE", NativeWindow.contextmenus.imageSaveableContext),
       order: NativeWindow.contextmenus.DEFAULT_HTML5_ORDER - 1, // Show above HTML5 menu items
       showAsActions: function(aTarget) {
         let doc = aTarget.ownerDocument;
@@ -768,7 +777,7 @@ var BrowserApp = {
       });
 
     NativeWindow.contextmenus.add(Strings.browser.GetStringFromName("contextmenu.setImageAs"),
-      NativeWindow.contextmenus._disableInGuest(NativeWindow.contextmenus.imageSaveableContext),
+      NativeWindow.contextmenus._disableRestricted("SET_IMAGE", NativeWindow.contextmenus.imageSaveableContext),
       function(aTarget) {
         UITelemetry.addEvent("action.1", "contextmenu", null, "web_background_image");
 
@@ -952,7 +961,8 @@ var BrowserApp = {
 
     let tab = this.getTabForBrowser(aBrowser);
     if (tab) {
-      if ("userSearch" in aParams) tab.userSearch = aParams.userSearch;
+      if ("userRequested" in aParams) tab.userRequested = aParams.userRequested;
+      tab.isSearch = ("isSearch" in aParams) ? aParams.isSearch : false;
     }
 
     try {
@@ -1199,7 +1209,7 @@ var BrowserApp = {
         webBrowserPrint.cancel();
       }
     }
-    let isPrivate = PrivateBrowsingUtils.isWindowPrivate(aBrowser.contentWindow);
+    let isPrivate = PrivateBrowsingUtils.isBrowserPrivate(aBrowser);
     let download = dm.addDownload(Ci.nsIDownloadManager.DOWNLOAD_TYPE_DOWNLOAD,
                                   aBrowser.currentURI,
                                   Services.io.newFileURI(file), "", mimeInfo,
@@ -1576,13 +1586,15 @@ var BrowserApp = {
           desktopMode: (data.desktopMode === true)
         };
 
+        params.userRequested = url;
+
         if (data.engine) {
           let engine = Services.search.getEngineByName(data.engine);
           if (engine) {
-            params.userSearch = url;
             let submission = engine.getSubmission(url);
             url = submission.uri.spec;
             params.postData = submission.postData;
+            params.isSearch = true;
           }
         }
 
@@ -1614,10 +1626,10 @@ var BrowserApp = {
         // This event refers to a search via the URL bar, not a bookmarks
         // keyword search. Note that this code assumes that the user can only
         // perform a keyword search on the selected tab.
-        this.selectedTab.userSearch = aData;
+        this.isSearch = true;
 
         // Don't store queries in private browsing mode.
-        let isPrivate = PrivateBrowsingUtils.isWindowPrivate(this.selectedTab.browser.contentWindow);
+        let isPrivate = PrivateBrowsingUtils.isBrowserPrivate(this.selectedTab.browser);
         let query = isPrivate ? "" : aData;
 
         let engine = aSubject.QueryInterface(Ci.nsISearchEngine);
@@ -2096,7 +2108,7 @@ var NativeWindow = {
     linkOpenableNonPrivateContext: {
       matches: function linkOpenableNonPrivateContextMatches(aElement) {
         let doc = aElement.ownerDocument;
-        if (!doc || PrivateBrowsingUtils.isWindowPrivate(doc.defaultView)) {
+        if (!doc || PrivateBrowsingUtils.isContentWindowPrivate(doc.defaultView)) {
           return false;
         }
 
@@ -2341,39 +2353,6 @@ var NativeWindow = {
       return res;
     },
 
-    _findTarget: function(x, y) {
-      let isDescendant = function(parent, child) {
-        let node = child;
-        while (node) {
-          if (node === parent) {
-            return true;
-          }
-
-          node = node.parentNode;
-        }
-
-        return false;
-      };
-
-      let target = BrowserEventHandler._highlightElement;
-      let touchTarget = ElementTouchHelper.anyElementFromPoint(x, y);
-
-      // If we have a highlighted element that has a click handler, we want to ensure our target is inside it
-      if (isDescendant(target, touchTarget)) {
-        target = touchTarget;
-      } else if (!target) {
-        // Otherwise, let's try to find something clickable
-        target = ElementTouchHelper.elementFromPoint(x, y);
-
-        // If that failed, we'll just fall back to anything under the user's finger
-        if (!target) {
-          target = touchTarget;
-        }
-      }
-
-      return target;
-    },
-
     /* Checks if there are context menu items to show, and if it finds them
      * sends a contextmenu event to content. We also send showing events to
      * any html5 context menus we are about to show, and fire some local notifications
@@ -2386,8 +2365,8 @@ var NativeWindow = {
         return;
       }
 
-      // Find the target of the long-press / contextmenu event.
-      this._target = this._findTarget(event.clientX, event.clientY);
+      // Use the highlighted element for the context menu target.
+      this._target = BrowserEventHandler._highlightElement;
       if (!this._target) {
         return;
       }
@@ -2674,11 +2653,13 @@ var NativeWindow = {
       return null;
     },
 
-    _disableInGuest: function _disableInGuest(selector) {
+    _disableRestricted: function _disableRestricted(restriction, selector) {
       return {
-        matches: function _disableInGuestMatches(aElement, aX, aY) {
-          if (BrowserApp.isGuest)
+        matches: function _disableRestrictedMatches(aElement, aX, aY) {
+          if (!ParentalControls.isAllowed(ParentalControls[restriction])) {
             return false;
+          }
+
           return selector.matches(aElement, aX, aY);
         }
       };
@@ -2840,6 +2821,9 @@ var LightWeightThemeWebInstaller = {
   },
 
   _isAllowed: function (node) {
+    // Make sure the whitelist has been imported to permissions
+    PermissionsUtils.importFromPrefs("xpinstall.", "install");
+
     let pm = Services.perms;
 
     let uri = node.ownerDocument.documentURIObject;
@@ -2995,7 +2979,7 @@ nsBrowserAccess.prototype = {
         let parent = BrowserApp.getTabForWindow(aOpener.top);
         if (parent) {
           parentId = parent.id;
-          isPrivate = PrivateBrowsingUtils.isWindowPrivate(parent.browser.contentWindow);
+          isPrivate = PrivateBrowsingUtils.isBrowserPrivate(parent.browser);
         }
       }
 
@@ -3251,7 +3235,8 @@ Tab.prototype = {
       let charset = "charset" in aParams ? aParams.charset : null;
 
       // The search term the user entered to load the current URL
-      this.userSearch = "userSearch" in aParams ? aParams.userSearch : "";
+      this.userRequested = "userRequested" in aParams ? aParams.userRequested : "";
+      this.isSearch = "isSearch" in aParams ? aParams.isSearch : false;
 
       try {
         this.browser.loadURIWithFlags(aURL, flags, referrerURI, charset, postData);
@@ -3780,16 +3765,6 @@ Tab.prototype = {
         else if (docURI.startsWith("about:neterror"))
           errorType = "neterror";
 
-        Messaging.sendRequest({
-          type: "DOMContentLoaded",
-          tabID: this.id,
-          bgColor: backgroundColor,
-          errorType: errorType,
-          metadata: this.metatags
-        });
-
-        this.metatags = null;
-
         // Attach a listener to watch for "click" events bubbling up from error
         // pages and other similar page. This lets us fix bugs like 401575 which
         // require error page UI to do privileged things, without letting error
@@ -3797,6 +3772,17 @@ Tab.prototype = {
         if (docURI.startsWith("about:neterror")) {
           NetErrorHelper.attachToBrowser(this.browser);
         }
+
+        Messaging.sendRequest({
+          type: "DOMContentLoaded",
+          tabID: this.id,
+          bgColor: backgroundColor,
+          errorType: errorType,
+          metadata: this.metatags,
+        });
+
+        // Reset isSearch so that the userRequested term will be erased on next page load
+        this.metatags = null;
 
         if (docURI.startsWith("about:certerror") || docURI.startsWith("about:blocked")) {
           this.browser.addEventListener("click", ErrorPageEventHandler, true);
@@ -3922,50 +3908,52 @@ Tab.prototype = {
           // Check that type matches opensearch.
           let isOpenSearch = (type == "application/opensearchdescription+xml");
           if (isOpenSearch && target.title && /^(?:https?|ftp):/i.test(target.href)) {
-            let visibleEngines = Services.search.getVisibleEngines();
-            // NOTE: Engines are currently identified by name, but this can be changed
-            // when Engines are identified by URL (see bug 335102).
-            if (visibleEngines.some(function(e) {
-              return e.name == target.title;
-            })) {
-              // This engine is already present, do nothing.
-              return;
-            }
-
-            if (this.browser.engines) {
-              // This engine has already been handled, do nothing.
-              if (this.browser.engines.some(function(e) {
-                return e.url == target.href;
+            Services.search.init(() => {
+              let visibleEngines = Services.search.getVisibleEngines();
+              // NOTE: Engines are currently identified by name, but this can be changed
+              // when Engines are identified by URL (see bug 335102).
+              if (visibleEngines.some(function(e) {
+                return e.name == target.title;
               })) {
-                  return;
+                // This engine is already present, do nothing.
+                return;
               }
-            } else {
-              this.browser.engines = [];
-            }
 
-            // Get favicon.
-            let iconURL = target.ownerDocument.documentURIObject.prePath + "/favicon.ico";
+              if (this.browser.engines) {
+                // This engine has already been handled, do nothing.
+                if (this.browser.engines.some(function(e) {
+                  return e.url == target.href;
+                })) {
+                    return;
+                }
+              } else {
+                this.browser.engines = [];
+              }
 
-            let newEngine = {
-              title: target.title,
-              url: target.href,
-              iconURL: iconURL
-            };
+              // Get favicon.
+              let iconURL = target.ownerDocument.documentURIObject.prePath + "/favicon.ico";
 
-            this.browser.engines.push(newEngine);
+              let newEngine = {
+                title: target.title,
+                url: target.href,
+                iconURL: iconURL
+              };
 
-            // Don't send a message to display engines if we've already handled an engine.
-            if (this.browser.engines.length > 1)
-              return;
+              this.browser.engines.push(newEngine);
 
-            // Broadcast message that this tab contains search engines that should be visible.
-            let newEngineMessage = {
-              type: "Link:OpenSearch",
-              tabID: this.id,
-              visible: true
-            };
+              // Don't send a message to display engines if we've already handled an engine.
+              if (this.browser.engines.length > 1)
+                return;
 
-            Messaging.sendRequest(newEngineMessage);
+              // Broadcast message that this tab contains search engines that should be visible.
+              let newEngineMessage = {
+                type: "Link:OpenSearch",
+                tabID: this.id,
+                visible: true
+              };
+
+              Messaging.sendRequest(newEngineMessage);
+            });
           }
         }
         break;
@@ -4065,10 +4053,20 @@ Tab.prototype = {
         if (aEvent.originalTarget.defaultView != this.browser.contentWindow)
           return;
 
+        let target = aEvent.originalTarget;
+        let docURI = target.documentURI;
+        if (!docURI.startsWith("about:neterror") && !this.isSearch) {
+          // If this wasn't an error page and the user isn't search, don't retain the typed entry
+          this.userRequested = "";
+        }
+
         Messaging.sendRequest({
           type: "Content:PageShow",
-          tabID: this.id
+          tabID: this.id,
+          userRequested: this.userRequested
         });
+
+        this.isSearch = false;
 
         if (!aEvent.persisted && Services.prefs.getBoolPref("browser.ui.linkify.phone")) {
           if (!this._linkifier)
@@ -4196,8 +4194,8 @@ Tab.prototype = {
       fixedURI = URIFixup.createExposableURI(aLocationURI);
     } catch (ex) { }
 
-    // In guest sessions, we refuse to let you open any file urls.
-    if (BrowserApp.isGuest) {
+    // In restricted profiles, we refuse to let you open any file urls.
+    if (!ParentalControls.isAllowed(ParentalControls.VISIT_FILE_URLS)) {
       let bannedSchemes = ["file", "chrome", "resource", "jar", "wyciwyg"];
 
       if (bannedSchemes.indexOf(fixedURI.scheme) > -1) {
@@ -4252,16 +4250,13 @@ Tab.prototype = {
       type: "Content:LocationChange",
       tabID: this.id,
       uri: truncate(fixedURI.spec, MAX_URI_LENGTH),
-      userSearch: this.userSearch || "",
+      userRequested: this.userRequested || "",
       baseDomain: baseDomain,
       contentType: (contentType ? contentType : ""),
       sameDocument: sameDocument
     };
 
     Messaging.sendRequest(message);
-
-    // The search term is only valid for this location change event, so reset it here.
-    this.userSearch = "";
 
     if (!sameDocument) {
       // XXX This code assumes that this is the earliest hook we have at which
@@ -4767,41 +4762,34 @@ var BrowserEventHandler = {
     if (!BrowserApp.isBrowserContentDocumentDisplayed() || aEvent.touches.length > 1 || aEvent.defaultPrevented)
       return;
 
-    let closest = aEvent.target;
+    let target = aEvent.target;
+    if (!target) {
+      return;
+    }
 
-    if (closest) {
-      // If we've pressed a scrollable element, let Java know that we may
-      // want to override the scroll behaviour (for document sub-frames)
-      this._scrollableElement = this._findScrollableElement(closest, true);
-      this._firstScrollEvent = true;
+    // If we've pressed a scrollable element, let Java know that we may
+    // want to override the scroll behaviour (for document sub-frames)
+    this._scrollableElement = this._findScrollableElement(target, true);
+    this._firstScrollEvent = true;
 
-      if (this._scrollableElement != null) {
-        // Discard if it's the top-level scrollable, we let Java handle this
-        // The top-level scrollable is the body in quirks mode and the html element
-        // in standards mode
-        let doc = BrowserApp.selectedBrowser.contentDocument;
-        let rootScrollable = (doc.compatMode === "BackCompat" ? doc.body : doc.documentElement);
-        if (this._scrollableElement != rootScrollable) {
-          Messaging.sendRequest({ type: "Panning:Override" });
-        }
+    if (this._scrollableElement != null) {
+      // Discard if it's the top-level scrollable, we let Java handle this
+      // The top-level scrollable is the body in quirks mode and the html element
+      // in standards mode
+      let doc = BrowserApp.selectedBrowser.contentDocument;
+      let rootScrollable = (doc.compatMode === "BackCompat" ? doc.body : doc.documentElement);
+      if (this._scrollableElement != rootScrollable) {
+        Messaging.sendRequest({ type: "Panning:Override" });
       }
     }
 
-    if (!ElementTouchHelper.isElementClickable(closest, null, false))
-      closest = ElementTouchHelper.elementFromPoint(aEvent.changedTouches[0].screenX,
-                                                    aEvent.changedTouches[0].screenY);
-    if (!closest)
-      closest = aEvent.target;
-
-    if (closest) {
-      let uri = this._getLinkURI(closest);
-      if (uri) {
-        try {
-          Services.io.QueryInterface(Ci.nsISpeculativeConnect).speculativeConnect(uri, null);
-        } catch (e) {}
-      }
-      this._doTapHighlight(closest);
+    let uri = this._getLinkURI(target);
+    if (uri) {
+      try {
+        Services.io.QueryInterface(Ci.nsISpeculativeConnect).speculativeConnect(uri, null);
+      } catch (e) {}
     }
+    this._doTapHighlight(target);
   },
 
   _getLinkURI: function(aElement) {
@@ -4896,32 +4884,29 @@ var BrowserEventHandler = {
         break;
 
       case "Gesture:SingleTap": {
-        let element = this._highlightElement;
-        if (element) {
-          try {
-            let data = JSON.parse(aData);
-            let [x, y] = [data.x, data.y];
-            if (ElementTouchHelper.isElementClickable(element)) {
-              [x, y] = this._moveClickPoint(element, x, y);
-            }
-
-            // Was the element already focused before it was clicked?
-            let isFocused = (element == BrowserApp.getFocusedInput(BrowserApp.selectedBrowser));
-
-            this._sendMouseEvent("mousemove", element, x, y);
-            this._sendMouseEvent("mousedown", element, x, y);
-            this._sendMouseEvent("mouseup",   element, x, y);
-
-            // If the element was previously focused, show the caret attached to it.
-            if (isFocused)
-              SelectionHandler.attachCaret(element);
-
-            // scrollToFocusedInput does its own checks to find out if an element should be zoomed into
-            BrowserApp.scrollToFocusedInput(BrowserApp.selectedBrowser);
-          } catch(e) {
-            Cu.reportError(e);
+        try {
+          // If the element was previously focused, show the caret attached to it.
+          let element = this._highlightElement;
+          if (element && element == BrowserApp.getFocusedInput(BrowserApp.selectedBrowser)) {
+            SelectionHandler.attachCaret(element);
           }
+        } catch(e) {
+          Cu.reportError(e);
         }
+
+        // The _highlightElement was chosen after fluffing the touch events
+        // that led to this SingleTap, so by fluffing the mouse events, they
+        // should find the same target since we fluff them again below.
+        let data = JSON.parse(aData);
+        let {x, y} = data;
+
+        this._sendMouseEvent("mousemove", x, y);
+        this._sendMouseEvent("mousedown", x, y);
+        this._sendMouseEvent("mouseup",   x, y);
+
+        // scrollToFocusedInput does its own checks to find out if an element should be zoomed into
+        BrowserApp.scrollToFocusedInput(BrowserApp.selectedBrowser);
+
         this._cancelTapHighlight();
         break;
       }
@@ -5070,40 +5055,11 @@ var BrowserEventHandler = {
     this.motionBuffer.push({ dx: dx, dy: dy, time: this.lastTime });
   },
 
-  _moveClickPoint: function(aElement, aX, aY) {
-    // the element can be out of the aX/aY point because of the touch radius
-    // if outside, we gracefully move the touch point to the edge of the element
-    if (!(aElement instanceof HTMLHtmlElement)) {
-      let isTouchClick = true;
-      let rects = ElementTouchHelper.getContentClientRects(aElement);
-      for (let i = 0; i < rects.length; i++) {
-        let rect = rects[i];
-        let inBounds =
-          (aX > rect.left && aX < (rect.left + rect.width)) &&
-          (aY > rect.top && aY < (rect.top + rect.height));
-        if (inBounds) {
-          isTouchClick = false;
-          break;
-        }
-      }
-
-      if (isTouchClick) {
-        let rect = rects[0];
-        // if either width or height is zero, we don't want to move the click to the edge of the element. See bug 757208
-        if (rect.width != 0 && rect.height != 0) {
-          aX = Math.min(Math.ceil(rect.left + rect.width) - 1, Math.max(Math.ceil(rect.left), aX));
-          aY = Math.min(Math.ceil(rect.top + rect.height) - 1, Math.max(Math.ceil(rect.top),  aY));
-        }
-      }
-    }
-    return [aX, aY];
-  },
-
-  _sendMouseEvent: function _sendMouseEvent(aName, aElement, aX, aY) {
-    let window = aElement.ownerDocument.defaultView;
+  _sendMouseEvent: function _sendMouseEvent(aName, aX, aY) {
+    let win = BrowserApp.selectedBrowser.contentWindow;
     try {
-      let cwu = window.top.QueryInterface(Ci.nsIInterfaceRequestor).getInterface(Ci.nsIDOMWindowUtils);
-      cwu.sendMouseEventToWindow(aName, aX, aY, 0, 1, 0, true);
+      let cwu = win.top.QueryInterface(Ci.nsIInterfaceRequestor).getInterface(Ci.nsIDOMWindowUtils);
+      cwu.sendMouseEventToWindow(aName, aX, aY, 0, 1, 0, true, 0, Ci.nsIDOMMouseEvent.MOZ_SOURCE_TOUCH);
     } catch(e) {
       Cu.reportError(e);
     }
@@ -5174,8 +5130,6 @@ var BrowserEventHandler = {
   }
 };
 
-const kReferenceDpi = 240; // standard "pixel" size used in some preferences
-
 const ElementTouchHelper = {
   /* Return the element at the given coordinates, starting from the given window and
      drilling down through frames. If no window is provided, the top-level window of
@@ -5197,182 +5151,28 @@ const ElementTouchHelper = {
     return elem;
   },
 
-  /* Return the most appropriate clickable element (if any), starting from the given window
-     and drilling down through iframes as necessary. If no window is provided, the top-level
-     window of the currently selected tab is used. The coordinates provided should be CSS
-     pixels relative to the window's scroll position. The element returned may not actually
-     contain the coordinates passed in because of touch radius and clickability heuristics. */
-  elementFromPoint: function(aX, aY, aWindow) {
-    // browser's elementFromPoint expect browser-relative client coordinates.
-    // subtract browser's scroll values to adjust
-    let win = (aWindow ? aWindow : BrowserApp.selectedBrowser.contentWindow);
-    let cwu = win.QueryInterface(Ci.nsIInterfaceRequestor).getInterface(Ci.nsIDOMWindowUtils);
-    let elem = this.getClosest(cwu, aX, aY);
-
-    // step through layers of IFRAMEs and FRAMES to find innermost element
-    while (elem && (elem instanceof HTMLIFrameElement || elem instanceof HTMLFrameElement)) {
-      // adjust client coordinates' origin to be top left of iframe viewport
-      let rect = elem.getBoundingClientRect();
-      aX -= rect.left;
-      aY -= rect.top;
-      cwu = elem.contentDocument.defaultView.QueryInterface(Ci.nsIInterfaceRequestor).getInterface(Ci.nsIDOMWindowUtils);
-      elem = this.getClosest(cwu, aX, aY);
-    }
-
-    return elem;
-  },
-
-  /* Returns the touch radius in content px. */
+  /* Returns the touch radius with zoom factored in. */
   getTouchRadius: function getTouchRadius() {
-    let dpiRatio = ViewportHandler.displayDPI / kReferenceDpi;
     let zoom = BrowserApp.selectedTab._zoom;
     return {
-      top: this.radius.top * dpiRatio / zoom,
-      right: this.radius.right * dpiRatio / zoom,
-      bottom: this.radius.bottom * dpiRatio / zoom,
-      left: this.radius.left * dpiRatio / zoom
+      top: this.radius.top / zoom,
+      right: this.radius.right / zoom,
+      bottom: this.radius.bottom / zoom,
+      left: this.radius.left / zoom
     };
   },
 
-  /* Returns the touch radius in reference pixels. */
+  /* Returns the touch radius in device pixels. */
   get radius() {
+    let mmToIn = 1 / 25.4;
+    let mmToPx = mmToIn * ViewportHandler.displayDPI;
     let prefs = Services.prefs;
     delete this.radius;
-    return this.radius = { "top": prefs.getIntPref("browser.ui.touch.top"),
-                           "right": prefs.getIntPref("browser.ui.touch.right"),
-                           "bottom": prefs.getIntPref("browser.ui.touch.bottom"),
-                           "left": prefs.getIntPref("browser.ui.touch.left")
+    return this.radius = { "top": prefs.getIntPref("ui.touch.radius.topmm") * mmToPx,
+                           "right": prefs.getIntPref("ui.touch.radius.rightmm") * mmToPx,
+                           "bottom": prefs.getIntPref("ui.touch.radius.bottommm") * mmToPx,
+                           "left": prefs.getIntPref("ui.touch.radius.leftmm") * mmToPx
                          };
-  },
-
-  get weight() {
-    delete this.weight;
-    return this.weight = { "visited": Services.prefs.getIntPref("browser.ui.touch.weight.visited") };
-  },
-
-  /* Retrieve the closest element to a point by looking at borders position */
-  getClosest: function getClosest(aWindowUtils, aX, aY) {
-    let target = aWindowUtils.elementFromPoint(aX, aY,
-                                               true,   /* ignore root scroll frame*/
-                                               false); /* don't flush layout */
-
-    // if this element is clickable we return quickly. also, if it isn't,
-    // use a cache to speed up future calls to isElementClickable in the
-    // loop below.
-    let unclickableCache = new Array();
-    if (this.isElementClickable(target, unclickableCache, false))
-      return target;
-
-    target = null;
-    let radius = this.getTouchRadius();
-    let nodes = aWindowUtils.nodesFromRect(aX, aY, radius.top, radius.right, radius.bottom, radius.left, true, false);
-
-    let threshold = Number.POSITIVE_INFINITY;
-    for (let i = 0; i < nodes.length; i++) {
-      let current = nodes[i];
-      if (!current.matches || !this.isElementClickable(current, unclickableCache, true))
-        continue;
-
-      let rect = current.getBoundingClientRect();
-      let distance = this._computeDistanceFromRect(aX, aY, rect);
-
-      // increase a little bit the weight for already visited items
-      if (current && current.matches("*:visited"))
-        distance *= (this.weight.visited / 100);
-
-      if (distance < threshold) {
-        target = current;
-        threshold = distance;
-      }
-    }
-
-    return target;
-  },
-
-  isElementClickable: function isElementClickable(aElement, aUnclickableCache, aAllowBodyListeners) {
-    const selector = "a,:link,:visited,[role=button],button,input,select,textarea";
-
-    let stopNode = null;
-    if (!aAllowBodyListeners && aElement && aElement.ownerDocument)
-      stopNode = aElement.ownerDocument.body;
-
-    for (let elem = aElement; elem && elem != stopNode; elem = elem.parentNode) {
-      if (aUnclickableCache && aUnclickableCache.indexOf(elem) != -1)
-        continue;
-      if (this._hasMouseListener(elem))
-        return true;
-      if (elem.matches && elem.matches(selector))
-        return true;
-      if (elem instanceof HTMLLabelElement && elem.control != null)
-        return true;
-      if (aUnclickableCache)
-        aUnclickableCache.push(elem);
-    }
-    return false;
-  },
-
-  _computeDistanceFromRect: function _computeDistanceFromRect(aX, aY, aRect) {
-    let x = 0, y = 0;
-    let xmost = aRect.left + aRect.width;
-    let ymost = aRect.top + aRect.height;
-
-    // compute horizontal distance from left/right border depending if X is
-    // before/inside/after the element's rectangle
-    if (aRect.left < aX && aX < xmost)
-      x = Math.min(xmost - aX, aX - aRect.left);
-    else if (aX < aRect.left)
-      x = aRect.left - aX;
-    else if (aX > xmost)
-      x = aX - xmost;
-
-    // compute vertical distance from top/bottom border depending if Y is
-    // above/inside/below the element's rectangle
-    if (aRect.top < aY && aY < ymost)
-      y = Math.min(ymost - aY, aY - aRect.top);
-    else if (aY < aRect.top)
-      y = aRect.top - aY;
-    if (aY > ymost)
-      y = aY - ymost;
-
-    return Math.sqrt(Math.pow(x, 2) + Math.pow(y, 2));
-  },
-
-  _els: Cc["@mozilla.org/eventlistenerservice;1"].getService(Ci.nsIEventListenerService),
-  _clickableEvents: ["mousedown", "mouseup", "click"],
-  _hasMouseListener: function _hasMouseListener(aElement) {
-    let els = this._els;
-    let listeners = els.getListenerInfoFor(aElement, {});
-    for (let i = 0; i < listeners.length; i++) {
-      if (this._clickableEvents.indexOf(listeners[i].type) != -1)
-        return true;
-    }
-    return false;
-  },
-
-  getContentClientRects: function(aElement) {
-    let offset = { x: 0, y: 0 };
-
-    let nativeRects = aElement.getClientRects();
-    // step out of iframes and frames, offsetting scroll values
-    for (let frame = aElement.ownerDocument.defaultView; frame.frameElement; frame = frame.parent) {
-      // adjust client coordinates' origin to be top left of iframe viewport
-      let rect = frame.frameElement.getBoundingClientRect();
-      let left = frame.getComputedStyle(frame.frameElement, "").borderLeftWidth;
-      let top = frame.getComputedStyle(frame.frameElement, "").borderTopWidth;
-      offset.x += rect.left + parseInt(left);
-      offset.y += rect.top + parseInt(top);
-    }
-
-    let result = [];
-    for (let i = nativeRects.length - 1; i >= 0; i--) {
-      let r = nativeRects[i];
-      result.push({ left: r.left + offset.x,
-                    top: r.top + offset.y,
-                    width: r.width,
-                    height: r.height
-                  });
-    }
-    return result;
   },
 
   getBoundingContentRect: function(aElement) {
@@ -5518,6 +5318,7 @@ var FormAssistant = {
     Services.obs.addObserver(this, "FormAssist:AutoComplete", false);
     Services.obs.addObserver(this, "FormAssist:Blocklisted", false);
     Services.obs.addObserver(this, "FormAssist:Hidden", false);
+    Services.obs.addObserver(this, "FormAssist:Remove", false);
     Services.obs.addObserver(this, "invalidformsubmit", false);
     Services.obs.addObserver(this, "PanZoom:StateChange", false);
 
@@ -5535,6 +5336,7 @@ var FormAssistant = {
     Services.obs.removeObserver(this, "FormAssist:AutoComplete");
     Services.obs.removeObserver(this, "FormAssist:Blocklisted");
     Services.obs.removeObserver(this, "FormAssist:Hidden");
+    Services.obs.removeObserver(this, "FormAssist:Remove");
     Services.obs.removeObserver(this, "invalidformsubmit");
     Services.obs.removeObserver(this, "PanZoom:StateChange");
 
@@ -5598,6 +5400,18 @@ var FormAssistant = {
 
       case "FormAssist:Hidden":
         this._currentInputElement = null;
+        break;
+
+      case "FormAssist:Remove":
+        if (!this._currentInputElement) {
+          break;
+        }
+
+        FormHistory.update({
+          op: "remove",
+          fieldname: this._currentInputElement.name,
+          value: aData
+        });
         break;
     }
   },
@@ -6547,7 +6361,7 @@ var PopupBlockerObserver = {
         let popupName = pageReport[i].popupWindowName;
 
         let parent = BrowserApp.selectedTab;
-        let isPrivate = PrivateBrowsingUtils.isWindowPrivate(parent.browser.contentWindow);
+        let isPrivate = PrivateBrowsingUtils.isBrowserPrivate(parent.browser);
         BrowserApp.addTab(popupURIspec, { parentId: parent.id, isPrivate: isPrivate });
       }
     }

@@ -24,9 +24,12 @@ import org.mozilla.gecko.GeckoApplication;
 import org.mozilla.gecko.GeckoEvent;
 import org.mozilla.gecko.GeckoProfile;
 import org.mozilla.gecko.GeckoSharedPrefs;
+import org.mozilla.gecko.GuestSession;
 import org.mozilla.gecko.LocaleManager;
+import org.mozilla.gecko.NewTabletUI;
 import org.mozilla.gecko.PrefsHelper;
 import org.mozilla.gecko.R;
+import org.mozilla.gecko.RestrictedProfiles;
 import org.mozilla.gecko.Telemetry;
 import org.mozilla.gecko.TelemetryContract;
 import org.mozilla.gecko.TelemetryContract.Method;
@@ -109,19 +112,22 @@ OnSharedPreferenceChangeListener
     private static final String PREFS_MENU_CHAR_ENCODING = "browser.menu.showCharacterEncoding";
     private static final String PREFS_MP_ENABLED = "privacy.masterpassword.enabled";
     private static final String PREFS_UPDATER_AUTODOWNLOAD = "app.update.autodownload";
-    private static final String PREFS_GEO_REPORTING = "app.geo.reportdata";
+    private static final String PREFS_GEO_REPORTING = NON_PREF_PREFIX + "app.geo.reportdata";
     private static final String PREFS_GEO_LEARN_MORE = NON_PREF_PREFIX + "geo.learn_more";
     private static final String PREFS_HEALTHREPORT_LINK = NON_PREF_PREFIX + "healthreport.link";
     private static final String PREFS_DEVTOOLS_REMOTE_ENABLED = "devtools.debugger.remote-enabled";
     private static final String PREFS_DISPLAY_REFLOW_ON_ZOOM = "browser.zoom.reflowOnZoom";
+    private static final String PREFS_DISPLAY_TITLEBAR_MODE = "browser.chrome.titlebarMode";
     private static final String PREFS_SYNC = NON_PREF_PREFIX + "sync";
-    private static final String PREFS_STUMBLER_ENABLED = AppConstants.ANDROID_PACKAGE_NAME + ".STUMBLER_PREF";
+
+    private static final String ACTION_STUMBLER_UPLOAD_PREF = AppConstants.ANDROID_PACKAGE_NAME + ".STUMBLER_PREF";
 
     // This isn't a Gecko pref, even if it looks like one.
     private static final String PREFS_BROWSER_LOCALE = "locale";
 
     public static final String PREFS_RESTORE_SESSION = NON_PREF_PREFIX + "restoreSession3";
     public static final String PREFS_SUGGESTED_SITES = NON_PREF_PREFIX + "home_suggested_sites";
+    public static final String PREFS_NEW_TABLET_UI = NON_PREF_PREFIX + "new_tablet_ui";
 
     // These values are chosen to be distinct from other Activity constants.
     private static final int REQUEST_CODE_PREF_SCREEN = 5;
@@ -288,6 +294,10 @@ OnSharedPreferenceChangeListener
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
+        if (GeckoProfile.get(this).inGuestMode()) {
+            GuestSession.configureWindow(getWindow());
+        }
+
         // Apply the current user-selected locale, if necessary.
         checkLocale();
 
@@ -626,7 +636,7 @@ OnSharedPreferenceChangeListener
             // This logic will need to be extended when
             // content language selection (Bug 881510) is implemented.
             if (!localeSwitchingIsEnabled &&
-                "preferences_locale".equals(pref.getExtras().getString("resource", null))) {
+                "preferences_locale".equals(pref.getExtras().getString("resource"))) {
                 preferences.removePreference(pref);
                 i--;
                 continue;
@@ -658,6 +668,12 @@ OnSharedPreferenceChangeListener
                     preferences.removePreference(pref);
                     i--;
                     continue;
+                } else if ((AppConstants.RELEASE_BUILD || !HardwareUtils.isTablet()) &&
+                           PREFS_NEW_TABLET_UI.equals(key)) {
+                    // Remove toggle for new tablet UI on release builds and phones.
+                    preferences.removePreference(pref);
+                    i--;
+                    continue;
                 } else if (!AppConstants.MOZ_TELEMETRY_REPORTING &&
                            PREFS_TELEMETRY_ENABLED.equals(key)) {
                     preferences.removePreference(pref);
@@ -674,8 +690,9 @@ OnSharedPreferenceChangeListener
                     preferences.removePreference(pref);
                     i--;
                     continue;
-                } else if (AppConstants.RELEASE_BUILD && PREFS_GEO_REPORTING.equals(key)) {
-                    // We don't build wifi/cell tower collection in release builds, so hide the UI.
+                } else if (!AppConstants.MOZ_STUMBLER_BUILD_TIME_ENABLED &&
+                           (PREFS_GEO_REPORTING.equals(key) ||
+                            PREFS_GEO_LEARN_MORE.equals(key))) {
                     preferences.removePreference(pref);
                     i--;
                     continue;
@@ -701,7 +718,8 @@ OnSharedPreferenceChangeListener
                     CharSequence selectedEntry = listPref.getEntry();
                     listPref.setSummary(selectedEntry);
                     continue;
-                } else if (PREFS_SYNC.equals(key) && GeckoProfile.get(this).inGuestMode()) {
+                } else if (PREFS_SYNC.equals(key) &&
+                           !RestrictedProfiles.isAllowed(RestrictedProfiles.Restriction.DISALLOW_MODIFY_ACCOUNTS)) {
                     // Don't show sync prefs while in guest mode.
                     preferences.removePreference(pref);
                     i--;
@@ -715,6 +733,12 @@ OnSharedPreferenceChangeListener
                             return true;
                         }
                     });
+                } else if (PREFS_DISPLAY_TITLEBAR_MODE.equals(key) &&
+                           NewTabletUI.isEnabled(this)) {
+                    // New tablet always shows URLS, not titles.
+                    preferences.removePreference(pref);
+                    i--;
+                    continue;
                 } else if (handlers.containsKey(key)) {
                     PrefHandler handler = handlers.get(key);
                     handler.setupPref(this, pref);
@@ -852,10 +876,10 @@ OnSharedPreferenceChangeListener
 
     /**
      * Broadcast the provided value as the value of the
-     * <code>PREFS_STUMBLER_ENABLED</code> pref.
+     * <code>PREFS_GEO_REPORTING</code> pref.
      */
     public static void broadcastStumblerPref(final Context context, final boolean value) {
-       Intent intent = new Intent(PREFS_STUMBLER_ENABLED)
+       Intent intent = new Intent(ACTION_STUMBLER_UPLOAD_PREF)
                 .putExtra("pref", PREFS_GEO_REPORTING)
                 .putExtra("branch", GeckoSharedPrefs.APP_PREFS_NAME)
                 .putExtra("enabled", value)
@@ -871,10 +895,10 @@ OnSharedPreferenceChangeListener
 
     /**
      * Broadcast the current value of the
-     * <code>PREFS_STUMBLER_ENABLED</code> pref.
+     * <code>PREFS_GEO_REPORTING</code> pref.
      */
     public static void broadcastStumblerPref(final Context context) {
-        final boolean value = getBooleanPref(context, PREFS_GEO_REPORTING, true);
+        final boolean value = getBooleanPref(context, PREFS_GEO_REPORTING, false);
         broadcastStumblerPref(context, value);
     }
 
@@ -993,6 +1017,8 @@ OnSharedPreferenceChangeListener
                              sharedPreferences.getString(key, null));
         } else if (PREFS_SUGGESTED_SITES.equals(key)) {
             refreshSuggestedSites();
+        } else if (PREFS_NEW_TABLET_UI.equals(key)) {
+            Toast.makeText(this, R.string.new_tablet_restart, Toast.LENGTH_SHORT).show();
         }
     }
 
@@ -1302,22 +1328,7 @@ OnSharedPreferenceChangeListener
             @Override
             public void prefValue(String prefName, final int value) {
                 final Preference pref = getField(prefName);
-                final CheckBoxPrefSetter prefSetter;
-                if (PREFS_GEO_REPORTING.equals(prefName)) {
-                    if (Versions.preICS) {
-                        prefSetter = new CheckBoxPrefSetter();
-                    } else {
-                        prefSetter = new TwoStatePrefSetter();
-                    }
-                    ThreadUtils.postToUiThread(new Runnable() {
-                        @Override
-                        public void run() {
-                            prefSetter.setBooleanPref(pref, value == 1);
-                        }
-                    });
-                } else {
-                    Log.w(LOGTAG, "Unhandled int value for pref [" + pref + "]");
-                }
+                Log.w(LOGTAG, "Unhandled int value for pref [" + pref + "]");
             }
 
             @Override

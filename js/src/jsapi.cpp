@@ -77,11 +77,10 @@
 #include "vm/Runtime.h"
 #include "vm/SavedStacks.h"
 #include "vm/Shape.h"
-#include "vm/SharedArrayObject.h"
 #include "vm/StopIterationObject.h"
 #include "vm/StringBuffer.h"
 #include "vm/Symbol.h"
-#include "vm/TypedArrayObject.h"
+#include "vm/TypedArrayCommon.h"
 #include "vm/WeakMapObject.h"
 #include "vm/WrapperObject.h"
 #include "vm/Xdr.h"
@@ -1889,28 +1888,29 @@ JS_RemoveFinalizeCallback(JSRuntime *rt, JSFinalizeCallback cb)
 }
 
 JS_PUBLIC_API(bool)
-JS_AddMovingGCCallback(JSRuntime *rt, JSMovingGCCallback cb, void *data)
+JS_AddWeakPointerCallback(JSRuntime *rt, JSWeakPointerCallback cb, void *data)
 {
     AssertHeapIsIdle(rt);
-    return rt->gc.addMovingGCCallback(cb, data);
+    return rt->gc.addWeakPointerCallback(cb, data);
 }
 
 JS_PUBLIC_API(void)
-JS_RemoveMovingGCCallback(JSRuntime *rt, JSMovingGCCallback cb)
+JS_RemoveWeakPointerCallback(JSRuntime *rt, JSWeakPointerCallback cb)
 {
-    rt->gc.removeMovingGCCallback(cb);
+    rt->gc.removeWeakPointerCallback(cb);
 }
 
-JS_PUBLIC_API(bool)
-JS_IsAboutToBeFinalized(JS::Heap<JSObject *> *objp)
+JS_PUBLIC_API(void)
+JS_UpdateWeakPointerAfterGC(JS::Heap<JSObject *> *objp)
 {
-    return IsObjectAboutToBeFinalized(objp->unsafeGet());
+    JS_UpdateWeakPointerAfterGCUnbarriered(objp->unsafeGet());
 }
 
-JS_PUBLIC_API(bool)
-JS_IsAboutToBeFinalizedUnbarriered(JSObject **objp)
+JS_PUBLIC_API(void)
+JS_UpdateWeakPointerAfterGCUnbarriered(JSObject **objp)
 {
-    return IsObjectAboutToBeFinalized(objp);
+    if (IsObjectAboutToBeFinalized(objp))
+        *objp = nullptr;
 }
 
 JS_PUBLIC_API(void)
@@ -2740,7 +2740,7 @@ JS_AlreadyHasOwnPropertyById(JSContext *cx, HandleObject obj, HandleId id, bool 
             return true;
         }
 
-        if (obj->is<TypedArrayObject>() && index < obj->as<TypedArrayObject>().length()) {
+        if (IsAnyTypedArray(obj) && index < AnyTypedArrayLength(obj)) {
             *foundp = true;
             return true;
         }
@@ -3218,26 +3218,43 @@ JS_DefineObject(JSContext *cx, HandleObject obj, const char *name, const JSClass
     return nobj;
 }
 
-JS_PUBLIC_API(bool)
-JS_DefineConstDoubles(JSContext *cx, HandleObject obj, const JSConstDoubleSpec *cds)
+static inline Value
+ValueFromScalar(double x)
 {
-    bool ok;
-    unsigned attrs;
+    return DoubleValue(x);
+}
+static inline Value
+ValueFromScalar(int32_t x)
+{
+    return Int32Value(x);
+}
 
+template<typename T>
+static bool
+DefineConstScalar(JSContext *cx, HandleObject obj, const JSConstScalarSpec<T> *cds)
+{
     AssertHeapIsIdle(cx);
     CHECK_REQUEST(cx);
     JSPropertyOpWrapper noget = GetterWrapper(nullptr);
     JSStrictPropertyOpWrapper noset = SetterWrapper(nullptr);
-    for (ok = true; cds->name; cds++) {
-        RootedValue value(cx, DoubleValue(cds->dval));
-        attrs = cds->flags;
-        if (!attrs)
-            attrs = JSPROP_READONLY | JSPROP_PERMANENT;
-        ok = DefineProperty(cx, obj, cds->name, value, noget, noset, attrs, 0);
-        if (!ok)
-            break;
+    unsigned attrs = JSPROP_READONLY | JSPROP_PERMANENT;
+    for (; cds->name; cds++) {
+        RootedValue value(cx, ValueFromScalar(cds->val));
+        if (!DefineProperty(cx, obj, cds->name, value, noget, noset, attrs, 0))
+            return false;
     }
-    return ok;
+    return true;
+}
+
+JS_PUBLIC_API(bool)
+JS_DefineConstDoubles(JSContext *cx, HandleObject obj, const JSConstDoubleSpec *cds)
+{
+    return DefineConstScalar(cx, obj, cds);
+}
+JS_PUBLIC_API(bool)
+JS_DefineConstIntegers(JSContext *cx, HandleObject obj, const JSConstIntegerSpec *cis)
+{
+    return DefineConstScalar(cx, obj, cis);
 }
 
 JS_PUBLIC_API(bool)
@@ -3707,7 +3724,7 @@ JS_NewPropertyIterator(JSContext *cx, HandleObject obj)
 }
 
 JS_PUBLIC_API(bool)
-JS_NextProperty(JSContext *cx, HandleObject iterobj, jsid *idp)
+JS_NextProperty(JSContext *cx, HandleObject iterobj, MutableHandleId idp)
 {
     AssertHeapIsIdle(cx);
     CHECK_REQUEST(cx);
@@ -3723,10 +3740,10 @@ JS_NextProperty(JSContext *cx, HandleObject iterobj, jsid *idp)
 
         if (!shape->previous()) {
             JS_ASSERT(shape->isEmptyShape());
-            *idp = JSID_VOID;
+            idp.set(JSID_VOID);
         } else {
             iterobj->setPrivateGCThing(const_cast<Shape *>(shape->previous().get()));
-            *idp = shape->propid();
+            idp.set(shape->propid());
         }
     } else {
         /* Non-native case: use the ida enumerated when iterobj was created. */
@@ -3734,9 +3751,9 @@ JS_NextProperty(JSContext *cx, HandleObject iterobj, jsid *idp)
         JS_ASSERT(i <= ida->length);
         STATIC_ASSUME(i <= ida->length);
         if (i == 0) {
-            *idp = JSID_VOID;
+            idp.set(JSID_VOID);
         } else {
-            *idp = ida->vector[--i];
+            idp.set(ida->vector[--i]);
             iterobj->setSlot(JSSLOT_ITER_INDEX, Int32Value(i));
         }
     }
@@ -3980,16 +3997,26 @@ JS_GetFunctionArity(JSFunction *fun)
     return fun->nargs();
 }
 
+namespace JS {
+
+JS_PUBLIC_API(bool)
+IsCallable(JSObject *obj)
+{
+    return obj->isCallable();
+}
+
+JS_PUBLIC_API(bool)
+IsConstructor(JSObject *obj)
+{
+    return obj->isConstructor();
+}
+
+} /* namespace JS */
+
 JS_PUBLIC_API(bool)
 JS_ObjectIsFunction(JSContext *cx, JSObject *obj)
 {
     return obj->is<JSFunction>();
-}
-
-JS_PUBLIC_API(bool)
-JS_ObjectIsCallable(JSContext *cx, JSObject *obj)
-{
-    return obj->isCallable();
 }
 
 JS_PUBLIC_API(bool)
@@ -4449,15 +4476,15 @@ bool
 JS::Compile(JSContext *cx, HandleObject obj, const ReadOnlyCompileOptions &options,
             const char *bytes, size_t length, MutableHandleScript script)
 {
-    mozilla::ScopedFreePtr<char16_t> chars;
+    mozilla::UniquePtr<char16_t, JS::FreePolicy> chars;
     if (options.utf8)
-        chars = UTF8CharsToNewTwoByteCharsZ(cx, UTF8Chars(bytes, length), &length).get();
+        chars.reset(UTF8CharsToNewTwoByteCharsZ(cx, UTF8Chars(bytes, length), &length).get());
     else
-        chars = InflateString(cx, bytes, &length);
+        chars.reset(InflateString(cx, bytes, &length));
     if (!chars)
         return false;
 
-    return Compile(cx, obj, options, chars, length, script);
+    return Compile(cx, obj, options, chars.get(), length, script);
 }
 
 bool
@@ -4569,7 +4596,7 @@ JS_BufferIsCompilableUnit(JSContext *cx, HandleObject obj, const char *utf8, siz
     Parser<frontend::FullParseHandler> parser(cx, &cx->tempLifoAlloc(),
                                               options, chars, length,
                                               /* foldConstants = */ true, nullptr, nullptr);
-    JSErrorReporter older = JS_SetErrorReporter(cx, nullptr);
+    JSErrorReporter older = JS_SetErrorReporter(cx->runtime(), nullptr);
     if (!parser.parse(obj)) {
         // We ran into an error. If it was because we ran out of source, we
         // return false so our caller knows to try to collect more buffered
@@ -4579,7 +4606,7 @@ JS_BufferIsCompilableUnit(JSContext *cx, HandleObject obj, const char *utf8, siz
 
         cx->clearPendingException();
     }
-    JS_SetErrorReporter(cx, older);
+    JS_SetErrorReporter(cx->runtime(), older);
 
     js_free(chars);
     return result;
@@ -4649,15 +4676,15 @@ JS::CompileFunction(JSContext *cx, HandleObject obj, const ReadOnlyCompileOption
                     const char *name, unsigned nargs, const char *const *argnames,
                     const char *bytes, size_t length, MutableHandleFunction fun)
 {
-    mozilla::ScopedFreePtr<char16_t> chars;
+    mozilla::UniquePtr<char16_t, JS::FreePolicy> chars;
     if (options.utf8)
-        chars = UTF8CharsToNewTwoByteCharsZ(cx, UTF8Chars(bytes, length), &length).get();
+        chars.reset(UTF8CharsToNewTwoByteCharsZ(cx, UTF8Chars(bytes, length), &length).get());
     else
-        chars = InflateString(cx, bytes, &length);
+        chars.reset(InflateString(cx, bytes, &length));
     if (!chars)
         return false;
 
-    return CompileFunction(cx, obj, options, name, nargs, argnames, chars, length, fun);
+    return CompileFunction(cx, obj, options, name, nargs, argnames, chars.get(), length, fun);
 }
 
 JS_PUBLIC_API(bool)
@@ -5016,7 +5043,7 @@ JS::Construct(JSContext *cx, HandleValue fval, const JS::HandleValueArray& args,
     assertSameCompartment(cx, fval, args);
     AutoLastFrameCheck lfc(cx);
 
-    return InvokeConstructor(cx, fval, args.length(), args.begin(), rval.address());
+    return InvokeConstructor(cx, fval, args.length(), args.begin(), rval);
 }
 
 static JSObject *
@@ -5767,18 +5794,18 @@ JS_ReportAllocationOverflow(JSContext *cx)
 }
 
 JS_PUBLIC_API(JSErrorReporter)
-JS_GetErrorReporter(JSContext *cx)
+JS_GetErrorReporter(JSRuntime *rt)
 {
-    return cx->errorReporter;
+    return rt->errorReporter;
 }
 
 JS_PUBLIC_API(JSErrorReporter)
-JS_SetErrorReporter(JSContext *cx, JSErrorReporter er)
+JS_SetErrorReporter(JSRuntime *rt, JSErrorReporter er)
 {
     JSErrorReporter older;
 
-    older = cx->errorReporter;
-    cx->errorReporter = er;
+    older = rt->errorReporter;
+    rt->errorReporter = er;
     return older;
 }
 
@@ -6070,11 +6097,13 @@ JS::AutoSaveExceptionState::restore()
 
 JS::AutoSaveExceptionState::~AutoSaveExceptionState()
 {
-    if (wasPropagatingForcedReturn && !context->isPropagatingForcedReturn())
-        context->setPropagatingForcedReturn();
-    if (wasThrowing && !context->isExceptionPending()) {
-        context->throwing = true;
-        context->unwrappedException_ = exceptionValue;
+    if (!context->isExceptionPending()) {
+        if (wasPropagatingForcedReturn)
+            context->setPropagatingForcedReturn();
+        if (wasThrowing) {
+            context->throwing = true;
+            context->unwrappedException_ = exceptionValue;
+        }
     }
 }
 
@@ -6141,7 +6170,7 @@ JS_PUBLIC_API(bool)
 JS_ThrowStopIteration(JSContext *cx)
 {
     AssertHeapIsIdle(cx);
-    return js_ThrowStopIteration(cx);
+    return ThrowStopIteration(cx);
 }
 
 JS_PUBLIC_API(bool)
@@ -6195,56 +6224,58 @@ JS_PUBLIC_API(void)
 JS_SetGlobalJitCompilerOption(JSRuntime *rt, JSJitCompilerOption opt, uint32_t value)
 {
     switch (opt) {
-      case JSJITCOMPILER_BASELINE_USECOUNT_TRIGGER:
+      case JSJITCOMPILER_BASELINE_WARMUP_TRIGGER:
         if (value == uint32_t(-1)) {
             jit::JitOptions defaultValues;
-            value = defaultValues.baselineUsesBeforeCompile;
+            value = defaultValues.baselineWarmUpThreshold;
         }
-        jit::js_JitOptions.baselineUsesBeforeCompile = value;
+        jit::js_JitOptions.baselineWarmUpThreshold = value;
         break;
-      case JSJITCOMPILER_ION_USECOUNT_TRIGGER:
+      case JSJITCOMPILER_ION_WARMUP_TRIGGER:
         if (value == uint32_t(-1)) {
-            jit::js_JitOptions.resetUsesBeforeCompile();
+            jit::js_JitOptions.resetCompilerWarmUpThreshold();
             break;
         }
-        jit::js_JitOptions.setUsesBeforeCompile(value);
+        jit::js_JitOptions.setCompilerWarmUpThreshold(value);
         if (value == 0)
             jit::js_JitOptions.setEagerCompilation();
         break;
       case JSJITCOMPILER_ION_ENABLE:
         if (value == 1) {
             JS::RuntimeOptionsRef(rt).setIon(true);
-            JitSpew(js::jit::JitSpew_Scripts, "Enable ion");
+            JitSpew(js::jit::JitSpew_IonScripts, "Enable ion");
         } else if (value == 0) {
             JS::RuntimeOptionsRef(rt).setIon(false);
-            JitSpew(js::jit::JitSpew_Scripts, "Disable ion");
+            JitSpew(js::jit::JitSpew_IonScripts, "Disable ion");
         }
         break;
       case JSJITCOMPILER_BASELINE_ENABLE:
         if (value == 1) {
             JS::RuntimeOptionsRef(rt).setBaseline(true);
+            ReleaseAllJITCode(rt->defaultFreeOp());
             JitSpew(js::jit::JitSpew_BaselineScripts, "Enable baseline");
         } else if (value == 0) {
             JS::RuntimeOptionsRef(rt).setBaseline(false);
+            ReleaseAllJITCode(rt->defaultFreeOp());
             JitSpew(js::jit::JitSpew_BaselineScripts, "Disable baseline");
         }
         break;
       case JSJITCOMPILER_OFFTHREAD_COMPILATION_ENABLE:
         if (value == 1) {
             rt->setOffthreadIonCompilationEnabled(true);
-            JitSpew(js::jit::JitSpew_Scripts, "Enable offthread compilation");
+            JitSpew(js::jit::JitSpew_IonScripts, "Enable offthread compilation");
         } else if (value == 0) {
             rt->setOffthreadIonCompilationEnabled(false);
-            JitSpew(js::jit::JitSpew_Scripts, "Disable offthread compilation");
+            JitSpew(js::jit::JitSpew_IonScripts, "Disable offthread compilation");
         }
         break;
       case JSJITCOMPILER_SIGNALS_ENABLE:
         if (value == 1) {
             rt->setCanUseSignalHandlers(true);
-            JitSpew(js::jit::JitSpew_Scripts, "Enable signals");
+            JitSpew(js::jit::JitSpew_IonScripts, "Enable signals");
         } else if (value == 0) {
             rt->setCanUseSignalHandlers(false);
-            JitSpew(js::jit::JitSpew_Scripts, "Disable signals");
+            JitSpew(js::jit::JitSpew_IonScripts, "Disable signals");
         }
         break;
       default:
@@ -6257,10 +6288,10 @@ JS_GetGlobalJitCompilerOption(JSRuntime *rt, JSJitCompilerOption opt)
 {
 #ifndef JS_CODEGEN_NONE
     switch (opt) {
-      case JSJITCOMPILER_BASELINE_USECOUNT_TRIGGER:
-        return jit::js_JitOptions.baselineUsesBeforeCompile;
-      case JSJITCOMPILER_ION_USECOUNT_TRIGGER:
-        return jit::js_JitOptions.forcedDefaultIonUsesBeforeCompile;
+      case JSJITCOMPILER_BASELINE_WARMUP_TRIGGER:
+        return jit::js_JitOptions.baselineWarmUpThreshold;
+      case JSJITCOMPILER_ION_WARMUP_TRIGGER:
+        return jit::js_JitOptions.forcedDefaultIonWarmUpThreshold;
       case JSJITCOMPILER_ION_ENABLE:
         return JS::RuntimeOptionsRef(rt).ion();
       case JSJITCOMPILER_BASELINE_ENABLE:

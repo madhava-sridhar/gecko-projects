@@ -324,6 +324,7 @@ WebGLContext::WebGLContext()
 
 WebGLContext::~WebGLContext()
 {
+    RemovePostRefreshObserver();
     mContextObserver->Destroy();
 
     DestroyResourcesAndContext();
@@ -1430,7 +1431,7 @@ WebGLContext::PresentScreenBuffer()
 void
 WebGLContext::DummyFramebufferOperation(const char *info)
 {
-    GLenum status = CheckFramebufferStatus(LOCAL_GL_FRAMEBUFFER);
+    FBStatus status = CheckFramebufferStatus(LOCAL_GL_FRAMEBUFFER);
     if (status != LOCAL_GL_FRAMEBUFFER_COMPLETE)
         ErrorInvalidFramebufferOperation("%s: incomplete framebuffer", info);
 }
@@ -1726,10 +1727,7 @@ WebGLContext::GetSurfaceSnapshot(bool* aPremultAlpha)
         return nullptr;
     }
 
-    Matrix m;
-    m.Translate(0.0, mHeight);
-    m.Scale(1.0, -1.0);
-    dt->SetTransform(m);
+    dt->SetTransform(Matrix::Translation(0.0, mHeight).PreScale(1.0, -1.0));
 
     dt->DrawSurface(surf,
                     Rect(0, 0, mWidth, mHeight),
@@ -1740,7 +1738,15 @@ WebGLContext::GetSurfaceSnapshot(bool* aPremultAlpha)
     return dt->Snapshot();
 }
 
-bool WebGLContext::TexImageFromVideoElement(GLenum texImageTarget, GLint level,
+void
+WebGLContext::DidRefresh()
+{
+    if (gl) {
+        gl->FlushIfHeavyGLCallsSinceLastFlush();
+    }
+}
+
+bool WebGLContext::TexImageFromVideoElement(const TexImageTarget texImageTarget, GLint level,
                               GLenum internalformat, GLenum format, GLenum type,
                               mozilla::dom::Element& elt)
 {
@@ -1787,9 +1793,9 @@ bool WebGLContext::TexImageFromVideoElement(GLenum texImageTarget, GLint level,
                            info.Height() == srcImage->GetSize().height;
     if (!dimensionsMatch) {
         // we need to allocation
-        gl->fTexImage2D(texImageTarget, level, internalformat, srcImage->GetSize().width, srcImage->GetSize().height, 0, format, type, nullptr);
+        gl->fTexImage2D(texImageTarget.get(), level, internalformat, srcImage->GetSize().width, srcImage->GetSize().height, 0, format, type, nullptr);
     }
-    bool ok = gl->BlitHelper()->BlitImageToTexture(srcImage.get(), srcImage->GetSize(), tex->GLName(), texImageTarget, mPixelStoreFlipY);
+    bool ok = gl->BlitHelper()->BlitImageToTexture(srcImage.get(), srcImage->GetSize(), tex->GLName(), texImageTarget.get(), mPixelStoreFlipY);
     if (ok) {
         tex->SetImageInfo(texImageTarget, level, srcImage->GetSize().width, srcImage->GetSize().height, format, type, WebGLImageDataStatus::InitializedImageData);
         tex->Bind(TexImageTargetToTexTarget(texImageTarget));

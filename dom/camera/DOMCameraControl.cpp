@@ -66,6 +66,7 @@ NS_IMPL_CYCLE_COLLECTION_INHERITED(nsDOMCameraControl, DOMMediaStream,
                                    mOnRecorderStateChangeCb,
                                    mOnPreviewStateChangeCb,
                                    mOnAutoFocusMovingCb,
+                                   mOnAutoFocusCompletedCb,
                                    mOnFacesDetectedCb)
 
 /* static */
@@ -155,6 +156,7 @@ nsDOMCameraControl::nsDOMCameraControl(uint32_t aCameraId,
   , mOnRecorderStateChangeCb(nullptr)
   , mOnPreviewStateChangeCb(nullptr)
   , mOnAutoFocusMovingCb(nullptr)
+  , mOnAutoFocusCompletedCb(nullptr)
   , mOnFacesDetectedCb(nullptr)
   , mWindow(aWindow)
 {
@@ -618,6 +620,17 @@ nsDOMCameraControl::SetOnAutoFocusMoving(CameraAutoFocusMovingCallback* aCb)
   mOnAutoFocusMovingCb = aCb;
 }
 
+CameraAutoFocusCallback*
+nsDOMCameraControl::GetOnAutoFocusCompleted()
+{
+  return mOnAutoFocusCompletedCb;
+}
+void
+nsDOMCameraControl::SetOnAutoFocusCompleted(CameraAutoFocusCallback* aCb)
+{
+  mOnAutoFocusCompletedCb = aCb;
+}
+
 CameraFaceDetectionCallback*
 nsDOMCameraControl::GetOnFacesDetected()
 {
@@ -647,6 +660,28 @@ nsDOMCameraControl::Capabilities()
   return caps.forget();
 }
 
+class ImmediateErrorCallback : public nsRunnable
+{
+public:
+  ImmediateErrorCallback(CameraErrorCallback* aCallback, const nsAString& aMessage)
+    : mCallback(aCallback)
+    , mMessage(aMessage)
+  { }
+
+  NS_IMETHODIMP
+  Run()
+  {
+    MOZ_ASSERT(NS_IsMainThread());
+    ErrorResult ignored;
+    mCallback->Call(mMessage, ignored);
+    return NS_OK;
+  }
+
+protected:
+  nsRefPtr<CameraErrorCallback> mCallback;
+  nsString mMessage;
+};
+
 // Methods.
 void
 nsDOMCameraControl::StartRecording(const CameraStartRecordingOptions& aOptions,
@@ -657,6 +692,20 @@ nsDOMCameraControl::StartRecording(const CameraStartRecordingOptions& aOptions,
                                    ErrorResult& aRv)
 {
   MOZ_ASSERT(mCameraControl);
+
+  nsRefPtr<CameraStartRecordingCallback> cb = mStartRecordingOnSuccessCb;
+  if (cb) {
+    if (aOnError.WasPassed()) {
+      DOM_CAMERA_LOGT("%s:onError WasPassed\n", __func__);
+      NS_DispatchToMainThread(new ImmediateErrorCallback(&aOnError.Value(),
+                              NS_LITERAL_STRING("StartRecordingInProgress")));
+    } else {
+      DOM_CAMERA_LOGT("%s:onError NS_ERROR_FAILURE\n", __func__);
+      // Only throw if no error callback was passed in.
+      aRv = NS_ERROR_FAILURE;
+    }
+    return;
+  }
 
   NotifyRecordingStatusChange(NS_LITERAL_STRING("starting"));
 
@@ -744,28 +793,6 @@ nsDOMCameraControl::ResumePreview(ErrorResult& aRv)
   MOZ_ASSERT(mCameraControl);
   aRv = mCameraControl->StartPreview();
 }
-
-class ImmediateErrorCallback : public nsRunnable
-{
-public:
-  ImmediateErrorCallback(CameraErrorCallback* aCallback, const nsAString& aMessage)
-    : mCallback(aCallback)
-    , mMessage(aMessage)
-  { }
-  
-  NS_IMETHODIMP
-  Run()
-  {
-    MOZ_ASSERT(NS_IsMainThread());
-    ErrorResult ignored;
-    mCallback->Call(mMessage, ignored);
-    return NS_OK;
-  }
-
-protected:
-  nsRefPtr<CameraErrorCallback> mCallback;
-  nsString mMessage;
-};
 
 void
 nsDOMCameraControl::SetConfiguration(const CameraConfiguration& aConfiguration,
@@ -957,6 +984,7 @@ nsDOMCameraControl::Shutdown()
   mOnRecorderStateChangeCb = nullptr;
   mOnPreviewStateChangeCb = nullptr;
   mOnAutoFocusMovingCb = nullptr;
+  mOnAutoFocusCompletedCb = nullptr;
   mOnFacesDetectedCb = nullptr;
 
   mCameraControl->Shutdown();
@@ -1148,6 +1176,12 @@ nsDOMCameraControl::OnAutoFocusComplete(bool aAutoFocusSucceeded)
 
   nsRefPtr<CameraAutoFocusCallback> cb = mAutoFocusOnSuccessCb.forget();
   mAutoFocusOnErrorCb = nullptr;
+  if (cb) {
+    ErrorResult ignored;
+    cb->Call(aAutoFocusSucceeded, ignored);
+  }
+
+  cb = mOnAutoFocusCompletedCb;
   if (cb) {
     ErrorResult ignored;
     cb->Call(aAutoFocusSucceeded, ignored);

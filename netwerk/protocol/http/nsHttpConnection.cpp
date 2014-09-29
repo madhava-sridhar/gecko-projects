@@ -69,6 +69,7 @@ nsHttpConnection::nsHttpConnection()
     , mExperienced(false)
     , mInSpdyTunnel(false)
     , mForcePlainText(false)
+    , mTrafficStamp(false)
     , mHttp1xTransactionCount(0)
     , mRemainingConnectionUses(0xffffffff)
     , mClassification(nsAHttpTransaction::CLASS_GENERAL)
@@ -179,10 +180,10 @@ nsHttpConnection::StartSpdy(uint8_t spdyVersion)
 
     if (rv == NS_ERROR_ALREADY_OPENED) {
         // Has the interface for TakeSubTransactions() changed?
-        LOG(("TakeSubTranscations somehow called after "
+        LOG(("TakeSubTransactions somehow called after "
              "nsAHttpTransaction began processing\n"));
         MOZ_ASSERT(false,
-                   "TakeSubTranscations somehow called after "
+                   "TakeSubTransactions somehow called after "
                    "nsAHttpTransaction began processing");
         mTransaction->Close(NS_ERROR_ABORT);
         return;
@@ -2078,6 +2079,24 @@ nsHttpConnection::GetInterface(const nsIID &iid, void **result)
     if (callbacks)
         return callbacks->GetInterface(iid, result);
     return NS_ERROR_NO_INTERFACE;
+}
+
+void
+nsHttpConnection::CheckForTraffic(bool check)
+{
+    if (check) {
+        if (mSpdySession) {
+            // Send a ping to verify it is still alive
+            mSpdySession->SendPing();
+        } else {
+            // If not SPDY, Store snapshot amount of data right now
+            mTrafficCount = mTotalBytesWritten + mTotalBytesRead;
+            mTrafficStamp = true;
+        }
+    } else {
+        // mark it as not checked
+        mTrafficStamp = false;
+    }
 }
 
 } // namespace mozilla::net

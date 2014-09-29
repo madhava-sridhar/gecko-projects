@@ -162,7 +162,6 @@ const WRITE_ERROR_SHARING_VIOLATION_NOPROCESSFORPID = 47;
 const WRITE_ERROR_SHARING_VIOLATION_NOPID           = 48;
 const FOTA_FILE_OPERATION_ERROR                     = 49;
 const FOTA_RECOVERY_ERROR                           = 50;
-const SECURE_LOCATION_UPDATE_ERROR                  = 51;
 
 const CERT_ATTR_CHECK_FAILED_NO_UPDATE  = 100;
 const CERT_ATTR_CHECK_FAILED_HAS_UPDATE = 101;
@@ -1478,8 +1477,7 @@ function handleUpdateFailure(update, errorCode) {
     return true;
   }
 
-  if (update.errorCode == ELEVATION_CANCELED ||
-      update.errorCode == SECURE_LOCATION_UPDATE_ERROR) {
+  if (update.errorCode == ELEVATION_CANCELED) {
     writeStatusFile(getUpdatesDir(), update.state = STATE_PENDING);
     return true;
   }
@@ -2080,6 +2078,14 @@ UpdateService.prototype = {
       Services.obs.removeObserver(this, topic);
       Services.prefs.removeObserver(PREF_APP_UPDATE_LOG, this);
 
+#ifdef XP_WIN
+      // If we hold the update mutex, let it go!
+      // The OS would clean this up sometime after shutdown,
+      // but that would have no guarantee on timing.
+      if (gUpdateMutexHandle) {
+        closeHandle(gUpdateMutexHandle);
+      }
+#endif
       if (this._retryTimer) {
         this._retryTimer.cancel();
       }
@@ -2385,7 +2391,7 @@ UpdateService.prototype = {
       if (parts.length > 1) {
         result = parseInt(parts[1]) || INVALID_UPDATER_STATUS_CODE;
       }
-      Services.telemetry.getHistogramById("UPDATER_ALL_STATUS_CODES").add(result);
+      Services.telemetry.getHistogramById("UPDATER_STATUS_CODES").add(result);
     } catch(e) {
       // Don't allow any exception to be propagated.
       Cu.reportError(e);

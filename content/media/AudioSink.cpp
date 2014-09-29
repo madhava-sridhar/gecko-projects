@@ -25,6 +25,9 @@ extern PRLogModuleInfo* gMediaDecoderLog;
 #define SINK_LOG_V(msg, ...)
 #endif
 
+// The amount of audio frames that is used to fuzz rounding errors.
+static const int64_t AUDIO_FUZZ_FRAMES = 1;
+
 AudioSink::AudioSink(MediaDecoderStateMachine* aStateMachine,
                      int64_t aStartTime, AudioInfo aInfo, dom::AudioChannel aChannel)
   : mStateMachine(aStateMachine)
@@ -162,7 +165,7 @@ AudioSink::AudioLoop()
       break;
     }
 
-    if (missingFrames.value() > 0) {
+    if (missingFrames.value() > AUDIO_FUZZ_FRAMES) {
       // The next audio chunk begins some time after the end of the last chunk
       // we pushed to the audio hardware. We must push silence into the audio
       // hardware so that the next audio chunk begins playback at the correct
@@ -294,13 +297,7 @@ AudioSink::PlayFromAudioQueue()
   AssertOnAudioThread();
   NS_ASSERTION(!mAudioStream->IsPaused(), "Don't play when paused");
   nsAutoPtr<AudioData> audio(AudioQueue().PopFront());
-  {
-    ReentrantMonitorAutoEnter mon(GetReentrantMonitor());
-    NS_WARN_IF_FALSE(mPlaying, "Should be playing");
-    // Awaken the decode loop if it's waiting for space to free up in the
-    // audio queue.
-    GetReentrantMonitor().NotifyAll();
-  }
+
   SINK_LOG_V("playing %u frames of audio at time %lld",
              audio->mFrames, audio->mTime);
   mAudioStream->Write(audio->mAudioData, audio->mFrames);

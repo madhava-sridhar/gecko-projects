@@ -291,7 +291,8 @@ frontend::CompileScript(ExclusiveContext *cx, LifoAlloc *alloc, HandleObject sco
 
     BytecodeEmitter::EmitterMode emitterMode =
         options.selfHostingMode ? BytecodeEmitter::SelfHosting : BytecodeEmitter::Normal;
-    BytecodeEmitter bce(/* parent = */ nullptr, &parser, &globalsc, script, options.forEval,
+    BytecodeEmitter bce(/* parent = */ nullptr, &parser, &globalsc, script,
+                        /* lazyScript = */ js::NullPtr(), options.forEval,
                         evalCaller, !!globalScope, options.lineno, emitterMode);
     if (!bce.init())
         return nullptr;
@@ -436,9 +437,11 @@ frontend::CompileScript(ExclusiveContext *cx, LifoAlloc *alloc, HandleObject sco
     // locals, however, which are allocated to the fixed part of the stack
     // frame.
     InternalHandle<Bindings*> bindings(script, &script->bindings);
-    if (!Bindings::initWithTemporaryStorage(cx, bindings, 0, 0, nullptr,
-                                            pc->blockScopeDepth))
+    if (!Bindings::initWithTemporaryStorage(cx, bindings, 0, 0, 0,
+                                            pc->blockScopeDepth, nullptr))
+    {
         return nullptr;
+    }
 
     if (!JSScript::fullyInitFromEmitter(cx, script, &bce))
         return nullptr;
@@ -509,14 +512,12 @@ frontend::CompileLazyFunction(JSContext *cx, Handle<LazyScript*> lazy, const cha
     if (lazy->hasBeenCloned())
         script->setHasBeenCloned();
 
-    BytecodeEmitter bce(/* parent = */ nullptr, &parser, pn->pn_funbox, script, options.forEval,
-                        /* evalCaller = */ NullPtr(), /* hasGlobalScope = */ true,
-                        options.lineno, BytecodeEmitter::LazyFunction);
+    BytecodeEmitter bce(/* parent = */ nullptr, &parser, pn->pn_funbox, script, lazy,
+                        options.forEval, /* evalCaller = */ js::NullPtr(),
+                        /* hasGlobalScope = */ true, options.lineno,
+                        BytecodeEmitter::LazyFunction);
     if (!bce.init())
         return false;
-
-    if (lazy->treatAsRunOnce())
-        bce.lazyRunOnceLambda = true;
 
     return EmitFunctionScript(cx, &bce, pn->pn_body);
 }
@@ -613,6 +614,12 @@ CompileFunctionBody(JSContext *cx, MutableHandleFunction fun, const ReadOnlyComp
     if (!NameFunctions(cx, fn))
         return false;
 
+    if (!SetDisplayURL(cx, parser.tokenStream, ss))
+        return false;
+
+    if (!SetSourceMap(cx, parser.tokenStream, ss))
+        return false;
+
     if (fn->pn_funbox->function()->isInterpreted()) {
         JS_ASSERT(fun == fn->pn_funbox->function());
 
@@ -632,7 +639,8 @@ CompileFunctionBody(JSContext *cx, MutableHandleFunction fun, const ReadOnlyComp
          * instead is cloned immediately onto the right scope chain.
          */
         BytecodeEmitter funbce(/* parent = */ nullptr, &parser, fn->pn_funbox, script,
-                               /* insideEval = */ false, /* evalCaller = */ js::NullPtr(),
+                               /* lazyScript = */ js::NullPtr(), /* insideEval = */ false,
+                               /* evalCaller = */ js::NullPtr(),
                                fun->environment() && fun->environment()->is<GlobalObject>(),
                                options.lineno);
         if (!funbce.init())
@@ -644,12 +652,6 @@ CompileFunctionBody(JSContext *cx, MutableHandleFunction fun, const ReadOnlyComp
         fun.set(fn->pn_funbox->function());
         JS_ASSERT(IsAsmJSModuleNative(fun->native()));
     }
-
-    if (!SetDisplayURL(cx, parser.tokenStream, ss))
-        return false;
-
-    if (!SetSourceMap(cx, parser.tokenStream, ss))
-        return false;
 
     if (!sct.complete())
         return false;

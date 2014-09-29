@@ -18,6 +18,7 @@
 #include "jit/ExecutableAllocator.h"
 #include "jit/IonOptimizationLevels.h"
 #include "jit/IonTypes.h"
+#include "js/UbiNode.h"
 
 namespace js {
 
@@ -28,8 +29,9 @@ namespace jit {
 class MacroAssembler;
 class CodeOffsetLabel;
 class PatchableBackedge;
+class IonBuilder;
 
-class JitCode : public gc::BarrieredCell<JitCode>
+class JitCode : public gc::TenuredCell
 {
   protected:
     uint8_t *code_;
@@ -299,6 +301,8 @@ struct IonScript
     // that contain an optimized call directly into this IonScript.
     Vector<DependentAsmJSModuleExit> *dependentAsmJSModules;
 
+    IonBuilder *pendingBuilder_;
+
   private:
     inline uint8_t *bottomBuffer() {
         return reinterpret_cast<uint8_t *>(this);
@@ -308,6 +312,15 @@ struct IonScript
     }
 
   public:
+
+    // SHOULD ONLY BE CALLED FROM JSScript
+    void setPendingBuilderPrivate(IonBuilder *builder) {
+        pendingBuilder_ = builder;
+    }
+    IonBuilder *pendingBuilder() const {
+        return pendingBuilder_;
+    }
+
     SnapshotOffset *bailoutTable() {
         return (SnapshotOffset *) &bottomBuffer()[bailoutTable_];
     }
@@ -569,6 +582,10 @@ struct IonScript
     bool invalidated() const {
         return refcount_ != 0;
     }
+
+    // Invalidate the current compilation.
+    bool invalidate(JSContext *cx, bool resetUses, const char *reason);
+
     size_t refcount() const {
         return refcount_;
     }
@@ -811,5 +828,13 @@ IsMarked(const jit::VMFunction *)
 } // namespace gc
 
 } // namespace js
+
+// JS::ubi::Nodes can point to js::jit::JitCode instances; they're js::gc::Cell
+// instances with no associated compartment.
+namespace JS {
+namespace ubi {
+template<> struct Concrete<js::jit::JitCode> : TracerConcrete<js::jit::JitCode> { };
+}
+}
 
 #endif /* jit_IonCode_h */

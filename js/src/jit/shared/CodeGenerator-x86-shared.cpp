@@ -537,6 +537,58 @@ CodeGeneratorX86Shared::visitMinMaxD(LMinMaxD *ins)
 }
 
 bool
+CodeGeneratorX86Shared::visitMinMaxF(LMinMaxF *ins)
+{
+    FloatRegister first = ToFloatRegister(ins->first());
+    FloatRegister second = ToFloatRegister(ins->second());
+#ifdef DEBUG
+    FloatRegister output = ToFloatRegister(ins->output());
+    JS_ASSERT(first == output);
+#endif
+
+    Label done, nan, minMaxInst;
+
+    // Do a ucomiss to catch equality and NaNs, which both require special
+    // handling. If the operands are ordered and inequal, we branch straight to
+    // the min/max instruction. If we wanted, we could also branch for less-than
+    // or greater-than here instead of using min/max, however these conditions
+    // will sometimes be hard on the branch predictor.
+    masm.ucomiss(first, second);
+    masm.j(Assembler::NotEqual, &minMaxInst);
+    if (!ins->mir()->range() || ins->mir()->range()->canBeNaN())
+        masm.j(Assembler::Parity, &nan);
+
+    // Ordered and equal. The operands are bit-identical unless they are zero
+    // and negative zero. These instructions merge the sign bits in that
+    // case, and are no-ops otherwise.
+    if (ins->mir()->isMax())
+        masm.andps(second, first);
+    else
+        masm.orps(second, first);
+    masm.jump(&done);
+
+    // x86's min/max are not symmetric; if either operand is a NaN, they return
+    // the read-only operand. We need to return a NaN if either operand is a
+    // NaN, so we explicitly check for a NaN in the read-write operand.
+    if (!ins->mir()->range() || ins->mir()->range()->canBeNaN()) {
+        masm.bind(&nan);
+        masm.ucomiss(first, first);
+        masm.j(Assembler::Parity, &done);
+    }
+
+    // When the values are inequal, or second is NaN, x86's min and max will
+    // return the value we need.
+    masm.bind(&minMaxInst);
+    if (ins->mir()->isMax())
+        masm.maxss(second, first);
+    else
+        masm.minss(second, first);
+
+    masm.bind(&done);
+    return true;
+}
+
+bool
 CodeGeneratorX86Shared::visitAbsD(LAbsD *ins)
 {
     FloatRegister input = ToFloatRegister(ins->input());
@@ -2119,37 +2171,66 @@ CodeGeneratorX86Shared::visitFloat32x4(LFloat32x4 *ins)
 }
 
 bool
-CodeGeneratorX86Shared::visitSimdValueX4(LSimdValueX4 *ins)
+CodeGeneratorX86Shared::visitInt32x4ToFloat32x4(LInt32x4ToFloat32x4 *ins)
 {
-    FloatRegister output = ToFloatRegister(ins->output());
+    FloatRegister in = ToFloatRegister(ins->input());
+    FloatRegister out = ToFloatRegister(ins->output());
+    masm.convertInt32x4ToFloat32x4(in, out);
+    return true;
+}
 
+bool
+CodeGeneratorX86Shared::visitFloat32x4ToInt32x4(LFloat32x4ToInt32x4 *ins)
+{
+    FloatRegister in = ToFloatRegister(ins->input());
+    FloatRegister out = ToFloatRegister(ins->output());
+    masm.convertFloat32x4ToInt32x4(in, out);
+    return true;
+}
+
+bool
+CodeGeneratorX86Shared::visitSimdValueInt32x4(LSimdValueInt32x4 *ins)
+{
     MSimdValueX4 *mir = ins->mir();
-    JS_ASSERT(IsSimdType(mir->type()));
-    JS_STATIC_ASSERT(sizeof(float) == sizeof(int32_t));
+    MOZ_ASSERT(mir->type() == MIRType_Int32x4);
 
-    masm.reserveStack(Simd128DataSize);
-    // TODO see bug 1051860 for possible optimizations.
-    switch (mir->type()) {
-      case MIRType_Int32x4: {
-        for (size_t i = 0; i < 4; ++i) {
+    FloatRegister output = ToFloatRegister(ins->output());
+    if (AssemblerX86Shared::HasSSE41()) {
+        masm.movd(ToRegister(ins->getOperand(0)), output);
+        for (size_t i = 1; i < 4; ++i) {
             Register r = ToRegister(ins->getOperand(i));
-            masm.store32(r, Address(StackPointer, i * sizeof(int32_t)));
+            masm.pinsrd(i, r, output);
         }
-        masm.loadAlignedInt32x4(Address(StackPointer, 0), output);
-        break;
-      }
-      case MIRType_Float32x4: {
-        for (size_t i = 0; i < 4; ++i) {
-            FloatRegister r = ToFloatRegister(ins->getOperand(i));
-            masm.storeFloat32(r, Address(StackPointer, i * sizeof(float)));
-        }
-        masm.loadAlignedFloat32x4(Address(StackPointer, 0), output);
-        break;
-      }
-      default: MOZ_CRASH("Unknown SIMD kind");
+        return true;
     }
 
+    masm.reserveStack(Simd128DataSize);
+    for (size_t i = 0; i < 4; ++i) {
+        Register r = ToRegister(ins->getOperand(i));
+        masm.store32(r, Address(StackPointer, i * sizeof(int32_t)));
+    }
+    masm.loadAlignedInt32x4(Address(StackPointer, 0), output);
     masm.freeStack(Simd128DataSize);
+    return true;
+}
+
+bool
+CodeGeneratorX86Shared::visitSimdValueFloat32x4(LSimdValueFloat32x4 *ins)
+{
+    MSimdValueX4 *mir = ins->mir();
+    MOZ_ASSERT(mir->type() == MIRType_Float32x4);
+
+    FloatRegister output = ToFloatRegister(ins->output());
+    FloatRegister r0 = ToFloatRegister(ins->getOperand(0));
+    MOZ_ASSERT(r0 == output); // defineReuseInput(0)
+
+    FloatRegister r1 = ToFloatRegister(ins->getTemp(0));
+    FloatRegister r2 = ToFloatRegister(ins->getOperand(2));
+    FloatRegister r3 = ToFloatRegister(ins->getOperand(3));
+
+    masm.unpcklps(r3, r1);
+    masm.unpcklps(r2, r0);
+    masm.unpcklps(r1, r0);
     return true;
 }
 
@@ -2218,6 +2299,63 @@ CodeGeneratorX86Shared::visitSimdExtractElementF(LSimdExtractElementF *ins)
         masm.shuffleFloat32(mask, input, output);
     }
     masm.canonicalizeFloat(output);
+    return true;
+}
+
+bool
+CodeGeneratorX86Shared::visitSimdInsertElementI(LSimdInsertElementI *ins)
+{
+    FloatRegister vector = ToFloatRegister(ins->vector());
+    Register value = ToRegister(ins->value());
+    FloatRegister output = ToFloatRegister(ins->output());
+    MOZ_ASSERT(vector == output); // defineReuseInput(0)
+
+    unsigned component = unsigned(ins->lane());
+
+    // Note that, contrarily to float32x4, we cannot use movd if the inserted
+    // value goes into the first component, as movd clears out the higher lanes
+    // of the output.
+    if (AssemblerX86Shared::HasSSE41()) {
+        masm.pinsrd(component, value, output);
+        return true;
+    }
+
+    masm.reserveStack(Simd128DataSize);
+    masm.storeAlignedInt32x4(vector, Address(StackPointer, 0));
+    masm.store32(value, Address(StackPointer, component * sizeof(int32_t)));
+    masm.loadAlignedInt32x4(Address(StackPointer, 0), output);
+    masm.freeStack(Simd128DataSize);
+    return true;
+}
+
+bool
+CodeGeneratorX86Shared::visitSimdInsertElementF(LSimdInsertElementF *ins)
+{
+    FloatRegister vector = ToFloatRegister(ins->vector());
+    FloatRegister value = ToFloatRegister(ins->value());
+    FloatRegister output = ToFloatRegister(ins->output());
+    MOZ_ASSERT(vector == output); // defineReuseInput(0)
+
+    if (ins->lane() == SimdLane::LaneX) {
+        // As both operands are registers, movss doesn't modify the upper bits
+        // of the destination operand.
+        if (value != output)
+            masm.movss(value, output);
+        return true;
+    }
+
+    if (AssemblerX86Shared::HasSSE41()) {
+        // The input value is in the low float32 of the 'value' FloatRegister.
+        masm.insertps(value, output, masm.insertpsMask(SimdLane::LaneX, ins->lane()));
+        return true;
+    }
+
+    unsigned component = unsigned(ins->lane());
+    masm.reserveStack(Simd128DataSize);
+    masm.storeAlignedFloat32x4(vector, Address(StackPointer, 0));
+    masm.storeFloat32(value, Address(StackPointer, component * sizeof(int32_t)));
+    masm.loadAlignedFloat32x4(Address(StackPointer, 0), output);
+    masm.freeStack(Simd128DataSize);
     return true;
 }
 
@@ -2320,6 +2458,14 @@ CodeGeneratorX86Shared::visitSimdBinaryArithIx4(LSimdBinaryArithIx4 *ins)
       case MSimdBinaryArith::Div:
         // x86 doesn't have SIMD i32 div.
         break;
+      case MSimdBinaryArith::Max:
+        // we can do max with a single instruction only if we have SSE4.1
+        // using the PMAXSD instruction.
+        break;
+      case MSimdBinaryArith::Min:
+        // we can do max with a single instruction only if we have SSE4.1
+        // using the PMINSD instruction.
+        break;
     }
     MOZ_CRASH("unexpected SIMD op");
 }
@@ -2344,6 +2490,19 @@ CodeGeneratorX86Shared::visitSimdBinaryArithFx4(LSimdBinaryArithFx4 *ins)
         return true;
       case MSimdBinaryArith::Div:
         masm.packedDivFloat32(rhs, lhs);
+        return true;
+      case MSimdBinaryArith::Max:
+        // TODO: standardization of float32x4.min/max needs to define the
+        // semantics for particular values: if both input operands are -0 or 0,
+        // or one operand is NaN, the return value will be the "second operand"
+        // in the instruction.
+        // See also bug 1068028, which is about fixing semantics once the
+        // specification is stable.
+        masm.maxps(rhs, lhs);
+        return true;
+      case MSimdBinaryArith::Min:
+        // See comment above.
+        masm.minps(rhs, lhs);
         return true;
     }
     MOZ_CRASH("unexpected SIMD op");

@@ -83,14 +83,52 @@
   max-width: 80%;
 }
 
-.fx-embedded-btn-icon-video {
+.fx-embedded-btn-icon-video,
+.fx-embedded-btn-icon-audio {
   display: inline-block;
   vertical-align: top;
   width: .8rem;
   height: .8rem;
-  background-image: url("../img/video-inverse-14x14.png");
   background-repeat: no-repeat;
   cursor: pointer;
+}
+
+.fx-embedded-btn-icon-video,
+.fx-embedded-btn-video-small {
+  background-image: url("../img/video-inverse-14x14.png");
+}
+
+.fx-embedded-btn-icon-audio,
+.fx-embedded-btn-audio-small {
+  background-image: url("../img/audio-inverse-14x14.png");
+}
+
+.fx-embedded-btn-audio-small,
+.fx-embedded-btn-video-small {
+  width: 26px;
+  height: 26px;
+  border-left: 1px solid rgba(255,255,255,.4);
+  border-top-right-radius: 2px;
+  border-bottom-right-radius: 2px;
+  background-color: #74BF43;
+  background-position: center;
+  background-size: 1rem;
+  background-repeat: no-repeat;
+  cursor: pointer;
+}
+
+  .fx-embedded-btn-video-small:hover,
+  .fx-embedded-btn-audio-small:hover {
+    background-color: #6cb23e;
+  }
+
+@media (min-resolution: 2dppx) {
+  .fx-embedded-btn-audio-small {
+    background-image: url("../img/audio-inverse-14x14@2x.png");
+  }
+  .fx-embedded-btn-video-small {
+    background-image: url("../img/video-inverse-14x14@2x.png");
+  }
 }
 
 .standalone .btn-hangup {
@@ -197,12 +235,12 @@
   flex-direction: column;
   align-items: center;
   justify-content: space-between;
-  min-height: 264px;
+  min-height: 230px;
 }
 
 .incoming-call-action-group {
   display: flex;
-  padding: 2.5em 0;
+  padding: 2.5em 0 0 0;
   width: 100%;
   justify-content: space-around;
 }
@@ -231,30 +269,6 @@
 .fx-embedded-incoming-call-button-spacer {
   display: flex;
   flex: 1;
-}
-
-.call-audio-only {
-  width: 26px;
-  height: 26px;
-  border-left: 1px solid rgba(255,255,255,.4);
-  border-top-right-radius: 2px;
-  border-bottom-right-radius: 2px;
-  background-color: #74BF43;
-  background-image: url("../img/audio-inverse-14x14.png");
-  background-size: 1rem;
-  background-position: center;
-  background-repeat: no-repeat;
-  cursor: pointer;
-}
-
-  .call-audio-only:hover {
-    background-color: #6cb23e;
-  }
-
-@media (min-resolution: 2dppx) {
-  .call-audio-only {
-    background-image: url("../img/audio-inverse-14x14@2x.png");
-  }
 }
 
 /* Expired call url page */
@@ -349,13 +363,16 @@
   padding: 14px;
 }
 
+.feedback p {
+  margin: 0px;
+}
+
 .feedback h3 {
   color: #666;
   font-size: 12px;
   font-weight: 700;
   text-align: center;
-  margin-bottom: 14px;
-  margin-top: 14px;
+  margin: 0 0 1em 0;
 }
 
 .feedback .faces {
@@ -393,15 +410,14 @@
   background-image: url("../img/sad.png");
 }
 
-.feedback button.back {
+.fx-embedded-btn-back {
+  margin-bottom: 1rem;
+  padding: .2rem .8rem;
+  border: 1px solid #aaa;
   border-radius: 2px;
-  border: 1px solid #CCC;
-  color: #CCC;
-  font-size: 11px;
+  background: transparent;
+  color: #777;
   cursor: pointer;
-  padding: 3px 10px;
-  display: inline;
-  margin-bottom: 14px;
 }
 
 .feedback label {

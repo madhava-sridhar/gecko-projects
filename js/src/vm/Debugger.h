@@ -165,6 +165,7 @@ class Debugger : private mozilla::LinkedListElement<Debugger>
 {
     friend class Breakpoint;
     friend class DebuggerMemory;
+    friend class SavedStacks;
     friend class mozilla::LinkedListElement<Debugger>;
     friend bool (::JS_DefineDebuggerObject)(JSContext *cx, JS::HandleObject obj);
     friend bool SavedStacksMetadataCallback(JSContext *cx, JSObject **pmetadata);
@@ -209,6 +210,7 @@ class Debugger : private mozilla::LinkedListElement<Debugger>
     typedef mozilla::LinkedList<AllocationSite> AllocationSiteList;
 
     bool trackingAllocationSites;
+    double allocationSamplingProbability;
     AllocationSiteList allocationsLog;
     size_t allocationsLogLength;
     size_t maxAllocationsLogLength;
@@ -498,6 +500,10 @@ class Debugger : private mozilla::LinkedListElement<Debugger>
      * If *vp is a magic JS_OPTIMIZED_ARGUMENTS value signifying missing
      * arguments, this produces a plain object of the form { missingArguments:
      * true }.
+     *
+     * If *vp is a magic JS_UNINITIALIZED_LEXICAL value signifying an
+     * unaccessible uninitialized binding, this produces a plain object of the
+     * form { uninitialized: true }.
      */
     bool wrapDebuggeeValue(JSContext *cx, MutableHandleValue vp);
 

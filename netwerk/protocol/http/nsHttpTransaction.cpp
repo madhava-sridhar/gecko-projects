@@ -88,7 +88,7 @@ LogHeaders(const char *lineStart)
 //-----------------------------------------------------------------------------
 
 nsHttpTransaction::nsHttpTransaction()
-    : mCallbacksLock("transaction mCallbacks lock")
+    : mLock("transaction lock")
     , mRequestSize(0)
     , mConnection(nullptr)
     , mConnInfo(nullptr)
@@ -148,11 +148,9 @@ nsHttpTransaction::~nsHttpTransaction()
         mTokenBucketCancel = nullptr;
     }
 
-    // Force the callbacks to be released right now
+    // Force the callbacks and connection to be released right now
     mCallbacks = nullptr;
-
-    NS_IF_RELEASE(mConnection);
-    NS_IF_RELEASE(mConnInfo);
+    mConnection = nullptr;
 
     delete mResponseHead;
     delete mForTakeResponseHead;
@@ -271,7 +269,7 @@ nsHttpTransaction::Init(uint32_t caps,
                                         !activityDistributorActive);
     if (NS_FAILED(rv)) return rv;
 
-    NS_ADDREF(mConnInfo = cinfo);
+    mConnInfo = cinfo;
     mCallbacks = callbacks;
     mConsumerTarget = target;
     mCaps = caps;
@@ -375,14 +373,25 @@ nsHttpTransaction::Init(uint32_t caps,
 
     Classify();
 
-    NS_ADDREF(*responseBody = mPipeIn);
+    nsCOMPtr<nsIAsyncInputStream> tmp(mPipeIn);
+    tmp.forget(responseBody);
     return NS_OK;
 }
 
+// This method should only be used on the socket thread
 nsAHttpConnection *
 nsHttpTransaction::Connection()
 {
-    return mConnection;
+    MOZ_ASSERT(PR_GetCurrentThread() == gSocketThread);
+    return mConnection.get();
+}
+
+already_AddRefed<nsAHttpConnection>
+nsHttpTransaction::GetConnectionReference()
+{
+    MutexAutoLock lock(mLock);
+    nsRefPtr<nsAHttpConnection> connection(mConnection);
+    return connection.forget();
 }
 
 nsHttpResponseHead *
@@ -448,8 +457,10 @@ nsHttpTransaction::TakeSubTransactions(
 void
 nsHttpTransaction::SetConnection(nsAHttpConnection *conn)
 {
-    NS_IF_RELEASE(mConnection);
-    NS_IF_ADDREF(mConnection = conn);
+    {
+        MutexAutoLock lock(mLock);
+        mConnection = conn;
+    }
 
     if (conn) {
         MOZ_EVENT_TRACER_EXEC(static_cast<nsAHttpTransaction*>(this),
@@ -460,15 +471,16 @@ nsHttpTransaction::SetConnection(nsAHttpConnection *conn)
 void
 nsHttpTransaction::GetSecurityCallbacks(nsIInterfaceRequestor **cb)
 {
-    MutexAutoLock lock(mCallbacksLock);
-    NS_IF_ADDREF(*cb = mCallbacks);
+    MutexAutoLock lock(mLock);
+    nsCOMPtr<nsIInterfaceRequestor> tmp(mCallbacks);
+    tmp.forget(cb);
 }
 
 void
 nsHttpTransaction::SetSecurityCallbacks(nsIInterfaceRequestor* aCallbacks)
 {
     {
-        MutexAutoLock lock(mCallbacksLock);
+        MutexAutoLock lock(mLock);
         mCallbacks = aCallbacks;
     }
 
@@ -922,8 +934,10 @@ nsHttpTransaction::Close(nsresult reason)
         mTimings.responseEnd.IsNull() && !mTimings.responseStart.IsNull())
         mTimings.responseEnd = TimeStamp::Now();
 
-    if (relConn && mConnection)
-        NS_RELEASE(mConnection);
+    if (relConn && mConnection) {
+        MutexAutoLock lock(mLock);
+        mConnection = nullptr;
+    }
 
     // save network statistics in the end of transaction
     SaveNetworkStats(true);
@@ -952,7 +966,7 @@ nsHttpTransaction::Close(nsresult reason)
 nsHttpConnectionInfo *
 nsHttpTransaction::ConnectionInfo()
 {
-    return mConnInfo;
+    return mConnInfo.get();
 }
 
 nsresult
@@ -1086,7 +1100,8 @@ nsHttpTransaction::Restart()
     mSecurityInfo = 0;
     if (mConnection) {
         mConnection->DontReuse();
-        NS_RELEASE(mConnection);
+        MutexAutoLock lock(mLock);
+        mConnection = nullptr;
     }
 
     // disable pipelining for the next attempt in case pipelining caused the

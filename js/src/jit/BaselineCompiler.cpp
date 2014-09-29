@@ -265,6 +265,39 @@ BaselineCompiler::compile()
     return Method_Compiled;
 }
 
+void
+BaselineCompiler::emitInitializeLocals(size_t n, const Value &v)
+{
+    MOZ_ASSERT(frame.nlocals() > 0 && n <= frame.nlocals());
+
+    // Use R0 to minimize code size. If the number of locals to push is <
+    // LOOP_UNROLL_FACTOR, then the initialization pushes are emitted directly
+    // and inline.  Otherwise, they're emitted in a partially unrolled loop.
+    static const size_t LOOP_UNROLL_FACTOR = 4;
+    size_t toPushExtra = n % LOOP_UNROLL_FACTOR;
+
+    masm.moveValue(v, R0);
+
+    // Handle any extra pushes left over by the optional unrolled loop below.
+    for (size_t i = 0; i < toPushExtra; i++)
+        masm.pushValue(R0);
+
+    // Partially unrolled loop of pushes.
+    if (n >= LOOP_UNROLL_FACTOR) {
+        size_t toPush = n - toPushExtra;
+        JS_ASSERT(toPush % LOOP_UNROLL_FACTOR == 0);
+        JS_ASSERT(toPush >= LOOP_UNROLL_FACTOR);
+        masm.move32(Imm32(toPush), R1.scratchReg());
+        // Emit unrolled loop with 4 pushes per iteration.
+        Label pushLoop;
+        masm.bind(&pushLoop);
+        for (size_t i = 0; i < LOOP_UNROLL_FACTOR; i++)
+            masm.pushValue(R0);
+        masm.branchSub32(Assembler::NonZero,
+                         Imm32(LOOP_UNROLL_FACTOR), R1.scratchReg(), &pushLoop);
+    }
+}
+
 bool
 BaselineCompiler::emitPrologue()
 {
@@ -321,35 +354,12 @@ BaselineCompiler::emitPrologue()
                           &earlyStackCheckFailed);
     }
 
-    // Initialize locals to |undefined|. Use R0 to minimize code size.
-    // If the number of locals to push is < LOOP_UNROLL_FACTOR, then the
-    // initialization pushes are emitted directly and inline.  Otherwise,
-    // they're emitted in a partially unrolled loop.
-    if (frame.nlocals() > 0) {
-        size_t LOOP_UNROLL_FACTOR = 4;
-        size_t toPushExtra = frame.nlocals() % LOOP_UNROLL_FACTOR;
-
-        masm.moveValue(UndefinedValue(), R0);
-
-        // Handle any extra pushes left over by the optional unrolled loop below.
-        for (size_t i = 0; i < toPushExtra; i++)
-            masm.pushValue(R0);
-
-        // Partially unrolled loop of pushes.
-        if (frame.nlocals() >= LOOP_UNROLL_FACTOR) {
-            size_t toPush = frame.nlocals() - toPushExtra;
-            JS_ASSERT(toPush % LOOP_UNROLL_FACTOR == 0);
-            JS_ASSERT(toPush >= LOOP_UNROLL_FACTOR);
-            masm.move32(Imm32(toPush), R1.scratchReg());
-            // Emit unrolled loop with 4 pushes per iteration.
-            Label pushLoop;
-            masm.bind(&pushLoop);
-            for (size_t i = 0; i < LOOP_UNROLL_FACTOR; i++)
-                masm.pushValue(R0);
-            masm.branchSub32(Assembler::NonZero,
-                             Imm32(LOOP_UNROLL_FACTOR), R1.scratchReg(), &pushLoop);
-        }
-    }
+    // Initialize local vars to |undefined| and lexicals to a magic value that
+    // throws on touch.
+    if (frame.nvars() > 0)
+        emitInitializeLocals(frame.nvars(), UndefinedValue());
+    if (frame.nlexicals() > 0)
+        emitInitializeLocals(frame.nlexicals(), MagicValue(JS_UNINITIALIZED_LEXICAL));
 
     if (needsEarlyStackCheck())
         masm.bind(&earlyStackCheckFailed);
@@ -379,7 +389,7 @@ BaselineCompiler::emitPrologue()
     if (!emitDebugPrologue())
         return false;
 
-    if (!emitUseCountIncrement())
+    if (!emitWarmUpCounterIncrement())
         return false;
 
     if (!emitArgumentTypeChecks())
@@ -647,9 +657,9 @@ BaselineCompiler::emitInterruptCheck()
 }
 
 bool
-BaselineCompiler::emitUseCountIncrement(bool allowOsr)
+BaselineCompiler::emitWarmUpCounterIncrement(bool allowOsr)
 {
-    // Emit no use count increments or bailouts if Ion is not
+    // Emit no warm-up counter increments or bailouts if Ion is not
     // enabled, or if the script will never be Ion-compileable
 
     if (!ionCompileable_ && !ionOSRCompileable_)
@@ -657,15 +667,15 @@ BaselineCompiler::emitUseCountIncrement(bool allowOsr)
 
     Register scriptReg = R2.scratchReg();
     Register countReg = R0.scratchReg();
-    Address useCountAddr(scriptReg, JSScript::offsetOfUseCount());
+    Address warmUpCounterAddr(scriptReg, JSScript::offsetOfWarmUpCounter());
 
     masm.movePtr(ImmGCPtr(script), scriptReg);
-    masm.load32(useCountAddr, countReg);
+    masm.load32(warmUpCounterAddr, countReg);
     masm.add32(Imm32(1), countReg);
-    masm.store32(countReg, useCountAddr);
+    masm.store32(countReg, warmUpCounterAddr);
 
-    // If this is a loop inside a catch or finally block, increment the use
-    // count but don't attempt OSR (Ion only compiles the try block).
+    // If this is a loop inside a catch or finally block, increment the warmup
+    // counter but don't attempt OSR (Ion only compiles the try block).
     if (analysis_.info(pc).loopEntryInCatchOrFinally) {
         JS_ASSERT(JSOp(*pc) == JSOP_LOOPENTRY);
         return true;
@@ -680,15 +690,15 @@ BaselineCompiler::emitUseCountIncrement(bool allowOsr)
     Label skipCall;
 
     const OptimizationInfo *info = js_IonOptimizations.get(js_IonOptimizations.firstLevel());
-    uint32_t minUses = info->usesBeforeCompile(script, pc);
-    masm.branch32(Assembler::LessThan, countReg, Imm32(minUses), &skipCall);
+    uint32_t warmUpThreshold = info->compilerWarmUpThreshold(script, pc);
+    masm.branch32(Assembler::LessThan, countReg, Imm32(warmUpThreshold), &skipCall);
 
     masm.branchPtr(Assembler::Equal,
                    Address(scriptReg, JSScript::offsetOfIonScript()),
                    ImmPtr(ION_COMPILING_SCRIPT), &skipCall);
 
     // Call IC.
-    ICUseCount_Fallback::Compiler stubCompiler(cx);
+    ICWarmUpCounter_Fallback::Compiler stubCompiler(cx);
     if (!emitNonOpIC(stubCompiler.getStub(&stubSpace_)))
         return false;
 
@@ -1105,7 +1115,7 @@ bool
 BaselineCompiler::emit_JSOP_LOOPENTRY()
 {
     frame.syncStack(0);
-    return emitUseCountIncrement(LoopEntryCanIonOsr(pc));
+    return emitWarmUpCounterIncrement(LoopEntryCanIonOsr(pc));
 }
 
 bool
@@ -2543,6 +2553,60 @@ BaselineCompiler::emit_JSOP_SETARG()
     return emitFormalArgAccess(arg, /* get = */ false);
 }
 
+typedef bool (*ThrowUninitializedLexicalFn)(JSContext *cx);
+static const VMFunction ThrowUninitializedLexicalInfo =
+    FunctionInfo<ThrowUninitializedLexicalFn>(jit::ThrowUninitializedLexical);
+
+bool
+BaselineCompiler::emitUninitializedLexicalCheck(const ValueOperand &val)
+{
+    Label done;
+    masm.branchTestMagicValue(Assembler::NotEqual, val, JS_UNINITIALIZED_LEXICAL, &done);
+
+    prepareVMCall();
+    if (!callVM(ThrowUninitializedLexicalInfo))
+        return false;
+
+    masm.bind(&done);
+    return true;
+}
+
+
+bool
+BaselineCompiler::emit_JSOP_CHECKLEXICAL()
+{
+    frame.syncStack(0);
+    masm.loadValue(frame.addressOfLocal(GET_LOCALNO(pc)), R0);
+    return emitUninitializedLexicalCheck(R0);
+}
+
+bool
+BaselineCompiler::emit_JSOP_INITLEXICAL()
+{
+    return emit_JSOP_SETLOCAL();
+}
+
+bool
+BaselineCompiler::emit_JSOP_CHECKALIASEDLEXICAL()
+{
+    frame.syncStack(0);
+    masm.loadValue(getScopeCoordinateAddress(R0.scratchReg()), R0);
+    return emitUninitializedLexicalCheck(R0);
+}
+
+bool
+BaselineCompiler::emit_JSOP_INITALIASEDLEXICAL()
+{
+    return emit_JSOP_SETALIASEDVAR();
+}
+
+bool
+BaselineCompiler::emit_JSOP_UNINITIALIZED()
+{
+    frame.push(MagicValue(JS_UNINITIALIZED_LEXICAL));
+    return true;
+}
+
 bool
 BaselineCompiler::emitCall()
 {
@@ -3028,16 +3092,21 @@ BaselineCompiler::emit_JSOP_MOREITER()
 }
 
 bool
-BaselineCompiler::emit_JSOP_ITERNEXT()
+BaselineCompiler::emit_JSOP_ISNOITER()
 {
     frame.syncStack(0);
-    masm.loadValue(frame.addressOfStackValue(frame.peek(-1)), R0);
 
-    ICIteratorNext_Fallback::Compiler compiler(cx);
-    if (!emitOpIC(compiler.getStub(&stubSpace_)))
-        return false;
+    Label isMagic, done;
+    masm.branchTestMagic(Assembler::Equal, frame.addressOfStackValue(frame.peek(-1)),
+                         &isMagic);
+    masm.moveValue(BooleanValue(false), R0);
+    masm.jump(&done);
 
-    frame.push(R0);
+    masm.bind(&isMagic);
+    masm.moveValue(BooleanValue(true), R0);
+
+    masm.bind(&done);
+    frame.push(R0, JSVAL_TYPE_BOOLEAN);
     return true;
 }
 

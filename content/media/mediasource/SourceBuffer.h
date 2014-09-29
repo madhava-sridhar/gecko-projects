@@ -28,7 +28,6 @@ struct JSContext;
 
 namespace mozilla {
 
-class ContainerParser;
 class ErrorResult;
 class TrackBuffer;
 template <typename T> class AsyncEventRunner;
@@ -109,19 +108,16 @@ public:
   double GetBufferedStart();
   double GetBufferedEnd();
 
+#if defined(DEBUG)
+  void Dump(const char* aPath);
+#endif
+
 private:
   ~SourceBuffer();
 
   friend class AsyncEventRunner<SourceBuffer>;
   void DispatchSimpleEvent(const char* aName);
   void QueueAsyncSimpleEvent(const char* aName);
-
-  // Create a new decoder for mType, and store the result in mDecoder.
-  // Returns true if mDecoder was set.
-  bool InitNewDecoder();
-
-  // Set mDecoder to null and reset mDecoderInitialized.
-  void DiscardDecoder();
 
   // Update mUpdating and fire the appropriate events.
   void StartUpdating();
@@ -131,11 +127,13 @@ private:
   // Shared implementation of AppendBuffer overloads.
   void AppendData(const uint8_t* aData, uint32_t aLength, ErrorResult& aRv);
 
+  // Implements the "Prepare Append Algorithm".  Returns true if the append
+  // may continue, or false (with aRv set) on error.
+  bool PrepareAppend(ErrorResult& aRv);
+
   nsRefPtr<MediaSource> mMediaSource;
 
-  const nsCString mType;
-
-  nsAutoPtr<ContainerParser> mParser;
+  uint32_t mEvictionThreshold;
 
   nsRefPtr<TrackBuffer> mTrackBuffer;
 

@@ -107,6 +107,12 @@ public class BrowserContract {
         public static final String TIME_DELETED = "timeDeleted";
     }
 
+    public interface SuggestedSitesColumns {
+        public static final String BGCOLOR = "bgcolor";
+        public static final String IMAGEURL = "imageurl";
+        public static final String TRACKING_ID = "tracking_id";
+    }
+
     @RobocopTarget
     public static final class Favicons implements CommonColumns, DateSyncColumns {
         private Favicons() {}
@@ -166,17 +172,6 @@ public class BrowserContract {
         public static final int TYPE_SEPARATOR = 2;
         public static final int TYPE_LIVEMARK = 3;
         public static final int TYPE_QUERY = 4;
-
-        /*
-         * These values are returned by getItemFlags. They're not really
-         * exclusive to bookmarks, but there's no better place to put them.
-         */
-        public static final int FLAG_SUCCESS  = 1 << 1;   // The query succeeded.
-        public static final int FLAG_BOOKMARK = 1 << 2;
-        public static final int FLAG_PINNED   = 1 << 3;
-        public static final int FLAG_READING  = 1 << 4;
-
-        public static final Uri FLAGS_URI = Uri.withAppendedPath(AUTHORITY_URI, "flags");
 
         public static final Uri CONTENT_URI = Uri.withAppendedPath(AUTHORITY_URI, "bookmarks");
         public static final Uri PARENTS_CONTENT_URI = Uri.withAppendedPath(CONTENT_URI, "parents");
@@ -421,7 +416,7 @@ public class BrowserContract {
     }
 
     @RobocopTarget
-    public static final class TopSites implements CommonColumns, URLColumns {
+    public static final class TopSites implements CommonColumns, URLColumns, SuggestedSitesColumns {
         private TopSites() {}
 
         public static final int TYPE_BLANK = 0;
@@ -446,7 +441,7 @@ public class BrowserContract {
     }
 
     @RobocopTarget
-    public static final class SuggestedSites implements CommonColumns, URLColumns {
+    public static final class SuggestedSites implements CommonColumns, URLColumns, SuggestedSitesColumns {
         private SuggestedSites() {}
 
         public static final Uri CONTENT_URI = Uri.withAppendedPath(AUTHORITY_URI, "suggestedsites");

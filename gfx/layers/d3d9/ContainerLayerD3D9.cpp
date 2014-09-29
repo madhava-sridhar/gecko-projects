@@ -5,7 +5,7 @@
 
 #include "ContainerLayerD3D9.h"
 
-#include "ThebesLayerD3D9.h"
+#include "PaintedLayerD3D9.h"
 #include "ReadbackProcessor.h"
 
 using namespace mozilla::gfx;
@@ -161,7 +161,7 @@ ContainerLayerD3D9::RenderLayer()
     }
 
     nsIntRect scissorRect =
-      RenderTargetPixel::ToUntyped(layerToRender->GetLayer()->CalculateScissorRect(RenderTargetPixel::FromUntyped(oldScissor), nullptr));
+      RenderTargetPixel::ToUntyped(layerToRender->GetLayer()->CalculateScissorRect(RenderTargetPixel::FromUntyped(oldScissor)));
     if (scissorRect.IsEmpty()) {
       continue;
     }
@@ -173,8 +173,8 @@ ContainerLayerD3D9::RenderLayer()
     d3drect.bottom = scissorRect.y + scissorRect.height;
     device()->SetScissorRect(&d3drect);
 
-    if (layerToRender->GetLayer()->GetType() == TYPE_THEBES) {
-      static_cast<ThebesLayerD3D9*>(layerToRender)->RenderThebesLayer(&readback);
+    if (layerToRender->GetLayer()->GetType() == TYPE_PAINTED) {
+      static_cast<PaintedLayerD3D9*>(layerToRender)->RenderPaintedLayer(&readback);
     } else {
       layerToRender->RenderLayer();
     }

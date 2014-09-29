@@ -2,19 +2,41 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+include protocol PBackgroundIDBFactory;
 include protocol PBackgroundTest;
+include protocol PBlob;
+include protocol PFileDescriptorSet;
 include protocol PCacheStorage;
 include protocol PCache;
 include protocol PMessagePort;
 
+include DOMTypes;
+
+using struct mozilla::void_t
+  from "ipc/IPCMessageUtils.h";
 using mozilla::dom::cache::Namespace from "mozilla/dom/cache/Types.h";
 
 namespace mozilla {
+namespace dom {
+namespace indexedDB {
+
+union OptionalWindowId
+{
+  uint64_t;
+  void_t;
+};
+
+} // namespace indexedDB
+} // namespace dom
+
 namespace ipc {
 
-protocol PBackground
+sync protocol PBackground
 {
+  manages PBackgroundIDBFactory;
   manages PBackgroundTest;
+  manages PBlob;
+  manages PFileDescriptorSet;
   manages PCacheStorage;
   manages PCache;
   manages PMessagePort;
@@ -23,9 +45,16 @@ parent:
   // Only called at startup during mochitests to check the basic infrastructure.
   PBackgroundTest(nsCString testArg);
 
+  PBackgroundIDBFactory(OptionalWindowId optionalWindowId);
+
   PCacheStorage(Namespace namespaceEnum, nsCString origin, nsCString baseDomain);
 
   PMessagePort();
+
+both:
+  PBlob(BlobConstructorParams params);
+
+  PFileDescriptorSet(FileDescriptor fd);
 
 child:
   PCache();

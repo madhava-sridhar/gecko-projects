@@ -9,6 +9,7 @@
 
 #include "mozilla/DebugOnly.h"
 #include "mozilla/PodOperations.h"
+#include "mozilla/UniquePtr.h"
 
 #include "jsalloc.h"
 #include "jspubtd.h"
@@ -43,6 +44,7 @@ enum Phase {
     PHASE_SWEEP_COMPARTMENTS,
     PHASE_SWEEP_DISCARD_CODE,
     PHASE_SWEEP_TABLES,
+    PHASE_SWEEP_TABLES_INNER_VIEWS,
     PHASE_SWEEP_TABLES_WRAPPER,
     PHASE_SWEEP_TABLES_BASE_SHAPE,
     PHASE_SWEEP_TABLES_INITIAL_SHAPE,
@@ -58,12 +60,12 @@ enum Phase {
     PHASE_SWEEP_SCRIPT,
     PHASE_SWEEP_SHAPE,
     PHASE_SWEEP_JITCODE,
+    PHASE_FINALIZE_END,
+    PHASE_DESTROY,
     PHASE_COMPACT,
     PHASE_COMPACT_MOVE,
     PHASE_COMPACT_UPDATE,
     PHASE_COMPACT_UPDATE_GRAY,
-    PHASE_FINALIZE_END,
-    PHASE_DESTROY,
     PHASE_GC_END,
 
     PHASE_LIMIT
@@ -82,17 +84,22 @@ class StatisticsSerializer;
 struct ZoneGCStats
 {
     /* Number of zones collected in this GC. */
-    int collectedCount;
+    int collectedZoneCount;
 
     /* Total number of zones in the Runtime at the start of this GC. */
     int zoneCount;
 
+    /* Total number of comaprtments in all zones collected. */
+    int collectedCompartmentCount;
+
     /* Total number of compartments in the Runtime at the start of this GC. */
     int compartmentCount;
 
-    bool isCollectingAllZones() const { return collectedCount == zoneCount; }
+    bool isCollectingAllZones() const { return collectedZoneCount == zoneCount; }
 
-    ZoneGCStats() : collectedCount(0), zoneCount(0), compartmentCount(0) {}
+    ZoneGCStats()
+      : collectedZoneCount(0), zoneCount(0), collectedCompartmentCount(0), compartmentCount(0)
+    {}
 };
 
 struct Statistics
@@ -119,8 +126,12 @@ struct Statistics
 
     char16_t *formatMessage();
     char16_t *formatJSON(uint64_t timestamp);
+    UniqueChars formatDetailedMessage();
 
     JS::GCSliceCallback setSliceCallback(JS::GCSliceCallback callback);
+
+    int64_t clearMaxGCPauseAccumulator();
+    int64_t getMaxGCPauseSinceClear();
 
   private:
     JSRuntime *runtime;
@@ -173,6 +184,9 @@ struct Statistics
     /* Allocated space before the GC started. */
     size_t preBytes;
 
+    /* Records the maximum GC pause in an API-controlled interval (in us). */
+    int64_t maxPauseInInterval;
+
 #ifdef DEBUG
     /* Phases that are currently on stack. */
     static const size_t MAX_NESTING = 8;
@@ -192,6 +206,11 @@ struct Statistics
     void sccDurations(int64_t *total, int64_t *maxPause);
     void printStats();
     bool formatData(StatisticsSerializer &ss, uint64_t timestamp);
+
+    UniqueChars formatDescription();
+    UniqueChars formatSliceDescription(unsigned i, const SliceData &slice);
+    UniqueChars formatTotals();
+    UniqueChars formatPhaseTimes(int64_t *phaseTimes);
 
     double computeMMU(int64_t resolution);
 };

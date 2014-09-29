@@ -62,7 +62,8 @@ interface nsIMemoryInfoDumper : nsISupports
    * Sample output:
    *
    * {
-   *   "hasMozMallocUsableSize":true,
+   *   "version": 1
+   *   "hasMozMallocUsableSize": true,
    *   "reports": [
    *     {"process":"Main Process (pid 12345)", "path":"explicit/foo/bar",
    *      "kind":1, "units":0, "amount":2000000, "description":"Foo bar."},
@@ -77,6 +78,11 @@ interface nsIMemoryInfoDumper : nsISupports
    *
    * {
    *   "properties": {
+   *     "version": {
+   *       "type": "integer",
+   *       "description": "Version number of this schema.",
+   *       "required": true
+   *     },
    *     "hasMozMallocUsableSize": {
    *       "type": "boolean",
    *       "description": "nsIMemoryReporterManager::hasMozMallocUsableSize",
@@ -139,9 +145,10 @@ interface nsIMemoryInfoDumper : nsISupports
    * similar, such as memory-reports-<identifier>-<pid>-1.json.gz; no existing
    * file will be overwritten).
    *
-   * If DMD is enabled, this method also dumps gzipped DMD output to a file in
-   * the tmp directory called dmd-<identifier>-<pid>.txt.gz (or something
-   * similar; again, no existing file will be overwritten).
+   * If DMD is enabled, this method also dumps gzipped DMD output for this
+   * process and its child processes to files in the tmp directory called
+   * dmd-<identifier>-<pid>.txt.gz (or something similar; again, no existing
+   * file will be overwritten).
    *
    * @param aIdentifier this identifier will appear in the filename of our
    *   about:memory dump and those of our children.

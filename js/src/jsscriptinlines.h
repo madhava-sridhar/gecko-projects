@@ -166,10 +166,10 @@ inline void
 JSScript::setBaselineScript(JSContext *maybecx, js::jit::BaselineScript *baselineScript)
 {
     if (hasBaselineScript())
-        js::jit::BaselineScript::writeBarrierPre(tenuredZone(), baseline);
+        js::jit::BaselineScript::writeBarrierPre(zone(), baseline);
     MOZ_ASSERT(!hasIonScript());
     baseline = baselineScript;
-    updateBaselineOrIonRaw();
+    updateBaselineOrIonRaw(maybecx);
 }
 
 inline bool

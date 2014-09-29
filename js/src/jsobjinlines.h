@@ -17,6 +17,7 @@
 #include "vm/Probes.h"
 #include "vm/ScopeObject.h"
 #include "vm/StringObject.h"
+#include "vm/TypedArrayCommon.h"
 
 #include "jsatominlines.h"
 #include "jscompartmentinlines.h"
@@ -83,7 +84,7 @@ JSObject::finalize(js::FreeOp *fop)
 
 #ifdef DEBUG
     JS_ASSERT(isTenured());
-    if (!IsBackgroundFinalized(tenuredGetAllocKind())) {
+    if (!IsBackgroundFinalized(asTenured()->getAllocKind())) {
         /* Assert we're on the main thread. */
         JS_ASSERT(CurrentThreadCanAccessRuntime(fop->runtime()));
     }
@@ -342,6 +343,8 @@ JSObject::getDenseOrTypedArrayElement(uint32_t idx)
 {
     if (is<js::TypedArrayObject>())
         return as<js::TypedArrayObject>().getElement(idx);
+    if (is<js::SharedTypedArrayObject>())
+        return as<js::SharedTypedArrayObject>().getElement(idx);
     return getDenseElement(idx);
 }
 
@@ -489,7 +492,8 @@ JSObject::setProto(JSContext *cx, JS::HandleObject obj, JS::HandleObject proto, 
     }
 
     JS::Rooted<js::TaggedProto> taggedProto(cx, js::TaggedProto(proto));
-    return SetClassAndProto(cx, obj, obj->getClass(), taggedProto, succeeded);
+    *succeeded = SetClassAndProto(cx, obj, obj->getClass(), taggedProto, false);
+    return *succeeded;
 }
 
 inline bool
@@ -539,7 +543,40 @@ JSObject::create(js::ExclusiveContext *cx, js::gc::AllocKind kind, js::gc::Initi
     if (span)
         obj->initializeSlotRange(0, span);
 
+    // JSFunction's fixed slots expect POD-style initialization.
+    if (type->clasp()->isJSFunction())
+        memset(obj->fixedSlots(), 0, sizeof(js::HeapSlot) * GetGCKindSlots(kind));
+
     js::gc::TraceCreateObject(obj);
+
+    return obj;
+}
+
+/* static */ inline JSObject *
+JSObject::copy(js::ExclusiveContext *cx, js::gc::AllocKind kind, js::gc::InitialHeap heap,
+               js::HandleObject templateObject)
+{
+    js::RootedShape shape(cx, templateObject->lastProperty());
+    js::RootedTypeObject type(cx, templateObject->type());
+    MOZ_ASSERT(!templateObject->denseElementsAreCopyOnWrite());
+
+    JSObject *obj = create(cx, kind, heap, shape, type);
+    if (!obj)
+        return nullptr;
+
+    size_t span = shape->slotSpan();
+    if (span) {
+        uint32_t numFixed = templateObject->numFixedSlots();
+        const js::Value *fixed = &templateObject->getSlot(0);
+        MOZ_ASSERT(numFixed <= span);
+        obj->copySlotRange(0, fixed, numFixed);
+
+        if (numFixed < span) {
+            uint32_t numSlots = span - numFixed;
+            const js::Value *slots = &templateObject->getSlot(numFixed);
+            obj->copySlotRange(numFixed, slots, numSlots);
+        }
+    }
 
     return obj;
 }
@@ -659,6 +696,12 @@ JSObject::finish(js::FreeOp *fop)
             fop->free_(elements);
         }
     }
+
+    // It's possible that unreachable shapes may be marked whose listp points
+    // into this object. In case this happens, null out the shape's pointer here
+    // so that a moving GC will not try to access the dead object.
+    if (shape_->listp == &shape_)
+        shape_->listp = nullptr;
 }
 
 /* static */ inline bool
@@ -1056,7 +1099,7 @@ CopyInitializerObject(JSContext *cx, HandleObject baseobj, NewObjectKind newKind
 
     gc::AllocKind allocKind = gc::GetGCObjectFixedSlotsKind(baseobj->numFixedSlots());
     allocKind = gc::GetBackgroundAllocKind(allocKind);
-    JS_ASSERT_IF(baseobj->isTenured(), allocKind == baseobj->tenuredGetAllocKind());
+    JS_ASSERT_IF(baseobj->isTenured(), allocKind == baseobj->asTenured()->getAllocKind());
     RootedObject obj(cx);
     obj = NewBuiltinClassInstance(cx, &JSObject::class_, allocKind, newKind);
     if (!obj)
@@ -1123,8 +1166,8 @@ ObjectClassIs(HandleObject obj, ESClassValue classValue, JSContext *cx)
       case ESClass_String: return obj->is<StringObject>();
       case ESClass_Boolean: return obj->is<BooleanObject>();
       case ESClass_RegExp: return obj->is<RegExpObject>();
-      case ESClass_ArrayBuffer:
-        return obj->is<ArrayBufferObject>() || obj->is<SharedArrayBufferObject>();
+      case ESClass_ArrayBuffer: return obj->is<ArrayBufferObject>();
+      case ESClass_SharedArrayBuffer: return obj->is<SharedArrayBufferObject>();
       case ESClass_Date: return obj->is<DateObject>();
       case ESClass_Set: return obj->is<SetObject>();
       case ESClass_Map: return obj->is<MapObject>();

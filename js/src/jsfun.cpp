@@ -1588,7 +1588,7 @@ fun_bind(JSContext *cx, unsigned argc, Value *vp)
     CallArgs args = CallArgsFromVp(argc, vp);
 
     /* Step 1. */
-    Value thisv = args.thisv();
+    RootedValue thisv(cx, args.thisv());
 
     /* Step 2. */
     if (!IsCallable(thisv)) {
@@ -1861,8 +1861,6 @@ FunctionConstructor(JSContext *cx, unsigned argc, Value *vp, GeneratorKind gener
         str = ToString<CanGC>(cx, args[args.length() - 1]);
     if (!str)
         return false;
-
-    JS::Anchor<JSString *> strAnchor(str);
 
     /*
      * NB: (new Function) is not lexically closed by its caller, it's just an
@@ -2185,7 +2183,7 @@ CheckIsValidConstructible(Value calleev)
     if (callee->is<JSFunction>())
         JS_ASSERT(callee->as<JSFunction>().isNativeConstructor());
     else
-        JS_ASSERT(callee->getClass()->construct != nullptr);
+        JS_ASSERT(callee->constructHook() != nullptr);
 }
 
 } // namespace detail

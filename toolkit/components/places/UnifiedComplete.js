@@ -9,10 +9,7 @@
 ////////////////////////////////////////////////////////////////////////////////
 //// Constants
 
-const Cc = Components.classes;
-const Ci = Components.interfaces;
-const Cr = Components.results;
-const Cu = Components.utils;
+const { classes: Cc, interfaces: Ci, results: Cr, utils: Cu } = Components;
 
 const TOPIC_SHUTDOWN = "places-shutdown";
 const TOPIC_PREFCHANGED = "nsPref:changed";
@@ -56,6 +53,7 @@ const QUERYTYPE_KEYWORD       = 0;
 const QUERYTYPE_FILTERED      = 1;
 const QUERYTYPE_AUTOFILL_HOST = 2;
 const QUERYTYPE_AUTOFILL_URL  = 3;
+const QUERYTYPE_AUTOFILL_PREDICTURL  = 4;
 
 // This separator is used as an RTL-friendly way to split the title and tags.
 // It can also be used by an nsIAutoCompleteResult consumer to re-split the
@@ -68,7 +66,7 @@ const TITLE_SEARCH_ENGINE_SEPARATOR = " \u00B7\u2013\u00B7 ";
 // Telemetry probes.
 const TELEMETRY_1ST_RESULT = "PLACES_AUTOCOMPLETE_1ST_RESULT_TIME_MS";
 const TELEMETRY_6_FIRST_RESULTS = "PLACES_AUTOCOMPLETE_6_FIRST_RESULTS_TIME_MS";
-// The default frecency value used when inserting search engine results.
+// The default frecency value used when inserting matches with unknown frecency.
 const FRECENCY_SEARCHENGINES_DEFAULT = 1000;
 
 // Sqlite result row index constants.
@@ -492,6 +490,23 @@ function stripHttpAndTrim(spec) {
   return spec;
 }
 
+/**
+ * Make a moz-action: URL for a given action and set of parameters.
+ *
+ * @param action
+ *        Name of the action
+ * @param params
+ *        Object, whose keys are parameter names and values are the
+ *        corresponding parameter values.
+ * @return String representation of the built moz-action: URL
+ */
+function makeActionURL(action, params) {
+  let url = "moz-action:" + action + "," + JSON.stringify(params);
+  // Make a nsIURI out of this to ensure it's encoded properly.
+  return NetUtil.newURI(url).spec;
+}
+
+
 ////////////////////////////////////////////////////////////////////////////////
 //// Search Class
 //// Manages a single instance of an autocomplete search.
@@ -649,55 +664,90 @@ Search.prototype = {
     // wait for the initialization of PlacesSearchAutocompleteProvider first.
     yield PlacesSearchAutocompleteProvider.ensureInitialized();
 
-    // For any given search, we run many queries:
-    // 1) search engine domains
-    // 2) inline completion
-    // 3) keywords (this._keywordQuery)
-    // 4) adaptive learning (this._adaptiveQuery)
-    // 5) open pages not supported by history (this._switchToTabQuery)
-    // 6) query based on match behavior
+    // For any given search, we run many queries/heuristics:
+    // 1) by alias (as defined in SearchService)
+    // 2) inline completion from search engine resultDomains
+    // 3) inline completion for hosts (this._hostQuery) or urls (this._urlQuery)
+    // 4) directly typed in url (ie, can be navigated to as-is)
+    // 5) submission for the current search engine
+    // 6) keywords (this._keywordQuery)
+    // 7) adaptive learning (this._adaptiveQuery)
+    // 8) open pages not supported by history (this._switchToTabQuery)
+    // 9) query based on match behavior
     //
-    // (3) only gets ran if we get any filtered tokens, since if there are no
-    // tokens, there is nothing to match.
+    // (6) only gets ran if we get any filtered tokens, since if there are no
+    // tokens, there is nothing to match. This is the *first* query we check if
+    // we want to run, but it gets queued to be run later.
+    //
+    // (1), (4), (5) only get run if actions are enabled. When actions are
+    // enabled, the first result is always a special result (resulting from one
+    // of the queries between (1) and (6) inclusive). As such, the UI is
+    // expected to auto-select the first result when actions are enabled. If the
+    // first result is an inline completion result, that will also be the
+    // default result and therefore be autofilled (this also happens if actions
+    // are not enabled).
 
     // Get the final query, based on the tokens found in the search string.
     let queries = [ this._adaptiveQuery,
                     this._switchToTabQuery,
                     this._searchQuery ];
 
-    let hasKeyword = false;
+    // When actions are enabled, we run a series of heuristics to determine what
+    // the first result should be - which is always a special result.
+    // |hasFirstResult| is used to keep track of whether we've obtained such a
+    // result yet, so we can skip further heuristics and not add any additional
+    // special results.
+    let hasFirstResult = false;
+
     if (this._searchTokens.length > 0 &&
         PlacesUtils.bookmarks.getURIForKeyword(this._searchTokens[0])) {
+      // This may be a keyword of a bookmark.
       queries.unshift(this._keywordQuery);
-      hasKeyword = true;
+      hasFirstResult = true;
     }
 
-    if (this._shouldAutofill) {
-      if (this._searchTokens.length == 1 && !hasKeyword)
-        yield this._matchSearchEngineUrl();
-
-      // Hosts have no "/" in them.
-      let lastSlashIndex = this._searchString.lastIndexOf("/");
-      // Search only URLs if there's a slash in the search string...
-      if (lastSlashIndex != -1) {
-        // ...but not if it's exactly at the end of the search string.
-        if (lastSlashIndex < this._searchString.length - 1) {
-          queries.unshift(this._urlQuery);
-        }
-      } else if (this.pending) {
-        // The host query is executed immediately, while any other is delayed
-        // to avoid overloading the connection.
-        let [ query, params ] = this._hostQuery;
-        yield conn.executeCached(query, params, this._onResultRow.bind(this));
-      }
+    if (this._enableActions && !hasFirstResult) {
+      // If it's not a bookmarked keyword, then it may be a search engine
+      // with an alias - which works like a keyword.
+      hasFirstResult = yield this._matchSearchEngineAlias();
     }
+    let shouldAutofill = this._shouldAutofill;
+    if (this.pending && !hasFirstResult && shouldAutofill) {
+      // Or it may look like a URL we know about from search engines.
+      hasFirstResult = yield this._matchSearchEngineUrl();
+    }
+
+    if (this.pending && !hasFirstResult && shouldAutofill) {
+      // It may also look like a URL we know from the database.
+      // Here we can only try to predict whether the URL autofill query is
+      // likely to return a result.  If the prediction ends up being wrong,
+      // later we will need to make up for the lack of a special first result.
+      hasFirstResult = yield this._matchKnownUrl(conn, queries);
+    }
+
+    if (this.pending && this._enableActions && !hasFirstResult) {
+      // If we don't have a result that matches what we know about, then
+      // we use a fallback for things we don't know about.
+      yield this._matchHeuristicFallback();
+    }
+
+    // IMPORTANT: No other first result heuristics should run after
+    // _matchHeuristicFallback().
 
     yield this._sleep(Prefs.delay);
     if (!this.pending)
       return;
 
     for (let [query, params] of queries) {
-      yield conn.executeCached(query, params, this._onResultRow.bind(this));
+      let hasResult = yield conn.executeCached(query, params, this._onResultRow.bind(this));
+
+      if (this.pending && params.query_type == QUERYTYPE_AUTOFILL_URL &&
+          !hasResult) {
+        // If we predicted that our URL autofill query might have gotten a
+        // result, but it didn't, then we need to recover.
+        yield this._matchHeuristicFallback();
+      }
+
       if (!this.pending)
         return;
     }
@@ -715,31 +765,198 @@ Search.prototype = {
           return;
       }
     }
-
-    // If we didn't find enough matches and we have some frecency-driven
-    // matches, add them.
-    if (this._frecencyMatches) {
-      this._frecencyMatches.forEach(this._addMatch, this);
-    }
   }),
+
+  _matchKnownUrl: function* (conn, queries) {
+    // Hosts have no "/" in them.
+    let lastSlashIndex = this._searchString.lastIndexOf("/");
+    // Search only URLs if there's a slash in the search string...
+    if (lastSlashIndex != -1) {
+      // ...but not if it's exactly at the end of the search string.
+      if (lastSlashIndex < this._searchString.length - 1) {
+        // We don't want to execute this query right away because it needs to
+        // search the entire DB without an index, but we need to know if we have
+        // a result as it will influence other heuristics. So we guess by
+        // assuming that if we get a result from a *host* query and it *looks*
+        // like a URL, then we'll probably have a result.
+        let gotResult = false;
+        let [ query, params ] = this._urlPredictQuery;
+        yield conn.executeCached(query, params, row => {
+          gotResult = true;
+          queries.unshift(this._urlQuery);
+        });
+        return gotResult;
+      }
+
+      return false;
+    }
+
+    let gotResult = false;
+    let [ query, params ] = this._hostQuery;
+    yield conn.executeCached(query, params, row => {
+      gotResult = true;
+      this._onResultRow(row);
+    });
+
+    return gotResult;
+  },
 
   _matchSearchEngineUrl: function* () {
     if (!Prefs.autofillSearchEngines)
-      return;
+      return false;
 
     let match = yield PlacesSearchAutocompleteProvider.findMatchByToken(
                                                            this._searchString);
-    if (match) {
-      this._result.setDefaultIndex(0);
-      this._addFrecencyMatch({
-        value: match.token,
-        comment: match.engineName,
-        icon: match.iconUrl,
-        style: "priority-search",
-        finalCompleteValue: match.url,
-        frecency: FRECENCY_SEARCHENGINES_DEFAULT
-      });
+    if (!match)
+      return false;
+
+    // The match doesn't contain a 'scheme://www.' prefix, but since we have
+    // stripped it from the search string, here we could still be matching
+    // 'https://www.g' to 'google.com'.
+    // There are a couple cases where we don't want to match though:
+    //
+    //  * If the protocol differs we should not match. For example if the user
+    //    searched https we should not return http.
+    try {
+      let prefixURI = NetUtil.newURI(this._strippedPrefix);
+      let finalURI = NetUtil.newURI(match.url);
+      if (prefixURI.scheme != finalURI.scheme)
+        return false;
+    } catch (e) {}
+
+    //  * If the user typed "www." but the final url doesn't have it, we
+    //    should not match as well, the two urls may point to different pages.
+    if (this._strippedPrefix.endsWith("www.") &&
+        !stripHttpAndTrim(match.url).startsWith("www."))
+      return false;
+
+    let value = this._strippedPrefix + match.token;
+
+    // In any case, we should never arrive here with a value that doesn't
+    // match the search string.  If this happens there is some case we
+    // are not handling properly yet.
+    if (!value.startsWith(this._originalSearchString)) {
+      Components.utils.reportError(`Trying to inline complete in-the-middle
+                                    ${this._originalSearchString} to ${value}`);
+      return false;
     }
+
+    this._result.setDefaultIndex(0);
+    this._addMatch({
+      value: value,
+      comment: match.engineName,
+      icon: match.iconUrl,
+      style: "priority-search",
+      finalCompleteValue: match.url,
+      frecency: FRECENCY_SEARCHENGINES_DEFAULT
+    });
+    return true;
+  },
+
+  _matchSearchEngineAlias: function* () {
+    if (this._searchTokens.length < 2)
+      return false;
+
+    let match = yield PlacesSearchAutocompleteProvider.findMatchByAlias(
+                                                         this._searchTokens[0]);
+    if (!match)
+      return false;
+
+    let query = this._searchTokens.slice(1).join(" ");
+
+    yield this._addSearchEngineMatch(match, query);
+    return true;
+  },
+
+  _matchCurrentSearchEngine: function* () {
+    let match = yield PlacesSearchAutocompleteProvider.getDefaultMatch();
+    if (!match)
+      return;
+
+    let query = this._originalSearchString;
+
+    yield this._addSearchEngineMatch(match, query);
+  },
+
+  _addSearchEngineMatch: function* (match, query) {
+    let value = makeActionURL("searchengine", {
+      engineName: match.engineName,
+      input: this._originalSearchString,
+      searchQuery: query,
+    });
+
+    this._addMatch({
+      value: value,
+      comment: match.engineName,
+      icon: match.iconUrl,
+      style: "action searchengine",
+      finalCompleteValue: this._trimmedOriginalSearchString,
+      frecency: FRECENCY_SEARCHENGINES_DEFAULT,
+    });
+  },
+
+  // These are separated out so we can run them in two distinct cases:
+  // (1) We didn't match on anything that we know about
+  // (2) Our predictive query for URL autofill thought we may get a result,
+  //     but we didn't.
+  _matchHeuristicFallback: function* () {
+    // We may not have auto-filled, but this may still look like a URL.
+    let hasFirstResult = yield this._matchUnknownUrl();
+    // However, even if the input is a valid URL, we may not want to use
+    // it as such. This can happen if the host would require whitelisting,
+    // but isn't in the whitelist.
+
+    if (this.pending && !hasFirstResult) {
+      // When all else fails, we search using the current search engine.
+      yield this._matchCurrentSearchEngine();
+    }
+  },
+
+  // TODO (bug 1054814): Use visited URLs to inform which scheme to use, if the
+  // scheme isn't specificed.
+  _matchUnknownUrl: function* () {
+    let flags = Ci.nsIURIFixup.FIXUP_FLAG_FIX_SCHEME_TYPOS |
+                Ci.nsIURIFixup.FIXUP_FLAG_REQUIRE_WHITELISTED_HOST;
+    let fixupInfo = null;
+    try {
+      fixupInfo = Services.uriFixup.getFixupURIInfo(this._originalSearchString,
+                                                    flags);
+    } catch (e) {
+      return false;
+    }
+
+    let uri = fixupInfo.preferredURI;
+    // Check the host, as "http:///" is a valid nsIURI, but not useful to us.
+    // But, some schemes are expected to have no host. So we check just against
+    // schemes we know should have a host. This allows new schemes to be
+    // implemented without us accidentally blocking access to them.
+    let hostExpected = new Set(["http", "https", "ftp", "chrome", "resource"]);
+    if (!uri || (hostExpected.has(uri.scheme) && !uri.host))
+      return false;
+
+    let value = makeActionURL("visiturl", {
+      url: uri.spec,
+      input: this._originalSearchString,
+    });
+
+    let match = {
+      value: value,
+      comment: uri.spec,
+      style: "action visiturl",
+      finalCompleteValue: this._originalSearchString,
+      frecency: 0,
+    };
+
+    try {
+      let favicon = yield PlacesUtils.promiseFaviconLinkUrl(uri);
+      if (favicon)
+        match.icon = favicon.spec;
+    } catch (e) {
+      // It's possible we don't have a favicon for this - and that's ok.
+    };
+
+    this._addMatch(match);
+    return true;
   },
 
   _onResultRow: function (row) {
@@ -749,6 +966,8 @@ Search.prototype = {
     switch (queryType) {
       case QUERYTYPE_AUTOFILL_HOST:
         this._result.setDefaultIndex(0);
+        // Fall through.
+      case QUERYTYPE_AUTOFILL_PREDICTURL:
         match = this._processHostRow(row);
         break;
       case QUERYTYPE_AUTOFILL_URL:
@@ -761,19 +980,6 @@ Search.prototype = {
         break;
     }
     this._addMatch(match);
-  },
-
-  /**
-   * These matches should be mixed up with other matches, based on frecency.
-   */
-  _addFrecencyMatch: function (match) {
-    if (!this._frecencyMatches)
-      this._frecencyMatches = [];
-    this._frecencyMatches.push(match);
-    // We keep this array in reverse order, so we can walk it and remove stuff
-    // from it in one pass.  Notice that for frecency reverse order means from
-    // lower to higher.
-    this._frecencyMatches.sort((a, b) => a.frecency - b.frecency);
   },
 
   _maybeRestyleSearchMatch: function (match) {
@@ -807,14 +1013,6 @@ Search.prototype = {
       return;
 
     let notifyResults = false;
-
-    if (this._frecencyMatches) {
-      for (let i = this._frecencyMatches.length - 1;  i >= 0 ; i--) {
-        if (this._frecencyMatches[i].frecency > match.frecency) {
-          this._addMatch(this._frecencyMatches.splice(i, 1)[0]);
-        }
-      }
-    }
 
     // Must check both id and url, cause keywords dinamically modify the url.
     let urlMapKey = stripHttpAndTrim(match.value);
@@ -869,6 +1067,7 @@ Search.prototype = {
     let trimmedHost = row.getResultByIndex(QUERYINDEX_URL);
     let untrimmedHost = row.getResultByIndex(QUERYINDEX_TITLE);
     let frecency = row.getResultByIndex(QUERYINDEX_FRECENCY);
+
     // If the untrimmed value doesn't preserve the user's input just
     // ignore it and complete to the found host.
     if (untrimmedHost &&
@@ -880,7 +1079,19 @@ Search.prototype = {
     // Remove the trailing slash.
     match.comment = stripHttpAndTrim(trimmedHost);
     match.finalCompleteValue = untrimmedHost;
+
+    try {
+      let iconURI = NetUtil.newURI(untrimmedHost);
+      iconURI.path = "/favicon.ico";
+      match.icon = PlacesUtils.favicons.getFaviconLinkForIcon(iconURI).spec;
+    } catch (e) {
+      // This can fail, which is ok.
+    }
+
+    // Although this has a frecency, this query is executed before any other
+    // queries that would result in frecency matches.
     match.frecency = frecency;
+    match.style = "autofill";
     return match;
   },
 
@@ -914,7 +1125,10 @@ Search.prototype = {
     match.value = this._strippedPrefix + url;
     match.comment = url;
     match.finalCompleteValue = untrimmedURL;
+    // Although this has a frecency, this query is executed before any other
+    // queries that would result in frecency matches.
     match.frecency = frecency;
+    match.style = "autofill";
     return match;
   },
 
@@ -934,23 +1148,35 @@ Search.prototype = {
 
     // If actions are enabled and the page is open, add only the switch-to-tab
     // result.  Otherwise, add the normal result.
-    let [url, action] = this._enableActions && openPageCount > 0 ?
-                        ["moz-action:switchtab," + escapedURL, "action "] :
-                        [escapedURL, ""];
+    let url = escapedURL;
+    let action = null;
+    if (this._enableActions && openPageCount > 0) {
+      url = makeActionURL("switchtab", {url: escapedURL});
+      action = "switchtab";
+    }
 
     // Always prefer the bookmark title unless it is empty
     let title = bookmarkTitle || historyTitle;
 
     if (queryType == QUERYTYPE_KEYWORD) {
-      // If we do not have a title, then we must have a keyword, so let the UI
-      // know it is a keyword.  Otherwise, we found an exact page match, so just
-      // show the page like a regular result.  Because the page title is likely
-      // going to be more specific than the bookmark title (keyword title).
-      if (!historyTitle) {
+      if (this._enableActions) {
         match.style = "keyword";
-      }
-      else {
-        title = historyTitle;
+        url = makeActionURL("keyword", {
+          url: escapedURL,
+          input: this._originalSearchString,
+        });
+        action = "keyword";
+      } else {
+        // If we do not have a title, then we must have a keyword, so let the UI
+        // know it is a keyword.  Otherwise, we found an exact page match, so just
+        // show the page like a regular result.  Because the page title is likely
+        // going to be more specific than the bookmark title (keyword title).
+        if (!historyTitle) {
+          match.style = "keyword"
+        }
+        else {
+          title = historyTitle;
+        }
       }
     }
 
@@ -986,7 +1212,7 @@ Search.prototype = {
     }
 
     if (action)
-      match.style = "action " + match.style;
+      match.style = "action " + action;
 
     match.value = url;
     match.comment = title;
@@ -1111,6 +1337,9 @@ Search.prototype = {
     if (!Prefs.autofill)
       return false;
 
+    if (!this._searchTokens.length == 1)
+      return false;
+
     // Then, we should not try to autofill if the behavior is not the default.
     // TODO (bug 751709): Ideally we should have a more fine-grained behavior
     // here, but for now it's enough to just check for default behavior.
@@ -1131,18 +1360,11 @@ Search.prototype = {
     // This may confuse completeDefaultIndex cause the AUTOCOMPLETE_MATCH
     // tokenizer ends up trimming the search string and returning a value
     // that doesn't match it, or is even shorter.
-    if (/\s/.test(this._originalSearchString)) {
+    if (/\s/.test(this._originalSearchString))
       return false;
-    }
 
-    // Don't autoFill if the search term is recognized as a keyword, otherwise
-    // it will override default keywords behavior.  Note that keywords are
-    // hashed on first use, so while the first query may delay a little bit,
-    // next ones will just hit the memory hash.
-    if (this._searchString.length == 0 ||
-        PlacesUtils.bookmarks.getURIForKeyword(this._searchString)) {
+    if (this._searchString.length == 0)
       return false;
-    }
 
     return true;
   },
@@ -1165,6 +1387,29 @@ Search.prototype = {
       {
         query_type: QUERYTYPE_AUTOFILL_HOST,
         searchString: this._searchString.toLowerCase()
+      }
+    ];
+  },
+
+  /**
+   * Obtains a query to predict whether this._urlQuery is likely to return a
+   * result. We do by extracting what should be a host out of the input and
+   * performing a host query based on that.
+   */
+  get _urlPredictQuery() {
+    // We expect this to be a full URL, not just a host. We want to extract the
+    // host and use that as a guess for whether we'll get a result from a URL
+    // query.
+    let slashIndex = this._searchString.indexOf("/");
+
+    let host = this._searchString.substring(0, slashIndex);
+    host = host.toLowerCase();
+
+    return [
+      SQL_HOST_QUERY,
+      {
+        query_type: QUERYTYPE_AUTOFILL_PREDICTURL,
+        searchString: host
       }
     ];
   },
@@ -1316,12 +1561,15 @@ UnifiedComplete.prototype = {
 
     let search = this._currentSearch;
     this.getDatabaseHandle().then(conn => search.execute(conn))
+                            .then(null, ex => {
+                              dump(`Query failed: ${ex}\n`);
+                              Cu.reportError(ex);
+                            })
                             .then(() => {
                               if (search == this._currentSearch) {
                                 this.finishSearch(true);
                               }
-                            }, ex => { dump("Query failed: " + ex + "\n");
-                                       Cu.reportError(ex); });
+                            });
   },
 
   stopSearch: function () {

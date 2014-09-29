@@ -7,7 +7,7 @@
  */
 
 function spawnTest() {
-  let [target, debuggee, panel] = yield initWebAudioEditor(SIMPLE_CONTEXT_URL);
+  let { target, panel } = yield initWebAudioEditor(SIMPLE_CONTEXT_URL);
   let { gFront, $ } = panel.panelWin;
 
   is($("#reload-notice").hidden, false,
@@ -40,8 +40,8 @@ function spawnTest() {
   is($("#content").hidden, false,
     "The tool's content should not be hidden anymore.");
 
-  let navigating = once(target, "will-navigate");
-  let started = once(gFront, "start-context");
+  navigating = once(target, "will-navigate");
+  started = once(gFront, "start-context");
 
   reload(target);
 

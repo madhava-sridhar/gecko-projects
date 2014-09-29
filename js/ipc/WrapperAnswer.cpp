@@ -487,6 +487,30 @@ WrapperAnswer::AnswerCallOrConstruct(const ObjectId &objId,
 }
 
 bool
+WrapperAnswer::AnswerHasInstance(const ObjectId &objId, const JSVariant &vVar, ReturnStatus *rs, bool *bp)
+{
+    AutoSafeJSContext cx;
+    JSAutoRequest request(cx);
+
+    RootedObject obj(cx, findObjectById(cx, objId));
+    if (!obj)
+        return fail(cx, rs);
+
+    JSAutoCompartment comp(cx, obj);
+
+    LOG("%s.hasInstance(%s)", ReceiverObj(objId), InVariant(vVar));
+
+    RootedValue val(cx);
+    if (!fromVariant(cx, vVar, &val))
+        return fail(cx, rs);
+
+    if (!JS_HasInstance(cx, obj, val, bp))
+        return fail(cx, rs);
+
+    return ok(rs);
+}
+
+bool
 WrapperAnswer::AnswerObjectClassIs(const ObjectId &objId, const uint32_t &classValue,
 				   bool *result)
 {
@@ -612,11 +636,52 @@ WrapperAnswer::AnswerDOMInstanceOf(const ObjectId &objId, const int &prototypeID
 }
 
 bool
+WrapperAnswer::AnswerIsCallable(const ObjectId &objId, bool *result)
+{
+    AutoSafeJSContext cx;
+    JSAutoRequest request(cx);
+
+    RootedObject obj(cx, findObjectById(cx, objId));
+    if (!obj) {
+        // This is very unfortunate, but we have no choice.
+        *result = false;
+        return true;
+    }
+    JSAutoCompartment ac(cx, obj); // Not really necessary here, but be safe.
+
+    LOG("%s.isCallable()", ReceiverObj(objId));
+
+    *result = JS::IsCallable(obj);
+    return true;
+}
+
+bool
+WrapperAnswer::AnswerIsConstructor(const ObjectId &objId, bool *result)
+{
+    AutoSafeJSContext cx;
+    JSAutoRequest request(cx);
+
+    RootedObject obj(cx, findObjectById(cx, objId));
+    if (!obj) {
+        // This is very unfortunate, but we have no choice.
+        *result = false;
+        return true;
+    }
+    JSAutoCompartment ac(cx, obj); // Not really necessary here, but be safe.
+
+    LOG("%s.isConstructor()", ReceiverObj(objId));
+
+    *result = JS::IsConstructor(obj);
+    return true;
+}
+
+
+bool
 WrapperAnswer::RecvDropObject(const ObjectId &objId)
 {
-    JSObject *obj = findObjectById(objId);
+    JSObject *obj = objects_.find(objId);
     if (obj) {
-        objectIds_.remove(obj);
+        objectIdMap(objId.hasXrayWaiver()).remove(obj);
         objects_.remove(objId);
     }
     return true;

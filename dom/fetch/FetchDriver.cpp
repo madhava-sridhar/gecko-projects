@@ -176,11 +176,14 @@ FetchDriver::HttpNetworkFetch()
                           ios);
   NS_ENSURE_SUCCESS(rv, rv);
   nsCOMPtr<nsIChannel> chan;
+  /* FIXME: account for bug 1038756
   rv = NS_NewChannel(getter_AddRefs(chan),
                      uri,
                      ios,
                      nullptr, // FIXME(nsm): Extract loadgroup from request's client.
                      nullptr);
+  */
+  rv = NS_ERROR_NOT_IMPLEMENTED;
   NS_ENSURE_SUCCESS(rv, rv);
 
   nsCOMPtr<nsIHttpChannel> httpChan = do_QueryInterface(chan);

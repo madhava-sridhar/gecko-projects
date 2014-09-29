@@ -56,6 +56,37 @@ class BaseStructuredTest(unittest.TestCase):
         self.assertEquals(set(all_expected.keys()) | specials, set(actual.keys()))
 
 
+class TestStatusHandler(BaseStructuredTest):
+    def setUp(self):
+        super(TestStatusHandler, self).setUp()
+        self.handler = handlers.StatusHandler()
+        self.logger.add_handler(self.handler)
+
+    def test_failure_run(self):
+        self.logger.suite_start([])
+        self.logger.test_start("test1")
+        self.logger.test_status("test1", "sub1", status='PASS')
+        self.logger.test_status("test1", "sub2", status='TIMEOUT')
+        self.logger.test_end("test1", status='OK')
+        self.logger.suite_end()
+        summary = self.handler.summarize()
+        self.assertEqual(1, summary.unexpected)
+        self.assertEqual(2, summary.action_counts['test_status'])
+        self.assertEqual(1, summary.action_counts['test_end'])
+
+    def test_error_run(self):
+        self.logger.suite_start([])
+        self.logger.test_start("test1")
+        self.logger.error("ERRR!")
+        self.logger.test_end("test1", status='PASS')
+        self.logger.test_start("test2")
+        self.logger.test_end("test2", status='PASS')
+        self.logger.suite_end()
+        summary = self.handler.summarize()
+        self.assertIn('ERROR', summary.log_level_counts)
+        self.assertEqual(1, summary.log_level_counts['ERROR'])
+
+
 class TestStructuredLog(BaseStructuredTest):
     def test_suite_start(self):
         self.logger.suite_start(["test"])
@@ -453,6 +484,21 @@ class TestTBPLFormatter(FormatterTest):
                       self.loglines)
         self.logger.test_end("timeout_test", "OK")
         self.logger.suite_end()
+
+    def test_single_newline(self):
+        self.logger.suite_start([])
+        self.logger.test_start("test1")
+        self.set_position()
+        self.logger.test_status("test1", "subtest",
+                                status="PASS",
+                                expected="FAIL")
+        self.logger.test_end("test1", "OK")
+        self.logger.suite_end()
+
+        # This sequence should not produce blanklines
+        for line in self.loglines:
+            self.assertNotEqual("", line, "No blank line should be present in: %s" %
+                                self.loglines)
 
 
 class TestMachFormatter(FormatterTest):

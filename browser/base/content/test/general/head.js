@@ -108,6 +108,19 @@ function promiseWaitForCondition(aConditionFn) {
   return deferred.promise;
 }
 
+function promiseWaitForEvent(object, eventName, capturing = false) {
+  return new Promise((resolve) => {
+    function listener(event) {
+      info("Saw " + eventName);
+      object.removeEventListener(eventName, listener, capturing);
+      resolve(event);
+    }
+
+    info("Waiting for " + eventName);
+    object.addEventListener(eventName, listener, capturing);
+  });
+}
+
 function getTestPlugin(aName) {
   var pluginName = aName || "Test Plug-in";
   var ph = Cc["@mozilla.org/plugin/host;1"].getService(Ci.nsIPluginHost);
@@ -441,11 +454,15 @@ function waitForDocLoadComplete(aBrowser=gBrowser) {
   let deferred = Promise.defer();
   let progressListener = {
     onStateChange: function (webProgress, req, flags, status) {
-      let docStart = Ci.nsIWebProgressListener.STATE_IS_NETWORK |
-                     Ci.nsIWebProgressListener.STATE_STOP;
-      if ((flags & docStart) == docStart) {
+      let docStop = Ci.nsIWebProgressListener.STATE_IS_NETWORK |
+                    Ci.nsIWebProgressListener.STATE_STOP;
+      info("Saw state " + flags.toString(16) + " and status " + status.toString(16));
+
+      // When a load needs to be retargetted to a new process it is cancelled
+      // with NS_BINDING_ABORTED so ignore that case
+      if ((flags & docStop) == docStop && status != Cr.NS_BINDING_ABORTED) {
         aBrowser.removeProgressListener(progressListener);
-        info("Browser loaded");
+        info("Browser loaded " + aBrowser.contentWindow.location);
         deferred.resolve();
       }
     },
@@ -650,4 +667,101 @@ function assertWebRTCIndicatorStatus(expected) {
       ok(!indicator.hasMoreElements(), "only one global indicator window");
     }
   }
+}
+
+function makeActionURI(action, params) {
+  let url = "moz-action:" + action + "," + JSON.stringify(params);
+  return NetUtil.newURI(url);
+}
+
+function is_hidden(element) {
+  var style = element.ownerDocument.defaultView.getComputedStyle(element, "");
+  if (style.display == "none")
+    return true;
+  if (style.visibility != "visible")
+    return true;
+  if (style.display == "-moz-popup")
+    return ["hiding","closed"].contains(element.state);
+
+  // Hiding a parent element will hide all its children
+  if (element.parentNode != element.ownerDocument)
+    return is_hidden(element.parentNode);
+
+  return false;
+}
+
+function is_visible(element) {
+  var style = element.ownerDocument.defaultView.getComputedStyle(element, "");
+  if (style.display == "none")
+    return false;
+  if (style.visibility != "visible")
+    return false;
+  if (style.display == "-moz-popup" && element.state != "open")
+    return false;
+
+  // Hiding a parent element will hide all its children
+  if (element.parentNode != element.ownerDocument)
+    return is_visible(element.parentNode);
+
+  return true;
+}
+
+function is_element_visible(element, msg) {
+  isnot(element, null, "Element should not be null, when checking visibility");
+  ok(is_visible(element), msg);
+}
+
+function is_element_hidden(element, msg) {
+  isnot(element, null, "Element should not be null, when checking visibility");
+  ok(is_hidden(element), msg);
+}
+
+function promisePopupEvent(popup, eventSuffix) {
+  let endState = {shown: "open", hidden: "closed"}[eventSuffix];
+
+  if (popup.state = endState)
+    return Promise.resolve();
+
+  let eventType = "popup" + eventSuffix;
+  let deferred = Promise.defer();
+  popup.addEventListener(eventType, function onPopupShown(event) {
+    popup.removeEventListener(eventType, onPopupShown);
+    deferred.resolve();
+  });
+
+  return deferred.promise;
+}
+
+function promisePopupShown(popup) {
+  return promisePopupEvent(popup, "shown");
+}
+
+function promisePopupHidden(popup) {
+  return promisePopupEvent(popup, "hidden");
+}
+
+// NOTE: If you're using this, and attempting to interact with one of the
+// autocomplete results, your test is likely to be unreliable on Linux.
+// See bug 1073339.
+let gURLBarOnSearchComplete = null;
+function promiseSearchComplete() {
+  info("Waiting for onSearchComplete");
+  return new Promise(resolve => {
+    if (!gURLBarOnSearchComplete) {
+      gURLBarOnSearchComplete = gURLBar.onSearchComplete;
+      registerCleanupFunction(() => {
+        gURLBar.onSearchComplete = gURLBarOnSearchComplete;
+      });
+    }
+
+    gURLBar.onSearchComplete = function () {
+      ok(gURLBar.popupOpen, "The autocomplete popup is correctly open");
+      gURLBarOnSearchComplete.apply(gURLBar);
+      resolve();
+    }
+  }).then(() => {
+    // On Linux, the popup may or may not be open at this stage. So we need
+    // additional checks to ensure we wait long enough.
+    return promisePopupShown(gURLBar.popup);
+  });
 }

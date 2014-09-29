@@ -631,8 +631,7 @@ Layer::MayResample()
 }
 
 RenderTargetIntRect
-Layer::CalculateScissorRect(const RenderTargetIntRect& aCurrentScissorRect,
-                            const gfx::Matrix* aWorldTransform)
+Layer::CalculateScissorRect(const RenderTargetIntRect& aCurrentScissorRect)
 {
   ContainerLayer* container = GetParent();
   NS_ASSERTION(container, "This can't be called on the root!");
@@ -681,15 +680,6 @@ Layer::CalculateScissorRect(const RenderTargetIntRect& aCurrentScissorRect,
 
   if (container) {
     scissor.MoveBy(-container->GetIntermediateSurfaceRect().TopLeft());
-  } else if (aWorldTransform) {
-    gfx::Rect r(scissor.x, scissor.y, scissor.width, scissor.height);
-    gfx::Rect trScissor = aWorldTransform->TransformBounds(r);
-    trScissor.Round();
-    nsIntRect tmp;
-    if (!gfxUtils::GfxRectToIntRect(ThebesRect(trScissor), &tmp)) {
-      return RenderTargetIntRect(currentClip.TopLeft(), RenderTargetIntSize(0, 0));
-    }
-    scissor = RenderTargetPixel::FromUntyped(tmp);
   }
   return currentClip.Intersect(scissor);
 }
@@ -1161,11 +1151,11 @@ ContainerLayer::HasOpaqueAncestorLayer(Layer* aLayer)
 void
 ContainerLayer::DidRemoveChild(Layer* aLayer)
 {
-  ThebesLayer* tl = aLayer->AsThebesLayer();
+  PaintedLayer* tl = aLayer->AsPaintedLayer();
   if (tl && tl->UsedForReadback()) {
     for (Layer* l = mFirstChild; l; l = l->GetNextSibling()) {
       if (l->GetType() == TYPE_READBACK) {
-        static_cast<ReadbackLayer*>(l)->NotifyThebesLayerRemoved(tl);
+        static_cast<ReadbackLayer*>(l)->NotifyPaintedLayerRemoved(tl);
       }
     }
   }
@@ -1353,7 +1343,7 @@ Layer::Dump(std::stringstream& aStream, const char* aPrefix, bool aDumpHtml)
   if (aDumpHtml) {
     aStream << nsPrintfCString("<li><a id=\"%p\" ", this).get();
 #ifdef MOZ_DUMP_PAINTING
-    if (GetType() == TYPE_CONTAINER || GetType() == TYPE_THEBES) {
+    if (GetType() == TYPE_CONTAINER || GetType() == TYPE_PAINTED) {
       WriteSnapshotLinkToDumpFile(this, aStream);
     }
 #endif
@@ -1476,6 +1466,9 @@ Layer::PrintInfo(std::stringstream& aStream, const char* aPrefix)
   }
   if (!mTransform.IsIdentity()) {
     AppendToString(aStream, mTransform, " [transform=", "]");
+  }
+  if (!mLayerBounds.IsEmpty()) {
+    AppendToString(aStream, mLayerBounds, " [bounds=", "]");
   }
   if (!mVisibleRegion.IsEmpty()) {
     AppendToString(aStream, mVisibleRegion, " [visible=", "]");
@@ -1627,7 +1620,7 @@ Layer::DumpPacket(layerscope::LayersPacket* aPacket, const void* aParent)
 }
 
 void
-ThebesLayer::PrintInfo(std::stringstream& aStream, const char* aPrefix)
+PaintedLayer::PrintInfo(std::stringstream& aStream, const char* aPrefix)
 {
   Layer::PrintInfo(aStream, aPrefix);
   if (!mValidRegion.IsEmpty()) {
@@ -1636,13 +1629,13 @@ ThebesLayer::PrintInfo(std::stringstream& aStream, const char* aPrefix)
 }
 
 void
-ThebesLayer::DumpPacket(layerscope::LayersPacket* aPacket, const void* aParent)
+PaintedLayer::DumpPacket(layerscope::LayersPacket* aPacket, const void* aParent)
 {
   Layer::DumpPacket(aPacket, aParent);
   // get this layer data
   using namespace layerscope;
   LayersPacket::Layer* layer = aPacket->mutable_layer(aPacket->layer_size()-1);
-  layer->set_type(LayersPacket::Layer::ThebesLayer);
+  layer->set_type(LayersPacket::Layer::PaintedLayer);
   if (!mValidRegion.IsEmpty()) {
     DumpRegion(layer->mutable_valid(), mValidRegion);
   }

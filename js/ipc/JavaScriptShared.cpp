@@ -10,6 +10,7 @@
 #include "mozilla/dom/TabChild.h"
 #include "jsfriendapi.h"
 #include "xpcprivate.h"
+#include "WrapperFactory.h"
 #include "mozilla/Preferences.h"
 
 using namespace js;
@@ -36,7 +37,6 @@ IdToObjectMap::trace(JSTracer *trc)
     for (Table::Range r(table_.all()); !r.empty(); r.popFront()) {
         DebugOnly<JSObject *> prior = r.front().value().get();
         JS_CallObjectTracer(trc, &r.front().value(), "ipc-object");
-        MOZ_ASSERT(r.front().value() == prior);
     }
 }
 
@@ -44,8 +44,9 @@ void
 IdToObjectMap::sweep()
 {
     for (Table::Enum e(table_); !e.empty(); e.popFront()) {
-        DebugOnly<JSObject *> prior = e.front().value().get();
-        if (JS_IsAboutToBeFinalized(&e.front().value()))
+        JS::Heap<JSObject *> *objp = &e.front().value();
+        JS_UpdateWeakPointerAfterGC(objp);
+        if (!*objp)
             e.removeFront();
     }
 }
@@ -95,11 +96,23 @@ ObjectToIdMap::init()
 }
 
 void
+ObjectToIdMap::trace(JSTracer *trc)
+{
+    for (Table::Enum e(*table_); !e.empty(); e.popFront()) {
+        JSObject *obj = e.front().key();
+        JS_CallUnbarrieredObjectTracer(trc, &obj, "ipc-object");
+        if (obj != e.front().key())
+            e.rekeyFront(obj);
+    }
+}
+
+void
 ObjectToIdMap::sweep()
 {
     for (Table::Enum e(*table_); !e.empty(); e.popFront()) {
         JSObject *obj = e.front().key();
-        if (JS_IsAboutToBeFinalizedUnbarriered(&obj))
+        JS_UpdateWeakPointerAfterGCUnbarriered(&obj);
+        if (!obj)
             e.removeFront();
         else if (obj != e.front().key())
             e.rekeyFront(obj);
@@ -111,7 +124,7 @@ ObjectToIdMap::find(JSObject *obj)
 {
     Table::Ptr p = table_->lookup(obj);
     if (!p)
-        return 0;
+        return ObjectId::nullId();
     return p->value();
 }
 
@@ -150,7 +163,7 @@ bool JavaScriptShared::sStackLoggingEnabled;
 JavaScriptShared::JavaScriptShared(JSRuntime *rt)
   : rt_(rt),
     refcount_(1),
-    lastId_(0)
+    nextSerialNumber_(1)
 {
     if (!sLoggingInitialized) {
         sLoggingInitialized = true;
@@ -174,7 +187,9 @@ JavaScriptShared::init()
         return false;
     if (!cpows_.init())
         return false;
-    if (!objectIds_.init())
+    if (!unwaivedObjectIds_.init())
+        return false;
+    if (!waivedObjectIds_.init())
         return false;
 
     return true;
@@ -369,47 +384,31 @@ JavaScriptShared::ConvertID(const JSIID &from, nsID *to)
 }
 
 JSObject *
-JavaScriptShared::findObjectById(JSContext *cx, uint32_t objId)
+JavaScriptShared::findObjectById(JSContext *cx, const ObjectId &objId)
 {
-    RootedObject obj(cx, findObjectById(objId));
+    RootedObject obj(cx, objects_.find(objId));
     if (!obj) {
         JS_ReportError(cx, "operation not possible on dead CPOW");
         return nullptr;
     }
 
-    // Objects are stored in objects_ unwrapped. We want to wrap the object
-    // before returning it so that all operations happen on Xray wrappers. If
-    // the object is a DOM element, we try to obtain the corresponding
-    // TabChildGlobal and wrap in that.
-    RootedObject global(cx, GetGlobalForObjectCrossCompartment(obj));
-    nsCOMPtr<nsIGlobalObject> nativeGlobal = xpc::GetNativeForGlobal(global);
-    nsCOMPtr<nsIDOMWindow> window = do_QueryInterface(nativeGlobal);
-    if (window) {
-        dom::TabChild *tabChild = dom::TabChild::GetFrom(window);
-        if (tabChild) {
-            nsCOMPtr<nsIContentFrameMessageManager> mm;
-            tabChild->GetMessageManager(getter_AddRefs(mm));
-            nsCOMPtr<nsIGlobalObject> tabChildNativeGlobal = do_QueryInterface(mm);
-            RootedObject tabChildGlobal(cx, tabChildNativeGlobal->GetGlobalJSObject());
-            JSAutoCompartment ac(cx, tabChildGlobal);
-            if (!JS_WrapObject(cx, &obj))
-                return nullptr;
-            return obj;
-        }
+    // Each process has a dedicated compartment for CPOW targets. All CPOWs
+    // from the other process point to objects in this scope. From there, they
+    // can access objects in other compartments using cross-compartment
+    // wrappers.
+    JSAutoCompartment ac(cx, scopeForTargetObjects());
+    if (objId.hasXrayWaiver()) {
+        if (!xpc::WrapperFactory::WaiveXrayAndWrap(cx, &obj))
+            return nullptr;
+    } else {
+        if (!JS_WrapObject(cx, &obj))
+            return nullptr;
     }
-
-    // If there's no TabChildGlobal, we use the junk scope. In the parent we use
-    // the unprivileged junk scope to prevent security vulnerabilities. In the
-    // child we use the privileged junk scope.
-    JSAutoCompartment ac(cx, defaultScope());
-    if (!JS_WrapObject(cx, &obj))
-        return nullptr;
     return obj;
 }
 
 static const uint64_t DefaultPropertyOp = 1;
-static const uint64_t GetterOnlyPropertyStub = 2;
-static const uint64_t UnknownPropertyOp = 3;
+static const uint64_t UnknownPropertyOp = 2;
 
 bool
 JavaScriptShared::fromDescriptor(JSContext *cx, Handle<JSPropertyDescriptor> desc,
@@ -449,8 +448,6 @@ JavaScriptShared::fromDescriptor(JSContext *cx, Handle<JSPropertyDescriptor> des
     } else {
         if (desc.setter() == JS_StrictPropertyStub)
             out->setter() = DefaultPropertyOp;
-        else if (desc.setter() == js_GetterOnlyPropertyStub)
-            out->setter() = GetterOnlyPropertyStub;
         else
             out->setter() = UnknownPropertyOp;
     }
@@ -511,8 +508,6 @@ JavaScriptShared::toDescriptor(JSContext *cx, const PPropertyDescriptor &in,
     } else {
         if (in.setter().get_uint64_t() == DefaultPropertyOp)
             out.setSetter(JS_StrictPropertyStub);
-        else if (in.setter().get_uint64_t() == GetterOnlyPropertyStub)
-            out.setSetter(js_GetterOnlyPropertyStub);
         else
             out.setSetter(UnknownStrictPropertyStub);
     }
@@ -592,10 +587,4 @@ JavaScriptShared::Wrap(JSContext *cx, HandleObject aObj, InfallibleTArray<CpowEn
     }
 
     return true;
-}
-void JavaScriptShared::fixupAfterMovingGC()
-{
-    objects_.sweep();
-    cpows_.sweep();
-    objectIds_.sweep();
 }

@@ -153,6 +153,33 @@ class Context(KeyedDefaultDict):
 
         return KeyedDefaultDict.__setitem__(self, key, value)
 
+    def resolve_path(self, path):
+        """Resolves a path using moz.build conventions.
+
+        Paths may be relative to the current srcdir or objdir, or to the
+        environment's topsrcdir or topobjdir.  Different resolution contexts
+        are denoted by characters at the beginning of the path:
+
+            * '/' - relative to topsrcdir;
+            * '!/' - relative to topobjdir;
+            * '!' - relative to objdir; and
+            * any other character - relative to srcdir.
+        """
+        if path.startswith('/'):
+            resolved = mozpath.join(self.config.topsrcdir, path[1:])
+        elif path.startswith('!/'):
+            resolved = mozpath.join(self.config.topobjdir, path[2:])
+        elif path.startswith('!'):
+            resolved = mozpath.join(self.objdir, path[1:])
+        else:
+            resolved = mozpath.join(self.srcdir, path)
+
+        return mozpath.normpath(resolved)
+
+    @staticmethod
+    def is_objdir_path(path):
+        return path[0] == '!'
+
     def update(self, iterable={}, **kwargs):
         """Like dict.update(), but using the context's setitem.
 
@@ -780,10 +807,22 @@ VARIABLES = {
         """List of manifest files defining browser chrome tests.
         """, None),
 
+    'JETPACK_PACKAGE_MANIFESTS': (StrictOrderingOnAppendList, list,
+        """List of manifest files defining jetpack package tests.
+        """, None),
+
+    'JETPACK_ADDON_MANIFESTS': (StrictOrderingOnAppendList, list,
+        """List of manifest files defining jetpack addon tests.
+        """, None),
+
     'CRASHTEST_MANIFESTS': (StrictOrderingOnAppendList, list,
         """List of manifest files defining crashtests.
 
         These are commonly named crashtests.list.
+        """, None),
+
+    'ANDROID_INSTRUMENTATION_MANIFESTS': (StrictOrderingOnAppendList, list,
+        """List of manifest files defining Android instrumentation tests.
         """, None),
 
     'METRO_CHROME_MANIFESTS': (StrictOrderingOnAppendList, list,
@@ -830,7 +869,7 @@ VARIABLES = {
         When this variable is present, the results of this directory will end up
         being placed in the $(DIST_SUBDIR) subdirectory of where it would
         otherwise be placed.
-        """, 'libs'),
+        """, None),
 
     'FINAL_TARGET': (FinalTargetValue, unicode,
         """The name of the directory to install targets to.
@@ -840,7 +879,7 @@ VARIABLES = {
         neither are present, the result is dist/bin. If XPI_NAME is present, the
         result is dist/xpi-stage/$(XPI_NAME). If DIST_SUBDIR is present, then
         the $(DIST_SUBDIR) directory of the otherwise default value is used.
-        """, 'libs'),
+        """, None),
 
     'GYP_DIRS': (StrictOrderingOnAppendListWithFlagsFactory({
             'variables': dict,
@@ -930,7 +969,7 @@ VARIABLES = {
            Note that the ordering of flags matters here; these flags will be
            added to the linker's command line in the same order as they
            appear in the moz.build file.
-        """, 'libs'),
+        """, None),
 
     'EXTRA_DSO_LDOPTS': (List, list,
         """Flags passed to the linker when linking a shared library.
@@ -938,7 +977,7 @@ VARIABLES = {
            Note that the ordering of flags matter here, these flags will be
            added to the linker's command line in the same order as they
            appear in the moz.build file.
-        """, 'libs'),
+        """, None),
 
     'WIN32_EXE_LDFLAGS': (List, list,
         """Flags passed to the linker when linking a Windows .exe executable
@@ -949,7 +988,22 @@ VARIABLES = {
            appear in the moz.build file.
 
            This variable only has an effect on Windows.
-        """, 'libs'),
+        """, None),
+
+    'TEST_HARNESS_FILES': (HierarchicalStringList, list,
+        """List of files to be installed for test harnesses.
+
+        ``TEST_HARNESS_FILES`` can be used to install files to any directory
+        under $objdir/_tests. Files can be appended to a field to indicate
+        which subdirectory they should be exported to. For example,
+        to export ``foo.py`` to ``_tests/foo``, append to
+        ``TEST_HARNESS_FILES`` like so::
+           TEST_HARNESS_FILES.foo += ['foo.py']
+
+        Files from topsrcdir and the objdir can also be installed by prefixing
+        the path(s) with a '/' character and a '!' character, respectively::
+           TEST_HARNESS_FILES.path += ['/build/bar.py', '!quux.py']
+        """, None),
 }
 
 # Sanity check: we don't want any variable above to have a list as storage type.

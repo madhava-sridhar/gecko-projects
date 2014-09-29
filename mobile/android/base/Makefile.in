@@ -81,11 +81,9 @@ ALL_JARS = \
   gecko-R.jar \
   gecko-browser.jar \
   gecko-mozglue.jar \
+  gecko-thirdparty.jar \
   gecko-util.jar \
-  nineoldandroids.jar \
-  squareup-picasso.jar \
   sync-thirdparty.jar \
-  websockets.jar \
   $(NULL)
 
 ifdef MOZ_WEBRTC
@@ -144,7 +142,9 @@ endif
 .proguard.deps: $(ALL_JARS)
 	$(REPORT_BUILD)
 	@$(TOUCH) $@
-	java -jar $(ANDROID_SDK_ROOT)/tools/proguard/lib/proguard.jar \
+	java \
+		-Xmx512m -Xms128m \
+		-jar $(ANDROID_SDK_ROOT)/tools/proguard/lib/proguard.jar \
 		@$(topsrcdir)/mobile/android/config/proguard.cfg \
 		-optimizationpasses $(PROGUARD_PASSES) \
 		-injars $(subst ::,:,$(subst $(NULL) ,:,$(strip $(ALL_JARS)))) \

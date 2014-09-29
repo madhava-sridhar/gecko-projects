@@ -206,7 +206,7 @@ this.ContentSearch = {
     ]);
     let browserWin = msg.target.ownerDocument.defaultView;
     let engine = Services.search.getEngineByName(data.engineName);
-    browserWin.BrowserSearch.recordSearchInHealthReport(engine, data.whence);
+    browserWin.BrowserSearch.recordSearchInHealthReport(engine, data.whence, data.selection);
     let submission = engine.getSubmission(data.searchString, "", data.whence);
     browserWin.loadURI(submission.uri.spec, null, submission.postData);
     return Promise.resolve();
@@ -252,7 +252,7 @@ this.ContentSearch = {
     controller.maxLocalResults = ok ? 2 : 6;
     controller.maxRemoteResults = ok ? 6 : 0;
     controller.remoteTimeout = data.remoteTimeout || undefined;
-    let priv = PrivateBrowsingUtils.isWindowPrivate(msg.target.contentWindow);
+    let priv = PrivateBrowsingUtils.isBrowserPrivate(msg.target);
     // fetch() rejects its promise if there's a pending request, but since we
     // process our event queue serially, there's never a pending request.
     let suggestions = yield controller.fetch(data.searchString, priv, engine);
@@ -278,7 +278,7 @@ this.ContentSearch = {
     // been destroyed by the time we receive this message, and as a result
     // contentWindow is undefined.
     if (!msg.target.contentWindow ||
-        PrivateBrowsingUtils.isWindowPrivate(msg.target.contentWindow)) {
+        PrivateBrowsingUtils.isBrowserPrivate(msg.target)) {
       return Promise.resolve();
     }
     let browserData = this._suggestionDataForBrowser(msg.target, true);
