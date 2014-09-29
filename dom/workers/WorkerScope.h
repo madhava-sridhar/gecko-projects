@@ -8,6 +8,7 @@
 
 #include "Workers.h"
 #include "mozilla/DOMEventTargetHelper.h"
+#include "mozilla/dom/Headers.h"
 #include "mozilla/dom/RequestBinding.h"
 #include "mozilla/dom/Promise.h"
 #include "mozilla/dom/UnionTypes.h"
