@@ -11,6 +11,11 @@
 
 #include "mozilla/dom/Promise.h"
 
+// undo windows.h brain damage
+#ifdef PostMessage
+#undef PostMessage
+#endif
+
 using mozilla::ErrorResult;
 using namespace mozilla::dom;
 USING_WORKERS_NAMESPACE

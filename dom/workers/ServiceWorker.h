@@ -52,6 +52,10 @@ public:
     aURL = mURL;
   }
 
+// undo windows.h brain damage
+#ifdef PostMessage
+#undef PostMessage
+#endif
   void
   PostMessage(JSContext* aCx, JS::Handle<JS::Value> aMessage,
               const Optional<Sequence<JS::Value>>& aTransferable,
