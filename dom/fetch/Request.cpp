@@ -191,7 +191,7 @@ Request::Constructor(const GlobalObject& aGlobal,
     }
   }
 
-  domRequestHeaders->SwappedFill(headers, aRv);
+  domRequestHeaders->Fill(*headers, aRv);
   if (aRv.Failed()) {
     return nullptr;
   }

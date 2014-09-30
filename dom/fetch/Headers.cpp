@@ -356,12 +356,6 @@ Headers::GetPHeaders(nsTArray<PHeadersEntry>& aPHeadersOut) const
 }
 
 void
-Headers::SwappedFill(Headers* aHeaders, ErrorResult&)
-{
-  mList.SwapElements(aHeaders->mList);
-}
-
-void
 Headers::Fill(const Headers& aInit, ErrorResult& aRv)
 {
   const nsTArray<Entry>& list = aInit.mList;

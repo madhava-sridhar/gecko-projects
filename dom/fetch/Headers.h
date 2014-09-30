@@ -94,7 +94,7 @@ public:
   void
   GetPHeaders(nsTArray<PHeadersEntry>& aPHeadersOut) const;
 
-  void SwappedFill(Headers* aHeaders, ErrorResult&);
+  void Fill(const Headers& aInit, ErrorResult& aRv);
 private:
   // Since Headers is also an nsISupports, the above constructor can
   // accidentally be invoked as new Headers(Headers*[, implied None guard]) when
@@ -125,7 +125,6 @@ private:
            IsForbiddenResponseHeader(aName);
   }
 
-  void Fill(const Headers& aInit, ErrorResult& aRv);
   void Fill(const Sequence<Sequence<nsCString>>& aInit, ErrorResult& aRv);
   void Fill(const MozMap<nsCString>& aInit, ErrorResult& aRv);
 };
