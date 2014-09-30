@@ -85,6 +85,9 @@ SerializeCacheStream(nsIInputStream* aStream, PCacheReadStreamOrVoid* aStreamOut
     return;
   }
 
+  // TODO: Integrate khuey's nsFancyPipe here if aStream does not provide
+  //       efficient serialization.  (Or always use pipe.)
+
   PCacheReadStream readStream;
   nsTArray<FileDescriptor> fds;
   SerializeInputStream(aStream, readStream.params(), fds);
