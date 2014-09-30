@@ -42,7 +42,8 @@ public:
 
   // Manager::Listener methods
   virtual void OnStorageMatch(RequestId aRequestId, nsresult aRv,
-                              const SavedResponse* aResponse) MOZ_OVERRIDE;
+                              const SavedResponse* aResponse,
+                              Manager::StreamList* aStreamList) MOZ_OVERRIDE;
   virtual void OnStorageGet(RequestId aRequestId, nsresult aRv,
                             bool aCacheFound,
                             CacheId aCacheId) MOZ_OVERRIDE;
@@ -56,6 +57,11 @@ public:
                              const nsTArray<nsString>& aKeys) MOZ_OVERRIDE;
 
 private:
+  Manager::StreamControl*
+  SerializeReadStream(Manager::StreamControl *aStreamControl, const nsID& aId,
+                      Manager::StreamList* aStreamList,
+                      PCacheReadStream* aReadStreamOut);
+
   const Namespace mNamespace;
   const nsCString mOrigin;
   const nsCString mBaseDomain;

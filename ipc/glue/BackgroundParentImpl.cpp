@@ -12,6 +12,7 @@
 #include "mozilla/dom/MessagePortParent.h"
 #include "mozilla/dom/cache/CacheStorageParent.h"
 #include "mozilla/dom/cache/PCacheParent.h"
+#include "mozilla/dom/cache/PCacheStreamControlParent.h"
 #include "mozilla/ipc/BackgroundParent.h"
 #include "mozilla/ipc/PBackgroundTestParent.h"
 #include "nsThreadUtils.h"
@@ -30,6 +31,7 @@ using namespace mozilla::dom;
 using mozilla::dom::cache::PCacheParent;
 using mozilla::dom::cache::CacheStorageParent;
 using mozilla::dom::cache::PCacheStorageParent;
+using mozilla::dom::cache::PCacheStreamControlParent;
 
 namespace {
 
@@ -239,6 +241,22 @@ bool
 BackgroundParentImpl::DeallocPCacheParent(PCacheParent* aActor)
 {
   // The CacheParent actor is provided to the PBackground manager, but
+  // we own the object and must delete it.
+  delete aActor;
+  return true;
+}
+
+PCacheStreamControlParent*
+BackgroundParentImpl::AllocPCacheStreamControlParent()
+{
+  MOZ_CRASH("CacheStreamControlParent actor must be provided to PBackground manager");
+  return nullptr;
+}
+
+bool
+BackgroundParentImpl::DeallocPCacheStreamControlParent(PCacheStreamControlParent* aActor)
+{
+  // The CacheStreamControlParent actor is provided to the PBackground manager, but
   // we own the object and must delete it.
   delete aActor;
   return true;

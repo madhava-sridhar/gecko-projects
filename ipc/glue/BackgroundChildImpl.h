@@ -16,6 +16,7 @@ namespace cache {
 
 class PCacheChild;
 class PCacheStorageChild;
+class PCacheStreamControlChild;
 
 } // namespace cache
 namespace indexedDB {
@@ -88,6 +89,12 @@ protected:
 
   virtual bool
   DeallocPCacheChild(mozilla::dom::cache::PCacheChild* aActor) MOZ_OVERRIDE;
+
+  virtual mozilla::dom::cache::PCacheStreamControlChild*
+  AllocPCacheStreamControlChild();
+
+  virtual bool
+  DeallocPCacheStreamControlChild(mozilla::dom::cache::PCacheStreamControlChild* aActor);
 
   virtual PMessagePortChild*
   AllocPMessagePortChild() MOZ_OVERRIDE;

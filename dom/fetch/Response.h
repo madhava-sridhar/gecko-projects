@@ -106,7 +106,7 @@ public:
   Text(ErrorResult&);
 
   bool
-  BodyUsed();
+  BodyUsed() const;
 private:
   ~Response();
 

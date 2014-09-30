@@ -11,6 +11,7 @@
 #include "mozilla/dom/WorkerPrivate.h"
 #include "mozilla/dom/CacheBinding.h"
 #include "mozilla/dom/cache/CacheChild.h"
+#include "mozilla/dom/cache/ReadStream.h"
 #include "mozilla/dom/cache/TypeUtils.h"
 #include "mozilla/ErrorResult.h"
 #include "mozilla/Preferences.h"
@@ -59,16 +60,17 @@ Cache::Match(const RequestOrScalarValueString& aRequest,
     return nullptr;
   }
 
-  RequestId requestId = AddRequestPromise(promise, aRv);
-  if (requestId == INVALID_REQUEST_ID) {
-    return nullptr;
-  }
-
   PCacheRequest request;
-  TypeUtils::ToPCacheRequest(request, aRequest);
+  nsresult rv = TypeUtils::ToPCacheRequest(request, aRequest);
+  if (NS_FAILED(rv)) {
+    promise->MaybeReject(rv);
+    return promise.forget();
+  }
 
   PCacheQueryParams params;
   TypeUtils::ToPCacheQueryParams(params, aParams);
+
+  RequestId requestId = AddRequestPromise(promise, aRv);
 
   unused << mActor->SendMatch(requestId, request, params);
 
@@ -86,16 +88,17 @@ Cache::MatchAll(const Optional<RequestOrScalarValueString>& aRequest,
     return nullptr;
   }
 
-  RequestId requestId = AddRequestPromise(promise, aRv);
-  if (requestId == INVALID_REQUEST_ID) {
-    return nullptr;
-  }
-
   PCacheRequestOrVoid request;
-  TypeUtils::ToPCacheRequestOrVoid(request, aRequest);
+  nsresult rv = TypeUtils::ToPCacheRequestOrVoid(request, aRequest);
+  if (NS_FAILED(rv)) {
+    promise->MaybeReject(rv);
+    return promise.forget();
+  }
 
   PCacheQueryParams params;
   TypeUtils::ToPCacheQueryParams(params, aParams);
+
+  RequestId requestId = AddRequestPromise(promise, aRv);
 
   unused << mActor->SendMatchAll(requestId, request, params);
 
@@ -112,13 +115,14 @@ Cache::Add(const RequestOrScalarValueString& aRequest, ErrorResult& aRv)
     return nullptr;
   }
 
-  RequestId requestId = AddRequestPromise(promise, aRv);
-  if (requestId == INVALID_REQUEST_ID) {
-    return nullptr;
+  PCacheRequest request;
+  nsresult rv = TypeUtils::ToPCacheRequest(request, aRequest);
+  if (NS_FAILED(rv)) {
+    promise->MaybeReject(rv);
+    return promise.forget();
   }
 
-  PCacheRequest request;
-  TypeUtils::ToPCacheRequest(request, aRequest);
+  RequestId requestId = AddRequestPromise(promise, aRv);
 
   unused << mActor->SendAdd(requestId, request);
 
@@ -136,20 +140,17 @@ Cache::AddAll(const Sequence<OwningRequestOrScalarValueString>& aRequests,
     return nullptr;
   }
 
-  RequestId requestId = AddRequestPromise(promise, aRv);
-  if (requestId == INVALID_REQUEST_ID) {
-    return nullptr;
-  }
-
   nsTArray<PCacheRequest> requests;
   for(uint32_t i = 0; i < aRequests.Length(); ++i) {
     PCacheRequest* request = requests.AppendElement();
-    if (!request) {
-      aRv.Throw(NS_ERROR_OUT_OF_MEMORY);
-      return nullptr;
+    nsresult rv = TypeUtils::ToPCacheRequest(*request, aRequests[i]);
+    if (NS_FAILED(rv)) {
+      promise->MaybeReject(rv);
+      return promise.forget();
     }
-    TypeUtils::ToPCacheRequest(*request, aRequests[i]);
   }
+
+  RequestId requestId = AddRequestPromise(promise, aRv);
 
   unused << mActor->SendAddAll(requestId, requests);
 
@@ -157,8 +158,8 @@ Cache::AddAll(const Sequence<OwningRequestOrScalarValueString>& aRequests,
 }
 
 already_AddRefed<Promise>
-Cache::Put(const RequestOrScalarValueString& aRequest,
-           const Response& aResponse, ErrorResult& aRv)
+Cache::Put(const RequestOrScalarValueString& aRequest, const Response& aResponse,
+           ErrorResult& aRv)
 {
   MOZ_ASSERT(mActor);
 
@@ -167,16 +168,21 @@ Cache::Put(const RequestOrScalarValueString& aRequest,
     return nullptr;
   }
 
-  RequestId requestId = AddRequestPromise(promise, aRv);
-  if (requestId == INVALID_REQUEST_ID) {
-    return nullptr;
+  PCacheRequest request;
+  nsresult rv = TypeUtils::ToPCacheRequest(request, aRequest);
+  if (NS_FAILED(rv)) {
+    promise->MaybeReject(rv);
+    return promise.forget();
   }
 
-  PCacheRequest request;
-  TypeUtils::ToPCacheRequest(request, aRequest);
-
   PCacheResponse response;
-  TypeUtils::ToPCacheResponse(response, aResponse);
+  rv = TypeUtils::ToPCacheResponse(response, aResponse);
+  if (NS_FAILED(rv)) {
+    promise->MaybeReject(rv);
+    return promise.forget();
+  }
+
+  RequestId requestId = AddRequestPromise(promise, aRv);
 
   unused << mActor->SendPut(requestId, request, response);
 
@@ -194,16 +200,17 @@ Cache::Delete(const RequestOrScalarValueString& aRequest,
     return nullptr;
   }
 
-  RequestId requestId = AddRequestPromise(promise, aRv);
-  if (requestId == INVALID_REQUEST_ID) {
-    return nullptr;
-  }
-
   PCacheRequest request;
-  TypeUtils::ToPCacheRequest(request, aRequest);
+  nsresult rv = TypeUtils::ToPCacheRequest(request, aRequest);
+  if (NS_FAILED(rv)) {
+    promise->MaybeReject(rv);
+    return promise.forget();
+  }
 
   PCacheQueryParams params;
   TypeUtils::ToPCacheQueryParams(params, aParams);
+
+  RequestId requestId = AddRequestPromise(promise, aRv);
 
   unused << mActor->SendDelete(requestId, request, params);
 
@@ -221,16 +228,17 @@ Cache::Keys(const Optional<RequestOrScalarValueString>& aRequest,
     return nullptr;
   }
 
-  RequestId requestId = AddRequestPromise(promise, aRv);
-  if (requestId == INVALID_REQUEST_ID) {
-    return nullptr;
-  }
-
   PCacheRequestOrVoid request;
-  TypeUtils::ToPCacheRequestOrVoid(request, aRequest);
+  nsresult rv = TypeUtils::ToPCacheRequestOrVoid(request, aRequest);
+  if (NS_FAILED(rv)) {
+    promise->MaybeReject(rv);
+    return promise.forget();
+  }
 
   PCacheQueryParams params;
   TypeUtils::ToPCacheQueryParams(params, aParams);
+
+  RequestId requestId = AddRequestPromise(promise, aRv);
 
   unused << mActor->SendKeys(requestId, request, params);
 
@@ -288,7 +296,8 @@ Cache::ActorDestroy(mozilla::ipc::IProtocol& aActor)
 
 void
 Cache::RecvMatchResponse(RequestId aRequestId, nsresult aRv,
-                         const PCacheResponseOrVoid& aResponse)
+                         const PCacheResponseOrVoid& aResponse,
+                         PCacheStreamControlChild* aStreamControl)
 {
   nsRefPtr<Promise> promise = RemoveRequestPromise(aRequestId);
   if (NS_WARN_IF(!promise)) {
@@ -305,18 +314,15 @@ Cache::RecvMatchResponse(RequestId aRequestId, nsresult aRv,
     return;
   }
 
-  nsRefPtr<Response> response = new Response(mOwner);
-  if (!response) {
-    promise->MaybeReject(NS_ERROR_OUT_OF_MEMORY);
-    return;
-  }
-  TypeUtils::ToResponse(*response, aResponse);
+  nsRefPtr<Response> response = TypeUtils::ToResponse(mOwner, aResponse,
+                                                      aStreamControl);
   promise->MaybeResolve(response);
 }
 
 void
 Cache::RecvMatchAllResponse(RequestId aRequestId, nsresult aRv,
-                            const nsTArray<PCacheResponse>& aResponses)
+                            const nsTArray<PCacheResponse>& aResponses,
+                            PCacheStreamControlChild* aStreamControl)
 {
   nsRefPtr<Promise> promise = RemoveRequestPromise(aRequestId);
   if (NS_WARN_IF(!promise)) {
@@ -330,20 +336,17 @@ Cache::RecvMatchAllResponse(RequestId aRequestId, nsresult aRv,
 
   nsTArray<nsRefPtr<Response>> responses;
   for (uint32_t i = 0; i < aResponses.Length(); ++i) {
-    nsRefPtr<Response> response = new Response(mOwner);
-    if (!response) {
-      promise->MaybeReject(NS_ERROR_OUT_OF_MEMORY);
-      return;
-    }
-    TypeUtils::ToResponse(*response, aResponses[i]);
-    responses.AppendElement(response);
+    nsRefPtr<Response> response = TypeUtils::ToResponse(mOwner, aResponses[i],
+                                                        aStreamControl);
+    responses.AppendElement(response.forget());
   }
   promise->MaybeResolve(responses);
 }
 
 void
 Cache::RecvAddResponse(RequestId aRequestId, nsresult aRv,
-                       const PCacheResponse& aResponse)
+                       const PCacheResponseOrVoid& aResponse,
+                       PCacheStreamControlChild* aStreamControl)
 {
   nsRefPtr<Promise> promise = RemoveRequestPromise(aRequestId);
   if (NS_WARN_IF(!promise)) {
@@ -355,18 +358,15 @@ Cache::RecvAddResponse(RequestId aRequestId, nsresult aRv,
     return;
   }
 
-  nsRefPtr<Response> response = new Response(mOwner);
-  if (!response) {
-    promise->MaybeReject(NS_ERROR_OUT_OF_MEMORY);
-    return;
-  }
-  TypeUtils::ToResponse(*response, aResponse);
+  nsRefPtr<Response> response = TypeUtils::ToResponse(mOwner, aResponse,
+                                                      aStreamControl);
   promise->MaybeResolve(response);
 }
 
 void
 Cache::RecvAddAllResponse(RequestId aRequestId, nsresult aRv,
-                          const nsTArray<PCacheResponse>& aResponses)
+                          const nsTArray<PCacheResponse>& aResponses,
+                          PCacheStreamControlChild* aStreamControl)
 {
   nsRefPtr<Promise> promise = RemoveRequestPromise(aRequestId);
   if (NS_WARN_IF(!promise)) {
@@ -380,12 +380,8 @@ Cache::RecvAddAllResponse(RequestId aRequestId, nsresult aRv,
 
   nsTArray<nsRefPtr<Response>> responses;
   for (uint32_t i = 0; i < aResponses.Length(); ++i) {
-    nsRefPtr<Response> response = new Response(mOwner);
-    if (!response) {
-      promise->MaybeReject(NS_ERROR_OUT_OF_MEMORY);
-      return;
-    }
-    TypeUtils::ToResponse(*response, aResponses[i]);
+    nsRefPtr<Response> response = TypeUtils::ToResponse(mOwner, aResponses[i],
+                                                        aStreamControl);
     responses.AppendElement(response);
   }
   promise->MaybeResolve(responses);
@@ -393,7 +389,8 @@ Cache::RecvAddAllResponse(RequestId aRequestId, nsresult aRv,
 
 void
 Cache::RecvPutResponse(RequestId aRequestId, nsresult aRv,
-                       const PCacheResponseOrVoid& aResponse)
+                       const PCacheResponseOrVoid& aResponse,
+                       PCacheStreamControlChild* aStreamControl)
 {
   nsRefPtr<Promise> promise = RemoveRequestPromise(aRequestId);
   if (NS_WARN_IF(!promise)) {
@@ -409,12 +406,9 @@ Cache::RecvPutResponse(RequestId aRequestId, nsresult aRv,
     promise->MaybeResolve(nullptr);
     return;
   }
-  nsRefPtr<Response> response = new Response(mOwner);
-  if (!response) {
-    promise->MaybeReject(NS_ERROR_OUT_OF_MEMORY);
-    return;
-  }
-  TypeUtils::ToResponse(*response, aResponse);
+
+  nsRefPtr<Response> response = TypeUtils::ToResponse(mOwner, aResponse,
+                                                      aStreamControl);
   promise->MaybeResolve(response);
 }
 
@@ -436,7 +430,8 @@ Cache::RecvDeleteResponse(RequestId aRequestId, nsresult aRv, bool aSuccess)
 
 void
 Cache::RecvKeysResponse(RequestId aRequestId, nsresult aRv,
-                        const nsTArray<PCacheRequest>& aRequests)
+                        const nsTArray<PCacheRequest>& aRequests,
+                        PCacheStreamControlChild* aStreamControl)
 {
   nsRefPtr<Promise> promise = RemoveRequestPromise(aRequestId);
   if (NS_WARN_IF(!promise)) {
@@ -450,13 +445,11 @@ Cache::RecvKeysResponse(RequestId aRequestId, nsresult aRv,
 
   nsTArray<nsRefPtr<Request>> requests;
   for (uint32_t i = 0; i < aRequests.Length(); ++i) {
-    nsRefPtr<InternalRequest> internalRequest = new InternalRequest(mGlobal);
-    TypeUtils::ToInternalRequest(*internalRequest, aRequests[i]);
     // TODO: Should mOwner and mGlobal be just one field? Right now mOwner can
     //       be null (when on a worker), but mGlobal is always provided.
-    nsCOMPtr<nsIGlobalObject> owner = do_QueryInterface(mOwner);
-    nsRefPtr<Request> request = new Request(owner, internalRequest);
-    requests.AppendElement(request);
+    nsRefPtr<Request> request = TypeUtils::ToRequest(mGlobal, aRequests[i],
+                                                     aStreamControl);
+    requests.AppendElement(request.forget());
   }
   promise->MaybeResolve(requests);
 }
@@ -478,11 +471,6 @@ Cache::AddRequestPromise(Promise* aPromise, ErrorResult& aRv)
   MOZ_ASSERT(aPromise);
 
   nsRefPtr<Promise>* ref = mRequestPromises.AppendElement();
-  if (!ref) {
-    aRv.Throw(NS_ERROR_OUT_OF_MEMORY);
-    return INVALID_REQUEST_ID;
-  }
-
   *ref = aPromise;
 
   // (Ab)use the promise pointer as our request ID.  This is a fast, thread-safe

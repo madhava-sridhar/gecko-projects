@@ -25,7 +25,8 @@ public:
   virtual void ActorDestroy(ActorDestroyReason aReason) MOZ_OVERRIDE;
   virtual bool RecvMatchResponse(const RequestId& requestId,
                              const nsresult& aRv,
-                             const PCacheResponseOrVoid& response) MOZ_OVERRIDE;
+                             const PCacheResponseOrVoid& response,
+                             PCacheStreamControlChild* aStreamControl) MOZ_OVERRIDE;
   virtual bool RecvGetResponse(const cache::RequestId& aRequestId,
                                const nsresult& aRv,
                                PCacheChild* aActor) MOZ_OVERRIDE;

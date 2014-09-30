@@ -6,16 +6,35 @@
 
 #include "mozilla/dom/cache/TypeUtils.h"
 
+#include "mozilla/unused.h"
 #include "mozilla/dom/CacheBinding.h"
 #include "mozilla/dom/InternalRequest.h"
 #include "mozilla/dom/Request.h"
 #include "mozilla/dom/Response.h"
 #include "mozilla/dom/cache/PCacheTypes.h"
+#include "mozilla/dom/cache/ReadStream.h"
+#include "mozilla/ipc/BackgroundChild.h"
+#include "mozilla/ipc/PBackgroundChild.h"
+#include "mozilla/ipc/PFileDescriptorSetChild.h"
+#include "mozilla/ipc/InputStreamUtils.h"
 #include "nsCOMPtr.h"
 #include "nsString.h"
 #include "nsURLParsers.h"
 
+// TODO: remove stream testing code
+#include "nsStreamUtils.h"
+#include "nsStringStream.h"
+
 namespace {
+
+using mozilla::void_t;
+using mozilla::unused;
+using mozilla::dom::cache::PCacheReadStream;
+using mozilla::dom::cache::PCacheReadStreamOrVoid;
+using mozilla::ipc::BackgroundChild;
+using mozilla::ipc::FileDescriptor;
+using mozilla::ipc::PFileDescriptorSetChild;
+using mozilla::ipc::PBackgroundChild;
 
 // Utility function to remove the query from a URL.  We're not using nsIURL
 // or URL to do this because they require going to the main thread.
@@ -57,6 +76,40 @@ GetURLWithoutQuery(const nsAString& aUrl, nsAString& aUrlWithoutQueryOut)
   return NS_OK;
 }
 
+void
+SerializeCacheStream(nsIInputStream* aStream, PCacheReadStreamOrVoid* aStreamOut)
+{
+  MOZ_ASSERT(aStreamOut);
+  if (!aStream) {
+    *aStreamOut = void_t();
+    return;
+  }
+
+  PCacheReadStream readStream;
+  nsTArray<FileDescriptor> fds;
+  SerializeInputStream(aStream, readStream.params(), fds);
+
+  PFileDescriptorSetChild* fdSet = nullptr;
+  if (!fds.IsEmpty()) {
+    // We should not be serializing until we have an actor ready
+    PBackgroundChild* manager = BackgroundChild::GetForCurrentThread();
+    MOZ_ASSERT(manager);
+
+    fdSet = manager->SendPFileDescriptorSetConstructor(fds[0]);
+    for (uint32_t i = 1; i < fds.Length(); ++i) {
+      unused << fdSet->SendAddFileDescriptor(fds[i]);
+    }
+  }
+
+  if (fdSet) {
+    readStream.fds() = fdSet;
+  } else {
+    readStream.fds() = void_t();
+  }
+
+  *aStreamOut = readStream;
+}
+
 } // anonymous namespace
 
 namespace mozilla {
@@ -64,18 +117,20 @@ namespace dom {
 namespace cache {
 
 using mozilla::void_t;
+using mozilla::ipc::BackgroundChild;
+using mozilla::ipc::FileDescriptor;
+using mozilla::ipc::PFileDescriptorSetChild;
+using mozilla::ipc::PBackgroundChild;
 
 // static
-void
+nsresult
 TypeUtils::ToPCacheRequest(PCacheRequest& aOut, const Request& aIn)
 {
   aIn.GetMethod(aOut.method());
   aIn.GetUrl(aOut.url());
-  if(NS_WARN_IF(NS_FAILED(GetURLWithoutQuery(aOut.url(),
-                                              aOut.urlWithoutQuery())))) {
-    // Fallback to just not providing ignoreSearch support
-    // TODO: Should we error out here instead?
-    aIn.GetUrl(aOut.urlWithoutQuery());
+  nsresult rv = GetURLWithoutQuery(aOut.url(), aOut.urlWithoutQuery());
+  if(NS_FAILED(rv)) {
+    return rv;
   }
   aIn.GetReferrer(aOut.referrer());
   nsRefPtr<Headers> headers = aIn.Headers_();
@@ -84,10 +139,32 @@ TypeUtils::ToPCacheRequest(PCacheRequest& aOut, const Request& aIn)
   aOut.headersGuard() = headers->Guard();
   aOut.mode() = aIn.Mode();
   aOut.credentials() = aIn.Credentials();
+
+  if (aIn.BodyUsed()) {
+    return NS_ERROR_TYPE_ERR;
+  }
+
+  nsRefPtr<InternalRequest> internalRequest = aIn.GetInternalRequest();
+  MOZ_ASSERT(internalRequest);
+  nsCOMPtr<nsIInputStream> stream;
+
+  // TODO: internalRequest->GetBody(getter_AddRefs(stream));
+  // TODO: set Request body used
+
+  // TODO: remove stream testing code
+  rv = NS_NewCStringInputStream(getter_AddRefs(stream),
+                NS_LITERAL_CSTRING("request body stream beep beep boop!"));
+  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
+
+  // TODO: Provide way to send PCacheRequest without serializing body for
+  //       read-only operations that do not use body.
+  SerializeCacheStream(stream, &aOut.body());
+
+  return NS_OK;
 }
 
 // static
-void
+nsresult
 TypeUtils::ToPCacheRequest(PCacheRequest& aOut,
                            const RequestOrScalarValueString& aIn)
 {
@@ -99,25 +176,26 @@ TypeUtils::ToPCacheRequest(PCacheRequest& aOut,
     // TODO: see nsIStandardURL.init() if Request does not provide something...
     MOZ_CRASH("implement me");
   }
-  ToPCacheRequest(aOut, *request);
+  return ToPCacheRequest(aOut, *request);
 }
 
 // static
-void
+nsresult
 TypeUtils::ToPCacheRequestOrVoid(PCacheRequestOrVoid& aOut,
                                  const Optional<RequestOrScalarValueString>& aIn)
 {
   if (!aIn.WasPassed()) {
     aOut = void_t();
-    return;
+    return NS_OK;
   }
   PCacheRequest request;
-  ToPCacheRequest(request, aIn.Value());
+  nsresult rv = ToPCacheRequest(request, aIn.Value());
   aOut = request;
+  return rv;
 }
 
 // static
-void
+nsresult
 TypeUtils::ToPCacheRequest(PCacheRequest& aOut,
                            const OwningRequestOrScalarValueString& aIn)
 {
@@ -128,11 +206,11 @@ TypeUtils::ToPCacheRequest(PCacheRequest& aOut,
     MOZ_ASSERT(aIn.IsScalarValueString());
     MOZ_CRASH("implement me");
   }
-  ToPCacheRequest(aOut, *request);
+  return ToPCacheRequest(aOut, *request);
 }
 
 // static
-void
+nsresult
 TypeUtils::ToPCacheResponse(PCacheResponse& aOut, const Response& aIn)
 {
   aOut.type() = aIn.Type();
@@ -143,11 +221,29 @@ TypeUtils::ToPCacheResponse(PCacheResponse& aOut, const Response& aIn)
   MOZ_ASSERT(headers);
   headers->GetPHeaders(aOut.headers());
   aOut.headersGuard() = headers->Guard();
+
+  if (aIn.BodyUsed()) {
+    return NS_ERROR_TYPE_ERR;
+  }
+
+  nsCOMPtr<nsIInputStream> stream;
+
+  // TODO: get body stream from Response
+  // TODO: set body stream used in Response
+
+  // TODO: remove stream testing code
+  nsresult rv = NS_NewCStringInputStream(getter_AddRefs(stream),
+                NS_LITERAL_CSTRING("response body stream hooray!"));
+  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
+
+  SerializeCacheStream(stream, &aOut.body());
+
+  return NS_OK;
 }
 
 // static
 void
-TypeUtils:: ToPCacheQueryParams(PCacheQueryParams& aOut, const QueryParams& aIn)
+TypeUtils::ToPCacheQueryParams(PCacheQueryParams& aOut, const QueryParams& aIn)
 {
   aOut.ignoreSearch() = aIn.mIgnoreSearch.WasPassed() &&
                         aIn.mIgnoreSearch.Value();
@@ -166,25 +262,73 @@ TypeUtils:: ToPCacheQueryParams(PCacheQueryParams& aOut, const QueryParams& aIn)
 }
 
 // static
-void
-TypeUtils::ToResponse(Response& aOut, const PCacheResponse& aIn)
+already_AddRefed<Response>
+TypeUtils::ToResponse(nsISupports* aOwner, const PCacheResponse& aIn,
+                      PCacheStreamControlChild* aStreamControl)
 {
+  nsRefPtr<Response> ref = new Response(aOwner);
+
   // TODO: implement once real Request/Response are available
   NS_WARNING("Not filling in contents of Response returned from Cache.");
+
+  nsCOMPtr<nsIInputStream> stream = ReadStream::Create(aStreamControl,
+                                                       aIn.body());
+
+  // TODO: remove stream testing code
+  if (!stream) {
+    printf_stderr("### ### TypeUtils::ToResponse() null stream\n");
+  } else {
+    FallibleTArray<char> buf(100);
+    uint32_t numBytes = 0;
+    nsresult rv = NS_FillArray(buf, stream, 0, &numBytes);
+    if (NS_WARN_IF(NS_FAILED(rv))) { return nullptr; }
+    nsAutoCString s(buf.Elements(), buf.Length());
+    printf_stderr("### ### TypeUtils::ToResponse() stream with %u bytes: %s\n",
+                  numBytes, s.get());
+  }
+
+  return ref.forget();
 }
 
 // static
-void
-TypeUtils::ToInternalRequest(InternalRequest& aOut, const PCacheRequest& aIn)
+already_AddRefed<Request>
+TypeUtils::ToRequest(nsIGlobalObject* aGlobal, const PCacheRequest& aIn,
+                     PCacheStreamControlChild* aStreamControl)
 {
-  aOut.SetMethod(aIn.method());
-  aOut.SetURL(NS_ConvertUTF16toUTF8(aIn.url()));
-  aOut.SetReferrer(NS_ConvertUTF16toUTF8(aIn.referrer()));
-  aOut.SetMode(aIn.mode());
-  aOut.SetCredentialsMode(aIn.credentials());
-  nsRefPtr<Headers> headers = new Headers(aOut.GetClient(), aIn.headers(),
+  nsRefPtr<InternalRequest> internalRequest = new InternalRequest(aGlobal);
+
+  internalRequest->SetMethod(aIn.method());
+  internalRequest->SetURL(NS_ConvertUTF16toUTF8(aIn.url()));
+  internalRequest->SetReferrer(NS_ConvertUTF16toUTF8(aIn.referrer()));
+  internalRequest->SetMode(aIn.mode());
+  internalRequest->SetCredentialsMode(aIn.credentials());
+
+  nsRefPtr<Headers> headers = new Headers(aGlobal, aIn.headers(),
                                           aIn.headersGuard());
-  aOut.SetHeaders(headers);
+  internalRequest->SetHeaders(headers);
+
+  nsCOMPtr<nsIInputStream> stream = ReadStream::Create(aStreamControl,
+                                                       aIn.body());
+
+  internalRequest->SetBody(stream);
+  // TODO: clear request bodyRead flag
+  NS_WARNING("Not clearing bodyRead flag for Request returned from Cache.");
+
+  // TODO: remove stream testing code
+  if (!stream) {
+    printf_stderr("### ### TypeUtils::ToInternalRequest() null stream\n");
+  } else {
+    FallibleTArray<char> buf(100);
+    uint32_t numBytes = 0;
+    nsresult rv = NS_FillArray(buf, stream, 0, &numBytes);
+    if (NS_WARN_IF(NS_FAILED(rv))) { return nullptr; }
+    nsAutoCString s(buf.Elements(), buf.Length());
+    printf_stderr("### ### TypeUtils::ToInternalRequest() stream with %u bytes: %s\n",
+                  numBytes, s.get());
+  }
+
+  nsRefPtr<Request> request = new Request(aGlobal, internalRequest);
+  return request.forget();
 }
 
 } // namespace cache

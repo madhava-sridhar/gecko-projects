@@ -11,12 +11,15 @@
 #include "mozilla/dom/MessagePortChild.h"
 #include "mozilla/dom/cache/CacheChild.h"
 #include "mozilla/dom/cache/PCacheStorageChild.h"
+#include "mozilla/dom/cache/CacheStreamControlChild.h"
 #include "mozilla/ipc/PBackgroundTestChild.h"
 #include "nsTraceRefcnt.h"
 
 using mozilla::dom::cache::PCacheStorageChild;
 using mozilla::dom::cache::CacheChild;
 using mozilla::dom::cache::PCacheChild;
+using mozilla::dom::cache::PCacheStreamControlChild;
+using mozilla::dom::cache::CacheStreamControlChild;
 
 namespace {
 
@@ -190,6 +193,19 @@ BackgroundChildImpl::DeallocPCacheChild(PCacheChild* aActor)
 {
   // The CacheChild actor is provided to the PBackground manager, but
   // we own the object and must delete it.
+  delete aActor;
+  return true;
+}
+
+PCacheStreamControlChild*
+BackgroundChildImpl::AllocPCacheStreamControlChild()
+{
+  return new CacheStreamControlChild();
+}
+
+bool
+BackgroundChildImpl::DeallocPCacheStreamControlChild(PCacheStreamControlChild* aActor)
+{
   delete aActor;
   return true;
 }

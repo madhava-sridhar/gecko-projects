@@ -166,7 +166,7 @@ Response::Text(ErrorResult& result)
 }
 
 bool
-Response::BodyUsed()
+Response::BodyUsed() const
 {
   return false;
 }

@@ -15,12 +15,15 @@ EXPORTS.mozilla.dom.cache += [
     'CacheStorageChild.h',
     'CacheStorageChildListener.h',
     'CacheStorageParent.h',
+    'CacheStreamControlChild.h',
+    'CacheStreamControlParent.h',
     'Context.h',
     'DBAction.h',
     'DBSchema.h',
     'FileUtils.h',
     'IPCUtils.h',
     'Manager.h',
+    'ReadStream.h',
     'SavedTypes.h',
     'Types.h',
     'TypeUtils.h',
@@ -35,17 +38,21 @@ SOURCES += [
     'CacheStorage.cpp',
     'CacheStorageChild.cpp',
     'CacheStorageParent.cpp',
+    'CacheStreamControlChild.cpp',
+    'CacheStreamControlParent.cpp',
     'Context.cpp',
     'DBAction.cpp',
     'DBSchema.cpp',
     'FileUtils.cpp',
     'Manager.cpp',
+    'ReadStream.cpp',
     'TypeUtils.cpp',
 ]
 
 IPDL_SOURCES += [
     'PCache.ipdl',
     'PCacheStorage.ipdl',
+    'PCacheStreamControl.ipdl',
     'PCacheTypes.ipdlh',
 ]
 

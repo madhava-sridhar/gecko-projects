@@ -52,6 +52,11 @@ public:
   BodyFinalizeWrite(nsIFile* aBaseDir, CacheId aCacheId, const nsID& aId);
 
   static nsresult
+  BodyOpen(const nsACString& aOrigin, const nsACString& aBaseDomain,
+           nsIFile* aBaseDir, CacheId aCacheId, const nsID& aId,
+           nsIInputStream** aStreamOut);
+
+  static nsresult
   BodyStartReadStream(const nsACString& aOrigin, const nsACString& aBaseDomain,
                       nsIFile* aBaseDir, CacheId aCacheId, const nsID& aId,
                       nsIOutputStream* aDest, void* aClosure,

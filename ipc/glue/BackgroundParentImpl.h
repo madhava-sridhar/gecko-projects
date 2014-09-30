@@ -13,6 +13,7 @@ namespace dom {
 namespace cache {
   class PCacheParent;
   class PCacheStorageParent;
+  class PCacheStreamControlParent;
 }
 }
 namespace ipc {
@@ -78,6 +79,12 @@ protected:
 
   virtual bool
   DeallocPCacheParent(mozilla::dom::cache::PCacheParent* aActor) MOZ_OVERRIDE;
+
+  virtual mozilla::dom::cache::PCacheStreamControlParent*
+  AllocPCacheStreamControlParent();
+
+  virtual bool
+  DeallocPCacheStreamControlParent(mozilla::dom::cache::PCacheStreamControlParent* aActor);
 
   virtual PMessagePortParent*
   AllocPMessagePortParent() MOZ_OVERRIDE;

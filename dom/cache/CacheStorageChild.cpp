@@ -35,10 +35,11 @@ CacheStorageChild::ActorDestroy(ActorDestroyReason aReason)
 bool
 CacheStorageChild::RecvMatchResponse(const RequestId& aRequestId,
                                      const nsresult& aRv,
-                                     const PCacheResponseOrVoid& aResponseOrVoid)
+                                     const PCacheResponseOrVoid& aResponseOrVoid,
+                                     PCacheStreamControlChild* aStreamControl)
 {
   MOZ_ASSERT(mListener);
-  mListener->RecvMatchResponse(aRequestId, aRv, aResponseOrVoid);
+  mListener->RecvMatchResponse(aRequestId, aRv, aResponseOrVoid, aStreamControl);
   return true;
 }
 

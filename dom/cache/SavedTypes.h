@@ -27,7 +27,7 @@ struct StreamHolder
 
 struct SavedRequest
 {
-  SavedRequest() : mHasBodyId(false) { }
+  SavedRequest() : mHasBodyId(false) { mValue.body() = void_t(); }
   PCacheRequest mValue;
   bool mHasBodyId;
   nsID mBodyId;
@@ -36,7 +36,7 @@ struct SavedRequest
 
 struct SavedResponse
 {
-  SavedResponse() : mHasBodyId(false) { }
+  SavedResponse() : mHasBodyId(false) { mValue.body() = void_t(); }
   PCacheResponse mValue;
   bool mHasBodyId;
   nsID mBodyId;

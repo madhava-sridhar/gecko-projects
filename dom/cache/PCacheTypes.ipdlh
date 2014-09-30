@@ -3,12 +3,14 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 include PHeaders;
+include InputStreamParams;
 
 using HeadersGuardEnum from "mozilla/dom/FetchIPCUtils.h";
 using RequestCredentials from "mozilla/dom/FetchIPCUtils.h";
 using RequestMode from "mozilla/dom/FetchIPCUtils.h";
 using mozilla::dom::ResponseType from "mozilla/dom/FetchIPCUtils.h";
 using mozilla::void_t from "ipc/IPCMessageUtils.h";
+using struct nsID from "nsID.h";
 
 namespace mozilla {
 namespace dom {
@@ -24,6 +26,19 @@ struct PCacheQueryParams
   nsString cacheName;
 };
 
+struct PCacheReadStream
+{
+  nsID id;
+  OptionalInputStreamParams params;
+  OptionalFileDescriptorSet fds;
+};
+
+union PCacheReadStreamOrVoid
+{
+  void_t;
+  PCacheReadStream;
+};
+
 struct PCacheRequest
 {
   nsCString method;
@@ -34,6 +49,7 @@ struct PCacheRequest
   nsString referrer;
   RequestMode mode;
   RequestCredentials credentials;
+  PCacheReadStreamOrVoid body;
 };
 
 union PCacheRequestOrVoid
@@ -50,6 +66,7 @@ struct PCacheResponse
   nsCString statusText;
   PHeadersEntry[] headers;
   HeadersGuardEnum headersGuard;
+  PCacheReadStreamOrVoid body;
 };
 
 union PCacheResponseOrVoid

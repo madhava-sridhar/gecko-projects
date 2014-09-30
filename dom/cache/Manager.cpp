@@ -41,6 +41,8 @@ public:
     // TODO: init maintainance marker
     // TODO: perform maintainance if necessary
     // TODO: find orphaned caches in database
+    // TODO: have Context create/delete marker files in constructor/destructor
+    //       and only do expensive maintenance if that marker is present
 
     nsresult rv = FileUtils::BodyCreateDir(aDBDir);
     if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
@@ -241,11 +243,13 @@ public:
   CacheMatchAction(Manager* aManager, ListenerId aListenerId,
                    RequestId aRequestId, CacheId aCacheId,
                    const PCacheRequest& aRequest,
-                   const PCacheQueryParams& aParams)
+                   const PCacheQueryParams& aParams,
+                   StreamList* aStreamList)
     : BaseAction(aManager, aListenerId, aRequestId)
     , mCacheId(aCacheId)
     , mRequest(aRequest)
     , mParams(aParams)
+    , mStreamList(aStreamList)
     , mFoundResponse(false)
   { }
 
@@ -253,18 +257,36 @@ public:
   RunSyncWithDBOnTarget(nsIFile* aDBDir,
                         mozIStorageConnection* aConn) MOZ_OVERRIDE
   {
-    return DBSchema::CacheMatch(aConn, mCacheId, mRequest, mParams,
-                                &mFoundResponse, &mResponse);
+    nsresult rv = DBSchema::CacheMatch(aConn, mCacheId, mRequest, mParams,
+                                       &mFoundResponse, &mResponse);
+    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
+
+    if (!mFoundResponse || !mResponse.mHasBodyId) {
+      return rv;
+    }
+
+    nsCOMPtr<nsIInputStream> stream;
+    rv = FileUtils::BodyOpen(mManager->Origin(), mManager->BaseDomain(),
+                             aDBDir, mCacheId, mResponse.mBodyId,
+                             getter_AddRefs(stream));
+    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
+    if (NS_WARN_IF(!stream)) { return NS_ERROR_FILE_NOT_FOUND; }
+
+    mStreamList->Add(mResponse.mBodyId, stream);
+
+    return rv;
   }
 
   virtual void
   Complete(Listener* aListener, nsresult aRv) MOZ_OVERRIDE
   {
     if (!mFoundResponse) {
-      aListener->OnCacheMatch(mRequestId, aRv, nullptr);
+      aListener->OnCacheMatch(mRequestId, aRv, nullptr, nullptr);
     } else {
-      aListener->OnCacheMatch(mRequestId, aRv, &mResponse);
+      mStreamList->Activate(mCacheId);
+      aListener->OnCacheMatch(mRequestId, aRv, &mResponse, mStreamList);
     }
+    mStreamList = nullptr;
   }
 
   virtual bool MatchesCacheId(CacheId aCacheId) MOZ_OVERRIDE
@@ -277,6 +299,7 @@ protected:
   const CacheId mCacheId;
   const PCacheRequest mRequest;
   const PCacheQueryParams mParams;
+  nsRefPtr<StreamList> mStreamList;
   bool mFoundResponse;
   SavedResponse mResponse;
 };
@@ -287,25 +310,47 @@ public:
   CacheMatchAllAction(Manager* aManager, ListenerId aListenerId,
                       RequestId aRequestId, CacheId aCacheId,
                       const PCacheRequestOrVoid& aRequestOrVoid,
-                      const PCacheQueryParams& aParams)
+                      const PCacheQueryParams& aParams,
+                      StreamList* aStreamList)
     : BaseAction(aManager, aListenerId, aRequestId)
     , mCacheId(aCacheId)
     , mRequestOrVoid(aRequestOrVoid)
     , mParams(aParams)
+    , mStreamList(aStreamList)
   { }
 
   virtual nsresult
   RunSyncWithDBOnTarget(nsIFile* aDBDir,
                         mozIStorageConnection* aConn) MOZ_OVERRIDE
   {
-    return DBSchema::CacheMatchAll(aConn, mCacheId, mRequestOrVoid, mParams,
-                                   mSavedResponses);
+    nsresult rv = DBSchema::CacheMatchAll(aConn, mCacheId, mRequestOrVoid,
+                                          mParams, mSavedResponses);
+    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
+
+    for (uint32_t i = 0; i < mSavedResponses.Length(); ++i) {
+      if (!mSavedResponses[i].mHasBodyId) {
+        continue;
+      }
+
+      nsCOMPtr<nsIInputStream> stream;
+      rv = FileUtils::BodyOpen(mManager->Origin(), mManager->BaseDomain(),
+                               aDBDir, mCacheId, mSavedResponses[i].mBodyId,
+                               getter_AddRefs(stream));
+      if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
+      if (NS_WARN_IF(!stream)) { return NS_ERROR_FILE_NOT_FOUND; }
+
+      mStreamList->Add(mSavedResponses[i].mBodyId, stream);
+    }
+
+    return rv;
   }
 
   virtual void
   Complete(Listener* aListener, nsresult aRv) MOZ_OVERRIDE
   {
-    aListener->OnCacheMatchAll(mRequestId, aRv, mSavedResponses);
+    mStreamList->Activate(mCacheId);
+    aListener->OnCacheMatchAll(mRequestId, aRv, mSavedResponses, mStreamList);
+    mStreamList = nullptr;
   }
 
   virtual bool MatchesCacheId(CacheId aCacheId) MOZ_OVERRIDE
@@ -318,6 +363,7 @@ protected:
   const CacheId mCacheId;
   const PCacheRequestOrVoid mRequestOrVoid;
   const PCacheQueryParams mParams;
+  nsRefPtr<StreamList> mStreamList;
   nsTArray<SavedResponse> mSavedResponses;
 };
 
@@ -329,7 +375,8 @@ public:
                  const PCacheRequest& aRequest,
                  nsIInputStream* aRequestBodyStream,
                  const PCacheResponse& aResponse,
-                 nsIInputStream* aResponseBodyStream)
+                 nsIInputStream* aResponseBodyStream,
+                 StreamList* aStreamList)
     : DBAction(DBAction::Existing, aManager->Origin(), aManager->BaseDomain())
     , mManager(aManager)
     , mListenerId(aListenerId)
@@ -339,6 +386,7 @@ public:
     , mRequestBodyStream(aRequestBodyStream)
     , mResponse(aResponse)
     , mResponseBodyStream(aResponseBodyStream)
+    , mStreamList(aStreamList)
     , mExpectedAsyncCopyCompletions(0)
   { }
 
@@ -448,6 +496,23 @@ public:
       return;
     }
 
+    if (mSavedResponse.mHasBodyId) {
+      nsCOMPtr<nsIInputStream> stream;
+      rv = FileUtils::BodyOpen(mManager->Origin(), mManager->BaseDomain(),
+                               mDBDir, mCacheId, mSavedResponse.mBodyId,
+                               getter_AddRefs(stream));
+      if (NS_WARN_IF(NS_FAILED(rv))) {
+        DoResolve(rv);
+        return;
+      }
+      if (NS_WARN_IF(!stream)) {
+        DoResolve(NS_ERROR_FILE_NOT_FOUND);
+        return;
+      }
+
+      mStreamList->Add(mSavedResponse.mBodyId, stream);
+    }
+
     rv = trans.Commit();
     if (NS_WARN_IF(NS_FAILED(rv))) {
       DoResolve(rv);
@@ -467,10 +532,12 @@ public:
       return;
     }
     if (NS_FAILED(aRv)) {
-      listener->OnCachePut(mRequestId, aRv, nullptr);
+      listener->OnCachePut(mRequestId, aRv, nullptr, nullptr);
     } else {
-      listener->OnCachePut(mRequestId, aRv, &mSavedResponse);
+      mStreamList->Activate(mCacheId);
+      listener->OnCachePut(mRequestId, aRv, &mSavedResponse, mStreamList);
     }
+    mStreamList = nullptr;
   }
 
   virtual void
@@ -570,6 +637,7 @@ private:
   nsCOMPtr<nsIInputStream> mRequestBodyStream;
   const PCacheResponse mResponse;
   nsCOMPtr<nsIInputStream> mResponseBodyStream;
+  nsRefPtr<StreamList> mStreamList;
   nsRefPtr<Resolver> mResolver;
   nsCOMPtr<nsIFile> mDBDir;
   nsCOMPtr<mozIStorageConnection> mConn;
@@ -644,25 +712,47 @@ public:
   CacheKeysAction(Manager* aManager, ListenerId aListenerId,
                     RequestId aRequestId, CacheId aCacheId,
                     const PCacheRequestOrVoid& aRequestOrVoid,
-                    const PCacheQueryParams& aParams)
+                    const PCacheQueryParams& aParams,
+                    StreamList* aStreamList)
     : BaseAction(aManager, aListenerId, aRequestId)
     , mCacheId(aCacheId)
     , mRequestOrVoid(aRequestOrVoid)
     , mParams(aParams)
+    , mStreamList(aStreamList)
   { }
 
   virtual nsresult
   RunSyncWithDBOnTarget(nsIFile* aDBDir,
                         mozIStorageConnection* aConn) MOZ_OVERRIDE
   {
-    return DBSchema::CacheKeys(aConn, mCacheId, mRequestOrVoid, mParams,
-                               mSavedRequests);
+    nsresult rv = DBSchema::CacheKeys(aConn, mCacheId, mRequestOrVoid, mParams,
+                                      mSavedRequests);
+    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
+
+    for (uint32_t i = 0; i < mSavedRequests.Length(); ++i) {
+      if (!mSavedRequests[i].mHasBodyId) {
+        continue;
+      }
+
+      nsCOMPtr<nsIInputStream> stream;
+      rv = FileUtils::BodyOpen(mManager->Origin(), mManager->BaseDomain(),
+                               aDBDir, mCacheId, mSavedRequests[i].mBodyId,
+                               getter_AddRefs(stream));
+      if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
+      if (NS_WARN_IF(!stream)) { return NS_ERROR_FILE_NOT_FOUND; }
+
+      mStreamList->Add(mSavedRequests[i].mBodyId, stream);
+    }
+
+    return rv;
   }
 
   virtual void
   Complete(Listener* aListener, nsresult aRv) MOZ_OVERRIDE
   {
-    aListener->OnCacheKeys(mRequestId, aRv, mSavedRequests);
+    mStreamList->Activate(mCacheId);
+    aListener->OnCacheKeys(mRequestId, aRv, mSavedRequests, mStreamList);
+    mStreamList = nullptr;
   }
 
   virtual bool MatchesCacheId(CacheId aCacheId) MOZ_OVERRIDE
@@ -675,119 +765,8 @@ protected:
   const CacheId mCacheId;
   const PCacheRequestOrVoid mRequestOrVoid;
   const PCacheQueryParams mParams;
+  nsRefPtr<StreamList> mStreamList;
   nsTArray<SavedRequest> mSavedRequests;
-};
-
-class Manager::CacheReadBodyAction MOZ_FINAL : public Action
-{
-public:
-  CacheReadBodyAction(Manager* aManager, CacheId aCacheId,
-                      const nsID& aBodyId,
-                      nsIOutputStream* aStream)
-    : mManager(aManager)
-    , mCacheId(aCacheId)
-    , mBodyId(aBodyId)
-    , mStream(aStream)
-  { }
-
-  virtual void
-  RunOnTarget(Resolver* aResolver, nsIFile* aBaseDir) MOZ_OVERRIDE
-  {
-    mResolver = aResolver;
-
-    nsresult rv = aBaseDir->Append(NS_LITERAL_STRING("cache"));
-    if (NS_WARN_IF(NS_FAILED(rv))) {
-      DoResolve(rv);
-      return;
-    }
-
-    rv = FileUtils::BodyStartReadStream(mManager->Origin(),
-                                        mManager->BaseDomain(),
-                                        aBaseDir, mCacheId, mBodyId,
-                                        mStream, this,
-                                        AsyncCopyCompleteFunc,
-                                        getter_AddRefs(mCopyContext));
-    if (NS_WARN_IF(NS_FAILED(rv))) {
-      DoResolve(rv);
-      return;
-    }
-
-  }
-
-  void
-  OnAsyncCopyComplete(nsresult aRv)
-  {
-    MOZ_ASSERT(mResolver);
-
-    // When DoResolve() is called below the "this" object can get destructed
-    // out from under us on the initiating thread.  Ensure that we cleanly
-    // run to completion in this scope before destruction.
-    nsRefPtr<Action> kungFuDeathGrip = this;
-
-    DoResolve(aRv);
-  }
-
-  virtual void
-  CompleteOnInitiatingThread(nsresult aRv) MOZ_OVERRIDE
-  {
-    NS_ASSERT_OWNINGTHREAD(Action);
-    mManager = nullptr;
-  }
-
-  virtual void
-  CancelOnTarget() MOZ_OVERRIDE
-  {
-    if (mCopyContext) {
-      FileUtils::BodyCancelRead(mCopyContext);
-      mCopyContext = nullptr;
-      mStream->Close();
-    }
-    mResolver = nullptr;
-  }
-
-  virtual bool MatchesCacheId(CacheId aCacheId) MOZ_OVERRIDE
-  {
-    return aCacheId == mCacheId;
-  }
-
-private:
-  virtual ~CacheReadBodyAction() { }
-
-  static void
-  AsyncCopyCompleteFunc(void* aClosure, nsresult aRv)
-  {
-    MOZ_ASSERT(aClosure);
-    CacheReadBodyAction* action = static_cast<CacheReadBodyAction*>(aClosure);
-    action->OnAsyncCopyComplete(aRv);
-  }
-
-  void
-  DoResolve(nsresult aRv)
-  {
-    if (NS_FAILED(aRv)) {
-      if (mCopyContext) {
-        FileUtils::BodyCancelRead(mCopyContext);
-        mCopyContext = nullptr;
-        mStream->Close();
-      }
-    }
-
-    nsRefPtr<Resolver> resolver;
-    mResolver.swap(resolver);
-
-    if (resolver) {
-      // This can trigger self desctruction if a self-ref is not held by the
-      // caller.
-      resolver->Resolve(aRv);
-    }
-  }
-
-  nsRefPtr<Manager> mManager;
-  const CacheId mCacheId;
-  const nsID mBodyId;
-  nsCOMPtr<nsIOutputStream> mStream;
-  nsRefPtr<Resolver> mResolver;
-  nsCOMPtr<nsISupports> mCopyContext;
 };
 
 class Manager::StorageMatchAction MOZ_FINAL : public Manager::BaseAction
@@ -796,11 +775,13 @@ public:
   StorageMatchAction(Manager* aManager, ListenerId aListenerId,
                      RequestId aRequestId, Namespace aNamespace,
                      const PCacheRequest& aRequest,
-                     const PCacheQueryParams& aParams)
+                     const PCacheQueryParams& aParams,
+                     StreamList* aStreamList)
     : BaseAction(aManager, aListenerId, aRequestId)
     , mNamespace(aNamespace)
     , mRequest(aRequest)
     , mParams(aParams)
+    , mStreamList(aStreamList)
     , mFoundResponse(false)
   { }
 
@@ -808,18 +789,36 @@ public:
   RunSyncWithDBOnTarget(nsIFile* aDBDir,
                         mozIStorageConnection* aConn) MOZ_OVERRIDE
   {
-    return DBSchema::StorageMatch(aConn, mNamespace, mRequest, mParams,
-                                  &mFoundResponse, &mSavedResponse);
+    nsresult rv = DBSchema::StorageMatch(aConn, mNamespace, mRequest, mParams,
+                                         &mFoundResponse, &mSavedResponse);
+    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
+
+    if (!mFoundResponse || !mSavedResponse.mHasBodyId) {
+      return rv;
+    }
+
+    nsCOMPtr<nsIInputStream> stream;
+    rv = FileUtils::BodyOpen(mManager->Origin(), mManager->BaseDomain(),
+                             aDBDir, mSavedResponse.mCacheId,
+                             mSavedResponse.mBodyId, getter_AddRefs(stream));
+    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
+    if (NS_WARN_IF(!stream)) { return NS_ERROR_FILE_NOT_FOUND; }
+
+    mStreamList->Add(mSavedResponse.mBodyId, stream);
+
+    return rv;
   }
 
   virtual void
   Complete(Listener* aListener, nsresult aRv) MOZ_OVERRIDE
   {
     if (!mFoundResponse) {
-      aListener->OnStorageMatch(mRequestId, aRv, nullptr);
+      aListener->OnStorageMatch(mRequestId, aRv, nullptr, nullptr);
     } else {
-      aListener->OnStorageMatch(mRequestId, aRv, &mSavedResponse);
+      mStreamList->Activate(mSavedResponse.mCacheId);
+      aListener->OnStorageMatch(mRequestId, aRv, &mSavedResponse, mStreamList);
     }
+    mStreamList = nullptr;
   }
 
 protected:
@@ -827,6 +826,7 @@ protected:
   const Namespace mNamespace;
   const PCacheRequest mRequest;
   const PCacheQueryParams mParams;
+  nsRefPtr<StreamList> mStreamList;
   bool mFoundResponse;
   SavedResponse mSavedResponse;
 };
@@ -1026,6 +1026,115 @@ private:
   nsTArray<nsString> mKeys;
 };
 
+Manager::StreamList::StreamList(Manager* aManager, Context* aContext)
+  : mManager(aManager)
+  , mContext(aContext)
+  , mCacheId(0)
+  , mStreamControl(nullptr)
+  , mActivated(false)
+{
+  MOZ_ASSERT(mManager);
+  MOZ_ASSERT(mContext);
+}
+
+void
+Manager::StreamList::SetStreamControl(StreamControl* aStreamControl)
+{
+  NS_ASSERT_OWNINGTHREAD(Manager::StreamList);
+  MOZ_ASSERT(!mStreamControl);
+  MOZ_ASSERT(aStreamControl);
+  mStreamControl = aStreamControl;
+  mStreamControl->SetStreamList(this);
+}
+
+void
+Manager::StreamList::RemoveStreamControl(StreamControl* aStreamControl)
+{
+  NS_ASSERT_OWNINGTHREAD(Manager::StreamList);
+  MOZ_ASSERT(mStreamControl);
+  mStreamControl = nullptr;
+}
+
+void
+Manager::StreamList::Activate(CacheId aCacheId)
+{
+  NS_ASSERT_OWNINGTHREAD(Manager::StreamList);
+  MOZ_ASSERT(!mActivated);
+  MOZ_ASSERT(!mCacheId);
+  mActivated = true;
+  mCacheId = aCacheId;
+  mManager->AddRefCacheId(mCacheId);
+  mManager->AddStreamList(this);
+}
+
+void
+Manager::StreamList::Add(const nsID& aId, nsIInputStream* aStream)
+{
+  // All streams should be added on IO thread before we set the stream
+  // control on the owning IPC thread.
+  MOZ_ASSERT(!mStreamControl);
+  MOZ_ASSERT(aStream);
+  Entry* entry = mList.AppendElement();
+  entry->mId = aId;
+  entry->mStream = aStream;
+}
+
+already_AddRefed<nsIInputStream>
+Manager::StreamList::Extract(const nsID& aId)
+{
+  NS_ASSERT_OWNINGTHREAD(Manager::StreamList);
+  for (uint32_t i = 0; i < mList.Length(); ++i) {
+    if (mList[i].mId == aId) {
+      return mList[i].mStream.forget();
+    }
+  }
+  return nullptr;
+}
+
+void
+Manager::StreamList::NoteClosed(const nsID& aId)
+{
+  NS_ASSERT_OWNINGTHREAD(Manager::StreamList);
+  for (uint32_t i = 0; i < mList.Length(); ++i) {
+    if (mList[i].mId == aId) {
+      mList.RemoveElementAt(i);
+      break;
+    }
+  }
+
+  if (mList.IsEmpty() && mStreamControl) {
+    mStreamControl->Shutdown();
+  }
+}
+
+void
+Manager::StreamList::Close(const nsID& aId)
+{
+  NS_ASSERT_OWNINGTHREAD(Manager::StreamList);
+  if (mStreamControl) {
+    mStreamControl->Close(aId);
+  }
+}
+
+void
+Manager::StreamList::CloseAll()
+{
+  NS_ASSERT_OWNINGTHREAD(Manager::StreamList);
+  if (mStreamControl) {
+    mStreamControl->CloseAll();
+  }
+}
+
+Manager::StreamList::~StreamList()
+{
+  NS_ASSERT_OWNINGTHREAD(Manager::StreamList);
+  MOZ_ASSERT(!mStreamControl);
+  if (mActivated) {
+    mManager->RemoveStreamList(this);
+    mManager->ReleaseCacheId(mCacheId);
+  }
+}
+
 // static
 already_AddRefed<Manager>
 Manager::ForOrigin(const nsACString& aOrigin, const nsACString& aBaseDomain)
@@ -1089,6 +1198,25 @@ Manager::GetCacheIdRefCount(CacheId aCacheId)
   return 0;
 }
 
+// TODO: Call Manager::Shutdown from observer on main thread at shutdown
+// Notes:
+//  - implement a singleton called ShutdownObserver
+//  - Manager calls ShutdownObserver::AddManager(origin) at creation
+//  - Manager calls ShutdownObserver::RemoveManager(origin) at creation
+//  - origins are proxied to main thread and kept in a list
+//  - at shutdown time origins are sent to IPC thread to call Manager::Shutdown()
+void
+Manager::Shutdown()
+{
+  NS_ASSERT_OWNINGTHREAD(Manager);
+  for (uint32_t i = 0; i < mStreamLists.Length(); ++i) {
+    mStreamLists[i]->CloseAll();
+  }
+  if (mContext) {
+    mContext->CancelAll();
+  }
+}
+
 void
 Manager::CacheMatch(Listener* aListener, RequestId aRequestId, CacheId aCacheId,
                     const PCacheRequest& aRequest,
@@ -1096,9 +1224,11 @@ Manager::CacheMatch(Listener* aListener, RequestId aRequestId, CacheId aCacheId,
 {
   NS_ASSERT_OWNINGTHREAD(Manager);
   MOZ_ASSERT(aListener);
+  nsRefPtr<StreamList> streamList = new StreamList(this, CurrentContext());
   ListenerId listenerId = SaveListener(aListener);
   nsRefPtr<Action> action = new CacheMatchAction(this, listenerId, aRequestId,
-                                                 aCacheId, aRequest, aParams);
+                                                 aCacheId, aRequest, aParams,
+                                                 streamList);
   CurrentContext()->Dispatch(mIOThread, action);
 }
 
@@ -1109,9 +1239,11 @@ Manager::CacheMatchAll(Listener* aListener, RequestId aRequestId,
 {
   NS_ASSERT_OWNINGTHREAD(Manager);
   MOZ_ASSERT(aListener);
+  nsRefPtr<StreamList> streamList = new StreamList(this, CurrentContext());
   ListenerId listenerId = SaveListener(aListener);
   nsRefPtr<Action> action = new CacheMatchAllAction(this, listenerId, aRequestId,
-                                                    aCacheId, aRequest, aParams);
+                                                    aCacheId, aRequest, aParams,
+                                                    streamList);
   CurrentContext()->Dispatch(mIOThread, action);
 }
 
@@ -1124,11 +1256,13 @@ Manager::CachePut(Listener* aListener, RequestId aRequestId, CacheId aCacheId,
 {
   NS_ASSERT_OWNINGTHREAD(Manager);
   MOZ_ASSERT(aListener);
+  nsRefPtr<StreamList> streamList = new StreamList(this, CurrentContext());
   ListenerId listenerId = SaveListener(aListener);
   nsRefPtr<Action> action = new CachePutAction(this, listenerId, aRequestId,
                                                aCacheId,
                                                aRequest, aRequestBodyStream,
-                                               aResponse, aResponseBodyStream);
+                                               aResponse, aResponseBodyStream,
+                                               streamList);
   CurrentContext()->Dispatch(mIOThread, action);
 }
 
@@ -1152,21 +1286,11 @@ Manager::CacheKeys(Listener* aListener, RequestId aRequestId,
 {
   NS_ASSERT_OWNINGTHREAD(Manager);
   MOZ_ASSERT(aListener);
+  nsRefPtr<StreamList> streamList = new StreamList(this, CurrentContext());
   ListenerId listenerId = SaveListener(aListener);
   nsRefPtr<Action> action = new CacheKeysAction(this, listenerId, aRequestId,
                                                 aCacheId, aRequestOrVoid,
-                                                aParams);
-  CurrentContext()->Dispatch(mIOThread, action);
-}
-
-void
-Manager::CacheReadBody(CacheId aCacheId, const nsID& aBodyId,
-                       nsIOutputStream* aStream)
-{
-  NS_ASSERT_OWNINGTHREAD(Manager);
-  MOZ_ASSERT(aStream);
-  nsRefPtr<Action> action = new CacheReadBodyAction(this, aCacheId, aBodyId,
-                                                    aStream);
+                                                aParams, streamList);
   CurrentContext()->Dispatch(mIOThread, action);
 }
 
@@ -1177,10 +1301,11 @@ Manager::StorageMatch(Listener* aListener, RequestId aRequestId,
 {
   NS_ASSERT_OWNINGTHREAD(Manager);
   MOZ_ASSERT(aListener);
+  nsRefPtr<StreamList> streamList = new StreamList(this, CurrentContext());
   ListenerId listenerId = SaveListener(aListener);
   nsRefPtr<Action> action = new StorageMatchAction(this, listenerId, aRequestId,
                                                    aNamespace, aRequest,
-                                                   aParams);
+                                                   aParams, streamList);
   CurrentContext()->Dispatch(mIOThread, action);
 }
 
@@ -1310,6 +1435,22 @@ Manager::GetListener(ListenerId aListenerId) const
     }
   }
   return nullptr;
+}
+
+void
+Manager::AddStreamList(StreamList* aStreamList)
+{
+  NS_ASSERT_OWNINGTHREAD(Manager);
+  MOZ_ASSERT(aStreamList);
+  mStreamLists.AppendElement(aStreamList);
+}
+
+void
+Manager::RemoveStreamList(StreamList* aStreamList)
+{
+  NS_ASSERT_OWNINGTHREAD(Manager);
+  MOZ_ASSERT(aStreamList);
+  mStreamLists.RemoveElement(aStreamList);
 }
 
 } // namespace cache

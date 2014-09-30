@@ -8,6 +8,7 @@
 #define mozilla_dom_cache_Manager_h
 
 #include "mozilla/dom/cache/Context.h"
+#include "mozilla/dom/cache/PCacheStreamControlParent.h"
 #include "mozilla/dom/cache/Types.h"
 #include "nsCOMPtr.h"
 #include "nsISupportsImpl.h"
@@ -32,24 +33,78 @@ struct SavedResponse;
 class Manager MOZ_FINAL : public Context::Listener
 {
 public:
+  class StreamList;
+
+  class StreamControl : public PCacheStreamControlParent
+  {
+  public:
+    virtual ~StreamControl() { }
+
+    virtual void SetStreamList(StreamList* aStreamList)=0;
+
+    virtual void Close(const nsID& aId)=0;
+    virtual void CloseAll()=0;
+    virtual void Shutdown()=0;
+  };
+
+  class StreamList
+  {
+  public:
+    StreamList(Manager* aManager, Context* aContext);
+
+    void SetStreamControl(StreamControl* aStreamControl);
+    void RemoveStreamControl(StreamControl* aStreamControl);
+
+    void Activate(CacheId aCacheId);
+
+    void Add(const nsID& aId, nsIInputStream* aStream);
+    already_AddRefed<nsIInputStream> Extract(const nsID& aId);
+
+    void NoteClosed(const nsID& aId);
+    void Close(const nsID& aId);
+    void CloseAll();
+
+  private:
+    ~StreamList();
+    struct Entry
+    {
+      nsID mId;
+      nsCOMPtr<nsIInputStream> mStream;
+    };
+    nsRefPtr<Manager> mManager;
+    nsRefPtr<Context> mContext;
+    CacheId mCacheId;
+    StreamControl* mStreamControl;
+    nsTArray<Entry> mList;
+    bool mActivated;
+
+  public:
+    NS_INLINE_DECL_REFCOUNTING(mozilla::dom::cache::Manager::StreamList)
+  };
+
   class Listener
   {
   public:
     virtual ~Listener() { }
 
     virtual void OnCacheMatch(RequestId aRequestId, nsresult aRv,
-                              const SavedResponse* aResponse) { }
+                              const SavedResponse* aResponse,
+                              StreamList* aStreamList) { }
     virtual void OnCacheMatchAll(RequestId aRequestId, nsresult aRv,
-                             const nsTArray<SavedResponse>& aSavedResponses) { }
+                                 const nsTArray<SavedResponse>& aSavedResponses,
+                                 StreamList* aStreamList) { }
     virtual void OnCachePut(RequestId aRequestId, nsresult aRv,
-                            const SavedResponse* aSavedResponse) { }
+                            const SavedResponse* aSavedResponse,
+                            StreamList* aStreamList) { }
     virtual void OnCacheDelete(RequestId aRequestId, nsresult aRv,
                                bool aSuccess) { }
     virtual void OnCacheKeys(RequestId aRequestId, nsresult aRv,
-                             const nsTArray<SavedRequest>& aSavedRequests) { }
+                             const nsTArray<SavedRequest>& aSavedRequests,
+                             StreamList* aStreamList) { }
 
     virtual void OnStorageMatch(RequestId aRequestId, nsresult aRv,
-                                const SavedResponse* aResponse) { }
+                                const SavedResponse* aResponse,
+                                StreamList* aStreamList) { }
     virtual void OnStorageGet(RequestId aRequestId, nsresult aRv,
                               bool aCacheFound, CacheId aCacheId) { }
     virtual void OnStorageHas(RequestId aRequestId, nsresult aRv,
@@ -69,6 +124,7 @@ public:
   void AddRefCacheId(CacheId aCacheId);
   void ReleaseCacheId(CacheId aCacheId);
   uint32_t GetCacheIdRefCount(CacheId aCacheId);
+  void Shutdown();
 
   // TODO: consider moving CacheId up in the argument lists below
   void CacheMatch(Listener* aListener, RequestId aRequestId, CacheId aCacheId,
@@ -88,8 +144,6 @@ public:
   void CacheKeys(Listener* aListener, RequestId aRequestId,
                  CacheId aCacheId, const PCacheRequestOrVoid& aRequestOrVoid,
                  const PCacheQueryParams& aParams);
-  void CacheReadBody(CacheId aCacheId, const nsID& aBodyId,
-                     nsIOutputStream* aStream);
 
   void StorageMatch(Listener* aListener, RequestId aRequestId,
                     Namespace aNamespace, const PCacheRequest& aRequest,
@@ -122,7 +176,6 @@ private:
   class CachePutAction;
   class CacheDeleteAction;
   class CacheKeysAction;
-  class CacheReadBodyAction;
 
   class StorageMatchAction;
   class StorageGetAction;
@@ -140,10 +193,14 @@ private:
   ListenerId SaveListener(Listener* aListener);
   Listener* GetListener(ListenerId aListenerId) const;
 
+  void AddStreamList(StreamList* aStreamList);
+  void RemoveStreamList(StreamList* aStreamList);
+
   const nsCString mOrigin;
   const nsCString mBaseDomain;
   nsCOMPtr<nsIThread> mIOThread;
   nsTArray<Listener*> mListeners;
+  nsTArray<StreamList*> mStreamLists;
 
   struct CacheIdRefCounter
   {

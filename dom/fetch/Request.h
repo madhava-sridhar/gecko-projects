@@ -107,7 +107,7 @@ public:
   }
 
   already_AddRefed<InternalRequest>
-  GetInternalRequest();
+  GetInternalRequest() const;
 private:
   enum ConsumeType
   {

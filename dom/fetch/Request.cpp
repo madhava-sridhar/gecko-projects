@@ -50,7 +50,7 @@ Request::~Request()
 }
 
 already_AddRefed<InternalRequest>
-Request::GetInternalRequest()
+Request::GetInternalRequest() const
 {
   nsRefPtr<InternalRequest> r = mRequest;
   return r.forget();

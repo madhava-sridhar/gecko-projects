@@ -6,8 +6,9 @@ include protocol PBackgroundIDBFactory;
 include protocol PBackgroundTest;
 include protocol PBlob;
 include protocol PFileDescriptorSet;
-include protocol PCacheStorage;
 include protocol PCache;
+include protocol PCacheStorage;
+include protocol PCacheStreamControl;
 include protocol PMessagePort;
 
 include DOMTypes;
@@ -37,8 +38,9 @@ sync protocol PBackground
   manages PBackgroundTest;
   manages PBlob;
   manages PFileDescriptorSet;
-  manages PCacheStorage;
   manages PCache;
+  manages PCacheStorage;
+  manages PCacheStreamControl;
   manages PMessagePort;
 
 parent:
@@ -58,6 +60,7 @@ both:
 
 child:
   PCache();
+  PCacheStreamControl();
 };
 
 } // namespace ipc

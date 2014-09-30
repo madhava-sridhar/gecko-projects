@@ -22,6 +22,7 @@ namespace cache {
 class PCacheRequest;
 class PCacheResponse;
 class PCacheResponseOrVoid;
+class PCacheStreamControlChild;
 
 class CacheChildListener
 {
@@ -31,25 +32,31 @@ public:
 
   virtual void
   RecvMatchResponse(RequestId aRequestId, nsresult aRv,
-                    const PCacheResponseOrVoid& aResponse)=0;
+                    const PCacheResponseOrVoid& aResponse,
+                    PCacheStreamControlChild* aStreamControl)=0;
   virtual void
   RecvMatchAllResponse(RequestId aRequestId, nsresult aRv,
-                       const nsTArray<PCacheResponse>& aResponses)=0;
+                       const nsTArray<PCacheResponse>& aResponses,
+                       PCacheStreamControlChild* aStreamControl)=0;
   virtual void
   RecvAddResponse(RequestId aRequestId, nsresult aRv,
-                  const PCacheResponse& aResponse)=0;
+                  const PCacheResponseOrVoid& aResponse,
+                  PCacheStreamControlChild* aStreamControl)=0;
   virtual void
   RecvAddAllResponse(RequestId aRequestId, nsresult aRv,
-                     const nsTArray<PCacheResponse>& aResponses)=0;
+                     const nsTArray<PCacheResponse>& aResponses,
+                     PCacheStreamControlChild* aStreamControl)=0;
   virtual void
   RecvPutResponse(RequestId aRequestId, nsresult aRv,
-                  const PCacheResponseOrVoid& aResponse)=0;
+                  const PCacheResponseOrVoid& aResponse,
+                  PCacheStreamControlChild* aStreamControl)=0;
   virtual void
   RecvDeleteResponse(RequestId aRequestId, nsresult aRv,
                      bool aSuccess)=0;
   virtual void
   RecvKeysResponse(RequestId aRequestId, nsresult aRv,
-                   const nsTArray<PCacheRequest>& aRequests)=0;
+                   const nsTArray<PCacheRequest>& aRequests,
+                   PCacheStreamControlChild* aStreamControl)=0;
 };
 
 } // namespace cache

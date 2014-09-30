@@ -7,9 +7,13 @@
 #include "mozilla/dom/cache/CacheStorageParent.h"
 
 #include "mozilla/dom/cache/CacheParent.h"
+#include "mozilla/dom/cache/CacheStreamControlParent.h"
 #include "mozilla/dom/cache/Manager.h"
 #include "mozilla/dom/cache/SavedTypes.h"
+#include "mozilla/ipc/InputStreamUtils.h"
 #include "mozilla/ipc/PBackgroundParent.h"
+#include "mozilla/ipc/PFileDescriptorSetParent.h"
+#include "mozilla/DebugOnly.h"
 #include "mozilla/unused.h"
 #include "nsCOMPtr.h"
 
@@ -19,6 +23,10 @@
 namespace mozilla {
 namespace dom {
 namespace cache {
+
+using mozilla::unused;
+using mozilla::void_t;
+using mozilla::ipc::PFileDescriptorSetParent;
 
 CacheStorageParent::CacheStorageParent(Namespace aNamespace,
                                        const nsACString& aOrigin,
@@ -92,31 +100,34 @@ CacheStorageParent::RecvKeys(const RequestId& aRequestId)
 
 void
 CacheStorageParent::OnStorageMatch(RequestId aRequestId, nsresult aRv,
-                                   const SavedResponse* aSavedResponse)
+                                   const SavedResponse* aSavedResponse,
+                                   Manager::StreamList* aStreamList)
 {
   PCacheResponseOrVoid responseOrVoid;
 
   // no match
   if (NS_FAILED(aRv) || !aSavedResponse) {
     responseOrVoid = void_t();
-    unused << SendMatchResponse(aRequestId, aRv, responseOrVoid);
+    unused << SendMatchResponse(aRequestId, aRv, responseOrVoid, nullptr);
     return;
   }
 
   // match without body data to stream
   if (!aSavedResponse->mHasBodyId) {
     responseOrVoid = aSavedResponse->mValue;
-    unused << SendMatchResponse(aRequestId, aRv, responseOrVoid);
+    unused << SendMatchResponse(aRequestId, aRv, responseOrVoid, nullptr);
     return;
   }
 
-  // TODO: remove stream test code
-  nsCOMPtr<nsIOutputStream> stream = MemoryOutputStream::Create(4096);
+  PCacheReadStream readStream;
+  Manager::StreamControl* streamControl =
+    SerializeReadStream(nullptr, aSavedResponse->mBodyId, aStreamList,
+                        &readStream);
 
-  mManager->CacheReadBody(aSavedResponse->mCacheId, aSavedResponse->mBodyId,
-                          stream);
   responseOrVoid = aSavedResponse->mValue;
-  unused << SendMatchResponse(aRequestId, aRv, responseOrVoid);
+  responseOrVoid.get_PCacheResponse().body() = readStream;
+
+  unused << SendMatchResponse(aRequestId, aRv, responseOrVoid, streamControl);
 }
 
 void
@@ -168,6 +179,48 @@ CacheStorageParent::OnStorageKeys(RequestId aRequestId, nsresult aRv,
                                   const nsTArray<nsString>& aKeys)
 {
   unused << SendKeysResponse(aRequestId, aRv, aKeys);
+}
+
+Manager::StreamControl*
+CacheStorageParent::SerializeReadStream(Manager::StreamControl *aStreamControl,
+                                        const nsID& aId,
+                                        Manager::StreamList* aStreamList,
+                                        PCacheReadStream* aReadStreamOut)
+{
+  MOZ_ASSERT(aStreamList);
+  MOZ_ASSERT(aReadStreamOut);
+
+  aReadStreamOut->id() = aId;
+  nsCOMPtr<nsIInputStream> stream = aStreamList->Extract(aId);
+  MOZ_ASSERT(stream);
+
+  nsTArray<FileDescriptor> fds;
+  SerializeInputStream(stream, aReadStreamOut->params(), fds);
+
+  PFileDescriptorSetParent* fdSet = nullptr;
+  if (!fds.IsEmpty()) {
+    fdSet = Manager()->SendPFileDescriptorSetConstructor(fds[0]);
+    for (uint32_t i = 1; i < fds.Length(); ++i) {
+      unused << fdSet->SendAddFileDescriptor(fds[i]);
+    }
+  }
+
+  if (fdSet) {
+    aReadStreamOut->fds() = fdSet;
+  } else {
+    aReadStreamOut->fds() = void_t();
+  }
+
+  if (!aStreamControl) {
+    aStreamControl = new CacheStreamControlParent();
+    DebugOnly<PCacheStreamControlParent*> actor =
+      Manager()->SendPCacheStreamControlConstructor(aStreamControl);
+    MOZ_ASSERT(aStreamControl == actor);
+  }
+
+  aStreamList->SetStreamControl(aStreamControl);
+
+  return aStreamControl;
 }
 
 } // namespace cache

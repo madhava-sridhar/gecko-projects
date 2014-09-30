@@ -11,8 +11,9 @@
 #include "mozilla/dom/Response.h"
 #include "mozilla/dom/CacheStorageBinding.h"
 #include "mozilla/dom/cache/Cache.h"
-#include "mozilla/dom/cache/PCacheChild.h"
 #include "mozilla/dom/cache/CacheStorageChild.h"
+#include "mozilla/dom/cache/PCacheChild.h"
+#include "mozilla/dom/cache/ReadStream.h"
 #include "mozilla/dom/cache/TypeUtils.h"
 #include "mozilla/ipc/BackgroundChild.h"
 #include "mozilla/ipc/PBackgroundChild.h"
@@ -76,6 +77,7 @@ already_AddRefed<Promise>
 CacheStorage::Match(const RequestOrScalarValueString& aRequest,
                     const QueryParams& aParams, ErrorResult& aRv)
 {
+  // TODO: properly handle async actor creation
   MOZ_ASSERT(mActor);
 
   nsRefPtr<Promise> promise = Promise::Create(mGlobal, aRv);
@@ -102,6 +104,7 @@ CacheStorage::Match(const RequestOrScalarValueString& aRequest,
 already_AddRefed<Promise>
 CacheStorage::Get(const nsAString& aKey, ErrorResult& aRv)
 {
+  // TODO: properly handle async actor creation
   MOZ_ASSERT(mActor);
 
   nsRefPtr<Promise> promise = Promise::Create(mGlobal, aRv);
@@ -122,6 +125,7 @@ CacheStorage::Get(const nsAString& aKey, ErrorResult& aRv)
 already_AddRefed<Promise>
 CacheStorage::Has(const nsAString& aKey, ErrorResult& aRv)
 {
+  // TODO: properly handle async actor creation
   MOZ_ASSERT(mActor);
 
   nsRefPtr<Promise> promise = Promise::Create(mGlobal, aRv);
@@ -142,6 +146,7 @@ CacheStorage::Has(const nsAString& aKey, ErrorResult& aRv)
 already_AddRefed<Promise>
 CacheStorage::Create(const nsAString& aKey, ErrorResult& aRv)
 {
+  // TODO: properly handle async actor creation
   MOZ_ASSERT(mActor);
 
   nsRefPtr<Promise> promise = Promise::Create(mGlobal, aRv);
@@ -162,6 +167,7 @@ CacheStorage::Create(const nsAString& aKey, ErrorResult& aRv)
 already_AddRefed<Promise>
 CacheStorage::Delete(const nsAString& aKey, ErrorResult& aRv)
 {
+  // TODO: properly handle async actor creation
   MOZ_ASSERT(mActor);
 
   nsRefPtr<Promise> promise = Promise::Create(mGlobal, aRv);
@@ -182,6 +188,7 @@ CacheStorage::Delete(const nsAString& aKey, ErrorResult& aRv)
 already_AddRefed<Promise>
 CacheStorage::Keys(ErrorResult& aRv)
 {
+  // TODO: properly handle async actor creation
   MOZ_ASSERT(mActor);
 
   nsRefPtr<Promise> promise = Promise::Create(mGlobal, aRv);
@@ -261,7 +268,8 @@ CacheStorage::ActorDestroy(IProtocol& aActor)
 
 void
 CacheStorage::RecvMatchResponse(RequestId aRequestId, nsresult aRv,
-                                const PCacheResponseOrVoid& aResponse)
+                                const PCacheResponseOrVoid& aResponse,
+                                PCacheStreamControlChild* aStreamControl)
 {
   nsRefPtr<Promise> promise = RemoveRequestPromise(aRequestId);
   if (NS_WARN_IF(!promise)) {
@@ -278,8 +286,8 @@ CacheStorage::RecvMatchResponse(RequestId aRequestId, nsresult aRv,
     return;
   }
 
-  nsRefPtr<Response> response = new Response(mOwner);
-  TypeUtils::ToResponse(*response, aResponse);
+  nsRefPtr<Response> response = TypeUtils::ToResponse(mOwner, aResponse,
+                                                      aStreamControl);
   promise->MaybeResolve(response);
 }
 

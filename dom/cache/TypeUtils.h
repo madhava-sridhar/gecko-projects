@@ -8,6 +8,11 @@
 #define mozilla_dom_cache_TypesUtils_h
 
 #include "mozilla/Attributes.h"
+#include "nsCOMPtr.h"
+#include "nsError.h"
+
+class nsIGlobalObject;
+class nsIInputStream;
 
 namespace mozilla {
 namespace dom {
@@ -26,35 +31,38 @@ class PCacheQueryParams;
 class PCacheRequest;
 class PCacheRequestOrVoid;
 class PCacheResponse;
+class PCacheStreamControlChild;
 
 class TypeUtils
 {
 public:
-  static void
+  static nsresult
   ToPCacheRequest(PCacheRequest& aOut, const Request& aIn);
 
-  static void
+  static nsresult
   ToPCacheRequest(PCacheRequest& aOut, const RequestOrScalarValueString& aIn);
 
-  static void
+  static nsresult
   ToPCacheRequestOrVoid(PCacheRequestOrVoid& aOut,
                         const Optional<RequestOrScalarValueString>& aIn);
 
-  static void
+  static nsresult
   ToPCacheRequest(PCacheRequest& aOut,
                   const OwningRequestOrScalarValueString& aIn);
 
-  static void
+  static nsresult
   ToPCacheResponse(PCacheResponse& aOut, const Response& aIn);
 
   static void
   ToPCacheQueryParams(PCacheQueryParams& aOut, const QueryParams& aIn);
 
-  static void
-  ToResponse(Response& aOut, const PCacheResponse& aIn);
+  static already_AddRefed<Response>
+  ToResponse(nsISupports* aOwner, const PCacheResponse& aIn,
+             PCacheStreamControlChild* aStreamControl);
 
-  static void
-  ToInternalRequest(InternalRequest& aOut, const PCacheRequest& aIn);
+  static already_AddRefed<Request>
+  ToRequest(nsIGlobalObject* aGlobal, const PCacheRequest& aIn,
+            PCacheStreamControlChild* aStreamControl);
 
 private:
   TypeUtils() MOZ_DELETE;

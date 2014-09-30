@@ -56,17 +56,29 @@ public:
 
   // Manager::Listener methods
   virtual void OnCacheMatch(RequestId aRequestId, nsresult aRv,
-                            const SavedResponse* aSavedResponse) MOZ_OVERRIDE;
+                            const SavedResponse* aSavedResponse,
+                            Manager::StreamList* aStreamList) MOZ_OVERRIDE;
   virtual void OnCacheMatchAll(RequestId aRequestId, nsresult aRv,
-                   const nsTArray<SavedResponse>& aSavedResponses) MOZ_OVERRIDE;
+                               const nsTArray<SavedResponse>& aSavedResponses,
+                               Manager::StreamList* aStreamList) MOZ_OVERRIDE;
   virtual void OnCachePut(RequestId aRequestId, nsresult aRv,
-                          const SavedResponse* aSavedResponse) MOZ_OVERRIDE;
+                          const SavedResponse* aSavedResponse,
+                          Manager::StreamList* aStreamList) MOZ_OVERRIDE;
   virtual void OnCacheDelete(RequestId aRequestId, nsresult aRv,
                              bool aSuccess) MOZ_OVERRIDE;
   virtual void OnCacheKeys(RequestId aRequestId, nsresult aRv,
-                     const nsTArray<SavedRequest>& aSavedRequests) MOZ_OVERRIDE;
+                           const nsTArray<SavedRequest>& aSavedRequests,
+                           Manager::StreamList* aStreamList) MOZ_OVERRIDE;
 
 private:
+  Manager::StreamControl*
+  SerializeReadStream(Manager::StreamControl *aStreamControl, const nsID& aId,
+                      Manager::StreamList* aStreamList,
+                      PCacheReadStream* aReadStreamOut);
+
+  already_AddRefed<nsIInputStream>
+  DeserializeCacheStream(const PCacheReadStreamOrVoid& aStreamOrVoid);
+
   const CacheId mCacheId;
   nsRefPtr<mozilla::dom::cache::Manager> mManager;
 };

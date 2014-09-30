@@ -75,7 +75,7 @@ DBSchema::CreateSchema(mozIStorageConnection* aConn)
         "response_status INTEGER NOT NULL, "
         "response_status_text TEXT NOT NULL, "
         "response_headers_guard INTEGER NOT NULL, "
-        "response_body_id TEXT NOT NULL, "
+        "response_body_id TEXT NULL, "
         "cache_id INTEGER NOT NULL REFERENCES caches(id) ON DELETE CASCADE"
       ");"
     ));

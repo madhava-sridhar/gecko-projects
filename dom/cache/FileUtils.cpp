@@ -299,6 +299,35 @@ FileUtils::BodyFinalizeWrite(nsIFile* aBaseDir, CacheId aCacheId, const nsID& aI
 
 // static
 nsresult
+FileUtils::BodyOpen(const nsACString& aOrigin, const nsACString& aBaseDomain,
+                    nsIFile* aBaseDir, CacheId aCacheId, const nsID& aId,
+                    nsIInputStream** aStreamOut)
+{
+  MOZ_ASSERT(aBaseDir);
+  MOZ_ASSERT(aStreamOut);
+
+  nsCOMPtr<nsIFile> finalFile;
+  nsresult rv = BodyIdToFile(aBaseDir, aCacheId, aId, BODY_FILE_FINAL,
+                    getter_AddRefs(finalFile));
+  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
+
+  bool exists;
+  rv = finalFile->Exists(&exists);
+  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
+  if (NS_WARN_IF(!exists)) { return NS_ERROR_FILE_NOT_FOUND; }
+
+  nsCOMPtr<nsIInputStream> fileStream =
+    FileInputStream::Create(PERSISTENCE_TYPE_PERSISTENT, aBaseDomain, aOrigin,
+                            finalFile);
+  if (NS_WARN_IF(!fileStream)) { return NS_ERROR_UNEXPECTED; }
+
+  fileStream.forget(aStreamOut);
+
+  return rv;
+}
+
+// static
+nsresult
 FileUtils::BodyStartReadStream(const nsACString& aOrigin,
                                const nsACString& aBaseDomain,
                                nsIFile* aBaseDir, CacheId aCacheId,

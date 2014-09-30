@@ -31,25 +31,31 @@ public:
   // PCacheChild methods
   virtual bool
   RecvMatchResponse(const RequestId& requestId, const nsresult& aRv,
-                    const PCacheResponseOrVoid& response) MOZ_OVERRIDE;
+                    const PCacheResponseOrVoid& aResponse,
+                    PCacheStreamControlChild* aStreamControl) MOZ_OVERRIDE;
   virtual bool
   RecvMatchAllResponse(const RequestId& requestId, const nsresult& aRv,
-                       const nsTArray<PCacheResponse>& responses) MOZ_OVERRIDE;
+                       const nsTArray<PCacheResponse>& responses,
+                       PCacheStreamControlChild* aStreamControl) MOZ_OVERRIDE;
   virtual bool
   RecvAddResponse(const RequestId& requestId, const nsresult& aRv,
-                  const PCacheResponse& response) MOZ_OVERRIDE;
+                  const PCacheResponseOrVoid& response,
+                  PCacheStreamControlChild* aStreamControl) MOZ_OVERRIDE;
   virtual bool
   RecvAddAllResponse(const RequestId& requestId, const nsresult& aRv,
-                     const nsTArray<PCacheResponse>& responses) MOZ_OVERRIDE;
+                     const nsTArray<PCacheResponse>& responses,
+                     PCacheStreamControlChild* aStreamControl) MOZ_OVERRIDE;
   virtual bool
-  RecvPutResponse(const RequestId& requestId, const nsresult& aRv,
-                  const PCacheResponseOrVoid& response) MOZ_OVERRIDE;
+  RecvPutResponse(const RequestId& aRequestId, const nsresult& aRv,
+                  const PCacheResponseOrVoid& aResponse,
+                  PCacheStreamControlChild* aStreamControl) MOZ_OVERRIDE;
   virtual bool
   RecvDeleteResponse(const RequestId& requestId, const nsresult& aRv,
                      const bool& result) MOZ_OVERRIDE;
   virtual bool
   RecvKeysResponse(const RequestId& requestId, const nsresult& aRv,
-                   const nsTArray<PCacheRequest>& requests) MOZ_OVERRIDE;
+                   const nsTArray<PCacheRequest>& requests,
+                   PCacheStreamControlChild* aStreamControl) MOZ_OVERRIDE;
 };
 
 } // namespace cache
