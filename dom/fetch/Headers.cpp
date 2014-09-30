@@ -362,9 +362,13 @@ Headers::SwappedFill(Headers* aHeaders, ErrorResult&)
 }
 
 void
-Headers::Fill(const Headers& aInit, ErrorResult&)
+Headers::Fill(const Headers& aInit, ErrorResult& aRv)
 {
-  mList = aInit.mList;
+  const nsTArray<Entry>& list = aInit.mList;
+  for (uint32_t i = 0; i < list.Length() && !aRv.Failed(); ++i) {
+    const Entry& entry = list[i];
+    Append(entry.mName, entry.mValue, aRv);
+  }
 }
 
 void
