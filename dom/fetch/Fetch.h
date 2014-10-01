@@ -8,74 +8,16 @@
 
 #include "nsISupportsImpl.h"
 
-#include "FetchDriver.h"
-
 #include "mozilla/dom/RequestBinding.h"
 #include "mozilla/dom/UnionTypes.h"
 
 class nsIGlobalObject;
+class nsIInputStream;
 
 namespace mozilla {
 namespace dom {
 
-class InternalResponse;
 class Promise;
-class Response;
-class WorkerPromiseHolder;
-
-namespace workers {
-class WorkerPrivate;
-} // namespace workers
-
-class WorkerResolveFetchWithResponse MOZ_FINAL : public FetchDriverObserver
-{
-  nsRefPtr<WorkerPromiseHolder> mPromiseHolder;
-  nsRefPtr<InternalResponse> mInternalResponse;
-public:
-  WorkerResolveFetchWithResponse(WorkerPromiseHolder* aHolder);
-
-  void
-  OnResponseAvailable(InternalResponse* aResponse) MOZ_OVERRIDE;
-
-  void
-  OnResponseEnd() MOZ_OVERRIDE;
-
-private:
-  ~WorkerResolveFetchWithResponse();
-};
-
-class ResolveFetchWithResponse MOZ_FINAL : public FetchDriverObserver
-{
-  nsRefPtr<Promise> mPromise;
-  nsRefPtr<InternalResponse> mInternalResponse;
-  nsRefPtr<Response> mDOMResponse;
-
-  NS_DECL_OWNINGTHREAD
-public:
-  ResolveFetchWithResponse(Promise* aPromise);
-
-  void
-  OnResponseAvailable(InternalResponse* aResponse) MOZ_OVERRIDE;
-
-  void
-  OnResponseEnd() MOZ_OVERRIDE;
-
-private:
-  ~ResolveFetchWithResponse();
-};
-
-already_AddRefed<Promise>
-WorkerDOMFetch(nsIGlobalObject* aGlobal, const RequestOrScalarValueString& aInput,
-               const RequestInit& aInit, ErrorResult& aRv);
-
-// Utility since windows and workers implement the same fetch() initialization
-// logic.
-already_AddRefed<Promise>
-DOMFetch(nsIGlobalObject* aGlobal, const RequestOrScalarValueString& aInput,
-         const RequestInit& aInit, ErrorResult& aRv);
-
-nsCString
-GetRequestReferrer(const InternalRequest* aRequest);
 
 /*
  * Creates an nsIInputStream based on the fetch specifications 'extract a byte
@@ -86,6 +28,82 @@ nsresult
 ExtractByteStreamFromBody(const OwningArrayBufferOrArrayBufferViewOrScalarValueStringOrURLSearchParams& aBodyInit,
                           nsIInputStream** aStream,
                           nsCString& aContentType);
+
+/*
+ * Non-owning version.
+ */
+nsresult
+ExtractByteStreamFromBody(const ArrayBufferOrArrayBufferViewOrScalarValueStringOrURLSearchParams& aBodyInit,
+                          nsIInputStream** aStream,
+                          nsCString& aContentType);
+
+template <class Derived>
+class FetchBody {
+public:
+  bool
+  BodyUsed() const { return mBodyUsed; }
+
+  already_AddRefed<Promise>
+  ArrayBuffer(ErrorResult& aRv)
+  {
+    return ConsumeBody(CONSUME_ARRAYBUFFER, aRv);
+  }
+
+  already_AddRefed<Promise>
+  Blob(ErrorResult& aRv)
+  {
+    return ConsumeBody(CONSUME_BLOB, aRv);
+  }
+
+  already_AddRefed<Promise>
+  Json(ErrorResult& aRv)
+  {
+    return ConsumeBody(CONSUME_JSON, aRv);
+  }
+
+  already_AddRefed<Promise>
+  Text(ErrorResult& aRv)
+  {
+    return ConsumeBody(CONSUME_TEXT, aRv);
+  }
+
+protected:
+  FetchBody()
+    : mBodyUsed(false)
+  {
+  }
+
+  void
+  SetBodyUsed()
+  {
+    mBodyUsed = true;
+  }
+
+  void
+  SetMimeType(ErrorResult& aRv);
+
+private:
+  enum ConsumeType
+  {
+    CONSUME_ARRAYBUFFER,
+    CONSUME_BLOB,
+    // FormData not supported right now,
+    CONSUME_JSON,
+    CONSUME_TEXT,
+  };
+
+  Derived*
+  DerivedClass() const
+  {
+    return static_cast<Derived*>(const_cast<FetchBody*>(this));
+  }
+
+  already_AddRefed<Promise>
+  ConsumeBody(ConsumeType aType, ErrorResult& aRv);
+
+  bool mBodyUsed;
+  nsCString mMimeType;
+};
 } // namespace dom
 } // namespace mozilla
 

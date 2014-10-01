@@ -6394,7 +6394,8 @@ already_AddRefed<Promise>
 nsGlobalWindow::Fetch(const RequestOrScalarValueString& aInput,
                       const RequestInit& aInit, ErrorResult& aRv)
 {
-  return DOMFetch(this, aInput, aInit, aRv);
+  aRv.Throw(NS_ERROR_NOT_IMPLEMENTED);
+  return nullptr;
 }
 
 void

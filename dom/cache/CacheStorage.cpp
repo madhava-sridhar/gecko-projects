@@ -286,7 +286,7 @@ CacheStorage::RecvMatchResponse(RequestId aRequestId, nsresult aRv,
     return;
   }
 
-  nsRefPtr<Response> response = TypeUtils::ToResponse(mOwner, aResponse,
+  nsRefPtr<Response> response = TypeUtils::ToResponse(mGlobal, aResponse,
                                                       aStreamControl);
   promise->MaybeResolve(response);
 }

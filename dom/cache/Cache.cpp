@@ -7,7 +7,9 @@
 #include "mozilla/dom/cache/Cache.h"
 
 #include "mozilla/dom/Headers.h"
+#include "mozilla/dom/InternalResponse.h"
 #include "mozilla/dom/Promise.h"
+#include "mozilla/dom/Response.h"
 #include "mozilla/dom/WorkerPrivate.h"
 #include "mozilla/dom/CacheBinding.h"
 #include "mozilla/dom/cache/CacheChild.h"
@@ -314,7 +316,7 @@ Cache::RecvMatchResponse(RequestId aRequestId, nsresult aRv,
     return;
   }
 
-  nsRefPtr<Response> response = TypeUtils::ToResponse(mOwner, aResponse,
+  nsRefPtr<Response> response = TypeUtils::ToResponse(mGlobal, aResponse,
                                                       aStreamControl);
   promise->MaybeResolve(response);
 }
@@ -336,7 +338,7 @@ Cache::RecvMatchAllResponse(RequestId aRequestId, nsresult aRv,
 
   nsTArray<nsRefPtr<Response>> responses;
   for (uint32_t i = 0; i < aResponses.Length(); ++i) {
-    nsRefPtr<Response> response = TypeUtils::ToResponse(mOwner, aResponses[i],
+    nsRefPtr<Response> response = TypeUtils::ToResponse(mGlobal, aResponses[i],
                                                         aStreamControl);
     responses.AppendElement(response.forget());
   }
@@ -358,7 +360,7 @@ Cache::RecvAddResponse(RequestId aRequestId, nsresult aRv,
     return;
   }
 
-  nsRefPtr<Response> response = TypeUtils::ToResponse(mOwner, aResponse,
+  nsRefPtr<Response> response = TypeUtils::ToResponse(mGlobal, aResponse,
                                                       aStreamControl);
   promise->MaybeResolve(response);
 }
@@ -380,7 +382,7 @@ Cache::RecvAddAllResponse(RequestId aRequestId, nsresult aRv,
 
   nsTArray<nsRefPtr<Response>> responses;
   for (uint32_t i = 0; i < aResponses.Length(); ++i) {
-    nsRefPtr<Response> response = TypeUtils::ToResponse(mOwner, aResponses[i],
+    nsRefPtr<Response> response = TypeUtils::ToResponse(mGlobal, aResponses[i],
                                                         aStreamControl);
     responses.AppendElement(response);
   }
@@ -407,7 +409,7 @@ Cache::RecvPutResponse(RequestId aRequestId, nsresult aRv,
     return;
   }
 
-  nsRefPtr<Response> response = TypeUtils::ToResponse(mOwner, aResponse,
+  nsRefPtr<Response> response = TypeUtils::ToResponse(mGlobal, aResponse,
                                                       aStreamControl);
   promise->MaybeResolve(response);
 }

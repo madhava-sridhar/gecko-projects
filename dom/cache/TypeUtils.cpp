@@ -266,10 +266,11 @@ TypeUtils::ToPCacheQueryParams(PCacheQueryParams& aOut, const QueryParams& aIn)
 
 // static
 already_AddRefed<Response>
-TypeUtils::ToResponse(nsISupports* aOwner, const PCacheResponse& aIn,
+TypeUtils::ToResponse(nsIGlobalObject* aGlobal, const PCacheResponse& aIn,
                       PCacheStreamControlChild* aStreamControl)
 {
-  nsRefPtr<Response> ref = new Response(aOwner);
+  nsRefPtr<InternalResponse> ir = new InternalResponse(200, NS_LITERAL_CSTRING("OK"));
+  nsRefPtr<Response> ref = new Response(aGlobal, ir);
 
   // TODO: implement once real Request/Response are available
   NS_WARNING("Not filling in contents of Response returned from Cache.");

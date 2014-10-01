@@ -10,6 +10,9 @@
 #include "nsIStringStream.h"
 #include "nsIUnicodeEncoder.h"
 
+#include "nsDOMFile.h"
+#include "nsNetUtil.h"
+#include "nsStreamUtils.h"
 #include "nsStringStream.h"
 
 #include "mozilla/dom/EncodingUtils.h"
@@ -23,288 +26,84 @@
 #include "mozilla/dom/workers/Workers.h"
 
 #include "InternalResponse.h"
+// dom/workers
+#include "File.h"
 #include "WorkerPrivate.h"
 #include "WorkerRunnable.h"
 
 namespace mozilla {
 namespace dom {
 
-using namespace workers;
-
-class MainThreadFetchRunnable : public nsRunnable
+namespace {
+nsresult
+ExtractFromArrayBuffer(const ArrayBuffer& aBuffer,
+                       nsIInputStream** aStream)
 {
-  nsRefPtr<WorkerPromiseHolder> mPromiseHolder;
-  nsRefPtr<InternalRequest> mRequest;
-
-public:
-  MainThreadFetchRunnable(WorkerPrivate* aWorkerPrivate,
-                          Promise* aPromise,
-                          InternalRequest* aRequest)
-    : mPromiseHolder(new WorkerPromiseHolder(aWorkerPrivate, aPromise))
-    , mRequest(aRequest)
-  {
-    MOZ_ASSERT(aWorkerPrivate);
-    aWorkerPrivate->AssertIsOnWorkerThread();
-  }
-
-  NS_IMETHOD
-  Run()
-  {
-    AssertIsOnMainThread();
-    nsRefPtr<WorkerResolveFetchWithResponse> resolver =
-      new WorkerResolveFetchWithResponse(mPromiseHolder);
-    nsRefPtr<FetchDriver> fetch = new FetchDriver(mRequest);
-    nsresult rv = fetch->Fetch(resolver);
-    if (NS_FAILED(rv)) {
-      // FIXME(nsm): Reject promise.
-      return rv;
-    }
-
-    return NS_OK;
-  }
-};
-
-already_AddRefed<Promise>
-WorkerDOMFetch(nsIGlobalObject* aGlobal, const RequestOrScalarValueString& aInput,
-               const RequestInit& aInit, ErrorResult& aRv)
-{
-  nsRefPtr<Promise> p = Promise::Create(aGlobal, aRv);
-  if (aRv.Failed()) {
-    return nullptr;
-  }
-
-  AutoJSAPI jsapi;
-  jsapi.Init(aGlobal);
-  JSContext* cx = jsapi.cx();
-
-  JS::Rooted<JSObject*> jsGlobal(cx, aGlobal->GetGlobalJSObject());
-  GlobalObject global(cx, jsGlobal);
-
-  nsRefPtr<Request> request = Request::Constructor(global, aInput, aInit, aRv);
-  if (aRv.Failed()) {
-    return nullptr;
-  }
-
-  nsRefPtr<mozilla::dom::InternalRequest> r = request->GetInternalRequest();
-  // Set the referrer to a URL so that it isn't attempted on the main thread.
-  if (!r->ReferrerIsNone()) {
-    r->SetReferrer(GetRequestReferrer(r));
-  }
-
-  nsRefPtr<MainThreadFetchRunnable> run = new MainThreadFetchRunnable(GetCurrentThreadWorkerPrivate(), p, r);
-  NS_DispatchToMainThread(run);
-  return p.forget();
+  aBuffer.ComputeLengthAndData();
+  //XXXnsm reinterpret_cast<> is used in DOMParser, should be ok.
+  return NS_NewByteInputStream(aStream,
+                               reinterpret_cast<char*>(aBuffer.Data()),
+                               aBuffer.Length(), NS_ASSIGNMENT_COPY);
 }
 
-already_AddRefed<Promise>
-DOMFetch(nsIGlobalObject* aGlobal, const RequestOrScalarValueString& aInput,
-         const RequestInit& aInit, ErrorResult& aRv)
+nsresult
+ExtractFromArrayBufferView(const ArrayBufferView& aBuffer,
+                           nsIInputStream** aStream)
 {
-  nsRefPtr<Promise> p = Promise::Create(aGlobal, aRv);
-  if (aRv.Failed()) {
-    return nullptr;
-  }
-
-  AutoJSAPI jsapi;
-  jsapi.Init(aGlobal);
-  JSContext* cx = jsapi.cx();
-
-  JS::Rooted<JSObject*> jsGlobal(cx, aGlobal->GetGlobalJSObject());
-  GlobalObject global(cx, jsGlobal);
-
-  nsRefPtr<Request> request = Request::Constructor(global, aInput, aInit, aRv);
-  if (aRv.Failed()) {
-    return nullptr;
-  }
-
-  nsRefPtr<mozilla::dom::InternalRequest> r = request->GetInternalRequest();
-  if (!r->ReferrerIsNone()) {
-    r->SetReferrer(GetRequestReferrer(r));
-  }
-
-  nsRefPtr<ResolveFetchWithResponse> resolver = new ResolveFetchWithResponse(p);
-  nsRefPtr<FetchDriver> fetch = new FetchDriver(r);
-  aRv = fetch->Fetch(resolver);
-  if (aRv.Failed()) {
-    return nullptr;
-  }
-
-  return p.forget();
+  aBuffer.ComputeLengthAndData();
+  //XXXnsm reinterpret_cast<> is used in DOMParser, should be ok.
+  return NS_NewByteInputStream(aStream,
+                               reinterpret_cast<char*>(aBuffer.Data()),
+                               aBuffer.Length(), NS_ASSIGNMENT_COPY);
 }
 
-ResolveFetchWithResponse::ResolveFetchWithResponse(Promise* aPromise)
-  : mPromise(aPromise)
+nsresult
+ExtractFromScalarValueString(const nsString& aStr,
+                             nsIInputStream** aStream,
+                             nsCString& aContentType)
 {
-}
-
-void
-ResolveFetchWithResponse::OnResponseAvailable(InternalResponse* aResponse)
-{
-  NS_ASSERT_OWNINGTHREAD(ResolveFetchWithResponse);
-  AssertIsOnMainThread();
-  mInternalResponse = aResponse;
-
-  nsCOMPtr<nsIGlobalObject> go = mPromise->GetParentObject();
-
-  mDOMResponse = new Response(go, aResponse);
-  mPromise->MaybeResolve(mDOMResponse);
-}
-
-void
-ResolveFetchWithResponse::OnResponseEnd()
-{
-  NS_ASSERT_OWNINGTHREAD(ResolveFetchWithResponse);
-  AssertIsOnMainThread();
-}
-
-ResolveFetchWithResponse::~ResolveFetchWithResponse()
-{
-  NS_ASSERT_OWNINGTHREAD(ResolveFetchWithResponse);
-}
-
-class ResolveFetchWithResponseRunnable : public WorkerRunnable
-{
-  nsRefPtr<WorkerPromiseHolder> mPromiseHolder;
-  nsRefPtr<InternalResponse> mResponse;
-public:
-  ResolveFetchWithResponseRunnable(WorkerPromiseHolder* aPromiseHolder, InternalResponse* aResponse)
-    : WorkerRunnable(aPromiseHolder->GetWorkerPrivate(), WorkerThreadModifyBusyCount)
-    , mPromiseHolder(aPromiseHolder)
-    , mResponse(aResponse)
-  {
+  nsCOMPtr<nsIUnicodeEncoder> encoder = EncodingUtils::EncoderForEncoding("UTF-8");
+  if (!encoder) {
+    return NS_ERROR_OUT_OF_MEMORY;
   }
 
-  bool
-  WorkerRun(JSContext* aCx, WorkerPrivate* aWorkerPrivate) MOZ_OVERRIDE
-  {
-    MOZ_ASSERT(aWorkerPrivate);
-    aWorkerPrivate->AssertIsOnWorkerThread();
-    MOZ_ASSERT(aWorkerPrivate == mWorkerPrivate);
-
-    MOZ_ASSERT(mPromiseHolder);
-    nsRefPtr<Promise> workerPromise = mPromiseHolder->GetWorkerPromise();
-    MOZ_ASSERT(workerPromise);
-
-    nsRefPtr<nsIGlobalObject> global = aWorkerPrivate->GlobalScope();
-    nsRefPtr<Response> response = new Response(global, mResponse);
-    workerPromise->MaybeResolve(response);
-    // Release the Promise because it has been resolved/rejected for sure.
-    mPromiseHolder->CleanUp(aCx);
-    return true;
-  }
-};
-
-class ResolveFetchWithBodyRunnable : public WorkerRunnable
-{
-  nsRefPtr<InternalResponse> mResponse;
-  nsRefPtr<DOMFileImpl> mFileImpl;
-public:
-  ResolveFetchWithBodyRunnable(WorkerPrivate* aWorkerPrivate, InternalResponse* aResponse, DOMFileImpl* aFileImpl)
-    : WorkerRunnable(aWorkerPrivate, WorkerThreadModifyBusyCount)
-    , mResponse(aResponse)
-    , mFileImpl(aFileImpl)
-  {
+  int32_t destBufferLen;
+  nsresult rv = encoder->GetMaxLength(aStr.get(), aStr.Length(), &destBufferLen);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
   }
 
-  bool
-  WorkerRun(JSContext* aCx, WorkerPrivate* aWorkerPrivate) MOZ_OVERRIDE
-  {
-    MOZ_ASSERT(aWorkerPrivate);
-    aWorkerPrivate->AssertIsOnWorkerThread();
-
-    mResponse->SetBody(new DOMFile(mFileImpl));
-    return true;
+  nsCString encoded;
+  if (!encoded.SetCapacity(destBufferLen, fallible_t())) {
+    return NS_ERROR_OUT_OF_MEMORY;
   }
-};
 
-WorkerResolveFetchWithResponse::WorkerResolveFetchWithResponse(WorkerPromiseHolder* aHolder)
-  : mPromiseHolder(aHolder)
-{
+  char* destBuffer = encoded.BeginWriting();
+  int32_t srcLen = (int32_t) aStr.Length();
+  int32_t outLen = destBufferLen;
+  rv = encoder->Convert(aStr.get(), &srcLen, destBuffer, &outLen);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+
+  MOZ_ASSERT(outLen <= destBufferLen);
+  encoded.SetLength(outLen);
+
+  aContentType = NS_LITERAL_CSTRING("text/plain;charset=UTF-8");
+
+  return NS_NewCStringInputStream(aStream, encoded);
 }
 
-WorkerResolveFetchWithResponse::~WorkerResolveFetchWithResponse()
+nsresult
+ExtractFromURLSearchParams(const URLSearchParams& aParams,
+                           nsIInputStream** aStream,
+                           nsCString& aContentType)
 {
+  nsString serialized;
+  aParams.Stringify(serialized);
+  aContentType = NS_LITERAL_CSTRING("application/x-www-form-urlencoded;charset=UTF-8");
+  return NS_NewStringInputStream(aStream, serialized);
 }
-
-void
-WorkerResolveFetchWithResponse::OnResponseAvailable(InternalResponse* aResponse)
-{
-  NS_ASSERT_OWNINGTHREAD(ResolveFetchWithResponse);
-  AssertIsOnMainThread();
-  mInternalResponse = aResponse;
-
-  nsRefPtr<ResolveFetchWithResponseRunnable> r =
-    new ResolveFetchWithResponseRunnable(mPromiseHolder, aResponse);
-
-  AutoSafeJSContext cx;
-  if (!r->Dispatch(cx)) {
-    NS_WARNING("Could not dispatch fetch resolve");
-  }
-}
-
-void
-WorkerResolveFetchWithResponse::OnResponseEnd()
-{
-  NS_ASSERT_OWNINGTHREAD(ResolveFetchWithResponse);
-  AssertIsOnMainThread();
-  MOZ_ASSERT(mInternalResponse);
-
-  nsCOMPtr<nsIDOMBlob> blob = mInternalResponse->GetBody();
-  nsRefPtr<DOMFile> f = static_cast<DOMFile*>(blob.get());
-  MOZ_ASSERT(f);
-  nsRefPtr<DOMFileImpl> fileImpl = f->Impl();
-  mInternalResponse->SetBody(nullptr);
-
-  // FIXME(nsm): The worker private could've gone by the time we do this since it will be
-  // removefeatured when onresponseavailable dispatches the response.
-  nsRefPtr<ResolveFetchWithBodyRunnable> r =
-    new ResolveFetchWithBodyRunnable(mPromiseHolder->GetWorkerPrivate(), mInternalResponse, fileImpl);
-
-  AutoSafeJSContext cx;
-  if (!r->Dispatch(cx)) {
-    NS_WARNING("Could not dispatch fetch body");
-  }
-}
-
-// Empty string for no-referrer. FIXME(nsm): Does returning empty string
-// actually lead to no-referrer in the base channel?
-// The actual referrer policy and stripping is dealt with by HttpBaseChannel,
-// this always returns the full API referrer URL of the relevant global.
-nsCString
-GetRequestReferrer(const InternalRequest* aRequest)
-{
-  nsCOMPtr<nsIGlobalObject> env = aRequest->GetClient();
-
-  nsCString referrerSource;
-  if (aRequest->ReferrerIsURL()) {
-    referrerSource = aRequest->ReferrerAsURL();
-  } else {
-    nsCOMPtr<nsPIDOMWindow> window = do_QueryInterface(env);
-    if (window) {
-      nsCOMPtr<nsIDocument> doc = window->GetExtantDoc();
-      if (doc) {
-        nsCOMPtr<nsIURI> docURI = doc->GetDocumentURI();
-        nsCString origin;
-        nsresult rv = nsContentUtils::GetASCIIOrigin(docURI, origin);
-        if (NS_WARN_IF(NS_FAILED(rv))) {
-          return EmptyCString();
-        }
-
-        nsString referrer;
-        doc->GetReferrer(referrer);
-        referrerSource = NS_ConvertUTF16toUTF8(referrer);
-      }
-    } else {
-      WorkerPrivate* worker = GetCurrentThreadWorkerPrivate();
-      MOZ_ASSERT(worker);
-      worker->AssertIsOnWorkerThread();
-      referrerSource = worker->BaseURL();
-      // FIXME(nsm): Algorithm says "If source is not a URL..." but when is it
-      // not a URL?
-    }
-  }
-
-  return referrerSource;
 }
 
 nsresult
@@ -312,72 +111,242 @@ ExtractByteStreamFromBody(const OwningArrayBufferOrArrayBufferViewOrScalarValueS
                           nsIInputStream** aStream,
                           nsCString& aContentType)
 {
-  nsresult rv;
-  nsCOMPtr<nsIInputStream> byteStream;
+  MOZ_ASSERT(aStream);
+
   if (aBodyInit.IsArrayBuffer()) {
     const ArrayBuffer& buf = aBodyInit.GetAsArrayBuffer();
-    buf.ComputeLengthAndData();
-    //XXXnsm reinterpret_cast<> is used in DOMParser, should be ok.
-    rv = NS_NewByteInputStream(getter_AddRefs(byteStream),
-                               reinterpret_cast<char*>(buf.Data()),
-                               buf.Length(), NS_ASSIGNMENT_COPY);
-    if (NS_WARN_IF(NS_FAILED(rv))) {
-      return rv;
-    }
+    return ExtractFromArrayBuffer(buf, aStream);
   } else if (aBodyInit.IsArrayBufferView()) {
     const ArrayBufferView& buf = aBodyInit.GetAsArrayBufferView();
-    buf.ComputeLengthAndData();
-    //XXXnsm reinterpret_cast<> is used in DOMParser, should be ok.
-    rv = NS_NewByteInputStream(getter_AddRefs(byteStream),
-                               reinterpret_cast<char*>(buf.Data()),
-                               buf.Length(), NS_ASSIGNMENT_COPY);
-    if (NS_WARN_IF(NS_FAILED(rv))) {
-      return rv;
-    }
+    return ExtractFromArrayBufferView(buf, aStream);
   } else if (aBodyInit.IsScalarValueString()) {
-    nsString str = aBodyInit.GetAsScalarValueString();
-
-    nsCOMPtr<nsIUnicodeEncoder> encoder = EncodingUtils::EncoderForEncoding("UTF-8");
-    int32_t destBufferLen;
-    rv = encoder->GetMaxLength(str.get(), str.Length(), &destBufferLen);
-    if (NS_WARN_IF(NS_FAILED(rv))) {
-      return rv;
-    }
-
-    nsCString encoded;
-    if (!encoded.SetCapacity(destBufferLen, fallible_t())) {
-      return NS_ERROR_OUT_OF_MEMORY;
-    }
-
-    char* destBuffer = encoded.BeginWriting();
-    int32_t srcLen = (int32_t) str.Length();
-    rv = encoder->Convert(str.get(), &srcLen, destBuffer, &destBufferLen);
-    if (NS_WARN_IF(NS_FAILED(rv))) {
-      return rv;
-    }
-
-    encoded.SetLength(destBufferLen);
-    rv = NS_NewCStringInputStream(getter_AddRefs(byteStream), encoded);
-    if (NS_WARN_IF(NS_FAILED(rv))) {
-      return rv;
-    }
-
-    aContentType = NS_LITERAL_CSTRING("text/plain;charset=UTF-8");
+    nsString str;
+    str.Assign(aBodyInit.GetAsScalarValueString());
+    return ExtractFromScalarValueString(str, aStream, aContentType);
   } else if (aBodyInit.IsURLSearchParams()) {
     URLSearchParams& params = aBodyInit.GetAsURLSearchParams();
-    nsString serialized;
-    params.Stringify(serialized);
-    rv = NS_NewStringInputStream(getter_AddRefs(byteStream), serialized);
-    if (NS_WARN_IF(NS_FAILED(rv))) {
-      return rv;
-    }
-    aContentType = NS_LITERAL_CSTRING("application/x-www-form-urlencoded;charset=UTF-8");
+    return ExtractFromURLSearchParams(params, aStream, aContentType);
   }
 
-  MOZ_ASSERT(byteStream);
-  byteStream.forget(aStream);
-  return NS_OK;
+  NS_NOTREACHED("Should never reach here");
+  return NS_ERROR_FAILURE;
 }
 
+nsresult
+ExtractByteStreamFromBody(const ArrayBufferOrArrayBufferViewOrScalarValueStringOrURLSearchParams& aBodyInit,
+                          nsIInputStream** aStream,
+                          nsCString& aContentType)
+{
+  MOZ_ASSERT(aStream);
+
+  if (aBodyInit.IsArrayBuffer()) {
+    const ArrayBuffer& buf = aBodyInit.GetAsArrayBuffer();
+    return ExtractFromArrayBuffer(buf, aStream);
+  } else if (aBodyInit.IsArrayBufferView()) {
+    const ArrayBufferView& buf = aBodyInit.GetAsArrayBufferView();
+    return ExtractFromArrayBufferView(buf, aStream);
+  } else if (aBodyInit.IsScalarValueString()) {
+    nsString str;
+    str.Assign(aBodyInit.GetAsScalarValueString());
+    return ExtractFromScalarValueString(str, aStream, aContentType);
+  } else if (aBodyInit.IsURLSearchParams()) {
+    URLSearchParams& params = aBodyInit.GetAsURLSearchParams();
+    return ExtractFromURLSearchParams(params, aStream, aContentType);
+  }
+
+  NS_NOTREACHED("Should never reach here");
+  return NS_ERROR_FAILURE;
+}
+
+namespace {
+nsresult
+DecodeUTF8(const nsCString& aBuffer, nsString& aDecoded)
+{
+  nsCOMPtr<nsIUnicodeDecoder> decoder =
+    EncodingUtils::DecoderForEncoding("UTF-8");
+  if (!decoder) {
+    return NS_ERROR_FAILURE;
+  }
+
+  int32_t destBufferLen;
+  nsresult rv =
+    decoder->GetMaxLength(aBuffer.get(), aBuffer.Length(), &destBufferLen);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+
+  if (!aDecoded.SetCapacity(destBufferLen, fallible_t())) {
+    return NS_ERROR_OUT_OF_MEMORY;
+  }
+
+  char16_t* destBuffer = aDecoded.BeginWriting();
+  int32_t srcLen = (int32_t) aBuffer.Length();
+  int32_t outLen = destBufferLen;
+  rv = decoder->Convert(aBuffer.get(), &srcLen, destBuffer, &outLen);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+
+  MOZ_ASSERT(outLen <= destBufferLen);
+  aDecoded.SetLength(outLen);
+  return NS_OK;
+}
+}
+
+template <class Derived>
+already_AddRefed<Promise>
+FetchBody<Derived>::ConsumeBody(ConsumeType aType, ErrorResult& aRv)
+{
+  nsRefPtr<Promise> promise = Promise::Create(DerivedClass()->GetParentObject(), aRv);
+  if (aRv.Failed()) {
+    return nullptr;
+  }
+
+  if (BodyUsed()) {
+    aRv.ThrowTypeError(MSG_REQUEST_BODY_CONSUMED_ERROR);
+    return nullptr;
+  }
+
+  SetBodyUsed();
+
+  // While the spec says to do this asynchronously, all the body constructors
+  // right now only accept bodies whose streams are backed by an in-memory
+  // buffer that can be read without blocking. So I think this is fine.
+  nsCOMPtr<nsIInputStream> stream;
+  DerivedClass()->GetBody(getter_AddRefs(stream));
+
+  if (!stream) {
+    aRv = NS_NewByteInputStream(getter_AddRefs(stream), "", 0,
+                                NS_ASSIGNMENT_COPY);
+    if (aRv.Failed()) {
+      return nullptr;
+    }
+  }
+
+  AutoJSAPI api;
+  api.Init(DerivedClass()->GetParentObject());
+  JSContext* cx = api.cx();
+
+  // We can make this assertion because for now we only support memory backed
+  // structures for the body argument for a Request.
+  MOZ_ASSERT(NS_InputStreamIsBuffered(stream));
+  nsCString buffer;
+  uint64_t len;
+  aRv = stream->Available(&len);
+  if (aRv.Failed()) {
+    return nullptr;
+  }
+
+  aRv = NS_ReadInputStreamToString(stream, buffer, len);
+  if (aRv.Failed()) {
+    return nullptr;
+  }
+
+  buffer.SetLength(len);
+
+  switch (aType) {
+    case CONSUME_ARRAYBUFFER: {
+      JS::Rooted<JSObject*> arrayBuffer(cx);
+      arrayBuffer =
+        ArrayBuffer::Create(cx, buffer.Length(),
+                            reinterpret_cast<const uint8_t*>(buffer.get()));
+      JS::Rooted<JS::Value> val(cx);
+      val.setObjectOrNull(arrayBuffer);
+      promise->MaybeResolve(cx, val);
+      return promise.forget();
+    }
+    case CONSUME_BLOB: {
+      // XXXnsm it is actually possible to avoid these duplicate allocations
+      // for the Blob case by having the Blob adopt the stream's memory
+      // directly, but I've not added a special case for now.
+      //
+      // This is similar to nsContentUtils::CreateBlobBuffer, but also deals
+      // with worker wrapping.
+      uint32_t blobLen = buffer.Length();
+      void* blobData = moz_malloc(blobLen);
+      nsCOMPtr<nsIDOMBlob> blob;
+      if (blobData) {
+        memcpy(blobData, buffer.BeginReading(), blobLen);
+        blob = DOMFile::CreateMemoryFile(blobData, blobLen,
+                                         NS_ConvertUTF8toUTF16(mMimeType));
+      } else {
+        aRv = NS_ERROR_OUT_OF_MEMORY;
+        return nullptr;
+      }
+
+      JS::Rooted<JS::Value> jsBlob(cx);
+      if (NS_IsMainThread()) {
+        aRv = nsContentUtils::WrapNative(cx, blob, &jsBlob);
+        if (aRv.Failed()) {
+          return nullptr;
+        }
+      } else {
+        jsBlob.setObject(*workers::file::CreateBlob(cx, blob));
+      }
+      promise->MaybeResolve(cx, jsBlob);
+      return promise.forget();
+    }
+    case CONSUME_JSON: {
+      nsString decoded;
+      aRv = DecodeUTF8(buffer, decoded);
+      if (aRv.Failed()) {
+        return nullptr;
+      }
+
+      JS::Rooted<JS::Value> json(cx);
+      if (!JS_ParseJSON(cx, decoded.get(), decoded.Length(), &json)) {
+        JS::Rooted<JS::Value> exn(cx);
+        if (JS_GetPendingException(cx, &exn)) {
+          JS_ClearPendingException(cx);
+          promise->MaybeReject(cx, exn);
+        }
+      }
+      promise->MaybeResolve(cx, json);
+      return promise.forget();
+    }
+    case CONSUME_TEXT: {
+      nsString decoded;
+      aRv = DecodeUTF8(buffer, decoded);
+      if (aRv.Failed()) {
+        return nullptr;
+      }
+
+      promise->MaybeResolve(decoded);
+      return promise.forget();
+    }
+  }
+
+  NS_NOTREACHED("Unexpected consume body type");
+  // Silence warnings.
+  return nullptr;
+}
+
+template
+already_AddRefed<Promise>
+FetchBody<Request>::ConsumeBody(ConsumeType aType, ErrorResult& aRv);
+
+template
+already_AddRefed<Promise>
+FetchBody<Response>::ConsumeBody(ConsumeType aType, ErrorResult& aRv);
+
+template <class Derived>
+void
+FetchBody<Derived>::SetMimeType(ErrorResult& aRv)
+{
+  // Extract mime type.
+  nsTArray<nsCString> contentTypeValues;
+  MOZ_ASSERT(DerivedClass()->Headers_());
+  DerivedClass()->Headers_()->GetAll(NS_LITERAL_CSTRING("Content-Type"), contentTypeValues, aRv);
+  if (NS_WARN_IF(aRv.Failed())) {
+    return;
+  }
+
+  // HTTP ABNF states Content-Type may have only one value.
+  // This is from the "parse a header value" of the fetch spec.
+  if (contentTypeValues.Length() == 1) {
+    mMimeType = contentTypeValues[0];
+    ToLowerCase(mMimeType);
+  }
+}
 } // namespace dom
 } // namespace mozilla

@@ -61,5 +61,5 @@ MSG_DEF(MSG_INVALID_HEADER_SEQUENCE, 0, "Headers require name/value tuples when 
 MSG_DEF(MSG_PERMISSION_DENIED_TO_PASS_ARG, 1, "Permission denied to pass cross-origin object as {0}.")
 MSG_DEF(MSG_MISSING_REQUIRED_DICTIONARY_MEMBER, 1, "Missing required {0}.")
 MSG_DEF(MSG_INVALID_REQUEST_METHOD, 1, "Invalid request method {0}.")
-MSG_DEF(MSG_URL_PARSE_ERROR, 0, "Error parsing URL.")
 MSG_DEF(MSG_REQUEST_BODY_CONSUMED_ERROR, 0, "Request body has already been consumed.")
+MSG_DEF(MSG_RESPONSE_INVALID_STATUSTEXT_ERROR, 0, "Response statusText may not contain newline or carriage return.")

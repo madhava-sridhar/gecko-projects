@@ -57,7 +57,7 @@ public:
   ToPCacheQueryParams(PCacheQueryParams& aOut, const QueryParams& aIn);
 
   static already_AddRefed<Response>
-  ToResponse(nsISupports* aOwner, const PCacheResponse& aIn,
+  ToResponse(nsIGlobalObject* aOwner, const PCacheResponse& aIn,
              PCacheStreamControlChild* aStreamControl);
 
   static already_AddRefed<Request>

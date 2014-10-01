@@ -8,57 +8,28 @@
 
 #include "nsISupportsImpl.h"
 
-#include "mozilla/dom/Headers.h"
-#include "mozilla/dom/HeadersBinding.h"
 #include "mozilla/dom/ResponseBinding.h"
-#include "nsIDOMFile.h"
+
+class nsIInputStream;
 
 namespace mozilla {
 namespace dom {
 
 class InternalResponse MOZ_FINAL
 {
-  friend class FetchDriver;
-
-  ~InternalResponse()
-  { }
-
-  ResponseType mType;
-  nsCString mTerminationReason;
-  nsCString mURL;
-  const uint32_t mStatus;
-  const nsCString mStatusText;
-  nsRefPtr<Headers> mHeaders;
-  nsCOMPtr<nsIDOMBlob> mBody;
-  nsCString mContentType;
-  bool mError;
 
 public:
   NS_INLINE_DECL_THREADSAFE_REFCOUNTING(InternalResponse)
 
-  InternalResponse(uint32_t aStatus, const nsACString& aStatusText)
-    : mType(ResponseType::Default)
-    , mStatus(aStatus)
-    , mStatusText(aStatusText)
-    , mHeaders(new Headers(nullptr, HeadersGuardEnum::MozNone))
-    , mError(false)
-  { }
+  InternalResponse(uint16_t aStatus, const nsACString& aStatusText);
 
-  // Does not copy the body over!
-  explicit InternalResponse(const InternalResponse& aOther)
-    : mStatus(aOther.mStatus)
-    , mStatusText(aOther.mStatusText)
-    , mHeaders(aOther.mHeaders)
-    , mError(aOther.mError)
-    // FIXME(nsm): Copy the rest of the stuff.
-  {
-  }
+  explicit InternalResponse(const InternalResponse& aOther) MOZ_DELETE;
 
   static already_AddRefed<InternalResponse>
   NetworkError()
   {
     nsRefPtr<InternalResponse> response = new InternalResponse(0, NS_LITERAL_CSTRING(""));
-    response->mError = true;
+    response->mType = ResponseType::Error;
     return response.forget();
   }
 
@@ -71,16 +42,17 @@ public:
   bool
   IsError() const
   {
-    return mError;
+    return Type() == ResponseType::Error;
   }
 
+  // FIXME(nsm): Return with exclude fragment.
   nsCString&
   GetUrl()
   {
     return mURL;
   }
 
-  uint32_t
+  uint16_t
   GetStatus() const
   {
     return mStatus;
@@ -92,21 +64,37 @@ public:
     return mStatusText;
   }
 
-  already_AddRefed<Headers>
-  Headers_() const
+  Headers*
+  Headers_()
   {
-    nsRefPtr<Headers> h = mHeaders;
-    return h.forget();
+    return mHeaders;
   }
 
-  already_AddRefed<nsIDOMBlob>
-  GetBody();
+  void
+  GetBody(nsIInputStream** aStream)
+  {
+    nsCOMPtr<nsIInputStream> stream = mBody;
+    stream.forget(aStream);
+  }
 
   void
-  SetBody(nsIDOMBlob* aBody)
+  SetBody(nsIInputStream* aBody)
   {
     mBody = aBody;
   }
+
+private:
+  ~InternalResponse()
+  { }
+
+  ResponseType mType;
+  nsCString mTerminationReason;
+  nsCString mURL;
+  const uint16_t mStatus;
+  const nsCString mStatusText;
+  nsRefPtr<Headers> mHeaders;
+  nsCOMPtr<nsIInputStream> mBody;
+  nsCString mContentType;
 };
 
 } // namespace dom

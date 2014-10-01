@@ -6,34 +6,39 @@
 #ifndef mozilla_dom_Response_h
 #define mozilla_dom_Response_h
 
+#include "nsWrapperCache.h"
+#include "nsISupportsImpl.h"
+
+#include "mozilla/dom/Fetch.h"
 #include "mozilla/dom/ResponseBinding.h"
 #include "mozilla/dom/UnionTypes.h"
 
 #include "InternalResponse.h"
-#include "nsWrapperCache.h"
-#include "nsISupportsImpl.h"
 
 class nsPIDOMWindow;
 
 namespace mozilla {
-
-class ErrorResult;
-
 namespace dom {
 
 class Headers;
-class Promise;
 
 class Response MOZ_FINAL : public nsISupports
                          , public nsWrapperCache
+                         , public FetchBody<Response>
 {
   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
   NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS(Response)
 
 public:
-  Response(nsISupports* aOwner);
-
   Response(nsIGlobalObject* aGlobal, InternalResponse* aInternalResponse);
+
+  Response(const Response& aOther) MOZ_DELETE;
+
+  JSObject*
+  WrapObject(JSContext* aCx)
+  {
+    return ResponseBinding::Wrap(aCx, this);
+  }
 
   ResponseType
   Type() const
@@ -46,7 +51,6 @@ public:
   {
     aUrl = NS_ConvertUTF8toUTF16(mInternalResponse->GetUrl());
   }
-
 
   // Undo X11 macro brain damage
   #ifdef Status
@@ -65,8 +69,11 @@ public:
     aStatusText = mInternalResponse->GetStatusText();
   }
 
-  already_AddRefed<Headers>
-  Headers_() const;
+  Headers*
+  Headers_() const { return mInternalResponse->Headers_(); }
+
+  void
+  GetBody(nsIInputStream** aStream) { return mInternalResponse->GetBody(aStream); }
 
   static already_AddRefed<Response>
   Error(const GlobalObject& aGlobal);
@@ -79,13 +86,7 @@ public:
               const Optional<ArrayBufferOrArrayBufferViewOrScalarValueStringOrURLSearchParams>& aBody,
               const ResponseInit& aInit, ErrorResult& rv);
 
-  virtual JSObject*
-  WrapObject(JSContext* aCx)
-  {
-    return mozilla::dom::ResponseBinding::Wrap(aCx, this);
-  }
-
-  nsISupports* GetParentObject() const
+  nsIGlobalObject* GetParentObject() const
   {
     return mOwner;
   }
@@ -93,26 +94,13 @@ public:
   already_AddRefed<Response>
   Clone();
 
-  already_AddRefed<Promise>
-  ArrayBuffer(ErrorResult&);
-
-  already_AddRefed<Promise>
-  Blob(ErrorResult&);
-
-  already_AddRefed<Promise>
-  Json(ErrorResult&);
-
-  already_AddRefed<Promise>
-  Text(ErrorResult&);
-
-  bool
-  BodyUsed() const;
+  void
+  SetBody(nsIInputStream* aBody);
 private:
   ~Response();
 
-  nsISupports* mOwner;
+  nsCOMPtr<nsIGlobalObject> mOwner;
   nsRefPtr<InternalResponse> mInternalResponse;
-  // nsRefPtr<FetchBodyStream> mBody;
 };
 
 } // namespace dom
