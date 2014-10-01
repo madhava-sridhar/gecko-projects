@@ -188,7 +188,10 @@ public:
   }
 
   virtual void
-  CompleteOnInitiatingThread(nsresult aRv) MOZ_OVERRIDE { }
+  CompleteOnInitiatingThread(nsresult aRv) MOZ_OVERRIDE
+  {
+    mManager = nullptr;
+  }
 
 private:
   virtual ~DeleteOrphanedCacheAction() { }
@@ -221,6 +224,7 @@ public:
   CompleteOnInitiatingThread(nsresult aRv) MOZ_OVERRIDE
   {
     if (!mOrphaned) {
+      mManager = nullptr;
       return;
     }
 
@@ -228,6 +232,8 @@ public:
 
     nsRefPtr<Action> action = new DeleteOrphanedCacheAction(mManager, mCacheId);
     mManager->CurrentContext()->Dispatch(mManager->mIOThread, action);
+
+    mManager = nullptr;
   }
 
 private:

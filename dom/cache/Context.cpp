@@ -315,7 +315,11 @@ public:
     mState = STATE_COMPLETING;
     nsresult rv = mInitiatingThread->Dispatch(this, nsIThread::DISPATCH_NORMAL);
     if (NS_FAILED(rv)) {
-      MOZ_CRASH("Failed to dispatch ActionRunnable to initiating thread.");
+      // TODO: Investigate what to do if we can't dispatch back to initiating
+      //       thread because the PBackground worker thread went away.  Seems to
+      //       happen on linux opt mochitest.  Possibly due to not having a proper
+      //       shutdown observer yet.
+      NS_WARNING("Failed to dispatch ActionRunnable to initiating thread.");
     }
   }
 
