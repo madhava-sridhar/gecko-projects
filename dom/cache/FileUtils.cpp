@@ -405,6 +405,7 @@ FileUtils::BodyDeleteFiles(nsIFile* aBaseDir, CacheId aCacheId,
     rv = finalFile->Remove(false /* recursive */);
     if (NS_FAILED(rv)) {
       NS_WARNING("Failed to remove Cache body file!");
+      rv = NS_OK;
     }
   }
 
