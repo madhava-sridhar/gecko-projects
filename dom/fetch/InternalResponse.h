@@ -6,11 +6,10 @@
 #ifndef mozilla_dom_InternalResponse_h
 #define mozilla_dom_InternalResponse_h
 
+#include "nsIInputStream.h"
 #include "nsISupportsImpl.h"
 
 #include "mozilla/dom/ResponseBinding.h"
-
-class nsIInputStream;
 
 namespace mozilla {
 namespace dom {

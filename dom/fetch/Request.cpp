@@ -38,7 +38,8 @@ NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(Request)
 NS_INTERFACE_MAP_END
 
 Request::Request(nsIGlobalObject* aOwner, InternalRequest* aRequest)
-  : mOwner(aOwner)
+  : FetchBody<Request>()
+  , mOwner(aOwner)
   , mRequest(aRequest)
 {
   SetIsDOMBinding();
