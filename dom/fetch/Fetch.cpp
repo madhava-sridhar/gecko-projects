@@ -348,5 +348,14 @@ FetchBody<Derived>::SetMimeType(ErrorResult& aRv)
     ToLowerCase(mMimeType);
   }
 }
+
+template
+void
+FetchBody<Request>::SetMimeType(ErrorResult& aRv);
+
+template
+void
+FetchBody<Response>::SetMimeType(ErrorResult& aRv);
+
 } // namespace dom
 } // namespace mozilla
