@@ -168,23 +168,22 @@ TypeUtils::ToPCacheRequest(PCacheRequest& aOut, const Request& aIn)
 
 // static
 nsresult
-TypeUtils::ToPCacheRequest(PCacheRequest& aOut,
+TypeUtils::ToPCacheRequest(const GlobalObject& aGlobal,
+                           PCacheRequest& aOut,
                            const RequestOrScalarValueString& aIn)
 {
-  nsRefPtr<Request> request;
-  if (aIn.IsRequest()) {
-    request = &aIn.GetAsRequest();
-  } else {
-    MOZ_ASSERT(aIn.IsScalarValueString());
-    // TODO: see nsIStandardURL.init() if Request does not provide something...
-    MOZ_CRASH("implement me");
+  RequestInit init;
+  ErrorResult result;
+  nsRefPtr<Request> request = Request::Constructor(aGlobal, aIn, init, result);
+  if (NS_WARN_IF(result.Failed())) {
+    return result.ErrorCode();
   }
   return ToPCacheRequest(aOut, *request);
 }
 
 // static
 nsresult
-TypeUtils::ToPCacheRequestOrVoid(PCacheRequestOrVoid& aOut,
+TypeUtils::ToPCacheRequestOrVoid(const GlobalObject& aGlobal, PCacheRequestOrVoid& aOut,
                                  const Optional<RequestOrScalarValueString>& aIn)
 {
   if (!aIn.WasPassed()) {
@@ -192,22 +191,31 @@ TypeUtils::ToPCacheRequestOrVoid(PCacheRequestOrVoid& aOut,
     return NS_OK;
   }
   PCacheRequest request;
-  nsresult rv = ToPCacheRequest(request, aIn.Value());
+  nsresult rv = ToPCacheRequest(aGlobal, request, aIn.Value());
   aOut = request;
   return rv;
 }
 
 // static
 nsresult
-TypeUtils::ToPCacheRequest(PCacheRequest& aOut,
+TypeUtils::ToPCacheRequest(const GlobalObject& aGlobal, PCacheRequest& aOut,
                            const OwningRequestOrScalarValueString& aIn)
 {
-  nsRefPtr<Request> request;
+  RequestOrScalarValueString input;
+  RequestInit init;
+  ErrorResult result;
+
   if (aIn.IsRequest()) {
-    request = &static_cast<Request&>(aIn.GetAsRequest());
+    input.SetAsRequest() = aIn.GetAsRequest();
   } else {
-    MOZ_ASSERT(aIn.IsScalarValueString());
-    MOZ_CRASH("implement me");
+    nsString str;
+    str.Assign(aIn.GetAsScalarValueString());
+    input.SetAsScalarValueString().Rebind(str.Data(), str.Length());
+  }
+
+  nsRefPtr<Request> request = Request::Constructor(aGlobal, input, init, result);
+  if (NS_WARN_IF(result.Failed())) {
+    return result.ErrorCode();
   }
   return ToPCacheRequest(aOut, *request);
 }
@@ -230,14 +238,8 @@ TypeUtils::ToPCacheResponse(PCacheResponse& aOut, const Response& aIn)
   }
 
   nsCOMPtr<nsIInputStream> stream;
-
-  // TODO: get body stream from Response
+  aIn.GetBody(getter_AddRefs(stream));
   // TODO: set body stream used in Response
-
-  // TODO: remove stream testing code
-  nsresult rv = NS_NewCStringInputStream(getter_AddRefs(stream),
-                NS_LITERAL_CSTRING("response body stream hooray!"));
-  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 
   SerializeCacheStream(stream, &aOut.body());
 
@@ -270,27 +272,12 @@ TypeUtils::ToResponse(nsIGlobalObject* aGlobal, const PCacheResponse& aIn,
                       PCacheStreamControlChild* aStreamControl)
 {
   nsRefPtr<InternalResponse> ir = new InternalResponse(200, NS_LITERAL_CSTRING("OK"));
-  nsRefPtr<Response> ref = new Response(aGlobal, ir);
-
-  // TODO: implement once real Request/Response are available
-  NS_WARNING("Not filling in contents of Response returned from Cache.");
 
   nsCOMPtr<nsIInputStream> stream = ReadStream::Create(aStreamControl,
                                                        aIn.body());
+  ir->SetBody(stream);
 
-  // TODO: remove stream testing code
-  if (!stream) {
-    printf_stderr("### ### TypeUtils::ToResponse() null stream\n");
-  } else {
-    FallibleTArray<char> buf(100);
-    uint32_t numBytes = 0;
-    nsresult rv = NS_FillArray(buf, stream, 0, &numBytes);
-    if (NS_WARN_IF(NS_FAILED(rv))) { return nullptr; }
-    nsAutoCString s(buf.Elements(), buf.Length());
-    printf_stderr("### ### TypeUtils::ToResponse() stream with %u bytes: %s\n",
-                  numBytes, s.get());
-  }
-
+  nsRefPtr<Response> ref = new Response(aGlobal, ir);
   return ref.forget();
 }
 
@@ -320,19 +307,6 @@ TypeUtils::ToRequest(nsIGlobalObject* aGlobal, const PCacheRequest& aIn,
   internalRequest->SetBody(stream);
   // TODO: clear request bodyRead flag
   NS_WARNING("Not clearing bodyRead flag for Request returned from Cache.");
-
-  // TODO: remove stream testing code
-  if (!stream) {
-    printf_stderr("### ### TypeUtils::ToInternalRequest() null stream\n");
-  } else {
-    FallibleTArray<char> buf(100);
-    uint32_t numBytes = 0;
-    nsresult rv = NS_FillArray(buf, stream, 0, &numBytes);
-    if (NS_WARN_IF(NS_FAILED(rv))) { return nullptr; }
-    nsAutoCString s(buf.Elements(), buf.Length());
-    printf_stderr("### ### TypeUtils::ToInternalRequest() stream with %u bytes: %s\n",
-                  numBytes, s.get());
-  }
 
   nsRefPtr<Request> request = new Request(aGlobal, internalRequest);
   return request.forget();

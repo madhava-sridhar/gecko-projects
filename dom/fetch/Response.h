@@ -73,7 +73,7 @@ public:
   Headers_() const { return mInternalResponse->Headers_(); }
 
   void
-  GetBody(nsIInputStream** aStream) { return mInternalResponse->GetBody(aStream); }
+  GetBody(nsIInputStream** aStream) const { return mInternalResponse->GetBody(aStream); }
 
   static already_AddRefed<Response>
   Error(const GlobalObject& aGlobal);

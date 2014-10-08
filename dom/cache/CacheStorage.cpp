@@ -89,7 +89,16 @@ CacheStorage::Match(const RequestOrScalarValueString& aRequest,
   }
 
   PCacheRequest request;
-  TypeUtils::ToPCacheRequest(request, aRequest);
+
+  AutoJSAPI jsapi;
+  jsapi.Init(mGlobal);
+  JSContext* cx = jsapi.cx();
+  JS::Rooted<JSObject*> jsGlobal(cx, mGlobal->GetGlobalJSObject());
+  JSAutoCompartment ac(cx, jsGlobal);
+
+  GlobalObject global(cx, jsGlobal);
+
+  TypeUtils::ToPCacheRequest(global, request, aRequest);
 
   PCacheQueryParams params;
   TypeUtils::ToPCacheQueryParams(params, aParams);

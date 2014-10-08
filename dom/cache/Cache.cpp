@@ -50,6 +50,49 @@ Cache::Cache(nsISupports* aOwner, nsIGlobalObject* aGlobal,
   mActor->SetListener(*this);
 }
 
+nsresult
+Cache::ToPCacheRequest(PCacheRequest& aOut, const RequestOrScalarValueString& aIn)
+{
+  AutoJSAPI jsapi;
+  jsapi.Init(mGlobal);
+  JSContext* cx = jsapi.cx();
+  JS::Rooted<JSObject*> jsGlobal(cx, mGlobal->GetGlobalJSObject());
+  JSAutoCompartment ac(cx, jsGlobal);
+
+  GlobalObject global(cx, jsGlobal);
+
+  return TypeUtils::ToPCacheRequest(global, aOut, aIn);
+}
+
+nsresult
+Cache::ToPCacheRequest(PCacheRequest& aOut, const OwningRequestOrScalarValueString& aIn)
+{
+  AutoJSAPI jsapi;
+  jsapi.Init(mGlobal);
+  JSContext* cx = jsapi.cx();
+  JS::Rooted<JSObject*> jsGlobal(cx, mGlobal->GetGlobalJSObject());
+  JSAutoCompartment ac(cx, jsGlobal);
+
+  GlobalObject global(cx, jsGlobal);
+
+  return TypeUtils::ToPCacheRequest(global, aOut, aIn);
+}
+
+nsresult
+Cache::ToPCacheRequestOrVoid(PCacheRequestOrVoid& aOut,
+                             const Optional<RequestOrScalarValueString>& aIn)
+{
+  AutoJSAPI jsapi;
+  jsapi.Init(mGlobal);
+  JSContext* cx = jsapi.cx();
+  JS::Rooted<JSObject*> jsGlobal(cx, mGlobal->GetGlobalJSObject());
+  JSAutoCompartment ac(cx, jsGlobal);
+
+  GlobalObject global(cx, jsGlobal);
+
+  return TypeUtils::ToPCacheRequestOrVoid(global, aOut, aIn);
+}
+
 already_AddRefed<Promise>
 Cache::Match(const RequestOrScalarValueString& aRequest,
              const QueryParams& aParams, ErrorResult& aRv)
@@ -62,7 +105,7 @@ Cache::Match(const RequestOrScalarValueString& aRequest,
   }
 
   PCacheRequest request;
-  nsresult rv = TypeUtils::ToPCacheRequest(request, aRequest);
+  nsresult rv = ToPCacheRequest(request, aRequest);
   if (NS_FAILED(rv)) {
     promise->MaybeReject(rv);
     return promise.forget();
@@ -90,7 +133,7 @@ Cache::MatchAll(const Optional<RequestOrScalarValueString>& aRequest,
   }
 
   PCacheRequestOrVoid request;
-  nsresult rv = TypeUtils::ToPCacheRequestOrVoid(request, aRequest);
+  nsresult rv = ToPCacheRequestOrVoid(request, aRequest);
   if (NS_FAILED(rv)) {
     promise->MaybeReject(rv);
     return promise.forget();
@@ -117,7 +160,7 @@ Cache::Add(const RequestOrScalarValueString& aRequest, ErrorResult& aRv)
   }
 
   PCacheRequest request;
-  nsresult rv = TypeUtils::ToPCacheRequest(request, aRequest);
+  nsresult rv = ToPCacheRequest(request, aRequest);
   if (NS_FAILED(rv)) {
     promise->MaybeReject(rv);
     return promise.forget();
@@ -144,7 +187,7 @@ Cache::AddAll(const Sequence<OwningRequestOrScalarValueString>& aRequests,
   nsTArray<PCacheRequest> requests;
   for(uint32_t i = 0; i < aRequests.Length(); ++i) {
     PCacheRequest* request = requests.AppendElement();
-    nsresult rv = TypeUtils::ToPCacheRequest(*request, aRequests[i]);
+    nsresult rv = ToPCacheRequest(*request, aRequests[i]);
     if (NS_FAILED(rv)) {
       promise->MaybeReject(rv);
       return promise.forget();
@@ -170,7 +213,7 @@ Cache::Put(const RequestOrScalarValueString& aRequest, const Response& aResponse
   }
 
   PCacheRequest request;
-  nsresult rv = TypeUtils::ToPCacheRequest(request, aRequest);
+  nsresult rv = ToPCacheRequest(request, aRequest);
   if (NS_FAILED(rv)) {
     promise->MaybeReject(rv);
     return promise.forget();
@@ -202,7 +245,7 @@ Cache::Delete(const RequestOrScalarValueString& aRequest,
   }
 
   PCacheRequest request;
-  nsresult rv = TypeUtils::ToPCacheRequest(request, aRequest);
+  nsresult rv = ToPCacheRequest(request, aRequest);
   if (NS_FAILED(rv)) {
     promise->MaybeReject(rv);
     return promise.forget();
@@ -230,7 +273,7 @@ Cache::Keys(const Optional<RequestOrScalarValueString>& aRequest,
   }
 
   PCacheRequestOrVoid request;
-  nsresult rv = TypeUtils::ToPCacheRequestOrVoid(request, aRequest);
+  nsresult rv = ToPCacheRequestOrVoid(request, aRequest);
   if (NS_FAILED(rv)) {
     promise->MaybeReject(rv);
     return promise.forget();

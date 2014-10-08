@@ -68,6 +68,7 @@ Request::Constructor(const GlobalObject& aGlobal,
   if (aInput.IsRequest()) {
     nsRefPtr<Request> inputReq = &aInput.GetAsRequest();
     if (inputReq->BodyUsed()) {
+      NS_WARNING("Body used");
       aRv.ThrowTypeError(MSG_REQUEST_BODY_CONSUMED_ERROR);
       return nullptr;
     }
@@ -102,12 +103,12 @@ Request::Constructor(const GlobalObject& aGlobal,
 
       nsRefPtr<mozilla::dom::URL> url =
         dom::URL::Constructor(aGlobal, input, NS_ConvertUTF8toUTF16(spec), aRv);
-      if (aRv.Failed()) {
+      if (NS_WARN_IF(aRv.Failed())) {
         return nullptr;
       }
 
       url->Stringify(requestURL, aRv);
-      if (aRv.Failed()) {
+      if (NS_WARN_IF(aRv.Failed())) {
         return nullptr;
       }
     } else {
@@ -118,12 +119,12 @@ Request::Constructor(const GlobalObject& aGlobal,
       nsString baseURL = NS_ConvertUTF8toUTF16(worker->GetLocationInfo().mHref);
       nsRefPtr<workers::URL> url =
         workers::URL::Constructor(aGlobal, input, baseURL, aRv);
-      if (aRv.Failed()) {
+      if (NS_WARN_IF(aRv.Failed())) {
         return nullptr;
       }
 
       url->Stringify(requestURL, aRv);
-      if (aRv.Failed()) {
+      if (NS_WARN_IF(aRv.Failed())) {
         return nullptr;
       }
     }
@@ -156,6 +157,7 @@ Request::Constructor(const GlobalObject& aGlobal,
         !method.EqualsASCII("put") &&
         !method.EqualsASCII("delete")) {
       NS_ConvertUTF8toUTF16 label(method);
+      NS_WARNING("Bad method");
       aRv.ThrowTypeError(MSG_INVALID_REQUEST_METHOD, &label);
       return nullptr;
     }
@@ -170,7 +172,7 @@ Request::Constructor(const GlobalObject& aGlobal,
   nsRefPtr<Headers> headers;
   if (aInit.mHeaders.WasPassed()) {
     headers = Headers::Constructor(aGlobal, aInit.mHeaders.Value(), aRv);
-    if (aRv.Failed()) {
+    if (NS_WARN_IF(aRv.Failed())) {
       return nullptr;
     }
   } else {
@@ -188,17 +190,18 @@ Request::Constructor(const GlobalObject& aGlobal,
         !method.EqualsASCII("post")) {
       NS_ConvertUTF8toUTF16 label(method);
       aRv.ThrowTypeError(MSG_INVALID_REQUEST_METHOD, &label);
+      NS_WARNING("Bad method 2");
       return nullptr;
     }
 
     domRequestHeaders->SetGuard(HeadersGuardEnum::Request_no_cors, aRv);
-    if (aRv.Failed()) {
+    if (NS_WARN_IF(aRv.Failed())) {
       return nullptr;
     }
   }
 
   domRequestHeaders->Fill(*headers, aRv);
-  if (aRv.Failed()) {
+  if (NS_WARN_IF(aRv.Failed())) {
     return nullptr;
   }
 
@@ -219,26 +222,15 @@ Request::Constructor(const GlobalObject& aGlobal,
                                 contentType, aRv);
     }
 
-    if (aRv.Failed()) {
+    if (NS_WARN_IF(aRv.Failed())) {
       return nullptr;
     }
   }
 
-  // Extract mime type.
-  nsTArray<nsCString> contentTypeValues;
-  domRequestHeaders->GetAll(NS_LITERAL_CSTRING("Content-Type"),
-                            contentTypeValues, aRv);
-  if (aRv.Failed()) {
+  domRequest->SetMimeType(aRv);
+  if (NS_WARN_IF(aRv.Failed())) {
     return nullptr;
   }
-
-  // HTTP ABNF states Content-Type may have only one value.
-  // This is from the "parse a header value" of the fetch spec.
-  if (contentTypeValues.Length() == 1) {
-    domRequest->mMimeType = contentTypeValues[0];
-    ToLowerCase(domRequest->mMimeType);
-  }
-
   return domRequest.forget();
 }
 
