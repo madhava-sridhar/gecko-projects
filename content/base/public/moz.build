@@ -76,6 +76,7 @@ EXPORTS.mozilla.dom += [
 ]
 
 EXPORTS.mozilla += [
+    'ArrayBufferBuilder.h',
     'CORSMode.h',
 ]
 

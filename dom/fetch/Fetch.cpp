@@ -16,7 +16,9 @@
 #include "nsStreamUtils.h"
 #include "nsStringStream.h"
 
+#include "mozilla/ArrayBufferBuilder.h"
 #include "mozilla/ErrorResult.h"
+#include "mozilla/dom/BlobSet.h"
 #include "mozilla/dom/EncodingUtils.h"
 #include "mozilla/dom/FetchDriver.h"
 #include "mozilla/dom/File.h"
@@ -576,37 +578,120 @@ ExtractByteStreamFromBody(const ArrayBufferOrArrayBufferViewOrBlobOrScalarValueS
 }
 
 namespace {
-nsresult
-DecodeUTF8(const nsCString& aBuffer, nsString& aDecoded)
+class StreamDecoder MOZ_FINAL
 {
-  nsCOMPtr<nsIUnicodeDecoder> decoder =
-    EncodingUtils::DecoderForEncoding("UTF-8");
-  if (!decoder) {
-    return NS_ERROR_FAILURE;
+  nsCOMPtr<nsIUnicodeDecoder> mDecoder;
+  nsString mDecoded;
+
+public:
+  StreamDecoder()
+    : mDecoder(EncodingUtils::DecoderForEncoding("UTF-8"))
+  {
+    MOZ_ASSERT(mDecoder);
   }
 
-  int32_t destBufferLen;
-  nsresult rv =
-    decoder->GetMaxLength(aBuffer.get(), aBuffer.Length(), &destBufferLen);
-  if (NS_WARN_IF(NS_FAILED(rv))) {
-    return rv;
+  nsresult
+  AppendText(const char* aSrcBuffer, uint32_t aSrcBufferLen)
+  {
+    int32_t destBufferLen;
+    nsresult rv =
+      mDecoder->GetMaxLength(aSrcBuffer, aSrcBufferLen, &destBufferLen);
+    if (NS_WARN_IF(NS_FAILED(rv))) {
+      return rv;
+    }
+
+    if (!mDecoded.SetCapacity(mDecoded.Length() + destBufferLen, fallible_t())) {
+      return NS_ERROR_OUT_OF_MEMORY;
+    }
+
+    char16_t* destBuffer = mDecoded.BeginWriting() + mDecoded.Length();
+    int32_t totalChars = mDecoded.Length();
+
+    int32_t srcLen = (int32_t) aSrcBufferLen;
+    int32_t outLen = destBufferLen;
+    rv = mDecoder->Convert(aSrcBuffer, &srcLen, destBuffer, &outLen);
+    MOZ_ASSERT(NS_SUCCEEDED(rv));
+
+    totalChars += outLen;
+    mDecoded.SetLength(totalChars);
+
+    return NS_OK;
   }
 
-  if (!aDecoded.SetCapacity(destBufferLen, fallible_t())) {
+  nsString&
+  GetText()
+  {
+    return mDecoded;
+  }
+};
+
+// Copied from nsXMLHttpRequest.cpp.
+// Maximum size that we'll grow an ArrayBuffer instead of doubling,
+// once doubling reaches this threshold
+#define FETCH_ARRAYBUFFER_MAX_GROWTH (32*1024*1024)
+// start at 32k to avoid lots of doubling right at the start
+#define FETCH_ARRAYBUFFER_MIN_SIZE (32*1024)
+
+NS_METHOD
+FillArrayBuffer(nsIInputStream* in,
+                void* closure,
+                const char* fromRawSegment,
+                uint32_t toOffset,
+                uint32_t count,
+                uint32_t *writeCount)
+{
+  ArrayBufferBuilder* builder = static_cast<ArrayBufferBuilder*>(closure);
+  MOZ_ASSERT(builder);
+  if (builder->capacity() == 0) {
+    builder->setCapacity(PR_MAX(count, FETCH_ARRAYBUFFER_MIN_SIZE));
+  }
+
+  if (!builder->append(reinterpret_cast<const uint8_t*>(fromRawSegment), count, FETCH_ARRAYBUFFER_MAX_GROWTH)) {
+    *writeCount = 0;
     return NS_ERROR_OUT_OF_MEMORY;
   }
 
-  char16_t* destBuffer = aDecoded.BeginWriting();
-  int32_t srcLen = (int32_t) aBuffer.Length();
-  int32_t outLen = destBufferLen;
-  rv = decoder->Convert(aBuffer.get(), &srcLen, destBuffer, &outLen);
-  if (NS_WARN_IF(NS_FAILED(rv))) {
-    return rv;
-  }
-
-  MOZ_ASSERT(outLen <= destBufferLen);
-  aDecoded.SetLength(outLen);
+  *writeCount = count;
   return NS_OK;
+}
+
+NS_METHOD
+FillBlobSet(nsIInputStream* in,
+            void* closure,
+            const char* fromRawSegment,
+            uint32_t toOffset,
+            uint32_t count,
+            uint32_t *writeCount)
+{
+  BlobSet* blobSet = static_cast<BlobSet*>(closure);
+  MOZ_ASSERT(blobSet);
+  nsresult rv = blobSet->AppendVoidPtr(fromRawSegment, count);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    *writeCount = 0;
+  } else {
+    *writeCount = count;
+  }
+  return rv;
+}
+
+NS_METHOD
+FillUTF8Decoded(nsIInputStream* in,
+                void* closure,
+                const char* fromRawSegment,
+                uint32_t toOffset,
+                uint32_t count,
+                uint32_t *writeCount)
+{
+  StreamDecoder* decoder = static_cast<StreamDecoder*>(closure);
+  MOZ_ASSERT(decoder);
+
+  nsresult rv = decoder->AppendText(fromRawSegment, count);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    *writeCount = 0;
+  } else {
+    *writeCount = count;
+  }
+  return rv;
 }
 }
 
@@ -619,61 +704,57 @@ FetchBody<Derived>::FinishConsumeBody()
   MOZ_ASSERT(stream);
   MOZ_ASSERT(NS_InputStreamIsBuffered(stream));
 
-  nsAutoCString buffer;
   uint64_t len;
   nsresult rv = stream->Available(&len);
   if (NS_WARN_IF(NS_FAILED(rv))) {
     return mDelayedConsumePromise->MaybeReject(rv);
   }
 
-  rv = NS_ReadInputStreamToString(stream, buffer, len);
-  if (NS_WARN_IF(NS_FAILED(rv))) {
-    return mDelayedConsumePromise->MaybeReject(rv);
-  }
-
-  buffer.SetLength(len);
-
   AutoJSAPI api;
   api.Init(DerivedClass()->GetParentObject());
   JSContext* cx = api.cx();
 
+  uint32_t totalRead;
   switch (mDelayedConsumeType) {
     case CONSUME_ARRAYBUFFER: {
-      JS::Rooted<JSObject*> arrayBuffer(cx);
-      arrayBuffer =
-        ArrayBuffer::Create(cx, buffer.Length(),
-                            reinterpret_cast<const uint8_t*>(buffer.get()));
+      mozilla::ArrayBufferBuilder builder;
+      rv = stream->ReadSegments(FillArrayBuffer, &builder, len, &totalRead);
+      if (NS_WARN_IF(NS_FAILED(rv))) {
+        return mDelayedConsumePromise->MaybeReject(rv);
+      }
+      JS::Rooted<JSObject*> arrayBuffer(cx, builder.getArrayBuffer(cx));
       JS::Rooted<JS::Value> val(cx);
       val.setObjectOrNull(arrayBuffer);
       return mDelayedConsumePromise->MaybeResolve(cx, val);
     }
     case CONSUME_BLOB: {
-      // XXXnsm it is actually possible to avoid these duplicate allocations
-      // for the Blob case by having the Blob adopt the stream's memory
-      // directly, but I've not added a special case for now.
-      //
-      // FIXME(nsm): Use nsContentUtils::CreateBlobBuffer once blobs have been fixed on
-      // workers.
-      nsRefPtr<File> blob;
-      uint32_t blobLen = buffer.Length();
-      void* blobData = moz_malloc(blobLen);
-      if (blobData) {
-        memcpy(blobData, buffer.BeginReading(), blobLen);
-        blob = File::CreateMemoryFile(DerivedClass()->GetParentObject(), blobData, blobLen,
-                                      NS_ConvertUTF8toUTF16(mMimeType));
-      } else {
-        return mDelayedConsumePromise->MaybeReject(NS_ERROR_OUT_OF_MEMORY);
-      }
-
-      return mDelayedConsumePromise->MaybeResolve(blob);
-    }
-    case CONSUME_JSON: {
-      nsAutoString decoded;
-      rv = DecodeUTF8(buffer, decoded);
+      // The input stream is backed by various blobs when obtained from HTTP.
+      // It would be nice if we could create a Blob that just adopted/shared
+      // that data instead of copying it.
+      nsAutoPtr<BlobSet> blobSet(new BlobSet());
+      rv = stream->ReadSegments(FillBlobSet, blobSet, len, &totalRead);
       if (NS_WARN_IF(NS_FAILED(rv))) {
         return mDelayedConsumePromise->MaybeReject(rv);
       }
 
+      nsRefPtr<File> blob =
+        blobSet->GetBlobInternal(DerivedClass()->GetParentObject(), mMimeType);
+      return mDelayedConsumePromise->MaybeResolve(blob);
+    }
+    case CONSUME_TEXT:
+      // fall through handles early exit.
+    case CONSUME_JSON: {
+      StreamDecoder decoder;
+      rv = stream->ReadSegments(FillUTF8Decoded, &decoder, len, &totalRead);
+      if (NS_WARN_IF(NS_FAILED(rv))) {
+        return mDelayedConsumePromise->MaybeReject(rv);
+      }
+
+      if (mDelayedConsumeType == CONSUME_TEXT) {
+        return mDelayedConsumePromise->MaybeResolve(decoder.GetText());
+      }
+
+      nsString decoded = decoder.GetText();
       JS::Rooted<JS::Value> json(cx);
       if (!JS_ParseJSON(cx, decoded.get(), decoded.Length(), &json)) {
         JS::Rooted<JS::Value> exn(cx);
@@ -684,15 +765,6 @@ FetchBody<Derived>::FinishConsumeBody()
       }
 
       return mDelayedConsumePromise->MaybeResolve(cx, json);
-    }
-    case CONSUME_TEXT: {
-      nsAutoString decoded;
-      rv = DecodeUTF8(buffer, decoded);
-      if (NS_WARN_IF(NS_FAILED(rv))) {
-        return mDelayedConsumePromise->MaybeReject(rv);
-      }
-
-      return mDelayedConsumePromise->MaybeResolve(decoded);
     }
   }
 
