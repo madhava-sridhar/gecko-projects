@@ -255,7 +255,7 @@ FetchRequest(nsIGlobalObject* aGlobal, const RequestOrScalarValueString& aInput,
     }
 
     nsRefPtr<MainThreadFetchResolver> resolver = new MainThreadFetchResolver(p);
-    nsRefPtr<FetchDriver> fetch = new FetchDriver(r, doc->NodePrincipal());
+    nsRefPtr<FetchDriver> fetch = new FetchDriver(r, doc->NodePrincipal(), doc);
     aRv = fetch->Fetch(resolver);
     if (NS_WARN_IF(aRv.Failed())) {
       return nullptr;
@@ -326,7 +326,6 @@ public:
 
     nsRefPtr<Promise> promise = mResolver->mFetchPromise.forget();
     promise->MaybeResolve(mResolver->mResponse);
-
     return true;
   }
 };

@@ -11,6 +11,7 @@
 #include "nsRefPtr.h"
 
 class nsIAsyncOutputStream;
+class nsIDocument;
 class nsIPrincipal;
 class nsPIDOMWindow;
 
@@ -42,11 +43,12 @@ public:
   NS_DECL_NSIREQUESTOBSERVER
   NS_DECL_NSISTREAMLISTENER
 
-  explicit FetchDriver(InternalRequest* aRequest, nsIPrincipal* aPrincipal);
+  explicit FetchDriver(InternalRequest* aRequest, nsIPrincipal* aPrincipal, nsIDocument* aDoc = nullptr);
   NS_IMETHOD Fetch(FetchDriverObserver* aObserver);
 
 private:
   nsCOMPtr<nsIPrincipal> mPrincipal;
+  nsCOMPtr<nsIDocument> mDocument;
   nsRefPtr<InternalRequest> mRequest;
   nsRefPtr<InternalResponse> mResponse;
   nsCOMPtr<nsIAsyncOutputStream> mPipeOutputStream;

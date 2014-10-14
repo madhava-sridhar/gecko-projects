@@ -5,6 +5,7 @@
 
 #include "mozilla/dom/FetchDriver.h"
 
+#include "nsIDocument.h"
 #include "nsIAsyncInputStream.h"
 #include "nsIAsyncOutputStream.h"
 #include "nsIHttpChannel.h"
@@ -31,8 +32,9 @@ namespace dom {
 
 NS_IMPL_ISUPPORTS(FetchDriver, nsIStreamListener)
 
-FetchDriver::FetchDriver(InternalRequest* aRequest, nsIPrincipal* aPrincipal)
+FetchDriver::FetchDriver(InternalRequest* aRequest, nsIPrincipal* aPrincipal, nsIDocument* aDoc)
   : mPrincipal(aPrincipal)
+  , mDocument(aDoc)
   , mRequest(aRequest)
   , mFetchRecursionCount(0)
 {
@@ -84,7 +86,23 @@ FetchDriver::ContinueFetch(bool aCORSFlag)
     return FailWithNetworkError();
   }
 
-  // FIXME(nsm): Bug 1039846: Add CSP checks
+  // CSP/mixed content checks.
+  int16_t shouldLoad;
+  rv = NS_CheckContentLoadPolicy(mRequest->GetContext(),
+                                 requestURI,
+                                 mPrincipal,
+                                 mDocument,
+                                 // FIXME(nsm): Should MIME be extracted from
+                                 // Content-Type header?
+                                 EmptyCString(), /* mime guess */
+                                 nullptr, /* extra */
+                                 &shouldLoad,
+                                 nsContentUtils::GetContentPolicy(),
+                                 nsContentUtils::GetSecurityManager());
+  if (NS_WARN_IF(NS_FAILED(rv)) || NS_CP_REJECTED(shouldLoad)) {
+    // Disallowed by content policy.
+    return FailWithNetworkError();
+  }
 
   nsAutoCString scheme;
   rv = requestURI->GetScheme(scheme);
@@ -261,7 +279,7 @@ FetchDriver::BasicFetch()
 }
 
 nsresult
-FetchDriver::HttpFetch(bool aCORSFlag, bool aPreflightCORSFlag, bool aAuthenticationFlag)
+FetchDriver::HttpFetch(bool aCORSFlag, bool aCORSPreflightFlag, bool aAuthenticationFlag)
 {
   mResponse = nullptr;
 
@@ -273,6 +291,17 @@ nsresult
 FetchDriver::ContinueHttpFetchAfterServiceWorker()
 {
   if (!mResponse) {
+    // FIXME(nsm): I believe the method cache match stuff should be handled
+    // by our CORS handling code.
+    if (aCORSPreflightFlag &&
+        (!mRequest->HasSimpleMethod() || mRequest->Mode() == RequestMode::Cors_with_forced_preflight) &&
+        !mRequest->Headers()->HasOnlySimpleHeaders()) {
+      nsresult rv = BeginCORSPreflight();
+      if (NS_WARN_IF(NS_FAILED(rv))) {
+        return FailWithNetworkError();
+      }
+      return NS_OK;
+    }
     // FIXME(nsm): Set skip SW flag.
     // FIXME(nsm): Deal with CORS flags cases which will also call
     // ContinueHttpFetchAfterCORSPreflight().
@@ -317,7 +346,21 @@ FetchDriver::HttpNetworkFetch()
                           nullptr,
                           ios);
   NS_ENSURE_SUCCESS(rv, rv);
+
   nsCOMPtr<nsIChannel> chan;
+  nsCOMPtr<nsIChannelPolicy> channelPolicy;
+  nsCOMPtr<nsIContentSecurityPolicy> csp;
+  rv = mPrincipal->GetCsp(getter_AddRefs(csp));
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return FailWithNetworkError();
+  }
+
+  if (csp) {
+    channelPolicy = do_CreateInstance("@mozilla.org/nschannelpolicy;1");
+    channelPolicy->SetContentSecurityPolicy(csp);
+    channelPolicy->SetLoadType(mRequest->GetContext());
+  }
+
   rv = NS_NewChannel(getter_AddRefs(chan),
                      uri,
                      mPrincipal,
@@ -325,7 +368,7 @@ FetchDriver::HttpNetworkFetch()
                      mRequest->GetContext(),
                      nullptr, /* FIXME(nsm): loadgroup */
                      nullptr, /* aCallbacks */
-                     nsIRequest::LOAD_NORMAL,
+                     nsIRequest::LOAD_BACKGROUND,
                      ios);
   NS_ENSURE_SUCCESS(rv, rv);
 
@@ -334,7 +377,9 @@ FetchDriver::HttpNetworkFetch()
     nsCString method;
     mRequest->GetMethod(method);
     rv = httpChan->SetRequestMethod(method);
-    NS_ENSURE_SUCCESS(rv, rv);
+    if (NS_WARN_IF(NS_FAILED(rv))) {
+      return FailWithNetworkError();
+    }
 
     nsTArray<InternalHeaders::Entry> headers;
     mRequest->Headers()->GetEntries(headers);
