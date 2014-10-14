@@ -229,7 +229,7 @@ RotatedContentBuffer::DrawTo(PaintedLayer* aLayer,
     // Bug 599189 if there is a non-integer-translation transform in aTarget,
     // we might sample pixels outside GetEffectiveVisibleRegion(), which is wrong
     // and may cause gray lines.
-    gfxUtils::ClipToRegionSnapped(aTarget, aLayer->GetEffectiveVisibleRegion());
+    gfxUtils::ClipToRegion(aTarget, aLayer->GetEffectiveVisibleRegion());
     clipped = true;
   }
 
@@ -695,7 +695,7 @@ RotatedContentBuffer::BeginPaint(PaintedLayer* aLayer,
   nsIntRegion invalidate;
   invalidate.Sub(aLayer->GetValidRegion(), destBufferRect);
   result.mRegionToInvalidate.Or(result.mRegionToInvalidate, invalidate);
-  result.mClip = DrawRegionClip::DRAW_SNAPPED;
+  result.mClip = DrawRegionClip::DRAW;
   result.mMode = mode;
 
   return result;
@@ -727,7 +727,13 @@ RotatedContentBuffer::BorrowDrawTargetForPainting(PaintState& aPaintState,
   }
 
   if (aPaintState.mMode == SurfaceMode::SURFACE_COMPONENT_ALPHA) {
-    MOZ_ASSERT(mDTBuffer && mDTBufferOnWhite);
+    if (!mDTBuffer || !mDTBufferOnWhite) {
+      // This can happen in release builds if allocating one of the two buffers
+      // failed. This is pretty bad and the reason for the failure is already
+      // reported through gfxCriticalError.
+      MOZ_ASSERT(false);
+      return nullptr;
+    }
     nsIntRegionRectIterator iter(*drawPtr);
     const nsIntRect *iterRect;
     while ((iterRect = iter.Next())) {

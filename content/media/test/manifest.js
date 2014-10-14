@@ -251,6 +251,13 @@ var gInvalidTests = [
   { name:"invalid-preskip.webm", type:"audio/webm; codecs=opus"},
 ];
 
+var gInvalidPlayTests = [
+  { name:"invalid-excess_discard.webm", type:"audio/webm; codecs=opus"},
+  { name:"invalid-excess_neg_discard.webm", type:"audio/webm; codecs=opus"},
+  { name:"invalid-neg_discard.webm", type:"audio/webm; codecs=opus"},
+  { name:"invalid-discard_on_multi_blocks.webm", type:"audio/webm; codecs=opus"},
+];
+
 // Files to check different cases of ogg skeleton information.
 // sample-fisbone-skeleton4.ogv
 // - Skeleton v4, w/ Content-Type,Role,Name,Language,Title for both theora/vorbis
@@ -812,11 +819,13 @@ function MediaTestManager() {
       if (this.onFinished) {
         this.onFinished();
       }
-      mediaTestCleanup();
-      var end = new Date();
-      SimpleTest.info("Finished at " + end + " (" + (end.getTime() / 1000) + "s)");
-      SimpleTest.info("Running time: " + (end.getTime() - this.startTime.getTime())/1000 + "s");
-      SimpleTest.finish();
+      var onCleanup = function() {
+        var end = new Date();
+        SimpleTest.info("Finished at " + end + " (" + (end.getTime() / 1000) + "s)");
+        SimpleTest.info("Running time: " + (end.getTime() - this.startTime.getTime())/1000 + "s");
+        SimpleTest.finish();
+      }.bind(this);
+      mediaTestCleanup(onCleanup);
       return;
     }
   }
@@ -825,7 +834,7 @@ function MediaTestManager() {
 // Ensures we've got no active video or audio elements in the document, and
 // forces a GC to release the address space reserved by the decoders' threads'
 // stacks.
-function mediaTestCleanup() {
+function mediaTestCleanup(callback) {
     var V = document.getElementsByTagName("video");
     for (i=0; i<V.length; i++) {
       removeNodeAndSource(V[i]);
@@ -836,7 +845,12 @@ function mediaTestCleanup() {
       removeNodeAndSource(A[i]);
       A[i] = null;
     }
-    SpecialPowers.forceGC();
+    var cb = function() {
+      if (callback) {
+        callback();
+      }
+    }
+    SpecialPowers.exactGC(window, cb);
 }
 
 (function() {

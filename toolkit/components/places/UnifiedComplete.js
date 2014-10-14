@@ -11,7 +11,6 @@
 
 const { classes: Cc, interfaces: Ci, results: Cr, utils: Cu } = Components;
 
-const TOPIC_SHUTDOWN = "places-shutdown";
 const TOPIC_PREFCHANGED = "nsPref:changed";
 
 const DEFAULT_BEHAVIOR = 0;
@@ -629,7 +628,9 @@ Search.prototype = {
   },
 
   /**
-   * Used to cancel this search, will stop providing results.
+   * Cancels this search.
+   * After invoking this method, we won't run any more searches or heuristics,
+   * and no new matches may be added to the current result.
    */
   cancel: function () {
     if (this._sleepTimer)
@@ -711,18 +712,19 @@ Search.prototype = {
       // with an alias - which works like a keyword.
       hasFirstResult = yield this._matchSearchEngineAlias();
     }
-    let shouldAutofill = this._shouldAutofill;
-    if (this.pending && !hasFirstResult && shouldAutofill) {
-      // Or it may look like a URL we know about from search engines.
-      hasFirstResult = yield this._matchSearchEngineUrl();
-    }
 
+    let shouldAutofill = this._shouldAutofill;
     if (this.pending && !hasFirstResult && shouldAutofill) {
       // It may also look like a URL we know from the database.
       // Here we can only try to predict whether the URL autofill query is
       // likely to return a result.  If the prediction ends up being wrong,
       // later we will need to make up for the lack of a special first result.
       hasFirstResult = yield this._matchKnownUrl(conn, queries);
+    }
+
+    if (this.pending && !hasFirstResult && shouldAutofill) {
+      // Or it may look like a URL we know about from search engines.
+      hasFirstResult = yield this._matchSearchEngineUrl();
     }
 
     if (this.pending && this._enableActions && !hasFirstResult) {
@@ -857,11 +859,12 @@ Search.prototype = {
     if (this._searchTokens.length < 2)
       return false;
 
-    let match = yield PlacesSearchAutocompleteProvider.findMatchByAlias(
-                                                         this._searchTokens[0]);
+    let alias = this._searchTokens[0];
+    let match = yield PlacesSearchAutocompleteProvider.findMatchByAlias(alias);
     if (!match)
       return false;
 
+    match.engineAlias = alias;
     let query = this._searchTokens.slice(1).join(" ");
 
     yield this._addSearchEngineMatch(match, query);
@@ -879,11 +882,15 @@ Search.prototype = {
   },
 
   _addSearchEngineMatch: function* (match, query) {
-    let value = makeActionURL("searchengine", {
+    let actionURLParams = {
       engineName: match.engineName,
       input: this._originalSearchString,
       searchQuery: query,
-    });
+    };
+    if (match.engineAlias) {
+      actionURLParams.alias = match.engineAlias;
+    }
+    let value = makeActionURL("searchengine", actionURLParams);
 
     this._addMatch({
       value: value,
@@ -980,6 +987,10 @@ Search.prototype = {
         break;
     }
     this._addMatch(match);
+    // If the search has been canceled by the user or by _addMatch reaching the
+    // maximum number of results, we can stop the underlying Sqlite query.
+    if (!this.pending)
+      throw StopIteration;
   },
 
   _maybeRestyleSearchMatch: function (match) {
@@ -1041,22 +1052,19 @@ Search.prototype = {
                                match.comment,
                                match.icon || PlacesUtils.favicons.defaultFavicon.spec,
                                match.style,
-                               match.finalCompleteValue);
+                               match.finalCompleteValue || "");
       notifyResults = true;
     }
 
     if (this._result.matchCount == 6)
       TelemetryStopwatch.finish(TELEMETRY_6_FIRST_RESULTS);
 
-    if (this._result.matchCount == Prefs.maxRichResults || !this.pending) {
+    if (this._result.matchCount == Prefs.maxRichResults) {
       // We have enough results, so stop running our search.
+      // We don't need to notify results in this case, cause the main promise
+      // chain will do that for us when finishSearch is invoked.
       this.cancel();
-      // This tells Sqlite.jsm to stop providing us results and cancel the
-      // underlying query.
-      throw StopIteration;
-    }
-
-    if (notifyResults) {
+    } else if (notifyResults) {
       // Notify about results if we've gotten them.
       this.notifyResults(true);
     }
@@ -1460,19 +1468,9 @@ Search.prototype = {
 //// component @mozilla.org/autocomplete/search;1?name=unifiedcomplete
 
 function UnifiedComplete() {
-  Services.obs.addObserver(this, TOPIC_SHUTDOWN, true);
 }
 
 UnifiedComplete.prototype = {
-  //////////////////////////////////////////////////////////////////////////////
-  //// nsIObserver
-
-  observe: function (subject, topic, data) {
-    if (topic === TOPIC_SHUTDOWN) {
-      this.ensureShutdown();
-    }
-  },
-
   //////////////////////////////////////////////////////////////////////////////
   //// Database handling
 
@@ -1497,6 +1495,18 @@ UnifiedComplete.prototype = {
           readOnly: true
         });
 
+        try {
+           Sqlite.shutdown.addBlocker("Places UnifiedComplete.js clone closing",
+                                      Task.async(function* () {
+                                        SwitchToTabStorage.shutdown();
+                                        yield conn.close();
+                                      }));
+        } catch (ex) {
+          // It's too late to block shutdown, just close the connection.
+          yield conn.close();
+          throw ex;
+        }
+
         // Autocomplete often fallbacks to a table scan due to lack of text
         // indices.  A larger cache helps reducing IO and improving performance.
         // The value used here is larger than the default Storage value defined
@@ -1510,20 +1520,6 @@ UnifiedComplete.prototype = {
                                        Cu.reportError(ex); });
     }
     return this._promiseDatabase;
-  },
-
-  /**
-   * Used to stop running queries and close the database handle.
-   */
-  ensureShutdown: function () {
-    if (this._promiseDatabase) {
-      Task.spawn(function* () {
-        let conn = yield this.getDatabaseHandle();
-        SwitchToTabStorage.shutdown();
-        yield conn.close()
-      }.bind(this)).then(null, Cu.reportError);
-      this._promiseDatabase = null;
-    }
   },
 
   //////////////////////////////////////////////////////////////////////////////

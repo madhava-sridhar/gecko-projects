@@ -17,6 +17,7 @@ using namespace js::jit;
 
 using mozilla::Abs;
 using mozilla::FloorLog2;
+using mozilla::Swap;
 
 LTableSwitch *
 LIRGeneratorX86Shared::newLTableSwitch(const LAllocation &in, const LDefinition &inputCopy,
@@ -34,7 +35,7 @@ LIRGeneratorX86Shared::newLTableSwitchV(MTableSwitch *tableswitch)
 bool
 LIRGeneratorX86Shared::visitGuardShape(MGuardShape *ins)
 {
-    JS_ASSERT(ins->obj()->type() == MIRType_Object);
+    MOZ_ASSERT(ins->obj()->type() == MIRType_Object);
 
     LGuardShape *guard = new(alloc()) LGuardShape(useRegisterAtStart(ins->obj()));
     if (!assignSnapshot(guard, ins->bailoutKind()))
@@ -47,7 +48,7 @@ LIRGeneratorX86Shared::visitGuardShape(MGuardShape *ins)
 bool
 LIRGeneratorX86Shared::visitGuardObjectType(MGuardObjectType *ins)
 {
-    JS_ASSERT(ins->obj()->type() == MIRType_Object);
+    MOZ_ASSERT(ins->obj()->type() == MIRType_Object);
 
     LGuardObjectType *guard = new(alloc()) LGuardObjectType(useRegisterAtStart(ins->obj()));
     if (!assignSnapshot(guard, Bailout_ObjectIdentityOrTypeGuard))
@@ -61,7 +62,7 @@ bool
 LIRGeneratorX86Shared::visitPowHalf(MPowHalf *ins)
 {
     MDefinition *input = ins->input();
-    JS_ASSERT(input->type() == MIRType_Double);
+    MOZ_ASSERT(input->type() == MIRType_Double);
     LPowHalfD *lir = new(alloc()) LPowHalfD(useRegisterAtStart(input));
     return defineReuseInput(lir, ins, 0);
 }
@@ -105,6 +106,31 @@ LIRGeneratorX86Shared::lowerForFPU(LInstructionHelper<1, 2, 0> *ins, MDefinition
     ins->setOperand(0, useRegisterAtStart(lhs));
     ins->setOperand(1, lhs != rhs ? use(rhs) : useAtStart(rhs));
     return defineReuseInput(ins, mir, 0);
+}
+
+bool
+LIRGeneratorX86Shared::lowerForCompIx4(LSimdBinaryCompIx4 *ins, MSimdBinaryComp *mir, MDefinition *lhs, MDefinition *rhs)
+{
+    return lowerForALU(ins, mir, lhs, rhs);
+}
+
+bool
+LIRGeneratorX86Shared::lowerForCompFx4(LSimdBinaryCompFx4 *ins, MSimdBinaryComp *mir, MDefinition *lhs, MDefinition *rhs)
+{
+    // Swap the operands around to fit the instructions that x86 actually has.
+    // We do this here, before register allocation, so that we don't need
+    // temporaries and copying afterwards.
+    switch (mir->operation()) {
+      case MSimdBinaryComp::greaterThan:
+      case MSimdBinaryComp::greaterThanOrEqual:
+        mir->reverse();
+        Swap(lhs, rhs);
+        break;
+      default:
+        break;
+    }
+
+    return lowerForFPU(ins, mir, lhs, rhs);
 }
 
 bool
@@ -215,7 +241,7 @@ LIRGeneratorX86Shared::visitAsmJSNeg(MAsmJSNeg *ins)
     if (ins->type() == MIRType_Float32)
         return defineReuseInput(new(alloc()) LNegF(useRegisterAtStart(ins->input())), ins, 0);
 
-    JS_ASSERT(ins->type() == MIRType_Double);
+    MOZ_ASSERT(ins->type() == MIRType_Double);
     return defineReuseInput(new(alloc()) LNegD(useRegisterAtStart(ins->input())), ins, 0);
 }
 
@@ -247,12 +273,12 @@ LIRGeneratorX86Shared::lowerUrshD(MUrsh *mir)
     MDefinition *lhs = mir->lhs();
     MDefinition *rhs = mir->rhs();
 
-    JS_ASSERT(lhs->type() == MIRType_Int32);
-    JS_ASSERT(rhs->type() == MIRType_Int32);
-    JS_ASSERT(mir->type() == MIRType_Double);
+    MOZ_ASSERT(lhs->type() == MIRType_Int32);
+    MOZ_ASSERT(rhs->type() == MIRType_Int32);
+    MOZ_ASSERT(mir->type() == MIRType_Double);
 
 #ifdef JS_CODEGEN_X64
-    JS_ASSERT(ecx == rcx);
+    MOZ_ASSERT(ecx == rcx);
 #endif
 
     LUse lhsUse = useRegisterAtStart(lhs);
@@ -294,7 +320,7 @@ bool
 LIRGeneratorX86Shared::lowerTruncateDToInt32(MTruncateToInt32 *ins)
 {
     MDefinition *opd = ins->input();
-    JS_ASSERT(opd->type() == MIRType_Double);
+    MOZ_ASSERT(opd->type() == MIRType_Double);
 
     LDefinition maybeTemp = Assembler::HasSSE3() ? LDefinition::BogusTemp() : tempDouble();
     return define(new(alloc()) LTruncateDToInt32(useRegister(opd), maybeTemp), ins);
@@ -304,7 +330,7 @@ bool
 LIRGeneratorX86Shared::lowerTruncateFToInt32(MTruncateToInt32 *ins)
 {
     MDefinition *opd = ins->input();
-    JS_ASSERT(opd->type() == MIRType_Float32);
+    MOZ_ASSERT(opd->type() == MIRType_Float32);
 
     LDefinition maybeTemp = Assembler::HasSSE3() ? LDefinition::BogusTemp() : tempFloat32();
     return define(new(alloc()) LTruncateFToInt32(useRegister(opd), maybeTemp), ins);

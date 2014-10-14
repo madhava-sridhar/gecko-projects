@@ -27,9 +27,10 @@
 #include "nsIScriptSecurityManager.h"
 #include "nsIJSRuntimeService.h"
 #include "nsIDOMClassInfo.h"
-#include "nsIDOMFile.h"
 #include "xpcpublic.h"
+#include "mozilla/CycleCollectedJSRuntime.h"
 #include "mozilla/Preferences.h"
+#include "mozilla/dom/File.h"
 #include "mozilla/dom/nsIContentParent.h"
 #include "mozilla/dom/PermissionMessageUtils.h"
 #include "mozilla/dom/ScriptSettings.h"
@@ -203,7 +204,7 @@ BuildClonedMessageData(typename BlobTraits<Flavor>::ConcreteContentManagerType* 
   SerializedStructuredCloneBuffer& buffer = aClonedData.data();
   buffer.data = aData.mData;
   buffer.dataLength = aData.mDataLength;
-  const nsTArray<nsCOMPtr<nsIDOMBlob> >& blobs = aData.mClosure.mBlobs;
+  const nsTArray<nsRefPtr<File>>& blobs = aData.mClosure.mBlobs;
   if (!blobs.IsEmpty()) {
     typedef typename BlobTraits<Flavor>::ProtocolType ProtocolType;
     InfallibleTArray<ProtocolType*>& blobList = DataBlobs<Flavor>::Blobs(aClonedData);
@@ -254,8 +255,13 @@ UnpackClonedMessageData(const ClonedMessageData& aData)
       auto* blob =
         static_cast<typename BlobTraits<Flavor>::BlobType*>(blobs[i]);
       MOZ_ASSERT(blob);
-      nsCOMPtr<nsIDOMBlob> domBlob = blob->GetBlob();
-      MOZ_ASSERT(domBlob);
+
+      nsRefPtr<FileImpl> blobImpl = blob->GetBlobImpl();
+      MOZ_ASSERT(blobImpl);
+
+      // This object will be duplicated with a correct parent before being
+      // exposed to JS.
+      nsRefPtr<File> domBlob = new File(nullptr, blobImpl);
       cloneData.mClosure.mBlobs.AppendElement(domBlob);
     }
   }
@@ -1432,8 +1438,8 @@ nsFrameScriptExecutor::LoadFrameScriptInternal(const nsAString& aURL,
     return;
   }
 
-  AutoSafeJSContext cx;
-  JS::Rooted<JSScript*> script(cx);
+  JSRuntime* rt = CycleCollectedJSRuntime::Get()->Runtime();
+  JS::Rooted<JSScript*> script(rt);
 
   nsFrameScriptObjectExecutorHolder* holder = sCachedScripts->Get(aURL);
   if (holder && holder->WillRunInGlobalScope() == aRunInGlobalScope) {
@@ -1446,25 +1452,22 @@ nsFrameScriptExecutor::LoadFrameScriptInternal(const nsAString& aURL,
                                  shouldCache, &script);
   }
 
-  JS::Rooted<JSObject*> global(cx, mGlobal->GetJSObject());
+  JS::Rooted<JSObject*> global(rt, mGlobal->GetJSObject());
   if (global) {
-    JSAutoCompartment ac(cx, global);
-    bool ok = true;
+    AutoEntryScript aes(xpc::NativeGlobal(global));
+    aes.TakeOwnershipOfErrorReporting();
+    JSContext* cx = aes.cx();
     if (script) {
       if (aRunInGlobalScope) {
-        ok = JS::CloneAndExecuteScript(cx, global, script);
+        JS::CloneAndExecuteScript(cx, global, script);
       } else {
         JS::Rooted<JSObject*> scope(cx);
-        ok = js::ExecuteInGlobalAndReturnScope(cx, global, script, &scope);
-        if (ok){
+        bool ok = js::ExecuteInGlobalAndReturnScope(cx, global, script, &scope);
+        if (ok) {
           // Force the scope to stay alive.
           mAnonymousGlobalScopes.AppendElement(scope);
         }
       }
-    }
-
-    if (!ok) {
-      nsJSUtils::ReportPendingException(cx);
     }
   }
 }
@@ -1730,14 +1733,14 @@ public:
       return false;
     }
     InfallibleTArray<mozilla::jsipc::CpowEntry> cpows;
-    if (!cc->GetCPOWManager()->Wrap(aCx, aCpows, &cpows)) {
+    if (aCpows && !cc->GetCPOWManager()->Wrap(aCx, aCpows, &cpows)) {
       return false;
     }
     if (aIsSync) {
       return cc->SendSyncMessage(PromiseFlatString(aMessage), data, cpows,
                                  IPC::Principal(aPrincipal), aJSONRetVal);
     }
-    return cc->CallRpcMessage(PromiseFlatString(aMessage), data, cpows,
+    return cc->SendRpcMessage(PromiseFlatString(aMessage), data, cpows,
                               IPC::Principal(aPrincipal), aJSONRetVal);
   }
 
@@ -1757,7 +1760,7 @@ public:
       return false;
     }
     InfallibleTArray<mozilla::jsipc::CpowEntry> cpows;
-    if (!cc->GetCPOWManager()->Wrap(aCx, aCpows, &cpows)) {
+    if (aCpows && !cc->GetCPOWManager()->Wrap(aCx, aCpows, &cpows)) {
       return false;
     }
     return cc->SendAsyncMessage(PromiseFlatString(aMessage), data, cpows,

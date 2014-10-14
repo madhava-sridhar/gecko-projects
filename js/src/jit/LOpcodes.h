@@ -24,11 +24,14 @@
     _(SimdInsertElementI)           \
     _(SimdInsertElementF)           \
     _(SimdSignMaskX4)               \
+    _(SimdUnaryArithIx4)            \
+    _(SimdUnaryArithFx4)            \
     _(SimdBinaryCompIx4)            \
     _(SimdBinaryCompFx4)            \
     _(SimdBinaryArithIx4)           \
     _(SimdBinaryArithFx4)           \
     _(SimdBinaryBitwiseX4)          \
+    _(SimdShift)                    \
     _(SimdSelect)                   \
     _(Value)                        \
     _(CloneLiteral)                 \

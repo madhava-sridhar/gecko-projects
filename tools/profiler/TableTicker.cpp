@@ -284,6 +284,9 @@ void TableTicker::StreamJSObject(JSStreamWriter& b)
           if (!sRegisteredThreads->at(i)->Profile())
             continue;
 
+          // Note that we intentionally include ThreadProfile which
+          // have been marked for pending delete.
+
           MutexAutoLock lock(*sRegisteredThreads->at(i)->Profile()->GetMutex());
 
           sRegisteredThreads->at(i)->Profile()->StreamJSObject(b);
@@ -543,7 +546,8 @@ void mergeStacksIntoProfile(ThreadProfile& aProfile, TickSample* aSample, Native
 
 #ifdef USE_NS_STACKWALK
 static
-void StackWalkCallback(void* aPC, void* aSP, void* aClosure)
+void StackWalkCallback(uint32_t aFrameNumber, void* aPC, void* aSP,
+                       void* aClosure)
 {
   NativeStack* nativeStack = static_cast<NativeStack*>(aClosure);
   MOZ_ASSERT(nativeStack->count < nativeStack->size);
@@ -567,8 +571,11 @@ void TableTicker::doNativeBacktrace(ThreadProfile &aProfile, TickSample* aSample
     0
   };
 
-  // Start with the current function.
-  StackWalkCallback(aSample->pc, aSample->sp, &nativeStack);
+  // Start with the current function. We use 0 as the frame number here because
+  // the FramePointerStackWalk() and NS_StackWalk() calls below will use 1..N.
+  // This is a bit weird but it doesn't matter because StackWalkCallback()
+  // doesn't use the frame number argument.
+  StackWalkCallback(/* frameNumber */ 0, aSample->pc, aSample->sp, &nativeStack);
 
   uint32_t maxFrames = uint32_t(nativeStack.size - nativeStack.count);
 #ifdef XP_MACOSX

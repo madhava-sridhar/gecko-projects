@@ -5,15 +5,18 @@
 
 package org.mozilla.gecko;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Set;
-
 import org.json.JSONException;
 import org.json.JSONObject;
 import org.mozilla.gecko.AppConstants.Versions;
 import org.mozilla.gecko.mozglue.RobocopTarget;
 import org.mozilla.gecko.mozglue.generatorannotations.WrapElementForJNI;
-
+import android.annotation.TargetApi;
 import android.content.Context;
+import android.net.Uri;
+import android.os.Build;
 import android.os.Bundle;
 import android.os.UserManager;
 import android.util.Log;
@@ -22,7 +25,34 @@ import android.util.Log;
 public class RestrictedProfiles {
     private static final String LOGTAG = "GeckoRestrictedProfiles";
 
-    // These constants should be in sync with the ones from toolkit/components/parentalcontrols/nsIParentalControlServices.java
+    private static Boolean inGuest = null;
+
+    @SuppressWarnings("serial")
+    private static final List<String> BANNED_SCHEMES = new ArrayList<String>() {{
+        add("file");
+        add("chrome");
+        add("resource");
+        add("jar");
+        add("wyciwyg");
+    }};
+
+    private static boolean getInGuest() {
+        if (inGuest == null) {
+            inGuest = GeckoAppShell.getGeckoInterface().getProfile().inGuestMode();
+        }
+
+        return inGuest;
+    }
+
+    @SuppressWarnings("serial")
+    private static final List<String> BANNED_URLS = new ArrayList<String>() {{
+        add("about:config");
+    }};
+
+    /* This is a list of things we can restrict you from doing. Some of these are reflected in Android UserManager constants.
+     * Others are specific to us.
+     * These constants should be in sync with the ones from toolkit/components/parentalcontrols/nsIParentalControlServices.idl
+     */
     public static enum Restriction {
         DISALLOW_DOWNLOADS(1, "no_download_files"),
         DISALLOW_INSTALL_EXTENSIONS(2, "no_install_extensions"),
@@ -43,26 +73,78 @@ public class RestrictedProfiles {
         }
     }
 
-    private static String geckoActionToRestriction(int action) {
+    private static Restriction geckoActionToRestriction(int action) {
         for (Restriction rest : Restriction.values()) {
             if (rest.id == action) {
-                return rest.name;
+                return rest;
             }
         }
 
         throw new IllegalArgumentException("Unknown action " + action);
     }
 
+    @TargetApi(Build.VERSION_CODES.JELLY_BEAN_MR1)
     @RobocopTarget
     private static Bundle getRestrictions() {
         final UserManager mgr = (UserManager) GeckoAppShell.getContext().getSystemService(Context.USER_SERVICE);
         return mgr.getUserRestrictions();
     }
 
+    /**
+     * This method does the system version check for you.
+     *
+     * Returns false if the system doesn't support restrictions,
+     * or the provided value is not present in the set of user
+     * restrictions.
+     *
+     * Returns true otherwise.
+     */
+    private static boolean getRestriction(final String name) {
+        // Early versions don't support restrictions at all,
+        // so no action can be restricted.
+        if (Versions.preJBMR2) {
+            return false;
+        }
+
+        return getRestrictions().getBoolean(name, false);
+    }
+
+    private static boolean canLoadUrl(final String url) {
+        // Null URLs are always permitted.
+        if (url == null) {
+            return true;
+        }
+
+        try {
+            // If we're not in guest mode, and the system restriction isn't in place, everything is allowed.
+            if (!getInGuest() &&
+                !getRestriction(Restriction.DISALLOW_BROWSE_FILES.name)) {
+                return true;
+            }
+        } catch (IllegalArgumentException ex) {
+            Log.i(LOGTAG, "Invalid action", ex);
+        }
+
+        final Uri u = Uri.parse(url);
+        final String scheme = u.getScheme();
+        if (BANNED_SCHEMES.contains(scheme)) {
+            return false;
+        }
+
+        for (String banned : BANNED_URLS) {
+            if (url.startsWith(banned)) {
+                return false;
+            }
+        }
+
+        // TODO: The UserManager should support blacklisting URLs by the device owner.
+        return true;
+    }
+
     @WrapElementForJNI
     public static boolean isUserRestricted() {
-        // Guest mode is supported in all Android versions
-        if (GeckoAppShell.getGeckoInterface().getProfile().inGuestMode()) {
+        // Guest mode is supported in all Android versions.
+        if (getInGuest()) {
             return true;
         }
 
@@ -79,30 +161,33 @@ public class RestrictedProfiles {
 
     @WrapElementForJNI
     public static boolean isAllowed(int action, String url) {
-        // ALl actions are blocked in Guest mode
-        if (GeckoAppShell.getGeckoInterface().getProfile().inGuestMode()) {
+        // Guest users can't do anything.
+        if (getInGuest()) {
             return false;
         }
 
-        if (Versions.preJBMR2) {
-            return true;
-        }
-
+        final Restriction restriction;
         try {
-            // NOTE: Restrictions hold the opposite intention, so we need to flip it
-            final String restriction = geckoActionToRestriction(action);
-            return !getRestrictions().getBoolean(restriction, false);
-        } catch(IllegalArgumentException ex) {
-            Log.i(LOGTAG, "Invalid action", ex);
+            restriction = geckoActionToRestriction(action);
+        } catch (IllegalArgumentException ex) {
+            // Unknown actions represent a coding error, so we
+            // refuse the action and log.
+            Log.e(LOGTAG, "Unknown action " + action + "; check calling code.");
+            return false;
         }
 
-        return true;
+        if (Restriction.DISALLOW_BROWSE_FILES == restriction) {
+            return canLoadUrl(url);
+        }
+
+        // NOTE: Restrictions hold the opposite intention, so we need to flip it.
+        return !getRestriction(restriction.name);
     }
 
     @WrapElementForJNI
     public static String getUserRestrictions() {
         // Guest mode is supported in all Android versions
-        if (GeckoAppShell.getGeckoInterface().getProfile().inGuestMode()) {
+        if (getInGuest()) {
             StringBuilder builder = new StringBuilder("{ ");
 
             for (Restriction restriction : Restriction.values()) {

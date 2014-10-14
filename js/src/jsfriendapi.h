@@ -143,8 +143,9 @@ JS_SetCompartmentPrincipals(JSCompartment *compartment, JSPrincipals *principals
 extern JS_FRIEND_API(JSPrincipals *)
 JS_GetScriptPrincipals(JSScript *script);
 
-extern JS_FRIEND_API(JSPrincipals *)
-JS_GetScriptOriginPrincipals(JSScript *script);
+extern JS_FRIEND_API(bool)
+JS_ScriptHasMutedErrors(JSScript *script);
+
 
 /* Safe to call with input obj == nullptr. Returns non-nullptr iff obj != nullptr. */
 extern JS_FRIEND_API(JSObject *)
@@ -710,7 +711,7 @@ IsCallObject(JSObject *obj);
 inline JSObject *
 GetObjectParent(JSObject *obj)
 {
-    JS_ASSERT(!IsScopeObject(obj));
+    MOZ_ASSERT(!IsScopeObject(obj));
     return reinterpret_cast<shadow::Object*>(obj)->shape->base->parent;
 }
 
@@ -799,7 +800,7 @@ GetObjectPrivate(JSObject *obj)
 inline const JS::Value &
 GetReservedSlot(JSObject *obj, size_t slot)
 {
-    JS_ASSERT(slot < JSCLASS_RESERVED_SLOTS(GetObjectClass(obj)));
+    MOZ_ASSERT(slot < JSCLASS_RESERVED_SLOTS(GetObjectClass(obj)));
     return reinterpret_cast<const shadow::Object *>(obj)->slotRef(slot);
 }
 
@@ -809,7 +810,7 @@ SetReservedSlotWithBarrier(JSObject *obj, size_t slot, const JS::Value &value);
 inline void
 SetReservedSlot(JSObject *obj, size_t slot, const JS::Value &value)
 {
-    JS_ASSERT(slot < JSCLASS_RESERVED_SLOTS(GetObjectClass(obj)));
+    MOZ_ASSERT(slot < JSCLASS_RESERVED_SLOTS(GetObjectClass(obj)));
     shadow::Object *sobj = reinterpret_cast<shadow::Object *>(obj);
     if (sobj->slotRef(slot).isMarkable()
 #ifdef JSGC_GENERATIONAL
@@ -829,7 +830,7 @@ GetObjectSlotSpan(JSObject *obj);
 inline const JS::Value &
 GetObjectSlot(JSObject *obj, size_t slot)
 {
-    JS_ASSERT(slot < GetObjectSlotSpan(obj));
+    MOZ_ASSERT(slot < GetObjectSlotSpan(obj));
     return reinterpret_cast<const shadow::Object *>(obj)->slotRef(slot);
 }
 
@@ -970,7 +971,7 @@ CopyFlatStringChars(char16_t *dest, JSFlatString *s, size_t len)
 }
 
 JS_FRIEND_API(bool)
-GetPropertyNames(JSContext *cx, JSObject *obj, unsigned flags, JS::AutoIdVector *props);
+GetPropertyKeys(JSContext *cx, JSObject *obj, unsigned flags, JS::AutoIdVector *props);
 
 JS_FRIEND_API(bool)
 AppendUnique(JSContext *cx, JS::AutoIdVector &base, JS::AutoIdVector &others);
@@ -1155,6 +1156,10 @@ GetErrorTypeName(JSRuntime *rt, int16_t exnType);
 extern JS_FRIEND_API(unsigned)
 GetEnterCompartmentDepth(JSContext* cx);
 #endif
+
+class RegExpGuard;
+extern JS_FRIEND_API(bool)
+RegExpToSharedNonInline(JSContext *cx, JS::HandleObject regexp, RegExpGuard *shared);
 
 /* Implemented in jswrapper.cpp. */
 typedef enum NukeReferencesToWindow {
@@ -1780,7 +1785,7 @@ const size_t TypedArrayLengthSlot = 1;
 inline void \
 Get ## Type ## ArrayLengthAndData(JSObject *obj, uint32_t *length, type **data) \
 { \
-    JS_ASSERT(GetObjectClass(obj) == detail::Type ## ArrayClassPtr); \
+    MOZ_ASSERT(GetObjectClass(obj) == detail::Type ## ArrayClassPtr); \
     const JS::Value &slot = GetReservedSlot(obj, detail::TypedArrayLengthSlot); \
     *length = mozilla::AssertedCast<uint32_t>(slot.toInt32()); \
     *data = static_cast<type*>(GetObjectPrivate(obj)); \
@@ -1947,39 +1952,32 @@ JS_GetArrayBufferViewByteLength(JSObject *obj);
  */
 
 extern JS_FRIEND_API(uint8_t *)
-JS_GetArrayBufferData(JSObject *obj);
+JS_GetArrayBufferData(JSObject *obj, const JS::AutoCheckCannotGC&);
 extern JS_FRIEND_API(int8_t *)
-JS_GetInt8ArrayData(JSObject *obj);
+JS_GetInt8ArrayData(JSObject *obj, const JS::AutoCheckCannotGC&);
 extern JS_FRIEND_API(uint8_t *)
-JS_GetUint8ArrayData(JSObject *obj);
+JS_GetUint8ArrayData(JSObject *obj, const JS::AutoCheckCannotGC&);
 extern JS_FRIEND_API(uint8_t *)
-JS_GetUint8ClampedArrayData(JSObject *obj);
+JS_GetUint8ClampedArrayData(JSObject *obj, const JS::AutoCheckCannotGC&);
 extern JS_FRIEND_API(int16_t *)
-JS_GetInt16ArrayData(JSObject *obj);
+JS_GetInt16ArrayData(JSObject *obj, const JS::AutoCheckCannotGC&);
 extern JS_FRIEND_API(uint16_t *)
-JS_GetUint16ArrayData(JSObject *obj);
+JS_GetUint16ArrayData(JSObject *obj, const JS::AutoCheckCannotGC&);
 extern JS_FRIEND_API(int32_t *)
-JS_GetInt32ArrayData(JSObject *obj);
+JS_GetInt32ArrayData(JSObject *obj, const JS::AutoCheckCannotGC&);
 extern JS_FRIEND_API(uint32_t *)
-JS_GetUint32ArrayData(JSObject *obj);
+JS_GetUint32ArrayData(JSObject *obj, const JS::AutoCheckCannotGC&);
 extern JS_FRIEND_API(float *)
-JS_GetFloat32ArrayData(JSObject *obj);
+JS_GetFloat32ArrayData(JSObject *obj, const JS::AutoCheckCannotGC&);
 extern JS_FRIEND_API(double *)
-JS_GetFloat64ArrayData(JSObject *obj);
-
-/*
- * Stable versions of the above functions where the buffer remains valid as long
- * as the object is live.
- */
-extern JS_FRIEND_API(uint8_t *)
-JS_GetStableArrayBufferData(JSContext *cx, JS::HandleObject obj);
+JS_GetFloat64ArrayData(JSObject *obj, const JS::AutoCheckCannotGC&);
 
 /*
  * Same as above, but for any kind of ArrayBufferView. Prefer the type-specific
  * versions when possible.
  */
 extern JS_FRIEND_API(void *)
-JS_GetArrayBufferViewData(JSObject *obj);
+JS_GetArrayBufferViewData(JSObject *obj, const JS::AutoCheckCannotGC&);
 
 /*
  * Return the ArrayBuffer underlying an ArrayBufferView. If the buffer has been
@@ -2052,7 +2050,7 @@ JS_GetDataViewByteLength(JSObject *obj);
  * unable to assert when unwrapping should be disallowed.
  */
 JS_FRIEND_API(void *)
-JS_GetDataViewData(JSObject *obj);
+JS_GetDataViewData(JSObject *obj, const JS::AutoCheckCannotGC&);
 
 namespace js {
 
@@ -2406,7 +2404,7 @@ inline int CheckIsParallelNative(JSParallelNative parallelNative);
 static MOZ_ALWAYS_INLINE const JSJitInfo *
 FUNCTION_VALUE_TO_JITINFO(const JS::Value& v)
 {
-    JS_ASSERT(js::GetObjectClass(&v.toObject()) == js::FunctionClassPtr);
+    MOZ_ASSERT(js::GetObjectClass(&v.toObject()) == js::FunctionClassPtr);
     return reinterpret_cast<js::shadow::Function *>(&v.toObject())->jitinfo;
 }
 
@@ -2417,7 +2415,7 @@ static MOZ_ALWAYS_INLINE void
 SET_JITINFO(JSFunction * func, const JSJitInfo *info)
 {
     js::shadow::Function *fun = reinterpret_cast<js::shadow::Function *>(func);
-    JS_ASSERT(!(fun->flags & JS_FUNCTION_INTERPRETED_BIT));
+    MOZ_ASSERT(!(fun->flags & JS_FUNCTION_INTERPRETED_BIT));
     fun->jitinfo = info;
 }
 
@@ -2464,9 +2462,9 @@ bool IdMatchesAtom(jsid id, JSAtom *atom);
 static MOZ_ALWAYS_INLINE jsid
 NON_INTEGER_ATOM_TO_JSID(JSAtom *atom)
 {
-    JS_ASSERT(((size_t)atom & 0x7) == 0);
+    MOZ_ASSERT(((size_t)atom & 0x7) == 0);
     jsid id = JSID_FROM_BITS((size_t)atom);
-    JS_ASSERT(js::detail::IdMatchesAtom(id, atom));
+    MOZ_ASSERT(js::detail::IdMatchesAtom(id, atom));
     return id;
 }
 
@@ -2502,7 +2500,7 @@ IdToValue(jsid id)
         return JS::Int32Value(JSID_TO_INT(id));
     if (JSID_IS_SYMBOL(id))
         return JS::SymbolValue(JSID_TO_SYMBOL(id));
-    JS_ASSERT(JSID_IS_VOID(id));
+    MOZ_ASSERT(JSID_IS_VOID(id));
     return JS::UndefinedValue();
 }
 
@@ -2660,6 +2658,34 @@ ReportErrorWithId(JSContext *cx, const char *msg, JS::HandleId id);
 extern JS_FRIEND_API(bool)
 ExecuteInGlobalAndReturnScope(JSContext *cx, JS::HandleObject obj, JS::HandleScript script,
                               JS::MutableHandleObject scope);
+
+#if defined(XP_WIN) && defined(_WIN64)
+// Parameters use void* types to avoid #including windows.h. The return value of
+// this function is returned from the exception handler.
+typedef long
+(*JitExceptionHandler)(void *exceptionRecord,  // PEXECTION_RECORD
+                       void *context);         // PCONTEXT
+
+// Windows uses "structured exception handling" to handle faults. When a fault
+// occurs, the stack is searched for a handler (similar to C++ exception
+// handling). If the search does not find a handler, the "unhandled exception
+// filter" is called. Breakpad uses the unhandled exception filter to do crash
+// reporting. Unfortunately, on Win64, JIT code on the stack completely throws
+// off this unwinding process and prevents the unhandled exception filter from
+// being called. The reason is that Win64 requires unwind information be
+// registered for all code regions and JIT code has none. While it is possible
+// to register full unwind information for JIT code, this is a lot of work (one
+// has to be able to recover the frame pointer at any PC) so instead we register
+// a handler for all JIT code that simply calls breakpad's unhandled exception
+// filter (which will perform crash reporting and then terminate the process).
+// This would be wrong if there was an outer __try block that expected to handle
+// the fault, but this is not generally allowed.
+//
+// Gecko must call SetJitExceptionFilter before any JIT code is compiled and
+// only once per process.
+extern JS_FRIEND_API(void)
+SetJitExceptionHandler(JitExceptionHandler handler);
+#endif
 
 } /* namespace js */
 

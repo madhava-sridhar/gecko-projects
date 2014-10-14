@@ -29,6 +29,7 @@
 #include "Units.h"
 #include "mozilla/dom/AutocompleteInfoBinding.h"
 #include "mozilla/dom/ScriptSettings.h"
+#include "mozilla/FloatingPoint.h"
 
 #if defined(XP_WIN)
 // Undefine LoadImage to prevent naming conflict with Windows.
@@ -187,6 +188,7 @@ public:
 
   /**
    * Returns the parent node of aChild crossing document boundaries.
+   * Uses the parent node in the composed document.
    */
   static nsINode* GetCrossDocParentNode(nsINode* aChild);
 
@@ -217,7 +219,8 @@ public:
 
   /**
    * Similar to ContentIsDescendantOf except it crosses document boundaries,
-   * also crosses ShadowRoot boundaries from ShadowRoot to its host.
+   * this function uses ancestor/descendant relations in the composed document
+   * (see shadow DOM spec).
    */
   static bool ContentIsCrossDocDescendantOf(nsINode* aPossibleDescendant,
                                               nsINode* aPossibleAncestor);
@@ -787,6 +790,7 @@ public:
     eCOMMON_DIALOG_PROPERTIES,
     eMATHML_PROPERTIES,
     eSECURITY_PROPERTIES,
+    eNECKO_PROPERTIES,
     PropertiesFile_COUNT
   };
   static nsresult ReportToConsole(uint32_t aErrorFlags,
@@ -1673,6 +1677,7 @@ public:
                                     JSObject** aResult);
 
   static nsresult CreateBlobBuffer(JSContext* aCx,
+                                   nsISupports* aParent,
                                    const nsACString& aData,
                                    JS::MutableHandle<JS::Value> aBlob);
 
@@ -2359,7 +2364,7 @@ public:
   if (aIID.Equals(NS_GET_IID(_interface))) {                                  \
     foundInterface = static_cast<_interface *>(_allocator);                   \
     if (!foundInterface) {                                                    \
-      *aInstancePtr = nullptr;                                                 \
+      *aInstancePtr = nullptr;                                                \
       return NS_ERROR_OUT_OF_MEMORY;                                          \
     }                                                                         \
   } else
@@ -2370,27 +2375,27 @@ public:
  * series is not finite.
  */
 #define NS_ENSURE_FINITE(f, rv)                                               \
-  if (!NS_finite(f)) {                                                        \
+  if (!mozilla::IsFinite(f)) {                                                \
     return (rv);                                                              \
   }
 
 #define NS_ENSURE_FINITE2(f1, f2, rv)                                         \
-  if (!NS_finite((f1)+(f2))) {                                                \
+  if (!mozilla::IsFinite((f1)+(f2))) {                                        \
     return (rv);                                                              \
   }
 
 #define NS_ENSURE_FINITE4(f1, f2, f3, f4, rv)                                 \
-  if (!NS_finite((f1)+(f2)+(f3)+(f4))) {                                      \
+  if (!mozilla::IsFinite((f1)+(f2)+(f3)+(f4))) {                              \
     return (rv);                                                              \
   }
 
 #define NS_ENSURE_FINITE5(f1, f2, f3, f4, f5, rv)                             \
-  if (!NS_finite((f1)+(f2)+(f3)+(f4)+(f5))) {                                 \
+  if (!mozilla::IsFinite((f1)+(f2)+(f3)+(f4)+(f5))) {                         \
     return (rv);                                                              \
   }
 
 #define NS_ENSURE_FINITE6(f1, f2, f3, f4, f5, f6, rv)                         \
-  if (!NS_finite((f1)+(f2)+(f3)+(f4)+(f5)+(f6))) {                            \
+  if (!mozilla::IsFinite((f1)+(f2)+(f3)+(f4)+(f5)+(f6))) {                    \
     return (rv);                                                              \
   }
 

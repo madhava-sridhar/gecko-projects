@@ -92,7 +92,10 @@ class LocalVersion(Version):
                 return None
 
         if binary:
-            if not os.path.exists(binary):
+            # on Windows, the binary may be specified with or without the
+            # .exe extension
+            if not os.path.exists(binary) and not os.path.exists(binary +
+                                                                 '.exe'):
                 raise IOError('Binary path does not exist: %s' % binary)
             path = find_location(os.path.dirname(os.path.realpath(binary)))
         else:
@@ -231,8 +234,11 @@ class RemoteB2GVersion(B2GVersion):
                     self._info[desired_props[key]] = value
 
         if self._info.get('device_id', '').lower() == 'flame':
-            self._info['device_firmware_version_base'] = dm._runCmd(
-                ['shell', 'getprop', 't2m.sw.version']).output[0]
+            for prop in ['ro.boot.bootloader', 't2m.sw.version']:
+                value = dm.shellCheckOutput(['getprop', prop])
+                if value:
+                    self._info['device_firmware_version_base'] = value
+                    break
 
 
 def get_version(binary=None, sources=None, dm_type=None, host=None,

@@ -23,7 +23,6 @@
 #include <algorithm>
 #include "BackgroundChild.h"
 #include "GeckoProfiler.h"
-#include "js/OldDebugAPI.h"
 #include "jsfriendapi.h"
 #include "mozilla/ArrayUtils.h"
 #include "mozilla/CycleCollectedJSRuntime.h"
@@ -176,9 +175,6 @@ uint32_t gMaxWorkersPerDomain = MAX_WORKERS_PER_DOMAIN;
 // Does not hold an owning reference.
 RuntimeService* gRuntimeService = nullptr;
 
-// Only non-null during the call to Init.
-RuntimeService* gRuntimeServiceDuringInit = nullptr;
-
 #ifdef ENABLE_TESTS
 bool gTestPBackground = false;
 #endif // ENABLE_TESTS
@@ -328,7 +324,7 @@ LoadRuntimeOptions(const char* aPrefName, void* /* aClosure */)
   AssertIsOnMainThread();
 
   RuntimeService* rts = RuntimeService::GetService();
-  if (!rts && !gRuntimeServiceDuringInit) {
+  if (!rts) {
     // May be shutting down, just bail.
     return;
   }
@@ -389,7 +385,7 @@ LoadGCZealOptions(const char* /* aPrefName */, void* /* aClosure */)
   AssertIsOnMainThread();
 
   RuntimeService* rts = RuntimeService::GetService();
-  if (!rts && !gRuntimeServiceDuringInit) {
+  if (!rts) {
     // May be shutting down, just bail.
     return;
   }
@@ -452,7 +448,7 @@ LoadJSGCMemoryOptions(const char* aPrefName, void* /* aClosure */)
 
   RuntimeService* rts = RuntimeService::GetService();
 
-  if (!rts && !gRuntimeServiceDuringInit) {
+  if (!rts) {
     // May be shutting down, just bail.
     return;
   }
@@ -847,6 +843,16 @@ CreateJSContextForWorker(WorkerPrivate* aWorkerPrivate, JSRuntime* aRuntime)
   return workerCx;
 }
 
+static bool
+PreserveWrapper(JSContext *cx, JSObject *obj)
+{
+    MOZ_ASSERT(cx);
+    MOZ_ASSERT(obj);
+    MOZ_ASSERT(mozilla::dom::IsDOMObject(obj));
+
+    return mozilla::dom::TryPreserveWrapper(obj);
+}
+
 class WorkerJSRuntime : public mozilla::CycleCollectedJSRuntime
 {
 public:
@@ -858,6 +864,7 @@ public:
                               WORKER_DEFAULT_NURSERY_SIZE),
     mWorkerPrivate(aWorkerPrivate)
   {
+    js::SetPreserveWrapperCallback(Runtime(), PreserveWrapper);
     JS_InitDestroyPrincipalsCallback(Runtime(), DestroyWorkerPrincipals);
   }
 
@@ -1401,19 +1408,18 @@ RuntimeService::GetOrCreateService()
   AssertIsOnMainThread();
 
   if (!gRuntimeService) {
-    nsRefPtr<RuntimeService> service = new RuntimeService();
-    if (NS_FAILED(service->Init())) {
+    // The observer service now owns us until shutdown.
+    gRuntimeService = new RuntimeService();
+    if (NS_FAILED(gRuntimeService->Init())) {
       NS_WARNING("Failed to initialize!");
-      service->Cleanup();
+      gRuntimeService->Cleanup();
+      gRuntimeService = nullptr;
       return nullptr;
     }
 
 #ifdef ENABLE_TESTS
     gTestPBackground = mozilla::Preferences::GetBool("pbackground.testing", false);
 #endif // ENABLE_TESTS
-
-    // The observer service now owns us until shutdown.
-    gRuntimeService = service;
   }
 
   return gRuntimeService;
@@ -1828,9 +1834,6 @@ RuntimeService::Init()
     NS_WARNING("Failed to register for offline notification event!");
   }
 
-  NS_ASSERTION(!gRuntimeServiceDuringInit, "This should be null!");
-  gRuntimeServiceDuringInit = this;
-
   if (NS_FAILED(Preferences::RegisterCallback(
                                  LoadJSGCMemoryOptions,
                                  PREF_JS_OPTIONS_PREFIX PREF_MEM_OPTIONS_PREFIX,
@@ -1891,9 +1894,6 @@ RuntimeService::Init()
                                                  nullptr))) {
     NS_WARNING("Failed to register pref callbacks!");
   }
-
-  NS_ASSERTION(gRuntimeServiceDuringInit == this, "Should be 'this'!");
-  gRuntimeServiceDuringInit = nullptr;
 
   // We assume atomic 32bit reads/writes. If this assumption doesn't hold on
   // some wacky platform then the worst that could happen is that the close
@@ -2216,7 +2216,7 @@ RuntimeService::CancelWorkersForWindow(nsPIDOMWindow* aWindow)
     for (uint32_t index = 0; index < workers.Length(); index++) {
       WorkerPrivate*& worker = workers[index];
 
-      if (worker->IsSharedWorker()) {
+      if (worker->IsSharedWorker() || worker->IsServiceWorker()) {
         worker->CloseSharedWorkersForWindow(aWindow);
       } else if (!worker->Cancel(cx)) {
         JS_ReportPendingException(cx);
@@ -2609,6 +2609,12 @@ RuntimeService::Observe(nsISupports* aSubject, const char* aTopic,
   }
   if (!strcmp(aTopic, NS_IOSERVICE_OFFLINE_STATUS_TOPIC)) {
     SendOfflineStatusChangeEventToAllWorkers(NS_IsOffline());
+    return NS_OK;
+  }
+  if (!strcmp(aTopic, NS_IOSERVICE_APP_OFFLINE_STATUS_TOPIC)) {
+    BROADCAST_ALL_WORKERS(OfflineStatusChangeEvent,
+                          NS_IsOffline() ||
+                          NS_IsAppOffline(workers[index]->GetPrincipal()));
     return NS_OK;
   }
 

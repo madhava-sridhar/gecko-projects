@@ -186,6 +186,7 @@ class JitRuntime
 
     // Thunk that calls the GC pre barrier.
     JitCode *valuePreBarrier_;
+    JitCode *stringPreBarrier_;
     JitCode *shapePreBarrier_;
     JitCode *typeObjectPreBarrier_;
 
@@ -274,12 +275,12 @@ class JitRuntime
     }
 
     ExecutableAllocator *getIonAlloc(JSContext *cx) {
-        JS_ASSERT(cx->runtime()->currentThreadOwnsInterruptLock());
+        MOZ_ASSERT(cx->runtime()->currentThreadOwnsInterruptLock());
         return ionAlloc_ ? ionAlloc_ : createIonAlloc(cx);
     }
 
     ExecutableAllocator *ionAlloc(JSRuntime *rt) {
-        JS_ASSERT(rt->currentThreadOwnsInterruptLock());
+        MOZ_ASSERT(rt->currentThreadOwnsInterruptLock());
         return ionAlloc_;
     }
 
@@ -359,6 +360,7 @@ class JitRuntime
     JitCode *preBarrier(MIRType type) const {
         switch (type) {
           case MIRType_Value: return valuePreBarrier_;
+          case MIRType_String: return stringPreBarrier_;
           case MIRType_Shape: return shapePreBarrier_;
           case MIRType_TypeObject: return typeObjectPreBarrier_;
           default: MOZ_CRASH();
@@ -391,8 +393,8 @@ class JitRuntime
         return v;
     }
     void setIonReturnOverride(const js::Value &v) {
-        JS_ASSERT(!hasIonReturnOverride());
-        JS_ASSERT(!v.isMagic());
+        MOZ_ASSERT(!hasIonReturnOverride());
+        MOZ_ASSERT(!v.isMagic());
         ionReturnOverride_ = v;
     }
 
@@ -401,7 +403,7 @@ class JitRuntime
     }
 
     JitcodeGlobalTable *getJitcodeGlobalTable() {
-        JS_ASSERT(hasJitcodeGlobalTable());
+        MOZ_ASSERT(hasJitcodeGlobalTable());
         return jitcodeGlobalTable_;
     }
 
@@ -439,13 +441,16 @@ class JitCompartment
     void *baselineGetPropReturnAddr_;
     void *baselineSetPropReturnAddr_;
 
-    // Stub to concatenate two strings inline. Note that it can't be
-    // stored in JitRuntime because masm.newGCString bakes in zone-specific
-    // pointers. These are weak pointers, but are not declared as ReadBarriered
-    // since they are only read from during Ion compilation, which may occur
-    // off thread and whose barriers are captured during CodeGenerator::link.
+    // Stubs to concatenate two strings inline, or perform RegExp calls inline.
+    // These bake in zone and compartment specific pointers and can't be stored
+    // in JitRuntime. These are weak pointers, but are not declared as
+    // ReadBarriered since they are only read from during Ion compilation,
+    // which may occur off thread and whose barriers are captured during
+    // CodeGenerator::link.
     JitCode *stringConcatStub_;
     JitCode *parallelStringConcatStub_;
+    JitCode *regExpExecStub_;
+    JitCode *regExpTestStub_;
 
     // Set of JSScripts invoked by ForkJoin (i.e. the entry script). These
     // scripts are marked if their respective parallel IonScripts' age is less
@@ -454,6 +459,8 @@ class JitCompartment
     ScriptSet *activeParallelEntryScripts_;
 
     JitCode *generateStringConcatStub(JSContext *cx, ExecutionMode mode);
+    JitCode *generateRegExpExecStub(JSContext *cx);
+    JitCode *generateRegExpTestStub(JSContext *cx);
 
   public:
     JitCode *getStubCode(uint32_t key) {
@@ -466,39 +473,39 @@ class JitCompartment
         // Make sure to do a lookupForAdd(key) and then insert into that slot, because
         // that way if stubCode gets moved due to a GC caused by lookupForAdd, then
         // we still write the correct pointer.
-        JS_ASSERT(!stubCodes_->has(key));
+        MOZ_ASSERT(!stubCodes_->has(key));
         ICStubCodeMap::AddPtr p = stubCodes_->lookupForAdd(key);
         return stubCodes_->add(p, key, stubCode.get());
     }
     void initBaselineCallReturnAddr(void *addr) {
-        JS_ASSERT(baselineCallReturnAddr_ == nullptr);
+        MOZ_ASSERT(baselineCallReturnAddr_ == nullptr);
         baselineCallReturnAddr_ = addr;
     }
     void *baselineCallReturnAddr() {
-        JS_ASSERT(baselineCallReturnAddr_ != nullptr);
+        MOZ_ASSERT(baselineCallReturnAddr_ != nullptr);
         return baselineCallReturnAddr_;
     }
     void initBaselineGetPropReturnAddr(void *addr) {
-        JS_ASSERT(baselineGetPropReturnAddr_ == nullptr);
+        MOZ_ASSERT(baselineGetPropReturnAddr_ == nullptr);
         baselineGetPropReturnAddr_ = addr;
     }
     void *baselineGetPropReturnAddr() {
-        JS_ASSERT(baselineGetPropReturnAddr_ != nullptr);
+        MOZ_ASSERT(baselineGetPropReturnAddr_ != nullptr);
         return baselineGetPropReturnAddr_;
     }
     void initBaselineSetPropReturnAddr(void *addr) {
-        JS_ASSERT(baselineSetPropReturnAddr_ == nullptr);
+        MOZ_ASSERT(baselineSetPropReturnAddr_ == nullptr);
         baselineSetPropReturnAddr_ = addr;
     }
     void *baselineSetPropReturnAddr() {
-        JS_ASSERT(baselineSetPropReturnAddr_ != nullptr);
+        MOZ_ASSERT(baselineSetPropReturnAddr_ != nullptr);
         return baselineSetPropReturnAddr_;
     }
 
     bool notifyOfActiveParallelEntryScript(JSContext *cx, HandleScript script);
     bool hasRecentParallelActivity() const;
 
-    void toggleBaselineStubBarriers(bool enabled);
+    void toggleBarriers(bool enabled);
 
     ExecutableAllocator *createIonAlloc();
 
@@ -520,6 +527,28 @@ class JitCompartment
           case ParallelExecution:   return parallelStringConcatStub_;
           default:                  MOZ_CRASH("No such execution mode");
         }
+    }
+
+    JitCode *regExpExecStubNoBarrier() const {
+        return regExpExecStub_;
+    }
+
+    bool ensureRegExpExecStubExists(JSContext *cx) {
+        if (regExpExecStub_)
+            return true;
+        regExpExecStub_ = generateRegExpExecStub(cx);
+        return regExpExecStub_ != nullptr;
+    }
+
+    JitCode *regExpTestStubNoBarrier() const {
+        return regExpTestStub_;
+    }
+
+    bool ensureRegExpTestStubExists(JSContext *cx) {
+        if (regExpTestStub_)
+            return true;
+        regExpTestStub_ = generateRegExpTestStub(cx);
+        return regExpTestStub_ != nullptr;
     }
 };
 

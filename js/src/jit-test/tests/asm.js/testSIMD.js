@@ -24,11 +24,14 @@ const INT32_MIN = INT32_MAX + 1 | 0;
 
 const assertEqFFI = {assertEq:assertEq};
 
-function assertEqX4(real, expected) {
-    assertEq(real.x, expected[0]);
-    assertEq(real.y, expected[1]);
-    assertEq(real.z, expected[2]);
-    assertEq(real.w, expected[3]);
+function assertEqX4(real, expected, assertFunc) {
+    if (typeof assertFunc === 'undefined')
+        assertFunc = assertEq;
+
+    assertFunc(real.x, expected[0]);
+    assertFunc(real.y, expected[1]);
+    assertFunc(real.z, expected[2]);
+    assertFunc(real.w, expected[3]);
 }
 
 function CheckI4(header, code, expected) {
@@ -444,6 +447,68 @@ CheckF4(F32M, 'var x=f4(1,2,3,4); var y=f4(4,3,5,2); x=f4m(x,y)', [4,6,15,8]);
 CheckF4(F32M, 'var x=f4(13.37,2,3,4); var y=f4(4,3,5,2); x=f4m(x,y)', [Math.fround(13.37) * 4,6,15,8]);
 CheckF4(F32M, 'var x=f4(13.37,2,3,4); var y=f4(4,3,5,2); x=f4(f4m(x,y))', [Math.fround(13.37) * 4,6,15,8]);
 
+// Unary arithmetic operators
+function CheckUnaryF4(op, checkFunc, assertFunc) {
+    var _ = asmLink(asmCompile('glob', USE_ASM + F32 + 'var op=f4.' + op + '; function f(x){x=f4(x); return f4(op(x)); } return f'), this);
+    return function(input) {
+        var simd = SIMD.float32x4(input[0], input[1], input[2], input[3]);
+
+        var exp = input.map(Math.fround).map(checkFunc).map(Math.fround);
+        var obs = _(simd);
+        assertEqX4(obs, exp, assertFunc);
+    }
+}
+
+function CheckUnaryI4(op, checkFunc) {
+    var _ = asmLink(asmCompile('glob', USE_ASM + I32 + 'var op=i4.' + op + '; function f(x){x=i4(x); return i4(op(x)); } return f'), this);
+    return function(input) {
+        var simd = SIMD.int32x4(input[0], input[1], input[2], input[3]);
+        assertEqX4(_(simd), input.map(checkFunc).map(function(x) { return x | 0}));
+    }
+}
+
+CheckUnaryI4('neg', function(x) { return -x })([1, -2, INT32_MIN, INT32_MAX]);
+CheckUnaryI4('not', function(x) { return ~x })([1, -2, INT32_MIN, INT32_MAX]);
+
+var CheckAbs = CheckUnaryF4('abs', Math.abs);
+CheckAbs([1, 42.42, 0.63, 13.37]);
+CheckAbs([NaN, -Infinity, Infinity, 0]);
+
+var CheckNegF = CheckUnaryF4('neg', function(x) { return -x });
+CheckNegF([1, 42.42, 0.63, 13.37]);
+CheckNegF([NaN, -Infinity, Infinity, 0]);
+
+var CheckNotF = CheckUnaryF4('not', (function() {
+    var f32 = new Float32Array(1);
+    var i32 = new Int32Array(f32.buffer);
+    return function(x) {
+        f32[0] = x;
+        i32[0] = ~i32[0];
+        return f32[0];
+    }
+})());
+CheckNotF([1, 42.42, 0.63, 13.37]);
+CheckNotF([NaN, -Infinity, Infinity, 0]);
+
+var CheckSqrt = CheckUnaryF4('sqrt', function(x) { return Math.sqrt(x); });
+CheckSqrt([1, 42.42, 0.63, 13.37]);
+CheckSqrt([NaN, -Infinity, Infinity, 0]);
+
+// Reciprocal and reciprocalSqrt give approximate results
+function assertNear(a, b) {
+    if (a !== a && b === b)
+        throw 'Observed NaN, expected ' + b;
+    if (Math.abs(a - b) > 1e-3)
+        throw 'More than 1e-3 between ' + a + ' and ' + b;
+}
+var CheckRecp = CheckUnaryF4('reciprocal', function(x) { return 1 / x; }, assertNear);
+CheckRecp([1, 42.42, 0.63, 13.37]);
+CheckRecp([NaN, -Infinity, Infinity, 0]);
+
+var CheckRecp = CheckUnaryF4('reciprocalSqrt', function(x) { return 1 / Math.sqrt(x); }, assertNear);
+CheckRecp([1, 42.42, 0.63, 13.37]);
+CheckRecp([NaN, -Infinity, Infinity, 0]);
+
 // Min/Max
 assertAsmTypeFail('glob', USE_ASM + I32 + "var f4m=i4.min; function f() {} return f");
 assertAsmTypeFail('glob', USE_ASM + I32 + "var f4d=i4.max; function f() {} return f");
@@ -515,9 +580,9 @@ assertAsmTypeFail('glob', USE_ASM + I32 + "var lt=i4.lessThanOrEqual; function f
 assertAsmTypeFail('glob', USE_ASM + I32 + "var ge=i4.greaterThanOrEqual; function f() {} return f");
 assertAsmTypeFail('glob', USE_ASM + I32 + "var ne=i4.notEqual; function f() {} return f");
 
-const LTI32 = 'var lt = i4.lessThan';
-const GTI32 = 'var gt = i4.greaterThan';
-const EQI32 = 'var eq = i4.equal';
+const LTI32 = 'var lt = i4.lessThan;';
+const GTI32 = 'var gt = i4.greaterThan;';
+const EQI32 = 'var eq = i4.equal;';
 
 CheckI4(LTI32, 'var x=i4(1,2,3,4); var y=i4(-1,1,0,2); x=lt(x,y)', [F, F, F, F]);
 CheckI4(LTI32, 'var x=i4(-1,1,0,2); var y=i4(1,2,3,4); x=lt(x,y)', [T, T, T, T]);
@@ -531,38 +596,44 @@ CheckI4(GTI32, 'var x=i4(1,2,3,4); var y=i4(-1,1,0,2); x=gt(x,y)', [T, T, T, T])
 CheckI4(GTI32, 'var x=i4(-1,1,0,2); var y=i4(1,2,3,4); x=gt(x,y)', [F, F, F, F]);
 CheckI4(GTI32, 'var x=i4(1,0,3,4); var y=i4(1,1,7,0); x=gt(x,y)', [F, F, F, T]);
 
-const LTF32 = 'var lt=f4.lessThan';
-const LEF32 = 'var le=f4.lessThanOrEqual';
-const GTF32 = 'var gt=f4.greaterThan';
-const GEF32 = 'var ge=f4.greaterThanOrEqual';
-const EQF32 = 'var eq=f4.equal';
-const NEF32 = 'var ne=f4.notEqual';
+const LTF32 = 'var lt=f4.lessThan;';
+const LEF32 = 'var le=f4.lessThanOrEqual;';
+const GTF32 = 'var gt=f4.greaterThan;';
+const GEF32 = 'var ge=f4.greaterThanOrEqual;';
+const EQF32 = 'var eq=f4.equal;';
+const NEF32 = 'var ne=f4.notEqual;';
 
 assertAsmTypeFail('glob', USE_ASM + F32 + "var lt=f4.lessThan; function f() {var x=f4(1,2,3,4); var y=f4(5,6,7,8); x=lt(x,y);} return f");
 
 CheckF4Comp(LTF32, 'var y=f4(1,2,3,4);  var z=f4(-1,1,0,2); var x=i4(0,0,0,0); x=lt(y,z)', [F, F, F, F]);
 CheckF4Comp(LTF32, 'var y=f4(-1,1,0,2); var z=f4(1,2,3,4);  var x=i4(0,0,0,0); x=lt(y,z)', [T, T, T, T]);
 CheckF4Comp(LTF32, 'var y=f4(1,0,3,4);  var z=f4(1,1,7,0);  var x=i4(0,0,0,0); x=lt(y,z)', [F, T, T, F]);
+CheckF4Comp(LTF32 + 'const nan = glob.NaN; const fround=glob.Math.fround', 'var y=f4(0,0,0,0); var z=f4(0,0,0,0); var x=i4(0,0,0,0); y=f4(fround(0.0),fround(-0.0),fround(0.0),fround(nan)); z=f4(fround(-0.0),fround(0.0),fround(nan),fround(0.0)); x=lt(y,z);', [F, F, F, F]);
 
 CheckF4Comp(LEF32, 'var y=f4(1,2,3,4);  var z=f4(-1,1,0,2); var x=i4(0,0,0,0); x=le(y,z)', [F, F, F, F]);
 CheckF4Comp(LEF32, 'var y=f4(-1,1,0,2); var z=f4(1,2,3,4);  var x=i4(0,0,0,0); x=le(y,z)', [T, T, T, T]);
 CheckF4Comp(LEF32, 'var y=f4(1,0,3,4);  var z=f4(1,1,7,0);  var x=i4(0,0,0,0); x=le(y,z)', [T, T, T, F]);
+CheckF4Comp(LEF32 + 'const nan = glob.NaN; const fround=glob.Math.fround', 'var y=f4(0,0,0,0); var z=f4(0,0,0,0); var x=i4(0,0,0,0); y=f4(fround(0.0),fround(-0.0),fround(0.0),fround(nan)); z=f4(fround(-0.0),fround(0.0),fround(nan),fround(0.0)); x=le(y,z);', [T, T, F, F]);
 
 CheckF4Comp(EQF32, 'var y=f4(1,2,3,4);  var z=f4(-1,1,0,2); var x=i4(0,0,0,0); x=eq(y,z)', [F, F, F, F]);
 CheckF4Comp(EQF32, 'var y=f4(-1,1,0,2); var z=f4(1,2,3,4);  var x=i4(0,0,0,0); x=eq(y,z)', [F, F, F, F]);
 CheckF4Comp(EQF32, 'var y=f4(1,0,3,4);  var z=f4(1,1,7,0);  var x=i4(0,0,0,0); x=eq(y,z)', [T, F, F, F]);
+CheckF4Comp(EQF32 + 'const nan = glob.NaN; const fround=glob.Math.fround', 'var y=f4(0,0,0,0); var z=f4(0,0,0,0); var x=i4(0,0,0,0); y=f4(fround(0.0),fround(-0.0),fround(0.0),fround(nan)); z=f4(fround(-0.0),fround(0.0),fround(nan),fround(0.0)); x=eq(y,z);', [T, T, F, F]);
 
 CheckF4Comp(NEF32, 'var y=f4(1,2,3,4);  var z=f4(-1,1,0,2); var x=i4(0,0,0,0); x=ne(y,z)', [T, T, T, T]);
 CheckF4Comp(NEF32, 'var y=f4(-1,1,0,2); var z=f4(1,2,3,4);  var x=i4(0,0,0,0); x=ne(y,z)', [T, T, T, T]);
 CheckF4Comp(NEF32, 'var y=f4(1,0,3,4);  var z=f4(1,1,7,0);  var x=i4(0,0,0,0); x=ne(y,z)', [F, T, T, T]);
+CheckF4Comp(NEF32 + 'const nan = glob.NaN; const fround=glob.Math.fround', 'var y=f4(0,0,0,0); var z=f4(0,0,0,0); var x=i4(0,0,0,0); y=f4(fround(0.0),fround(-0.0),fround(0.0),fround(nan)); z=f4(fround(-0.0),fround(0.0),fround(nan),fround(0.0)); x=ne(y,z);', [F, F, T, T]);
 
 CheckF4Comp(GTF32, 'var y=f4(1,2,3,4);  var z=f4(-1,1,0,2); var x=i4(0,0,0,0); x=gt(y,z)', [T, T, T, T]);
 CheckF4Comp(GTF32, 'var y=f4(-1,1,0,2); var z=f4(1,2,3,4);  var x=i4(0,0,0,0); x=gt(y,z)', [F, F, F, F]);
 CheckF4Comp(GTF32, 'var y=f4(1,0,3,4);  var z=f4(1,1,7,0);  var x=i4(0,0,0,0); x=gt(y,z)', [F, F, F, T]);
+CheckF4Comp(GTF32 + 'const nan = glob.NaN; const fround=glob.Math.fround', 'var y=f4(0,0,0,0); var z=f4(0,0,0,0); var x=i4(0,0,0,0); y=f4(fround(0.0),fround(-0.0),fround(0.0),fround(nan)); z=f4(fround(-0.0),fround(0.0),fround(nan),fround(0.0)); x=gt(y,z);', [F, F, F, F]);
 
 CheckF4Comp(GEF32, 'var y=f4(1,2,3,4);  var z=f4(-1,1,0,2); var x=i4(0,0,0,0); x=ge(y,z)', [T, T, T, T]);
 CheckF4Comp(GEF32, 'var y=f4(-1,1,0,2); var z=f4(1,2,3,4);  var x=i4(0,0,0,0); x=ge(y,z)', [F, F, F, F]);
 CheckF4Comp(GEF32, 'var y=f4(1,0,3,4);  var z=f4(1,1,7,0);  var x=i4(0,0,0,0); x=ge(y,z)', [T, F, F, T]);
+CheckF4Comp(GEF32 + 'const nan = glob.NaN; const fround=glob.Math.fround', 'var y=f4(0,0,0,0); var z=f4(0,0,0,0); var x=i4(0,0,0,0); y=f4(fround(0.0),fround(-0.0),fround(0.0),fround(nan)); z=f4(fround(-0.0),fround(0.0),fround(nan),fround(0.0)); x=ge(y,z);', [T, T, F, F]);
 
 // Conversions operators
 const CVTIF = 'var cvt=f4.fromInt32x4;';
@@ -665,11 +736,45 @@ CheckF4(ANDF32, 'var x=f4(42, 13.37,-1.42, 23.10); var y=f4(19.89, 2.4, 8.15, 16
 CheckF4(ORF32,  'var x=f4(42, 13.37,-1.42, 23.10); var y=f4(19.89, 2.4, 8.15, 16.36); x=orr(x,y)',  bitwise.or( [42, 13.37, -1.42, 23.10], [19.89, 2.4, 8.15, 16.36]));
 CheckF4(XORF32, 'var x=f4(42, 13.37,-1.42, 23.10); var y=f4(19.89, 2.4, 8.15, 16.36); x=xorr(x,y)', bitwise.xor([42, 13.37, -1.42, 23.10], [19.89, 2.4, 8.15, 16.36]));
 
+// Logical ops
+const LSHI = 'var lsh=i4.shiftLeft;'
+const RSHI = 'var rsh=i4.shiftRight;'
+const URSHI = 'var ursh=i4.shiftRightLogical;'
+
+assertAsmTypeFail('glob', USE_ASM + I32 + F32 + FROUND + LSHI + "function f() {var x=f4(1,2,3,4); return i4(lsh(x,f32(42)));} return f");
+assertAsmTypeFail('glob', USE_ASM + I32 + F32 + FROUND + LSHI + "function f() {var x=f4(1,2,3,4); return i4(lsh(x,42));} return f");
+assertAsmTypeFail('glob', USE_ASM + I32 + FROUND + LSHI + "function f() {var x=i4(1,2,3,4); return i4(lsh(x,42.0));} return f");
+assertAsmTypeFail('glob', USE_ASM + I32 + FROUND + LSHI + "function f() {var x=i4(1,2,3,4); return i4(lsh(x,f32(42)));} return f");
+
+var input = 'i4(0, 1, ' + INT32_MIN + ', ' + INT32_MAX + ')';
+var vinput = [0, 1, INT32_MIN, INT32_MAX];
+
+// TODO: What to do for masks > 31? Should we keep only the five low bits of
+// the mask (JS) or not (x86)?
+// Behave as x86 for now, fix when more broadly specified. See also bug 1068028
+function Lsh(i) {  if (i > 31) return () => 0; return function(x) { return (x << i) | 0 } }
+function Rsh(i) {  if (i > 31) return (x) => (x<0)?-1:0; return function(x) { return (x >> i) | 0 } }
+function Ursh(i) { if (i > 31) return () => 0; return function(x) { return (x >>> i) | 0 } }
+
+var asmLsh = asmLink(asmCompile('glob', USE_ASM + I32 + LSHI + 'function f(x, y){x=x|0;y=y|0; var v=' + input + ';return i4(lsh(v, x+y))} return f;'), this)
+var asmRsh = asmLink(asmCompile('glob', USE_ASM + I32 + RSHI + 'function f(x, y){x=x|0;y=y|0; var v=' + input + ';return i4(rsh(v, x+y))} return f;'), this)
+var asmUrsh = asmLink(asmCompile('glob', USE_ASM + I32 + URSHI + 'function f(x, y){x=x|0;y=y|0; var v=' + input + ';return i4(ursh(v, x+y))} return f;'), this)
+
+for (var i = 1; i < 64; i++) {
+    CheckI4(LSHI,  'var x=' + input + '; x=lsh(x, ' + i + ')',   vinput.map(Lsh(i)));
+    CheckI4(RSHI,  'var x=' + input + '; x=rsh(x, ' + i + ')',   vinput.map(Rsh(i)));
+    CheckI4(URSHI, 'var x=' + input + '; x=ursh(x, ' + i + ')',  vinput.map(Ursh(i)));
+
+    assertEqX4(asmLsh(i, 3),  vinput.map(Lsh(i + 3)));
+    assertEqX4(asmRsh(i, 3),  vinput.map(Rsh(i + 3)));
+    assertEqX4(asmUrsh(i, 3), vinput.map(Ursh(i + 3)));
+}
+
 // Select
 const I32SEL = 'var i4sel = i4.select;'
 const F32SEL = 'var f4sel = f4.select;'
 
-assertAsmTypeFail('glob', USE_ASM + F32 + I32SEL + "function f() {var m=f4(1,2,3,4); return i4(i4sel(x,x,x));} return f");
+assertAsmTypeFail('glob', USE_ASM + F32 + I32SEL + "function f() {var x=f4(1,2,3,4); return i4(i4sel(x,x,x));} return f");
 assertAsmTypeFail('glob', USE_ASM + I32 + F32 + I32SEL + "function f() {var m=f4(1,2,3,4); var x=i4(1,2,3,4); return i4(i4sel(m,x,x));} return f");
 assertAsmTypeFail('glob', USE_ASM + I32 + F32 + I32SEL + "function f() {var m=f4(1,2,3,4); var x=f4(1,2,3,4); return i4(i4sel(m,x,x));} return f");
 assertAsmTypeFail('glob', USE_ASM + I32 + F32 + I32SEL + "function f() {var m=i4(1,2,3,4); var x=f4(1,2,3,4); return i4(i4sel(m,x,x));} return f");

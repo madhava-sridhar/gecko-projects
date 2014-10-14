@@ -29,7 +29,7 @@ Response implements Body;
 dictionary ResponseInit {
   unsigned short status = 200;
   // WebIDL spec doesn't allow default values for ByteString.
-  ByteString statusText; // = "OK";
+  ByteString statusText;
   HeadersInit headers;
 };
 

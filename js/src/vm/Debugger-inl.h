@@ -14,6 +14,7 @@
 inline bool
 js::Debugger::onLeaveFrame(JSContext *cx, AbstractFramePtr frame, bool ok)
 {
+    MOZ_ASSERT_IF(frame.isInterpreterFrame(), frame.asInterpreterFrame() == cx->interpreterFrame());
     /* Traps must be cleared from eval frames, see slowPathOnLeaveFrame. */
     bool evalTraps = frame.isEvalFrame() &&
                      frame.script()->hasAnyBreakpointsOrStepMode();
@@ -25,8 +26,8 @@ js::Debugger::onLeaveFrame(JSContext *cx, AbstractFramePtr frame, bool ok)
 /* static */ inline js::Debugger *
 js::Debugger::fromJSObject(JSObject *obj)
 {
-    JS_ASSERT(js::GetObjectClass(obj) == &jsclass);
-    return (Debugger *) obj->getPrivate();
+    MOZ_ASSERT(js::GetObjectClass(obj) == &jsclass);
+    return (Debugger *) obj->as<NativeObject>().getPrivate();
 }
 
 #endif /* vm_Debugger_inl_h */

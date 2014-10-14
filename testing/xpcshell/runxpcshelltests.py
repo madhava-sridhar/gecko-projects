@@ -8,6 +8,7 @@ import copy
 import json
 import math
 import mozdebug
+import mozinfo
 import os
 import os.path
 import random
@@ -605,6 +606,25 @@ class XPCShellTestThread(Thread):
 
         completeCmd = cmdH + cmdT + args
 
+        if self.test_object.get('dmd') == 'true':
+            if sys.platform.startswith('linux'):
+                preloadEnvVar = 'LD_PRELOAD'
+                libdmd = os.path.join(self.xrePath, 'libdmd.so')
+            elif sys.platform == 'osx' or sys.platform == 'darwin':
+                preloadEnvVar = 'DYLD_INSERT_LIBRARIES'
+                # self.xrePath is <prefix>/Contents/Resources.
+                # We need <prefix>/Contents/MacOS/libdmd.dylib.
+                contents_dir = os.path.dirname(self.xrePath)
+                libdmd = os.path.join(contents_dir, 'MacOS', 'libdmd.dylib')
+            elif sys.platform == 'win32':
+                preloadEnvVar = 'MOZ_REPLACE_MALLOC_LIB'
+                libdmd = os.path.join(self.xrePath, 'dmd.dll')
+
+            self.env['DMD'] = '--mode=test'
+            self.env['PYTHON'] = sys.executable
+            self.env['BREAKPAD_SYMBOLS_PATH'] = self.symbolsPath
+            self.env[preloadEnvVar] = libdmd
+
         testTimeoutInterval = HARNESS_TIMEOUT
         # Allow a test to request a multiple of the timeout if it is expected to take long
         if 'requesttimeoutfactor' in self.test_object:
@@ -789,7 +809,7 @@ class XPCShellTests(object):
         if isinstance(self.manifest, manifestparser.TestManifest):
             mp = self.manifest
         else:
-            mp = manifestparser.TestManifest(strict=False)
+            mp = manifestparser.TestManifest(strict=True)
             if self.manifest is None:
                 for testdir in self.testdirs:
                     if testdir:
@@ -841,6 +861,12 @@ class XPCShellTests(object):
 
         if self.xrePath is None:
             self.xrePath = os.path.dirname(self.xpcshell)
+            if mozinfo.isMac:
+                # Check if we're run from an OSX app bundle and override
+                # self.xrePath if we are.
+                appBundlePath = os.path.join(os.path.dirname(os.path.dirname(self.xpcshell)), 'Resources')
+                if os.path.exists(os.path.join(appBundlePath, 'application.ini')):
+                    self.xrePath = appBundlePath
         else:
             self.xrePath = os.path.abspath(self.xrePath)
 
@@ -880,7 +906,7 @@ class XPCShellTests(object):
             os.environ["BEGINLIBPATH"] = self.xrePath + ";" + self.env["BEGINLIBPATH"]
             os.environ["LIBPATHSTRICT"] = "T"
         elif sys.platform == 'osx' or sys.platform == "darwin":
-            self.env["DYLD_LIBRARY_PATH"] = self.xrePath
+            self.env["DYLD_LIBRARY_PATH"] = os.path.join(os.path.dirname(self.xrePath), 'MacOS')
         else: # unix or linux?
             if not "LD_LIBRARY_PATH" in self.env or self.env["LD_LIBRARY_PATH"] is None:
                 self.env["LD_LIBRARY_PATH"] = self.xrePath

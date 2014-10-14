@@ -14,9 +14,10 @@ loop.webapp = (function($, _, OT, mozL10n) {
   loop.config = loop.config || {};
   loop.config.serverUrl = loop.config.serverUrl || "http://localhost:5000";
 
-  var sharedModels = loop.shared.models,
-      sharedViews = loop.shared.views,
-      sharedUtils = loop.shared.utils;
+  var sharedMixins = loop.shared.mixins;
+  var sharedModels = loop.shared.models;
+  var sharedViews = loop.shared.views;
+  var sharedUtils = loop.shared.utils;
 
   /**
    * Homepage view.
@@ -24,7 +25,7 @@ loop.webapp = (function($, _, OT, mozL10n) {
   var HomeView = React.createClass({
     render: function() {
       return (
-        <p>{mozL10n.get("welcome")}</p>
+        <p>{mozL10n.get("welcome", {clientShortname: mozL10n.get("clientShortname2")})}</p>
       );
     }
   });
@@ -36,13 +37,13 @@ loop.webapp = (function($, _, OT, mozL10n) {
     render: function() {
       var useLatestFF = mozL10n.get("use_latest_firefox", {
         "firefoxBrandNameLink": React.renderComponentToStaticMarkup(
-          <a target="_blank" href="https://www.mozilla.org/firefox/">Firefox</a>
+          <a target="_blank" href={mozL10n.get("brand_website")}>{mozL10n.get("brandShortname")}</a>
         )
       });
       return (
         <div>
           <h2>{mozL10n.get("incompatible_browser")}</h2>
-          <p>{mozL10n.get("powered_by_webrtc")}</p>
+          <p>{mozL10n.get("powered_by_webrtc", {clientShortname: mozL10n.get("clientShortname2")})}</p>
           <p dangerouslySetInnerHTML={{__html: useLatestFF}}></p>
         </div>
       );
@@ -57,8 +58,8 @@ loop.webapp = (function($, _, OT, mozL10n) {
       return (
         <div>
           <h2>{mozL10n.get("incompatible_device")}</h2>
-          <p>{mozL10n.get("sorry_device_unsupported")}</p>
-          <p>{mozL10n.get("use_firefox_windows_mac_linux")}</p>
+          <p>{mozL10n.get("sorry_device_unsupported", {clientShortname: mozL10n.get("clientShortname2")})}</p>
+          <p>{mozL10n.get("use_firefox_windows_mac_linux", {brandShortname: mozL10n.get("brandShortname")})}</p>
         </div>
       );
     }
@@ -78,11 +79,11 @@ loop.webapp = (function($, _, OT, mozL10n) {
       }
       return (
         <div className="promote-firefox">
-          <h3>{mozL10n.get("promote_firefox_hello_heading")}</h3>
+          <h3>{mozL10n.get("promote_firefox_hello_heading", {brandShortname: mozL10n.get("brandShortname")})}</h3>
           <p>
             <a className="btn btn-large btn-accept"
-               href="https://www.mozilla.org/firefox/">
-              {mozL10n.get("get_firefox_button")}
+               href={mozL10n.get("brand_website")}>
+              {mozL10n.get("get_firefox_button", {brandShortname: mozL10n.get("brandShortname")})}
             </a>
           </p>
         </div>
@@ -116,7 +117,7 @@ loop.webapp = (function($, _, OT, mozL10n) {
     render: function() {
       return (
         <h1 className="standalone-header-title">
-          <strong>{mozL10n.get("brandShortname")}</strong> {mozL10n.get("clientShortname")}
+          <strong>{mozL10n.get("clientShortname2")}</strong>
         </h1>
       );
     }
@@ -230,11 +231,13 @@ loop.webapp = (function($, _, OT, mozL10n) {
       return (
         <header className="standalone-header header-box container-box">
           <ConversationBranding />
-          <div className="loop-logo" title="Firefox WebRTC! logo"></div>
+          <div className="loop-logo"
+               title={mozL10n.get("client_alttext",
+                                  {clientShortname: mozL10n.get("clientShortname2")})}></div>
           <h3 className="call-url">
             {conversationUrl}
           </h3>
-          <h4 className={urlCreationDateClasses} >
+          <h4 className={urlCreationDateClasses}>
             {callUrlCreationDateString}
           </h4>
         </header>
@@ -246,7 +249,9 @@ loop.webapp = (function($, _, OT, mozL10n) {
     render: function() {
       return (
         <div className="standalone-footer container-box">
-          <div title="Mozilla Logo" className="footer-logo"></div>
+          <div title={mozL10n.get("vendor_alttext",
+                                  {vendorShortname: mozL10n.get("vendorShortname")})}
+               className="footer-logo"></div>
         </div>
       );
     }
@@ -286,72 +291,124 @@ loop.webapp = (function($, _, OT, mozL10n) {
               <ConversationBranding />
             </header>
 
-            <div id="cameraPreview"></div>
+            <div id="cameraPreview" />
 
-            <div id="messages"></div>
+            <div id="messages" />
 
             <p className="standalone-btn-label">
               {callState}
             </p>
 
             <div className="btn-pending-cancel-group btn-group">
-              <div className="flex-padding-1"></div>
+              <div className="flex-padding-1" />
               <button className="btn btn-large btn-cancel"
                       onClick={this._cancelOutgoingCall} >
                 <span className="standalone-call-btn-text">
                   {mozL10n.get("initiate_call_cancel_button")}
                 </span>
               </button>
-              <div className="flex-padding-1"></div>
+              <div className="flex-padding-1" />
             </div>
           </div>
-
           <ConversationFooter />
         </div>
       );
     }
   });
 
-  /**
-   * Conversation launcher view. A ConversationModel is associated and attached
-   * as a `model` property.
-   *
-   * Required properties:
-   * - {loop.shared.models.ConversationModel}    model    Conversation model.
-   * - {loop.shared.models.NotificationCollection} notifications
-   */
-  var StartConversationView = React.createClass({
+  var InitiateCallButton = React.createClass({
+    mixins: [sharedMixins.DropdownMenuMixin],
+
     propTypes: {
-      model: React.PropTypes.oneOfType([
-               React.PropTypes.instanceOf(sharedModels.ConversationModel),
-               React.PropTypes.instanceOf(FxOSConversationModel)
-             ]).isRequired,
-      // XXX Check more tightly here when we start injecting window.loop.*
-      notifications: React.PropTypes.object.isRequired,
-      client: React.PropTypes.object.isRequired
+      caption: React.PropTypes.string.isRequired,
+      startCall: React.PropTypes.func.isRequired,
+      disabled: React.PropTypes.bool
     },
 
     getDefaultProps: function() {
-      return {showCallOptionsMenu: false};
+      return {disabled: false};
+    },
+
+    render: function() {
+      var dropdownMenuClasses = React.addons.classSet({
+        "native-dropdown-large-parent": true,
+        "standalone-dropdown-menu": true,
+        "visually-hidden": !this.state.showMenu
+      });
+      var chevronClasses = React.addons.classSet({
+        "btn-chevron": true,
+        "disabled": this.props.disabled
+      });
+      return (
+        <div className="standalone-btn-chevron-menu-group">
+          <div className="btn-group-chevron">
+            <div className="btn-group">
+              <button className="btn btn-large btn-accept"
+                      onClick={this.props.startCall("audio-video")}
+                      disabled={this.props.disabled}
+                      title={mozL10n.get("initiate_audio_video_call_tooltip2")}>
+                <span className="standalone-call-btn-text">
+                  {this.props.caption}
+                </span>
+                <span className="standalone-call-btn-video-icon" />
+              </button>
+              <div className={chevronClasses}
+                   onClick={this.toggleDropdownMenu}>
+              </div>
+            </div>
+            <ul className={dropdownMenuClasses}>
+              <li>
+                <button className="start-audio-only-call"
+                        onClick={this.props.startCall("audio")}
+                        disabled={this.props.disabled}>
+                  {mozL10n.get("initiate_audio_call_button2")}
+                </button>
+              </li>
+            </ul>
+          </div>
+        </div>
+      );
+    }
+  });
+
+  /**
+   * Initiate conversation view.
+   */
+  var InitiateConversationView = React.createClass({
+    mixins: [Backbone.Events],
+
+    propTypes: {
+      conversation: React.PropTypes.oneOfType([
+                      React.PropTypes.instanceOf(sharedModels.ConversationModel),
+                      React.PropTypes.instanceOf(FxOSConversationModel)
+                    ]).isRequired,
+      // XXX Check more tightly here when we start injecting window.loop.*
+      notifications: React.PropTypes.object.isRequired,
+      client: React.PropTypes.object.isRequired,
+      title: React.PropTypes.string.isRequired,
+      callButtonLabel: React.PropTypes.string.isRequired
     },
 
     getInitialState: function() {
       return {
         urlCreationDateString: '',
-        disableCallButton: false,
-        showCallOptionsMenu: this.props.showCallOptionsMenu
+        disableCallButton: false
       };
     },
 
     componentDidMount: function() {
-      // Listen for events & hide dropdown menu if user clicks away
-      window.addEventListener("click", this.clickHandler);
-      this.props.model.listenTo(this.props.model, "session:error",
-                                this._onSessionError);
-      this.props.model.listenTo(this.props.model, "fxos:app-needed",
-                                this._onFxOSAppNeeded);
-      this.props.client.requestCallUrlInfo(this.props.model.get("loopToken"),
-                                           this._setConversationTimestamp);
+      this.listenTo(this.props.conversation,
+                    "session:error", this._onSessionError);
+      this.listenTo(this.props.conversation,
+                    "fxos:app-needed", this._onFxOSAppNeeded);
+      this.props.client.requestCallUrlInfo(
+        this.props.conversation.get("loopToken"),
+        this._setConversationTimestamp);
+    },
+
+    componentWillUnmount: function() {
+      this.stopListening(this.props.conversation);
+      localStorage.setItem("has-seen-tos", "true");
     },
 
     _onSessionError: function(error, l10nProps) {
@@ -362,11 +419,9 @@ loop.webapp = (function($, _, OT, mozL10n) {
 
     _onFxOSAppNeeded: function() {
       this.setState({
-        marketplaceSrc: loop.config.marketplaceUrl
-      });
-      this.setState({
-        onMarketplaceMessage: this.props.model.onMarketplaceMessage.bind(
-          this.props.model
+        marketplaceSrc: loop.config.marketplaceUrl,
+        onMarketplaceMessage: this.props.conversation.onMarketplaceMessage.bind(
+          this.props.conversation
         )
       });
      },
@@ -379,11 +434,10 @@ loop.webapp = (function($, _, OT, mozL10n) {
      *
      * @param {string} User call type choice "audio" or "audio-video"
      */
-    _initiateOutgoingCall: function(callType) {
+    startCall: function(callType) {
       return function() {
-        this.props.model.set("selectedCallType", callType);
+        this.props.conversation.setupOutgoingCall(callType);
         this.setState({disableCallButton: true});
-        this.props.model.setupOutgoingCall();
       }.bind(this);
     },
 
@@ -391,53 +445,28 @@ loop.webapp = (function($, _, OT, mozL10n) {
       if (err) {
         this.props.notifications.errorL10n("unable_retrieve_call_info");
       } else {
-        var date = (new Date(callUrlInfo.urlCreationDate * 1000));
-        var options = {year: "numeric", month: "long", day: "numeric"};
-        var timestamp = date.toLocaleDateString(navigator.language, options);
-        this.setState({urlCreationDateString: timestamp});
+        this.setState({
+          urlCreationDateString: sharedUtils.formatDate(callUrlInfo.urlCreationDate)
+        });
       }
-    },
-
-    componentWillUnmount: function() {
-      window.removeEventListener("click", this.clickHandler);
-      localStorage.setItem("has-seen-tos", "true");
-    },
-
-    clickHandler: function(e) {
-      if (!e.target.classList.contains('btn-chevron') &&
-          this.state.showCallOptionsMenu) {
-            this._toggleCallOptionsMenu();
-      }
-    },
-
-    _toggleCallOptionsMenu: function() {
-      var state = this.state.showCallOptionsMenu;
-      this.setState({showCallOptionsMenu: !state});
     },
 
     render: function() {
-      var tos_link_name = mozL10n.get("terms_of_use_link_text");
-      var privacy_notice_name = mozL10n.get("privacy_notice_link_text");
+      var tosLinkName = mozL10n.get("terms_of_use_link_text");
+      var privacyNoticeName = mozL10n.get("privacy_notice_link_text");
 
       var tosHTML = mozL10n.get("legal_text_and_links", {
-        "terms_of_use_url": "<a target=_blank href='/legal/terms/'>" +
-          tos_link_name + "</a>",
+        "clientShortname": mozL10n.get("clientShortname2"),
+        "terms_of_use_url": "<a target=_blank href='" +
+          mozL10n.get("legal_website") + "'>" +
+          tosLinkName + "</a>",
         "privacy_notice_url": "<a target=_blank href='" +
-          "https://www.mozilla.org/privacy/'>" + privacy_notice_name + "</a>"
+          mozL10n.get("privacy_website") + "'>" + privacyNoticeName + "</a>"
       });
 
-      var dropdownMenuClasses = React.addons.classSet({
-        "native-dropdown-large-parent": true,
-        "standalone-dropdown-menu": true,
-        "visually-hidden": !this.state.showCallOptionsMenu
-      });
       var tosClasses = React.addons.classSet({
         "terms-service": true,
         hide: (localStorage.getItem("has-seen-tos") === "true")
-      });
-      var chevronClasses = React.addons.classSet({
-        "btn-chevron": true,
-        "disabled": this.state.disableCallButton
       });
 
       return (
@@ -448,49 +477,19 @@ loop.webapp = (function($, _, OT, mozL10n) {
               urlCreationDateString={this.state.urlCreationDateString} />
 
             <p className="standalone-btn-label">
-              {mozL10n.get("initiate_call_button_label2")}
+              {this.props.title}
             </p>
 
             <div id="messages"></div>
 
             <div className="btn-group">
-              <div className="flex-padding-1"></div>
-              <div className="standalone-btn-chevron-menu-group">
-                <div className="btn-group-chevron">
-                  <div className="btn-group">
-
-                    <button className="btn btn-large btn-accept"
-                            onClick={this._initiateOutgoingCall("audio-video")}
-                            disabled={this.state.disableCallButton}
-                            title={mozL10n.get("initiate_audio_video_call_tooltip2")} >
-                      <span className="standalone-call-btn-text">
-                        {mozL10n.get("initiate_audio_video_call_button2")}
-                      </span>
-                      <span className="standalone-call-btn-video-icon"></span>
-                    </button>
-
-                    <div className={chevronClasses}
-                         onClick={this._toggleCallOptionsMenu}>
-                    </div>
-
-                  </div>
-
-                  <ul className={dropdownMenuClasses}>
-                    <li>
-                      {/*
-                       Button required for disabled state.
-                       */}
-                      <button className="start-audio-only-call"
-                              onClick={this._initiateOutgoingCall("audio")}
-                              disabled={this.state.disableCallButton} >
-                        {mozL10n.get("initiate_audio_call_button2")}
-                      </button>
-                    </li>
-                  </ul>
-
-                </div>
-              </div>
-              <div className="flex-padding-1"></div>
+              <div className="flex-padding-1" />
+              <InitiateCallButton
+                caption={this.props.callButtonLabel}
+                disabled={this.state.disableCallButton}
+                startCall={this.startCall}
+              />
+              <div className="flex-padding-1" />
             </div>
 
             <p className={tosClasses}
@@ -534,6 +533,26 @@ loop.webapp = (function($, _, OT, mozL10n) {
             video={{enabled: false, visible: false}}
           />
         </div>
+      );
+    }
+  });
+
+  var StartConversationView = React.createClass({
+    render: function() {
+      return this.transferPropsTo(
+        <InitiateConversationView
+          title={mozL10n.get("initiate_call_button_label2")}
+          callButtonLabel={mozL10n.get("initiate_audio_video_call_button2")} />
+      );
+    }
+  });
+
+  var FailedConversationView = React.createClass({
+    render: function() {
+      return this.transferPropsTo(
+        <InitiateConversationView
+          title={mozL10n.get("call_failed_title")}
+          callButtonLabel={mozL10n.get("retry_call_button")} />
       );
     }
   });
@@ -595,11 +614,19 @@ loop.webapp = (function($, _, OT, mozL10n) {
      */
     render: function() {
       switch (this.state.callStatus) {
-        case "failure":
         case "start": {
           return (
             <StartConversationView
-              model={this.props.conversation}
+              conversation={this.props.conversation}
+              notifications={this.props.notifications}
+              client={this.props.client}
+            />
+          );
+        }
+        case "failure": {
+          return (
+            <FailedConversationView
+              conversation={this.props.conversation}
               notifications={this.props.notifications}
               client={this.props.client}
             />
@@ -775,18 +802,17 @@ loop.webapp = (function($, _, OT, mozL10n) {
     /**
      * Handles call rejection.
      *
-     * @param {String} reason The reason the call was terminated.
+     * @param {String} reason The reason the call was terminated (reject, busy,
+     *                        timeout, cancel, media-fail, user-unknown, closed)
      */
     _handleCallTerminated: function(reason) {
-      if (reason !== "cancel") {
-        // XXX This should really display the call failed view - bug 1046959
-        // will implement this.
-        this.props.notifications.errorL10n("call_timeout_notification_text");
+      if (reason === "cancel") {
+        this.setState({callStatus: "start"});
+        return;
       }
-      // redirects the user to the call start view
-      // XXX should switch callStatus to failed for specific reasons when we
-      // get the call failed view; for now, switch back to start.
-      this.setState({callStatus: "start"});
+      // XXX later, we'll want to display more meaningfull messages (needs UX)
+      this.props.notifications.errorL10n("call_timeout_notification_text");
+      this.setState({callStatus: "failure"});
     },
 
     /**
@@ -887,12 +913,14 @@ loop.webapp = (function($, _, OT, mozL10n) {
     // Set the 'lang' and 'dir' attributes to <html> when the page is translated
     document.documentElement.lang = mozL10n.language.code;
     document.documentElement.dir = mozL10n.language.direction;
+    document.title = mozL10n.get("clientShortname2");
   }
 
   return {
     CallUrlExpiredView: CallUrlExpiredView,
     PendingConversationView: PendingConversationView,
     StartConversationView: StartConversationView,
+    FailedConversationView: FailedConversationView,
     OutgoingConversationView: OutgoingConversationView,
     EndedConversationView: EndedConversationView,
     HomeView: HomeView,

@@ -989,6 +989,7 @@ nsMathMLChar::SetFontFamily(nsPresContext*          aPresContext,
     aPresContext->DeviceContext()->
       GetMetricsFor(font,
                     mStyleContext->StyleFont()->mLanguage,
+                    gfxFont::eHorizontal,
                     aPresContext->GetUserFontSet(),
                     aPresContext->GetTextPerfMetrics(),
                     *getter_AddRefs(fm));
@@ -996,10 +997,8 @@ nsMathMLChar::SetFontFamily(nsPresContext*          aPresContext,
     // or if the same family name has been found
     gfxFont *firstFont = fm->GetThebesFontGroup()->GetFirstValidFont();
     FontFamilyList firstFontList;
-    if (firstFont) {
-      firstFontList.Append(
-        FontFamilyName(firstFont->GetFontEntry()->FamilyName(), eUnquotedName));
-    }
+    firstFontList.Append(
+      FontFamilyName(firstFont->GetFontEntry()->FamilyName(), eUnquotedName));
     if (aGlyphTable == &gGlyphTableList->mUnicodeTable ||
         firstFontList == familyList) {
       aFont.fontlist = familyList;
@@ -1529,6 +1528,7 @@ nsMathMLChar::StretchInternal(nsPresContext*           aPresContext,
   aPresContext->DeviceContext()->
     GetMetricsFor(font,
                   mStyleContext->StyleFont()->mLanguage,
+                  gfxFont::eHorizontal,
                   aPresContext->GetUserFontSet(),
                   aPresContext->GetTextPerfMetrics(),
                   *getter_AddRefs(fm));

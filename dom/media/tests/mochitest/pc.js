@@ -225,6 +225,20 @@ CommandChain.prototype = {
   },
 
   /**
+   * Replaces a single command.
+   *
+   * @param {string} id
+   *        Identifier of the command to be replaced
+   * @param {Array[]} commands
+   *        List of commands
+   * @returns {object[]} Removed commands
+   */
+  replace : function (id, commands) {
+    this.insertBefore(id, commands);
+    return this.remove(id);
+  },
+
+  /**
    * Replaces all commands after the specified one.
    *
    * @param {string} id
@@ -1937,6 +1951,10 @@ PeerConnectionWrapper.prototype = {
     var self = this;
 
     self._remote_ice_candidates.push(candidate);
+    if (self.signalingstate === 'closed') {
+      info("Received ICE candidate for closed PeerConnection - discarding");
+      return;
+    }
     if (self.remoteDescriptionSet) {
       self.addIceCandidate(candidate);
     } else {
@@ -2081,18 +2099,22 @@ PeerConnectionWrapper.prototype = {
    *        A PeerConnectionTest object to which the ice candidates gets
    *        forwarded.
    */
-  setupIceCandidateHandler : function PCW_setupIceCandidateHandler(test) {
+  setupIceCandidateHandler : function
+    PCW_setupIceCandidateHandler(test, candidateHandler, endHandler) {
     var self = this;
     self._local_ice_candidates = [];
     self._remote_ice_candidates = [];
     self._ice_candidates_to_add = [];
+
+    candidateHandler = candidateHandler || test.iceCandidateHandler.bind(test);
+    endHandler = endHandler || test.signalEndOfTrickleIce.bind(test);
 
     function iceCandidateCallback (anEvent) {
       info(self.label + ": received iceCandidateEvent");
       if (!anEvent.candidate) {
         info(self.label + ": received end of trickle ICE event");
         self.endOfTrickleIce = true;
-        test.signalEndOfTrickleIce(self.label);
+        endHandler(self.label);
       } else {
         if (self.endOfTrickleIce) {
           ok(false, "received ICE candidate after end of trickle");
@@ -2103,7 +2125,7 @@ PeerConnectionWrapper.prototype = {
         ok(anEvent.candidate.sdpMid.length === 0, "SDP MID has length zero");
         ok(typeof anEvent.candidate.sdpMLineIndex === 'number', "SDP MLine Index needs to exist");
         self._local_ice_candidates.push(anEvent.candidate);
-        test.iceCandidateHandler(self.label, anEvent.candidate);
+        candidateHandler(self.label, anEvent.candidate);
       }
     }
 
@@ -2566,15 +2588,9 @@ PeerConnectionWrapper.prototype = {
    * Closes the connection
    */
   close : function PCW_close() {
-    // It might be that a test has already closed the pc. In those cases
-    // we should not fail.
-    try {
-      this._pc.close();
-      info(this + ": Closed connection.");
-    }
-    catch (e) {
-      info(this + ": Failure in closing connection - " + e.message);
-    }
+    this._ice_candidates_to_add = [];
+    this._pc.close();
+    info(this + ": Closed connection.");
   },
 
   /**

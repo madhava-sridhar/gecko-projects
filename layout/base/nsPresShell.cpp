@@ -18,9 +18,6 @@
 
 /* a presentation of a document, part 2 */
 
-#ifdef MOZ_LOGGING
-#define FORCE_PR_LOG /* Allow logging in the release build */
-#endif
 #include "prlog.h"
 
 #include "mozilla/ArrayUtils.h"
@@ -6339,9 +6336,10 @@ nsIPresShell::GetPointerCapturingContent(uint32_t aPointerId)
   return nullptr;
 }
 
-/* static */ void
+/* static */ bool
 nsIPresShell::CheckPointerCaptureState(uint32_t aPointerId)
 {
+  bool didDispatchEvent = false;
   PointerCaptureInfo* pointerCaptureInfo = nullptr;
   if (gPointerCaptureList->Get(aPointerId, &pointerCaptureInfo) && pointerCaptureInfo) {
     // If pendingContent exist or anybody calls element.releasePointerCapture
@@ -6357,6 +6355,7 @@ nsIPresShell::CheckPointerCaptureState(uint32_t aPointerId)
           gPointerCaptureList->Remove(aPointerId);
         }
         DispatchGotOrLostPointerCaptureEvent(false, aPointerId, content);
+        didDispatchEvent = true;
       } else if (pointerCaptureInfo->mPendingContent && pointerCaptureInfo->mReleaseContent) {
         // If anybody calls element.releasePointerCapture
         // We should clear overrideContent and pendingContent
@@ -6372,8 +6371,10 @@ nsIPresShell::CheckPointerCaptureState(uint32_t aPointerId)
       pointerCaptureInfo->mPendingContent = nullptr;
       pointerCaptureInfo->mReleaseContent = false;
       DispatchGotOrLostPointerCaptureEvent(true, aPointerId, pointerCaptureInfo->mOverrideContent);
+      didDispatchEvent = true;
     }
   }
+  return didDispatchEvent;
 }
 
 /* static */ bool
@@ -6942,9 +6943,9 @@ PresShell::HandleEvent(nsIFrame* aFrame,
 
   if (!nsContentUtils::IsSafeToRunScript() &&
       aEvent->IsAllowedToDispatchDOMEvent()) {
-    if (aEvent->mClass == eCompositionEventClass ||
-        aEvent->mClass == eTextEventClass) {
-      IMEStateManager::OnCompositionEventDiscarded(aEvent);
+    if (aEvent->mClass == eCompositionEventClass) {
+      IMEStateManager::OnCompositionEventDiscarded(
+        aEvent->AsCompositionEvent());
     }
 #ifdef DEBUG
     if (aEvent->IsIMERelatedEvent()) {
@@ -7252,7 +7253,9 @@ PresShell::HandleEvent(nsIFrame* aFrame,
       if (WidgetPointerEvent* pointerEvent = aEvent->AsPointerEvent()) {
         // Before any pointer events, we should check state of pointer capture,
         // Thus got/lostpointercapture events emulate asynchronous behavior.
-        CheckPointerCaptureState(pointerEvent->pointerId);
+        // Handlers of got/lostpointercapture events can change capturing state,
+        // That's why we should re-check pointer capture state until stable state.
+        while(CheckPointerCaptureState(pointerEvent->pointerId));
       }
     }
 
@@ -7859,10 +7862,10 @@ PresShell::HandleEventInternal(WidgetEvent* aEvent, nsEventStatus* aStatus)
             }
           }
           if (eventTarget) {
-            if (aEvent->mClass == eCompositionEventClass ||
-                aEvent->mClass == eTextEventClass) {
+            if (aEvent->mClass == eCompositionEventClass) {
               IMEStateManager::DispatchCompositionEvent(eventTarget,
-                mPresContext, aEvent, aStatus, eventCBPtr);
+                mPresContext, aEvent->AsCompositionEvent(), aStatus,
+                eventCBPtr);
             } else {
               EventDispatcher::Dispatch(eventTarget, mPresContext,
                                         aEvent, nullptr, aStatus, eventCBPtr);
@@ -10060,6 +10063,7 @@ void ReflowCountMgr::PaintCount(const char*     aName,
         // We have one frame, therefore we must have a root...
         aPresContext->GetPresShell()->GetRootFrame()->
           StyleFont()->mLanguage,
+        gfxFont::eHorizontal,
         aPresContext->GetUserFontSet(),
         aPresContext->GetTextPerfMetrics(),
         *getter_AddRefs(fm));
@@ -10637,6 +10641,9 @@ nsIPresShell::SetScrollPositionClampingScrollPortSize(nscoord aWidth, nscoord aH
     mScrollPositionClampingScrollPortSize.width = aWidth;
     mScrollPositionClampingScrollPortSize.height = aHeight;
 
+    if (nsIScrollableFrame* rootScrollFrame = GetRootScrollFrameAsScrollable()) {
+      rootScrollFrame->MarkScrollbarsDirtyForReflow();
+    }
     MarkFixedFramesForReflow(eResize);
   }
 }

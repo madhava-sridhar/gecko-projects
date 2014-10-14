@@ -96,10 +96,30 @@ public:
   already_AddRefed<InternalRequest>
   GetInternalRequest() const;
 private:
+  enum ConsumeType
+  {
+    CONSUME_ARRAYBUFFER,
+    CONSUME_BLOB,
+    // FormData not supported right now,
+    CONSUME_JSON,
+    CONSUME_TEXT,
+  };
+
   ~Request();
+
+  already_AddRefed<Promise>
+  ConsumeBody(ConsumeType aType, ErrorResult& aRv);
+
+  void
+  SetBodyUsed()
+  {
+    mBodyUsed = true;
+  }
 
   nsCOMPtr<nsIGlobalObject> mOwner;
   nsRefPtr<InternalRequest> mRequest;
+  bool mBodyUsed;
+  nsCString mMimeType;
 };
 
 } // namespace dom

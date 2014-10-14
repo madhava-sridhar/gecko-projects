@@ -841,16 +841,6 @@ nsXULAppInfo::GetProcessID(uint32_t* aResult)
   return NS_OK;
 }
 
-static bool gBrowserTabsRemote = false;
-static bool gBrowserTabsRemoteInitialized = false;
-
-NS_IMETHODIMP
-nsXULAppInfo::GetBrowserTabsRemote(bool* aResult)
-{
-  *aResult = BrowserTabsRemote();
-  return NS_OK;
-}
-
 static bool gBrowserTabsRemoteAutostart = false;
 static bool gBrowserTabsRemoteAutostartInitialized = false;
 
@@ -983,6 +973,17 @@ nsXULAppInfo::GetDistributionID(nsACString& aResult)
   return NS_OK;
 }
 
+NS_IMETHODIMP
+nsXULAppInfo::GetIsOfficial(bool* aResult)
+{
+#ifdef MOZILLA_OFFICIAL
+  *aResult = true;
+#else
+  *aResult = false;
+#endif
+  return NS_OK;
+}
+
 #ifdef XP_WIN
 // Matches the enum in WinNT.h for the Vista SDK but renamed so that we can
 // safely build with the Vista SDK and without it.
@@ -1042,31 +1043,29 @@ NS_IMETHODIMP
 nsXULAppInfo::SetEnabled(bool aEnabled)
 {
   if (aEnabled) {
-    if (CrashReporter::GetEnabled())
+    if (CrashReporter::GetEnabled()) {
       // no point in erroring for double-enabling
       return NS_OK;
-
-    nsCOMPtr<nsIFile> xreDirectory;
-    if (gAppData) {
-      xreDirectory = gAppData->xreDirectory;
     }
-    else {
-      // We didn't get started through XRE_Main, probably
-      nsCOMPtr<nsIFile> greDir;
-      NS_GetSpecialDirectory(NS_GRE_DIR, getter_AddRefs(greDir));
-      if (!greDir)
-        return NS_ERROR_FAILURE;
 
-      xreDirectory = do_QueryInterface(greDir);
-      if (!xreDirectory)
-        return NS_ERROR_FAILURE;
+    nsCOMPtr<nsIFile> greBinDir;
+    NS_GetSpecialDirectory(NS_GRE_BIN_DIR, getter_AddRefs(greBinDir));
+    if (!greBinDir) {
+      return NS_ERROR_FAILURE;
     }
-    return CrashReporter::SetExceptionHandler(xreDirectory, true);
+
+    nsCOMPtr<nsIFile> xreBinDirectory = do_QueryInterface(greBinDir);
+    if (!xreBinDirectory) {
+      return NS_ERROR_FAILURE;
+    }
+
+    return CrashReporter::SetExceptionHandler(xreBinDirectory, true);
   }
   else {
-    if (!CrashReporter::GetEnabled())
+    if (!CrashReporter::GetEnabled()) {
       // no point in erroring for double-disabling
       return NS_OK;
+    }
 
     return CrashReporter::UnsetExceptionHandler();
   }
@@ -2854,7 +2853,7 @@ static void LogRegistryEvent(const wchar_t *msg)
 
 #endif
 
-static DWORD InitDwriteBG(LPVOID lpdwThreadParam)
+static DWORD WINAPI InitDwriteBG(LPVOID lpdwThreadParam)
 {
   SetThreadPriority(GetCurrentThread(), THREAD_MODE_BACKGROUND_BEGIN);
   LOGREGISTRY(L"loading dwrite.dll");
@@ -3044,8 +3043,7 @@ XREMain::XRE_mainInit(bool* aExitFlag)
     // FntCache service is ready by the time it's needed.
 
     if (IsVistaOrLater()) {
-      CreateThread(nullptr, 0, (LPTHREAD_START_ROUTINE)&InitDwriteBG,
-                   nullptr, 0, nullptr);
+      CreateThread(nullptr, 0, &InitDwriteBG, nullptr, 0, nullptr);
     }
   }
 #endif
@@ -3153,9 +3151,12 @@ XREMain::XRE_mainInit(bool* aExitFlag)
     mAppData->flags |= NS_XRE_ENABLE_CRASH_REPORTER;
   }
 
+  nsCOMPtr<nsIFile> xreBinDirectory;
+  xreBinDirectory = mDirProvider.GetGREBinDir();
+
   if ((mAppData->flags & NS_XRE_ENABLE_CRASH_REPORTER) &&
       NS_SUCCEEDED(
-         CrashReporter::SetExceptionHandler(mAppData->xreDirectory))) {
+        CrashReporter::SetExceptionHandler(xreBinDirectory))) {
     nsCOMPtr<nsIFile> file;
     rv = mDirProvider.GetUserAppDataDirectory(getter_AddRefs(file));
     if (NS_SUCCEEDED(rv)) {
@@ -4173,6 +4174,8 @@ XREMain::XRE_mainRun()
 
 /*
  * XRE_main - A class based main entry point used by most platforms.
+ *            Note that on OSX, aAppData->xreDirectory will point to
+ *            .app/Contents/Resources.
  */
 int
 XREMain::XRE_main(int argc, char* argv[], const nsXREAppData* aAppData)
@@ -4565,29 +4568,54 @@ XRE_GetProcessType()
   return mozilla::startup::sChildProcessType;
 }
 
-bool
-mozilla::BrowserTabsRemote()
-{
-  if (!gBrowserTabsRemoteInitialized) {
-    gBrowserTabsRemote = Preferences::GetBool("browser.tabs.remote", false);
-    gBrowserTabsRemoteInitialized = true;
+static void
+LogE10sBlockedReason(const char *reason) {
+  nsAutoString msg(NS_LITERAL_STRING("==================\nE10s has been blocked from running because:\n"));
+  msg.Append(NS_ConvertASCIItoUTF16(reason));
+  msg.AppendLiteral("\n==================\n");
+  nsCOMPtr<nsIConsoleService> console(do_GetService("@mozilla.org/consoleservice;1"));
+  if (console) {
+    console->LogStringMessage(msg.get());
   }
-
-  return gBrowserTabsRemote;
 }
 
 bool
 mozilla::BrowserTabsRemoteAutostart()
 {
+  if (gBrowserTabsRemoteAutostartInitialized) {
+    return gBrowserTabsRemoteAutostart;
+  }
+  gBrowserTabsRemoteAutostartInitialized = true;
+  bool optInPref = Preferences::GetBool("browser.tabs.remote.autostart", false);
+  bool trialPref = Preferences::GetBool("browser.tabs.remote.autostart.1", false);
+  bool prefEnabled = optInPref || trialPref;
 #if !defined(NIGHTLY_BUILD)
-  return false;
+  // When running tests with 'layers.offmainthreadcomposition.testing.enabled' and
+  // autostart set to true, return enabled.  These tests must be allowed to run
+  // remotely. Otherwise remote isn't allowed in non-nightly builds.
+  bool testPref = Preferences::GetBool("layers.offmainthreadcomposition.testing.enabled", false);
+  if (testPref && optInPref) {
+    gBrowserTabsRemoteAutostart = true;
+  }
+#else
+  // Nightly builds, update gBrowserTabsRemoteAutostart based on all the
+  // e10s remote relayed prefs we watch.
+  bool disabledForA11y = Preferences::GetBool("browser.tabs.remote.autostart.disabled-because-using-a11y", false);
+  // Only disable for IME for the automatic pref, not the opt-in one.
+  bool disabledForIME = trialPref && KeyboardMayHaveIME();
+
+  if (prefEnabled) {
+    if (gSafeMode) {
+      LogE10sBlockedReason("Firefox is in safe mode.");
+    } else if (disabledForA11y) {
+      LogE10sBlockedReason("An accessibility tool is active.");
+    } else if (disabledForIME) {
+      LogE10sBlockedReason("The keyboard being used has activated IME.");
+    } else {
+      gBrowserTabsRemoteAutostart = true;
+    }
+  }
 #endif
-  if (!gBrowserTabsRemoteAutostartInitialized) {
-    bool hasIME = KeyboardMayHaveIME();
-    bool prefEnabled = Preferences::GetBool("browser.tabs.remote.autostart", false) ||
-                       (Preferences::GetBool("browser.tabs.remote.autostart.1", false) && !hasIME);
-    bool disabledForA11y = Preferences::GetBool("browser.tabs.remote.autostart.disabled-because-using-a11y", false);
-    gBrowserTabsRemoteAutostart = !gSafeMode && !disabledForA11y && prefEnabled;
 
 #if defined(XP_WIN) || defined(XP_MACOSX)
   // If for any reason we suspect acceleration will be disabled, disabled
@@ -4596,13 +4624,6 @@ mozilla::BrowserTabsRemoteAutostart()
     // Check prefs
     bool accelDisabled = Preferences::GetBool("layers.acceleration.disabled", false) &&
                          !Preferences::GetBool("layers.acceleration.force-enabled", false);
-    // Check env flags
-    if (!accelDisabled) {
-      const char *acceleratedEnv = PR_GetEnv("MOZ_ACCELERATED");
-      if (acceleratedEnv && (*acceleratedEnv != '0')) {
-        accelDisabled = false;
-      }
-    }
 
 #if defined(XP_MACOSX)
     accelDisabled = !nsCocoaFeatures::AccelerateByDefault();
@@ -4635,25 +4656,31 @@ mozilla::BrowserTabsRemoteAutostart()
         }
       }
     }
+
+    // Check env flags
+    if (accelDisabled) {
+      const char *acceleratedEnv = PR_GetEnv("MOZ_ACCELERATED");
+      if (acceleratedEnv && (*acceleratedEnv != '0')) {
+        accelDisabled = false;
+      }
+    }
+
     if (accelDisabled) {
       gBrowserTabsRemoteAutostart = false;
+      LogE10sBlockedReason("Hardware acceleration is disabled.");
     }
   }
 #endif
 
-    gBrowserTabsRemoteAutostartInitialized = true;
-
-    mozilla::Telemetry::Accumulate(mozilla::Telemetry::E10S_AUTOSTART, gBrowserTabsRemoteAutostart);
-    if (Preferences::GetBool("browser.enabledE10SFromPrompt", false)) {
-      mozilla::Telemetry::Accumulate(mozilla::Telemetry::E10S_STILL_ACCEPTED_FROM_PROMPT,
-                                     gBrowserTabsRemoteAutostart);
-    }
-    if (prefEnabled) {
-      mozilla::Telemetry::Accumulate(mozilla::Telemetry::E10S_BLOCKED_FROM_RUNNING,
-                                     !gBrowserTabsRemoteAutostart);
-    }
+  mozilla::Telemetry::Accumulate(mozilla::Telemetry::E10S_AUTOSTART, gBrowserTabsRemoteAutostart);
+  if (Preferences::GetBool("browser.enabledE10SFromPrompt", false)) {
+    mozilla::Telemetry::Accumulate(mozilla::Telemetry::E10S_STILL_ACCEPTED_FROM_PROMPT,
+                                    gBrowserTabsRemoteAutostart);
   }
-
+  if (prefEnabled) {
+    mozilla::Telemetry::Accumulate(mozilla::Telemetry::E10S_BLOCKED_FROM_RUNNING,
+                                    !gBrowserTabsRemoteAutostart);
+  }
   return gBrowserTabsRemoteAutostart;
 }
 

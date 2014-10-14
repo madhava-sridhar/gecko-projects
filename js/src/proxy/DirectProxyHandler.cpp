@@ -18,7 +18,7 @@ DirectProxyHandler::getPropertyDescriptor(JSContext *cx, HandleObject proxy, Han
                                           MutableHandle<PropertyDescriptor> desc) const
 {
     assertEnteredPolicy(cx, proxy, id, GET | SET | GET_PROPERTY_DESCRIPTOR);
-    JS_ASSERT(!hasPrototype()); // Should never be called if there's a prototype.
+    MOZ_ASSERT(!hasPrototype()); // Should never be called if there's a prototype.
     RootedObject target(cx, proxy->as<ProxyObject>().target());
     return JS_GetPropertyDescriptorById(cx, target, id, desc);
 }
@@ -44,12 +44,12 @@ DirectProxyHandler::defineProperty(JSContext *cx, HandleObject proxy, HandleId i
 }
 
 bool
-DirectProxyHandler::getOwnPropertyNames(JSContext *cx, HandleObject proxy,
-                                        AutoIdVector &props) const
+DirectProxyHandler::ownPropertyKeys(JSContext *cx, HandleObject proxy,
+                                    AutoIdVector &props) const
 {
     assertEnteredPolicy(cx, proxy, JSID_VOID, ENUMERATE);
     RootedObject target(cx, proxy->as<ProxyObject>().target());
-    return GetPropertyNames(cx, target, JSITER_OWNONLY | JSITER_HIDDEN | JSITER_SYMBOLS, &props);
+    return GetPropertyKeys(cx, target, JSITER_OWNONLY | JSITER_HIDDEN | JSITER_SYMBOLS, &props);
 }
 
 bool
@@ -65,9 +65,9 @@ DirectProxyHandler::enumerate(JSContext *cx, HandleObject proxy,
                               AutoIdVector &props) const
 {
     assertEnteredPolicy(cx, proxy, JSID_VOID, ENUMERATE);
-    JS_ASSERT(!hasPrototype()); // Should never be called if there's a prototype.
+    MOZ_ASSERT(!hasPrototype()); // Should never be called if there's a prototype.
     RootedObject target(cx, proxy->as<ProxyObject>().target());
-    return GetPropertyNames(cx, target, 0, &props);
+    return GetPropertyKeys(cx, target, 0, &props);
 }
 
 bool
@@ -176,7 +176,7 @@ bool
 DirectProxyHandler::has(JSContext *cx, HandleObject proxy, HandleId id, bool *bp) const
 {
     assertEnteredPolicy(cx, proxy, id, GET);
-    JS_ASSERT(!hasPrototype()); // Should never be called if there's a prototype.
+    MOZ_ASSERT(!hasPrototype()); // Should never be called if there's a prototype.
     bool found;
     RootedObject target(cx, proxy->as<ProxyObject>().target());
     if (!JS_HasPropertyById(cx, target, id, &found))
@@ -222,7 +222,7 @@ DirectProxyHandler::keys(JSContext *cx, HandleObject proxy, AutoIdVector &props)
 {
     assertEnteredPolicy(cx, proxy, JSID_VOID, ENUMERATE);
     RootedObject target(cx, proxy->as<ProxyObject>().target());
-    return GetPropertyNames(cx, target, JSITER_OWNONLY, &props);
+    return GetPropertyKeys(cx, target, JSITER_OWNONLY, &props);
 }
 
 bool
@@ -230,7 +230,7 @@ DirectProxyHandler::iterate(JSContext *cx, HandleObject proxy, unsigned flags,
                             MutableHandleValue vp) const
 {
     assertEnteredPolicy(cx, proxy, JSID_VOID, ENUMERATE);
-    JS_ASSERT(!hasPrototype()); // Should never be called if there's a prototype.
+    MOZ_ASSERT(!hasPrototype()); // Should never be called if there's a prototype.
     RootedObject target(cx, proxy->as<ProxyObject>().target());
     return GetIterator(cx, target, flags, vp);
 }

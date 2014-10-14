@@ -168,9 +168,7 @@ gfxPlatformMac::IsFontFormatSupported(nsIURI *aFontURI, uint32_t aFormatFlags)
                  "strange font format hint set");
 
     // accept supported formats
-    if (aFormatFlags & (gfxUserFontSet::FLAG_FORMAT_WOFF     |
-                        gfxUserFontSet::FLAG_FORMAT_OPENTYPE | 
-                        gfxUserFontSet::FLAG_FORMAT_TRUETYPE | 
+    if (aFormatFlags & (gfxUserFontSet::FLAG_FORMATS_COMMON |
                         gfxUserFontSet::FLAG_FORMAT_TRUETYPE_AAT)) {
         return true;
     }
@@ -229,10 +227,14 @@ static const char kFontSTIXGeneral[] = "STIXGeneral";
 static const char kFontTamilMN[] = "Tamil MN";
 
 void
-gfxPlatformMac::GetCommonFallbackFonts(const uint32_t aCh,
+gfxPlatformMac::GetCommonFallbackFonts(uint32_t aCh, uint32_t aNextCh,
                                        int32_t aRunScript,
                                        nsTArray<const char*>& aFontList)
 {
+    if (aNextCh == 0xfe0f) {
+        aFontList.AppendElement(kFontAppleColorEmoji);
+    }
+
     aFontList.AppendElement(kFontLucidaGrande);
 
     if (!IS_IN_BMP(aCh)) {

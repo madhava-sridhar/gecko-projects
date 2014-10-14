@@ -299,7 +299,7 @@ already_AddRefed<Request>
 TypeUtils::ToRequest(nsIGlobalObject* aGlobal, const PCacheRequest& aIn,
                      PCacheStreamControlChild* aStreamControl)
 {
-  nsRefPtr<InternalRequest> internalRequest = new InternalRequest(aGlobal);
+  nsRefPtr<InternalRequest> internalRequest = new InternalRequest();
 
   internalRequest->SetMethod(aIn.method());
   internalRequest->SetURL(NS_ConvertUTF16toUTF8(aIn.url()));
@@ -309,7 +309,10 @@ TypeUtils::ToRequest(nsIGlobalObject* aGlobal, const PCacheRequest& aIn,
 
   nsRefPtr<Headers> headers = new Headers(aGlobal, aIn.headers(),
                                           aIn.headersGuard());
-  internalRequest->SetHeaders(headers);
+  ErrorResult result;
+  internalRequest->Headers_()->SetGuard(aIn.headersGuard(), result);
+  internalRequest->Headers_()->Fill(*headers, result);
+  MOZ_ASSERT(!result.Failed());
 
   nsCOMPtr<nsIInputStream> stream = ReadStream::Create(aStreamControl,
                                                        aIn.body());

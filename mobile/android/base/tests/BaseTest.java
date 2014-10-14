@@ -121,6 +121,10 @@ abstract class BaseTest extends BaseRobocopTest {
         mActions = new FennecNativeActions(mActivity, mSolo, getInstrumentation(), mAsserter);
         mDevice = new Device();
         mDatabaseHelper = new DatabaseHelper(mActivity, mAsserter);
+
+        // Ensure Robocop tests have access to network, and are run with Display powered on.
+        throwIfHttpGetFails();
+        throwIfScreenNotOn();
     }
 
     protected void initializeProfile() {
@@ -133,7 +137,7 @@ abstract class BaseTest extends BaseRobocopTest {
 
         // In Robocop tests, we typically don't get initialized correctly, because
         // GeckoProfile doesn't create the profile directory.
-        profile.enqueueInitialization();
+        profile.enqueueInitialization(profile.getDir());
     }
 
     @Override

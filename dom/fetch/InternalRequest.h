@@ -6,14 +6,13 @@
 #ifndef mozilla_dom_InternalRequest_h
 #define mozilla_dom_InternalRequest_h
 
+#include "mozilla/dom/Headers.h"
 #include "mozilla/dom/RequestBinding.h"
 #include "mozilla/dom/UnionTypes.h"
 
 #include "nsIContentPolicy.h"
 #include "nsIInputStream.h"
 #include "nsISupportsImpl.h"
-
-#include "Headers.h"
 
 class nsIDocument;
 class nsPIDOMWindow;
@@ -54,10 +53,9 @@ public:
     RESPONSETAINT_OPAQUE,
   };
 
-  explicit InternalRequest(nsIGlobalObject* aClient)
+  explicit InternalRequest()
     : mMethod("GET")
-    , mHeaders(new Headers(aClient))
-    , mClient(aClient)
+    , mHeaders(new Headers(nullptr, HeadersGuardEnum::MozNone))
     , mContextFrameType(FRAMETYPE_NONE)
     , mReferrerType(REFERRER_CLIENT)
     , mMode(RequestMode::No_cors)
@@ -81,7 +79,6 @@ public:
     , mURL(aOther.mURL)
     , mHeaders(aOther.mHeaders)
     , mBodyStream(aOther.mBodyStream)
-    , mClient(aOther.mClient)
     , mContext(aOther.mContext)
     , mOrigin(aOther.mOrigin)
     , mContextFrameType(aOther.mContextFrameType)
@@ -122,16 +119,12 @@ public:
     aURL.Assign(mURL);
   }
 
+  // FIXME(nsm): Ideally add a ctor that takes the URL and make this private
+  // again.
   void
   SetURL(const nsACString& aURL)
   {
     mURL.Assign(aURL);
-  }
-
-  nsIGlobalObject*
-  GetClient() const
-  {
-    return mClient;
   }
 
   bool
@@ -198,13 +191,6 @@ public:
     return mHeaders;
   }
 
-  void
-  SetHeaders(Headers* aHeaders)
-  {
-    MOZ_ASSERT(aHeaders);
-    mHeaders = aHeaders;
-  }
-
   bool
   ForceOriginHeader()
   {
@@ -234,7 +220,7 @@ public:
 
   // The global is used as the client for the new object.
   already_AddRefed<InternalRequest>
-  GetRequestConstructorCopy(nsIGlobalObject* aGlobal) const;
+  GetRequestConstructorCopy(nsIGlobalObject* aGlobal, ErrorResult& aRv) const;
 
 private:
   ~InternalRequest();
@@ -243,8 +229,6 @@ private:
   nsCString mURL;
   nsRefPtr<Headers> mHeaders;
   nsCOMPtr<nsIInputStream> mBodyStream;
-
-  nsIGlobalObject* mClient;
 
   // nsContentPolicyType does not cover the complete set defined in the spec,
   // but it is a good start.

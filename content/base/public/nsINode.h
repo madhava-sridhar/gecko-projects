@@ -320,7 +320,6 @@ public:
     mSubtreeRoot(MOZ_THIS_IN_INITIALIZER_LIST()),
     mSlots(nullptr)
   {
-    SetIsDOMBinding();
   }
 #endif
 
@@ -381,11 +380,7 @@ protected:
    * does some additional checks and fix-up that's common to all nodes. WrapNode
    * should just call the DOM binding's Wrap function.
    */
-  virtual JSObject* WrapNode(JSContext *aCx)
-  {
-    MOZ_ASSERT(!IsDOMBinding(), "Someone forgot to override WrapNode");
-    return nullptr;
-  }
+  virtual JSObject* WrapNode(JSContext *aCx) = 0;
 
   // Subclasses that wish to override the parent behavior should return the
   // result of GetParentObjectIntenral, which handles the XBL scope stuff.
@@ -1640,8 +1635,7 @@ public:
                                  localName.Length());
     }
   }
-  // HasAttributes is defined inline in Element.h.
-  bool HasAttributes() const;
+
   nsDOMAttributeMap* GetAttributes();
   void SetUserData(JSContext* aCx, const nsAString& aKey,
                    JS::Handle<JS::Value> aData,
@@ -1992,12 +1986,6 @@ ToCanonicalSupports(nsINode* aPointer)
   NS_IMETHOD GetLocalName(nsAString& aLocalName) __VA_ARGS__ \
   { \
     aLocalName = nsINode::LocalName(); \
-    return NS_OK; \
-  } \
-  using nsINode::HasAttributes; \
-  NS_IMETHOD HasAttributes(bool* aResult) __VA_ARGS__ \
-  { \
-    *aResult = nsINode::HasAttributes(); \
     return NS_OK; \
   } \
   NS_IMETHOD GetDOMBaseURI(nsAString& aBaseURI) __VA_ARGS__ \

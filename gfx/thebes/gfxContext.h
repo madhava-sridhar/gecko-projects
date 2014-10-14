@@ -37,7 +37,9 @@ template <typename T> class FallibleTArray;
  * as opposed to app units.
  */
 class gfxContext MOZ_FINAL {
+    typedef mozilla::gfx::FillRule FillRule;
     typedef mozilla::gfx::Path Path;
+    typedef mozilla::gfx::Pattern Pattern;
 
     NS_INLINE_DECL_REFCOUNTING(gfxContext)
 
@@ -83,11 +85,6 @@ public:
     mozilla::gfx::DrawTarget *GetDrawTarget() { return mDT; }
 
     /**
-     * Returns true if the cairo context is in an error state.
-     */
-    bool HasError();
-
-    /**
      ** State
      **/
     // XXX document exactly what bits are saved
@@ -106,12 +103,14 @@ public:
      * Does not consume the current path.
      */
     void Stroke();
+    void Stroke(const Pattern& aPattern);
     /**
      * Fill the current path according to the current settings.
      *
      * Does not consume the current path.
      */
     void Fill();
+    void Fill(const Pattern& aPattern);
 
     /**
      * Fill the current path according to the current settings and
@@ -120,6 +119,7 @@ public:
      * Does not consume the current path.
      */
     void FillWithOpacity(gfxFloat aOpacity);
+    void FillWithOpacity(const Pattern& aPattern, gfxFloat aOpacity);
 
     /**
      * Forgets the current path.
@@ -469,10 +469,6 @@ public:
      ** Fill Properties
      **/
 
-    enum FillRule {
-        FILL_RULE_WINDING,
-        FILL_RULE_EVEN_ODD
-    };
     void SetFillRule(FillRule rule);
     FillRule CurrentFillRule() const;
 
@@ -595,19 +591,6 @@ public:
     mozilla::TemporaryRef<mozilla::gfx::SourceSurface>
     PopGroupToSurface(mozilla::gfx::Matrix* aMatrix);
 
-    /**
-     ** Hit Testing - check if given point is in the current path
-     **/
-    bool PointInFill(const gfxPoint& pt);
-    bool PointInStroke(const gfxPoint& pt);
-
-    /**
-     ** Extents - returns user space extent of current path
-     **/
-    gfxRect GetUserPathExtent();
-    gfxRect GetUserFillExtent();
-    gfxRect GetUserStrokeExtent();
-
     mozilla::gfx::Point GetDeviceOffset() const;
 
     /**
@@ -671,7 +654,7 @@ public:
 private:
     ~gfxContext();
 
-  friend class GeneralPattern;
+  friend class PatternFromState;
   friend class GlyphBufferAzure;
 
   typedef mozilla::gfx::Matrix Matrix;
@@ -727,7 +710,7 @@ private:
   void EnsurePath();
   // This ensures mPathBuilder contains a valid PathBuilder (in user space!)
   void EnsurePathBuilder();
-  void FillAzure(mozilla::gfx::Float aOpacity);
+  void FillAzure(const Pattern& aPattern, mozilla::gfx::Float aOpacity);
   void PushClipsToDT(mozilla::gfx::DrawTarget *aDT);
   CompositionOp GetOp();
   void ChangeTransform(const mozilla::gfx::Matrix &aNewMatrix, bool aUpdatePatternTransform = true);

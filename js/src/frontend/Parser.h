@@ -153,7 +153,7 @@ struct ParseContext : public GenericParseContext
     }
 
     uint32_t numArgs() const {
-        JS_ASSERT(sc->isFunctionBox());
+        MOZ_ASSERT(sc->isFunctionBox());
         return args_.length();
     }
 
@@ -429,7 +429,7 @@ class Parser : private JS::AutoGCRooter, public StrictModeGetter
      * Allocate a new parsed object or function container from
      * cx->tempLifoAlloc.
      */
-    ObjectBox *newObjectBox(JSObject *obj);
+    ObjectBox *newObjectBox(NativeObject *obj);
     FunctionBox *newFunctionBox(Node fn, JSFunction *fun, ParseContext<ParseHandler> *pc,
                                 Directives directives, GeneratorKind generatorKind);
 

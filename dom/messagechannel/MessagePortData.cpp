@@ -48,7 +48,7 @@ MessagePortData::FromDataToMessages(
 
 #ifdef DEBUG
     {
-      const nsTArray<nsCOMPtr<nsIDOMBlob>>& blobs = aData[i]->mClosure.mBlobs;
+      const nsTArray<nsRefPtr<File>>& blobs = aData[i]->mClosure.mBlobs;
       MOZ_ASSERT(blobs.IsEmpty());
     }
 #endif

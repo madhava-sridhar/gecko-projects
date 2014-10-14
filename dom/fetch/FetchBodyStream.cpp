@@ -25,7 +25,6 @@ NS_INTERFACE_MAP_END
 FetchBodyStream::FetchBodyStream(nsISupports* aOwner)
   : mOwner(aOwner)
 {
-  SetIsDOMBinding();
 }
 
 FetchBodyStream::~FetchBodyStream()

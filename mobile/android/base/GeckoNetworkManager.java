@@ -37,7 +37,7 @@ import android.util.Log;
 public class GeckoNetworkManager extends BroadcastReceiver implements NativeEventListener {
     private static final String LOGTAG = "GeckoNetworkManager";
 
-    static private GeckoNetworkManager sInstance = new GeckoNetworkManager();
+    static private GeckoNetworkManager sInstance;
 
     public static void destroy() {
         if (sInstance != null) {
@@ -90,6 +90,10 @@ public class GeckoNetworkManager extends BroadcastReceiver implements NativeEven
     private volatile Context mApplicationContext;
 
     public static GeckoNetworkManager getInstance() {
+        if (sInstance == null) {
+            sInstance = new GeckoNetworkManager();
+        }
+
         return sInstance;
     }
 
@@ -276,9 +280,12 @@ public class GeckoNetworkManager extends BroadcastReceiver implements NativeEven
         if (networkOperator == null || networkOperator.length() <= 3) {
             return -1;
         }
+
         if (type == InfoType.MNC) {
             return Integer.parseInt(networkOperator.substring(3));
-        } else if (type == InfoType.MCC) {
+        }
+
+        if (type == InfoType.MCC) {
             return Integer.parseInt(networkOperator.substring(0, 3));
         }
 

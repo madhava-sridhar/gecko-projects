@@ -53,6 +53,7 @@
 
 #include "mozilla/unused.h"
 
+#include "mozInlineSpellChecker.h"
 #include "nsIConsoleListener.h"
 #include "nsICycleCollectorListener.h"
 #include "nsIIPCBackgroundChildCreateCallback.h"
@@ -77,6 +78,7 @@
 #include "nsIJSRuntimeService.h"
 #include "nsThreadManager.h"
 #include "nsAnonymousTemporaryFile.h"
+#include "nsISpellChecker.h"
 
 #include "IHistory.h"
 #include "nsNetUtil.h"
@@ -128,6 +130,8 @@
 #include "ipc/Nuwa.h"
 #endif
 
+#include "mozilla/dom/File.h"
+#include "mozilla/dom/cellbroadcast/CellBroadcastIPCService.h"
 #include "mozilla/dom/mobileconnection/MobileConnectionChild.h"
 #include "mozilla/dom/mobilemessage/SmsChild.h"
 #include "mozilla/dom/devicestorage/DeviceStorageRequestChild.h"
@@ -141,7 +145,6 @@
 #include "mozilla/dom/PSpeechSynthesisChild.h"
 #endif
 
-#include "nsDOMFile.h"
 #include "ProcessUtils.h"
 #include "StructuredCloneUtils.h"
 #include "URIUtils.h"
@@ -161,6 +164,7 @@ using namespace base;
 using namespace mozilla;
 using namespace mozilla::docshell;
 using namespace mozilla::dom::bluetooth;
+using namespace mozilla::dom::cellbroadcast;
 using namespace mozilla::dom::devicestorage;
 using namespace mozilla::dom::ipc;
 using namespace mozilla::dom::mobileconnection;
@@ -387,7 +391,7 @@ ConsoleListener::Observe(nsIConsoleMessage* aMessage)
 {
     if (!mChild)
         return NS_OK;
-    
+
     nsCOMPtr<nsIScriptError> scriptError = do_QueryInterface(aMessage);
     if (scriptError) {
         nsString msg, sourceName, sourceLine;
@@ -691,7 +695,7 @@ ContentChild::InitXPCOM()
         NS_WARNING("Couldn't register console listener for child process");
 
     bool isOffline;
-    SendGetXPCOMProcessAttributes(&isOffline);
+    SendGetXPCOMProcessAttributes(&isOffline, &mAvailableDictionaries);
     RecvSetOffline(isOffline);
 
     DebugOnly<FileUpdateDispatcher*> observer = FileUpdateDispatcher::GetSingleton();
@@ -1123,6 +1127,12 @@ ContentChild::RecvPBrowserConstructor(PBrowserChild* aActor,
     return true;
 }
 
+void
+ContentChild::GetAvailableDictionaries(InfallibleTArray<nsString>& aDictionaries)
+{
+    aDictionaries = mAvailableDictionaries;
+}
+
 PFileDescriptorSetChild*
 ContentChild::AllocPFileDescriptorSetChild(const FileDescriptor& aFD)
 {
@@ -1151,7 +1161,7 @@ ContentChild::AllocPBlobChild(const BlobConstructorParams& aParams)
 mozilla::PRemoteSpellcheckEngineChild *
 ContentChild::AllocPRemoteSpellcheckEngineChild()
 {
-    NS_NOTREACHED("Default Constructor for PRemoteSpellcheckEngineChilf should never be called");
+    NS_NOTREACHED("Default Constructor for PRemoteSpellcheckEngineChild should never be called");
     return nullptr;
 }
 
@@ -1236,7 +1246,7 @@ ContentChild::DeallocPTestShellChild(PTestShellChild* shell)
     return true;
 }
 
-jsipc::JavaScriptChild *
+jsipc::JavaScriptShared*
 ContentChild::GetCPOWManager()
 {
     if (ManagedPJavaScriptChild().Length()) {
@@ -1376,6 +1386,30 @@ ContentChild::DeallocPExternalHelperAppChild(PExternalHelperAppChild* aService)
 {
     ExternalHelperAppChild *child = static_cast<ExternalHelperAppChild*>(aService);
     child->Release();
+    return true;
+}
+
+PCellBroadcastChild*
+ContentChild::AllocPCellBroadcastChild()
+{
+    MOZ_CRASH("No one should be allocating PCellBroadcastChild actors");
+}
+
+PCellBroadcastChild*
+ContentChild::SendPCellBroadcastConstructor(PCellBroadcastChild* aActor)
+{
+    aActor = PContentChild::SendPCellBroadcastConstructor(aActor);
+    if (aActor) {
+        static_cast<CellBroadcastIPCService*>(aActor)->AddRef();
+    }
+
+    return aActor;
+}
+
+bool
+ContentChild::DeallocPCellBroadcastChild(PCellBroadcastChild* aActor)
+{
+    static_cast<CellBroadcastIPCService*>(aActor)->Release();
     return true;
 }
 
@@ -1540,6 +1574,10 @@ ContentChild::RecvRegisterChromeItem(const ChromeRegistryItem& item)
             chromeRegistry->RegisterOverride(item.get_OverrideMapping());
             break;
 
+        case ChromeRegistryItem::TResourceMapping:
+            chromeRegistry->RegisterResource(item.get_ResourceMapping());
+            break;
+
         default:
             MOZ_ASSERT(false, "bad chrome item");
             return false;
@@ -1697,7 +1735,7 @@ ContentChild::RecvAsyncMessage(const nsString& aMsg,
     nsRefPtr<nsFrameMessageManager> cpm = nsFrameMessageManager::sChildProcessManager;
     if (cpm) {
         StructuredCloneData cloneData = ipc::UnpackClonedMessageDataForChild(aData);
-        CpowIdHolder cpows(GetCPOWManager(), aCpows);
+        CpowIdHolder cpows(this, aCpows);
         cpm->ReceiveMessage(static_cast<nsIContentFrameMessageManager*>(cpm.get()),
                             aMsg, false, &cloneData, &cpows, aPrincipal, nullptr);
     }
@@ -1713,6 +1751,14 @@ ContentChild::RecvGeolocationUpdate(const GeoPosition& somewhere)
     }
     nsCOMPtr<nsIDOMGeoPosition> position = somewhere;
     gs->Update(position);
+    return true;
+}
+
+bool
+ContentChild::RecvUpdateDictionaryList(const InfallibleTArray<nsString>& aDictionaries)
+{
+    mAvailableDictionaries = aDictionaries;
+    mozInlineSpellChecker::UpdateCanEnableInlineSpellChecking();
     return true;
 }
 

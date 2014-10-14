@@ -477,6 +477,10 @@ gfxWindowsPlatform::CreateDevice(nsRefPtr<IDXGIAdapter1> &adapter1,
   nsRefPtr<ID3D10Device1> device;
   HRESULT hr =
     createD3DDevice(adapter1, D3D10_DRIVER_TYPE_HARDWARE, nullptr,
+#ifdef DEBUG
+                    // This isn't set because of bug 1078411
+                    // D3D10_CREATE_DEVICE_DEBUG |
+#endif
                     D3D10_CREATE_DEVICE_BGRA_SUPPORT |
                     D3D10_CREATE_DEVICE_PREVENT_INTERNAL_THREADING_OPTIMIZATIONS,
                     static_cast<D3D10_FEATURE_LEVEL1>(kSupportedFeatureLevels[featureLevelIndex]),
@@ -725,18 +729,29 @@ static const char kFontUtsaah[] = "Utsaah";
 static const char kFontYuGothic[] = "Yu Gothic";
 
 void
-gfxWindowsPlatform::GetCommonFallbackFonts(const uint32_t aCh,
+gfxWindowsPlatform::GetCommonFallbackFonts(uint32_t aCh, uint32_t aNextCh,
                                            int32_t aRunScript,
                                            nsTArray<const char*>& aFontList)
 {
+    if (aNextCh == 0xfe0fu) {
+        aFontList.AppendElement(kFontSegoeUIEmoji);
+    }
+
     // Arial is used as the default fallback for system fallback
     aFontList.AppendElement(kFontArial);
 
     if (!IS_IN_BMP(aCh)) {
         uint32_t p = aCh >> 16;
         if (p == 1) { // SMP plane
-            aFontList.AppendElement(kFontSegoeUIEmoji);
-            aFontList.AppendElement(kFontSegoeUISymbol);
+            if (aNextCh == 0xfe0eu) {
+                aFontList.AppendElement(kFontSegoeUISymbol);
+                aFontList.AppendElement(kFontSegoeUIEmoji);
+            } else {
+                if (aNextCh != 0xfe0fu) {
+                    aFontList.AppendElement(kFontSegoeUIEmoji);
+                }
+                aFontList.AppendElement(kFontSegoeUISymbol);
+            }
             aFontList.AppendElement(kFontEbrima);
             aFontList.AppendElement(kFontNirmalaUI);
             aFontList.AppendElement(kFontCambriaMath);
@@ -814,7 +829,6 @@ gfxWindowsPlatform::GetCommonFallbackFonts(const uint32_t aCh,
         case 0x2b:
         case 0x2c:
             aFontList.AppendElement(kFontSegoeUI);
-            aFontList.AppendElement(kFontSegoeUIEmoji);
             aFontList.AppendElement(kFontSegoeUISymbol);
             aFontList.AppendElement(kFontCambria);
             aFontList.AppendElement(kFontMeiryo);
@@ -959,9 +973,7 @@ gfxWindowsPlatform::IsFontFormatSupported(nsIURI *aFontURI, uint32_t aFormatFlag
                  "strange font format hint set");
 
     // accept supported formats
-    if (aFormatFlags & (gfxUserFontSet::FLAG_FORMAT_WOFF     |
-                        gfxUserFontSet::FLAG_FORMAT_OPENTYPE | 
-                        gfxUserFontSet::FLAG_FORMAT_TRUETYPE)) {
+    if (aFormatFlags & gfxUserFontSet::FLAG_FORMATS_COMMON) {
         return true;
     }
 
@@ -1527,6 +1539,8 @@ gfxWindowsPlatform::InitD3D11Devices()
     return;
   }
 
+  mD3D11Device->SetExceptionMode(0);
+
 #ifdef USE_D2D1_1
   if (Factory::SupportsD2D1()) {
     hr = d3d11CreateDevice(adapter, D3D_DRIVER_TYPE_UNKNOWN, nullptr,
@@ -1538,6 +1552,8 @@ gfxWindowsPlatform::InitD3D11Devices()
       mD3D11Device = nullptr;
       return;
     }
+
+    mD3D11ContentDevice->SetExceptionMode(0);
 
     Factory::SetDirect3D11Device(mD3D11ContentDevice);
   }

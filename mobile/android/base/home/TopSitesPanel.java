@@ -105,8 +105,8 @@ public class TopSitesPanel extends HomeFragment {
         return new TopSitesPanel();
     }
 
-    private static boolean logDebug = Log.isLoggable(LOGTAG, Log.DEBUG);
-    private static boolean logVerbose = Log.isLoggable(LOGTAG, Log.VERBOSE);
+    private static final boolean logDebug = Log.isLoggable(LOGTAG, Log.DEBUG);
+    private static final boolean logVerbose = Log.isLoggable(LOGTAG, Log.VERBOSE);
 
     private static void debug(final String message) {
         if (logDebug) {
@@ -284,7 +284,7 @@ public class TopSitesPanel extends HomeFragment {
 
         ContextMenuInfo menuInfo = item.getMenuInfo();
 
-        if (menuInfo == null || !(menuInfo instanceof TopSitesGridContextMenuInfo)) {
+        if (!(menuInfo instanceof TopSitesGridContextMenuInfo)) {
             return false;
         }
 
@@ -406,7 +406,7 @@ public class TopSitesPanel extends HomeFragment {
         // Max number of search results.
         private static final int SEARCH_LIMIT = 30;
         private static final String TELEMETRY_HISTOGRAM_LOAD_CURSOR = "FENNEC_TOPSITES_LOADER_TIME_MS";
-        private int mMaxGridEntries;
+        private final int mMaxGridEntries;
 
         public TopSitesLoader(Context context) {
             super(context);
@@ -525,12 +525,15 @@ public class TopSitesPanel extends HomeFragment {
                 return;
             }
 
+            // Make sure we query suggested images without the user-entered wrapper.
+            final String decodedUrl = StringUtils.decodeUserEnteredUrl(url);
+
             // Suggested images have precedence over thumbnails, no need to wait
             // for them to be loaded. See: CursorLoaderCallbacks.onLoadFinished()
-            final String imageUrl = cursor.getString(cursor.getColumnIndexOrThrow(TopSites.IMAGEURL));
+            final String imageUrl = BrowserDB.getSuggestedImageUrlForUrl(decodedUrl);
             if (!TextUtils.isEmpty(imageUrl)) {
-                final String bgColor = cursor.getString(cursor.getColumnIndexOrThrow(TopSites.BGCOLOR));
-                view.displayThumbnail(imageUrl, Color.parseColor(bgColor));
+                final int bgColor = BrowserDB.getSuggestedBackgroundColorForUrl(decodedUrl);
+                view.displayThumbnail(imageUrl, bgColor);
                 return;
             }
 
@@ -621,11 +624,10 @@ public class TopSitesPanel extends HomeFragment {
             int i = 1;
             do {
                 final String url = c.getString(col);
-                final String imageUrl = c.getString(c.getColumnIndexOrThrow(TopSites.IMAGEURL));
 
                 // Only try to fetch thumbnails for non-empty URLs that
                 // don't have an associated suggested image URL.
-                if (TextUtils.isEmpty(url) || !TextUtils.isEmpty(imageUrl)) {
+                if (TextUtils.isEmpty(url) || BrowserDB.hasSuggestedImageUrl(url)) {
                     continue;
                 }
 
@@ -699,7 +701,7 @@ public class TopSitesPanel extends HomeFragment {
     @SuppressWarnings("serial")
     static class ThumbnailsLoader extends AsyncTaskLoader<Map<String, ThumbnailInfo>> {
         private Map<String, ThumbnailInfo> mThumbnailInfos;
-        private ArrayList<String> mUrls;
+        private final ArrayList<String> mUrls;
 
         private static final ArrayList<String> COLUMNS = new ArrayList<String>() {{
             add(TILE_IMAGE_URL_COLUMN);

@@ -7,6 +7,7 @@
 #define GFX_PLATFORM_H
 
 #include "prlog.h"
+#include "mozilla/gfx/Types.h"
 #include "nsTArray.h"
 #include "nsString.h"
 #include "nsCOMPtr.h"
@@ -158,6 +159,7 @@ GetBackendName(mozilla::gfx::BackendType aBackend)
 
 class gfxPlatform {
 public:
+    typedef mozilla::gfx::Color Color;
     typedef mozilla::gfx::DataSourceSurface DataSourceSurface;
     typedef mozilla::gfx::DrawTarget DrawTarget;
     typedef mozilla::gfx::IntSize IntSize;
@@ -449,7 +451,7 @@ public:
 
     // returns a list of commonly used fonts for a given character
     // these are *possible* matches, no cmap-checking is done at this level
-    virtual void GetCommonFallbackFonts(const uint32_t /*aCh*/,
+    virtual void GetCommonFallbackFonts(uint32_t /*aCh*/, uint32_t /*aNextCh*/,
                                         int32_t /*aRunScript*/,
                                         nsTArray<const char*>& /*aFontList*/)
     {
@@ -492,6 +494,12 @@ public:
      * Sets 'out' to 'in' if transform is nullptr.
      */
     static void TransformPixel(const gfxRGBA& in, gfxRGBA& out, qcms_transform *transform);
+
+    /**
+     * Converts the color using the GetCMSRGBTransform() transform if the
+     * CMS mode is eCMSMode_All, else just returns the color.
+     */
+    static Color MaybeTransformColor(const gfxRGBA& aColor);
 
     /**
      * Return the output device ICC profile.

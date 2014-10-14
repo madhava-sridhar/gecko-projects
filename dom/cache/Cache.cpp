@@ -47,7 +47,6 @@ Cache::Cache(nsISupports* aOwner, nsIGlobalObject* aGlobal,
   , mActor(static_cast<CacheChild*>(aActor))
 {
   MOZ_ASSERT(mActor);
-  SetIsDOMBinding();
   mActor->SetListener(*this);
 }
 

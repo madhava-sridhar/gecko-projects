@@ -8,6 +8,7 @@
 #include "nsIContentPolicy.h"
 #include "nsIDocument.h"
 
+#include "mozilla/ErrorResult.h"
 #include "mozilla/dom/ScriptSettings.h"
 #include "mozilla/dom/workers/Workers.h"
 
@@ -16,10 +17,11 @@
 namespace mozilla {
 namespace dom {
 
+// The global is used to extract the principal.
 already_AddRefed<InternalRequest>
-InternalRequest::GetRequestConstructorCopy(nsIGlobalObject* aGlobal) const
+InternalRequest::GetRequestConstructorCopy(nsIGlobalObject* aGlobal, ErrorResult& aRv) const
 {
-  nsRefPtr<InternalRequest> copy = new InternalRequest(aGlobal);
+  nsRefPtr<InternalRequest> copy = new InternalRequest();
   copy->mURL.Assign(mURL);
   copy->SetMethod(mMethod);
   copy->mHeaders = new Headers(*mHeaders);
@@ -30,13 +32,16 @@ InternalRequest::GetRequestConstructorCopy(nsIGlobalObject* aGlobal) const
   if (NS_IsMainThread()) {
     nsIPrincipal* principal = aGlobal->PrincipalOrNull();
     MOZ_ASSERT(principal);
-    nsContentUtils::GetASCIIOrigin(principal, copy->mOrigin);
+    aRv = nsContentUtils::GetASCIIOrigin(principal, copy->mOrigin);
+    if (NS_WARN_IF(aRv.Failed())) {
+      return nullptr;
+    }
   } else {
     workers::WorkerPrivate* worker = workers::GetCurrentThreadWorkerPrivate();
     MOZ_ASSERT(worker);
     worker->AssertIsOnWorkerThread();
 
-    workers::WorkerPrivate::LocationInfo location = worker->GetLocationInfo();
+    workers::WorkerPrivate::LocationInfo& location = worker->GetLocationInfo();
     copy->mOrigin = NS_ConvertUTF16toUTF8(location.mOrigin);
   }
 

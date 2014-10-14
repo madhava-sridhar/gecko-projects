@@ -2354,7 +2354,7 @@ var gCSSProperties = {
     type: CSS_TYPE_LONGHAND,
     /* XXX needs to be on pseudo-elements */
     initial_values: [ "normal", "none" ],
-    other_values: [ '""', "''", '"hello"', "url(data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAIAAAD8GO2jAAAAKElEQVR42u3NQQ0AAAgEoNP+nTWFDzcoQE1udQQCgUAgEAgEAsGTYAGjxAE/G/Q2tQAAAABJRU5ErkJggg==)", "url('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAIAAAD8GO2jAAAAKElEQVR42u3NQQ0AAAgEoNP+nTWFDzcoQE1udQQCgUAgEAgEAsGTYAGjxAE/G/Q2tQAAAABJRU5ErkJggg==')", 'url("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAIAAAD8GO2jAAAAKElEQVR42u3NQQ0AAAgEoNP+nTWFDzcoQE1udQQCgUAgEAgEAsGTYAGjxAE/G/Q2tQAAAABJRU5ErkJggg==")', 'counter(foo)', 'counter(bar, upper-roman)', 'counters(foo, ".")', "counters(bar, '-', lower-greek)", "'-' counter(foo) '.'", "attr(title)", "open-quote", "close-quote", "no-open-quote", "no-close-quote", "close-quote attr(title) counters(foo, '.', upper-alpha)", "counter(foo, none)", "counters(bar, '.', none)", "attr(\\32)", "attr(\\2)", "attr(-\\2)", "attr(-\\32)", "counter(\\2)", "counters(\\32, '.')", "counter(-\\32, upper-roman)", "counters(-\\2, '-', lower-greek)", "counter(\\()", "counters(a\\+b, '.')", "counter(\\}, upper-alpha)", "-moz-alt-content" ],
+    other_values: [ '""', "''", '"hello"', "url(data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAIAAAD8GO2jAAAAKElEQVR42u3NQQ0AAAgEoNP+nTWFDzcoQE1udQQCgUAgEAgEAsGTYAGjxAE/G/Q2tQAAAABJRU5ErkJggg==)", "url('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAIAAAD8GO2jAAAAKElEQVR42u3NQQ0AAAgEoNP+nTWFDzcoQE1udQQCgUAgEAgEAsGTYAGjxAE/G/Q2tQAAAABJRU5ErkJggg==')", 'url("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAIAAAD8GO2jAAAAKElEQVR42u3NQQ0AAAgEoNP+nTWFDzcoQE1udQQCgUAgEAgEAsGTYAGjxAE/G/Q2tQAAAABJRU5ErkJggg==")', 'counter(foo)', 'counter(bar, upper-roman)', 'counters(foo, ".")', "counters(bar, '-', lower-greek)", "'-' counter(foo) '.'", "attr(title)", "open-quote", "close-quote", "no-open-quote", "no-close-quote", "close-quote attr(title) counters(foo, '.', upper-alpha)", "counter(foo, none)", "counters(bar, '.', none)", "attr(\\32)", "attr(\\2)", "attr(-\\2)", "attr(-\\32)", "counter(\\2)", "counters(\\32, '.')", "counter(-\\32, upper-roman)", "counters(-\\2, '-', lower-greek)", "counter(\\()", "counters(a\\+b, '.')", "counter(\\}, upper-alpha)", "-moz-alt-content", "counter(foo, symbols('*'))", "counter(foo, symbols(numeric '0' '1'))", "counters(foo, '.', symbols('*'))", "counters(foo, '.', symbols(numeric '0' '1'))" ],
     invalid_values: [ 'counters(foo)', 'counter(foo, ".")', 'attr("title")', "attr('title')", "attr(2)", "attr(-2)", "counter(2)", "counters(-2, '.')", "-moz-alt-content 'foo'", "'foo' -moz-alt-content" ]
   },
   "counter-increment": {
@@ -2716,6 +2716,12 @@ var gCSSProperties = {
     subproperties: [ "list-style-type", "list-style-position", "list-style-image" ],
     initial_values: [ "outside", "disc", "disc outside", "outside disc", "disc none", "none disc", "none disc outside", "none outside disc", "disc none outside", "disc outside none", "outside none disc", "outside disc none" ],
     other_values: [ "inside none", "none inside", "none none inside", "square", "none", "none none", "outside none none", "none outside none", "none none outside", "none outside", "outside none", "outside outside", "outside inside", "\\32 style", "\\32 style inside",
+      "symbols(\"*\" \"\\2020\" \"\\2021\" \"\\A7\")",
+      "symbols(cyclic \"*\" \"\\2020\" \"\\2021\" \"\\A7\")",
+      "inside symbols(\"*\" \"\\2020\" \"\\2021\" \"\\A7\")",
+      "symbols(\"*\" \"\\2020\" \"\\2021\" \"\\A7\") outside",
+      "none symbols(\"*\" \"\\2020\" \"\\2021\" \"\\A7\")",
+      "inside none symbols(\"*\" \"\\2020\" \"\\2021\" \"\\A7\")",
       'url("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAIAAAD8GO2jAAAAKElEQVR42u3NQQ0AAAgEoNP+nTWFDzcoQE1udQQCgUAgEAgEAsGTYAGjxAE/G/Q2tQAAAABJRU5ErkJggg==")',
       'none url("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAIAAAD8GO2jAAAAKElEQVR42u3NQQ0AAAgEoNP+nTWFDzcoQE1udQQCgUAgEAgEAsGTYAGjxAE/G/Q2tQAAAABJRU5ErkJggg==")',
       'url("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAIAAAD8GO2jAAAAKElEQVR42u3NQQ0AAAgEoNP+nTWFDzcoQE1udQQCgUAgEAgEAsGTYAGjxAE/G/Q2tQAAAABJRU5ErkJggg==") none',
@@ -2786,7 +2792,9 @@ var gCSSProperties = {
       "-moz-ethiopic-halehame", "-moz-ethiopic-numeric",
       "-moz-ethiopic-halehame-am",
       "-moz-ethiopic-halehame-ti-er", "-moz-ethiopic-halehame-ti-et",
-      "other-style", "inside", "outside", "\\32 style"
+      "other-style", "inside", "outside", "\\32 style",
+      "symbols(\"*\" \"\\2020\" \"\\2021\" \"\\A7\")",
+      "symbols(cyclic '*' '\\2020' '\\2021' '\\A7')"
     ],
     invalid_values: []
   },
@@ -4576,6 +4584,88 @@ if (SpecialPowers.getBoolPref("svg.paint-order.enabled")) {
   };
 }
 
+if (SpecialPowers.getBoolPref("layout.css.clip-path-shapes.enabled")) {
+  gCSSProperties["clip-path"] = {
+    domProp: "clip-path",
+    inherited: false,
+    type: CSS_TYPE_LONGHAND,
+    initial_values: [ "none" ],
+    other_values: [
+      // SVG reference clip-path
+      "url(#my-clip-path)",
+
+      "polygon(20px 20px)",
+      "polygon(20px 20%)",
+      "polygon(20% 20%)",
+      "polygon(20rem 20em)",
+      "polygon(20cm 20mm)",
+      "polygon(20px 20px, 30px 30px)",
+      "polygon(20px 20px, 30% 30%, 30px 30px)",
+      "polygon(nonzero, 20px 20px, 30% 30%, 30px 30px)",
+      "polygon(evenodd, 20px 20px, 30% 30%, 30px 30px)",
+
+      "content-box",
+      "padding-box",
+      "border-box",
+      "margin-box",
+      "fill-box",
+      "stroke-box",
+      "view-box",
+
+      "polygon(0 0) content-box",
+      "border-box polygon(0 0)",
+      "padding-box    polygon(   0  20px ,  30px    20% )  ",
+      "polygon(evenodd, 20% 20em) content-box",
+      "polygon(evenodd, 20vh 20em) padding-box",
+      "polygon(evenodd, 20vh calc(20% + 20em)) border-box",
+      "polygon(evenodd, 20vh 20vw) margin-box",
+      "polygon(evenodd, 20pt 20cm) fill-box",
+      "polygon(evenodd, 20ex 20pc) stroke-box",
+      "polygon(evenodd, 20rem 20in) view-box",
+    ],
+    invalid_values: [
+      "url(#test) url(#tes2)",
+      "polygon (0 0)",
+      "polygon(20px, 40px)",
+      "border-box content-box",
+      "polygon(0 0) polygon(0 0)",
+      "polygon(nonzero 0 0)",
+      "polygon(evenodd 20px 20px)",
+      "polygon(20px 20px, evenodd)",
+      "polygon(20px 20px, nonzero)",
+      "polygon(0 0) conten-box content-box",
+      "content-box polygon(0 0) conten-box",
+      "padding-box polygon(0 0) conten-box",
+      "polygon(0 0) polygon(0 0) content-box",
+      "polygon(0 0) content-box polygon(0 0)",
+      "polygon(0 0), content-box",
+      "polygon(0 0), polygon(0 0)",
+      "content-box polygon(0 0) polygon(0 0)",
+      "content-box polygon(0 0) none",
+      "none content-box polygon(0 0)",
+      "inherit content-box polygon(0 0)",
+      "initial polygon(0 0)",
+      "polygon(0 0) farthest-side",
+      "farthest-corner polygon(0 0)",
+      "polygon(0 0) farthest-corner",
+      "polygon(0 0) conten-box",
+      "polygon(0 0) polygon(0 0) farthest-corner",
+      "polygon(0 0) polygon(0 0) polygon(0 0)",
+      "border-box polygon(0, 0)",
+      "border-box padding-box",
+      "margin-box farthest-side",
+      "nonsense() border-box",
+      "border-box nonsense()",
+    ],
+    unbalanced_values: [
+      "polygon(30% 30%",
+      "polygon(nonzero, 20% 20px",
+      "polygon(evenodd, 20px 20px",
+    ]
+  };
+}
+
+
 if (SpecialPowers.getBoolPref("layout.css.filters.enabled")) {
   gCSSProperties["filter"] = {
     domProp: "filter",
@@ -4595,11 +4685,9 @@ if (SpecialPowers.getBoolPref("layout.css.filters.enabled")) {
       "grayscale(1) url(#my-filter-1)",
       "url(#my-filter-1) brightness(50%) contrast(0.9)",
 
-      // The CSS parser will accept these weird URLs. However, we'll fail
-      // to resolve them when computing style, so we'll fall back to the
-      // initial value ("none").
-      "url('feed:javascript:5')",
-      "blur(3px) url('feed:javascript:5') grayscale(50%)",
+      // Bad URLs
+      "url('badscheme:badurl')",
+      "blur(3px) url('badscheme:badurl') grayscale(50%)",
 
       "blur(0)",
       "blur(0px)",

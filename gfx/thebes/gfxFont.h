@@ -610,6 +610,7 @@ public:
                            uint32_t        aOffset,
                            uint32_t        aLength,
                            int32_t         aScript,
+                           bool            aVertical,
                            gfxShapedText  *aShapedText) = 0;
 
     gfxFont *GetFont() const { return mFont; }
@@ -1441,7 +1442,22 @@ public:
                                       // no '0' glyph in this font,
                                       // equal to .aveCharWidth
     };
-    virtual const gfxFont::Metrics& GetMetrics() = 0;
+
+    enum Orientation {
+        eHorizontal,
+        eVertical
+    };
+
+    const Metrics& GetMetrics(Orientation aOrientation)
+    {
+        if (aOrientation == eHorizontal) {
+            return GetHorizontalMetrics();
+        }
+        if (!mVerticalMetrics) {
+            mVerticalMetrics = CreateVerticalMetrics();
+        }
+        return *mVerticalMetrics;
+    }
 
     /**
      * We let layout specify spacing on either side of any
@@ -1512,7 +1528,8 @@ public:
      * -- all glyphs use this font
      */
     void Draw(gfxTextRun *aTextRun, uint32_t aStart, uint32_t aEnd,
-              gfxPoint *aPt, const TextRunDrawParams& aRunParams);
+              gfxPoint *aPt, const TextRunDrawParams& aRunParams,
+              uint16_t aOrientation);
 
     /**
      * Measure a run of characters. See gfxTextRun::Metrics.
@@ -1558,7 +1575,8 @@ public:
     gfxGlyphExtents *GetOrCreateGlyphExtents(int32_t aAppUnitsPerDevUnit);
 
     // You need to call SetupCairoFont on the aCR just before calling this
-    virtual void SetupGlyphExtents(gfxContext *aContext, uint32_t aGlyphID,
+    virtual void SetupGlyphExtents(gfxContext *aContext,
+                                   Orientation aOrientation, uint32_t aGlyphID,
                                    bool aNeedTight, gfxGlyphExtents *aExtents);
 
     // This is called by the default Draw() implementation above.
@@ -1614,7 +1632,8 @@ public:
                              const T *aString,
                              uint32_t aRunStart,
                              uint32_t aRunLength,
-                             int32_t aRunScript);
+                             int32_t aRunScript,
+                             bool aVertical);
 
     // Get a ShapedWord representing the given text (either 8- or 16-bit)
     // for use in setting up a gfxTextRun.
@@ -1624,6 +1643,7 @@ public:
                                  uint32_t aLength,
                                  uint32_t aHash,
                                  int32_t aRunScript,
+                                 bool aVertical,
                                  int32_t aAppUnitsPerDevUnit,
                                  uint32_t aFlags,
                                  gfxTextPerfMetrics *aTextPerf);
@@ -1735,6 +1755,10 @@ public:
     GetSubSuperscriptFont(int32_t aAppUnitsPerDevPixel);
 
 protected:
+    virtual const Metrics& GetHorizontalMetrics() = 0;
+
+    const Metrics* CreateVerticalMetrics();
+
     // Output a single glyph at *aPt, which is updated by the glyph's advance.
     // Normal glyphs are simply accumulated in aBuffer until it is full and
     // gets flushed, but SVG or color-font glyphs will instead be rendered
@@ -1796,6 +1820,7 @@ protected:
                    uint32_t       aOffset, // dest offset in gfxShapedText
                    uint32_t       aLength,
                    int32_t        aScript,
+                   bool           aVertical,
                    gfxShapedText *aShapedText); // where to store the result
 
     // Call the appropriate shaper to generate glyphs for aText and store
@@ -1805,6 +1830,7 @@ protected:
                            uint32_t         aOffset,
                            uint32_t         aLength,
                            int32_t          aScript,
+                           bool             aVertical,
                            gfxShapedText   *aShapedText);
 
     // Helper to adjust for synthetic bold and set character-type flags
@@ -1829,6 +1855,7 @@ protected:
                                    uint32_t    aOffset,
                                    uint32_t    aLength,
                                    int32_t     aScript,
+                                   bool        aVertical,
                                    gfxTextRun *aTextRun);
 
     // Shape a fragment of text (a run that is known to contain only
@@ -1842,6 +1869,7 @@ protected:
                                        uint32_t    aOffset,
                                        uint32_t    aLength,
                                        int32_t     aScript,
+                                       bool        aVertical,
                                        gfxTextRun *aTextRun);
 
     void CheckForFeaturesInvolvingSpace();
@@ -1972,6 +2000,9 @@ protected:
 
     mozilla::RefPtr<mozilla::gfx::ScaledFont> mAzureScaledFont;
 
+    // For vertical metrics, created on demand.
+    nsAutoPtr<const Metrics> mVerticalMetrics;
+
     // Helper for subclasses that want to initialize standard metrics from the
     // tables of sfnt (TrueType/OpenType) fonts.
     // This will use mFUnitsConvFactor if it is already set, else compute it
@@ -1988,7 +2019,7 @@ protected:
 
     // some fonts have bad metrics, this method sanitize them.
     // if this font has bad underline offset, aIsBadUnderlineFont should be true.
-    void SanitizeMetrics(gfxFont::Metrics *aMetrics, bool aIsBadUnderlineFont);
+    void SanitizeMetrics(Metrics *aMetrics, bool aIsBadUnderlineFont);
 
     bool RenderSVGGlyph(gfxContext *aContext, gfxPoint aPoint, DrawMode aDrawMode,
                         uint32_t aGlyphId, gfxTextContextPaint *aContextPaint) const;
@@ -2030,6 +2061,7 @@ struct TextRunDrawParams {
     gfxFloat                 direction;
     double                   devPerApp;
     DrawMode                 drawMode;
+    bool                     isVerticalRun;
     bool                     isRTL;
     bool                     paintSVGGlyphs;
 };
@@ -2043,6 +2075,7 @@ struct FontDrawParams {
     double                    synBoldOnePixelOffset;
     int32_t                   extraStrikes;
     mozilla::gfx::DrawOptions drawOptions;
+    bool                      isVerticalFont;
     bool                      haveSVGGlyphs;
     bool                      haveColorGlyphs;
 };

@@ -3735,7 +3735,7 @@ ChooseScaleAndSetTransform(FrameLayerBuilder* aLayerBuilder,
   nsIntPoint offset;
 
   Matrix4x4 transform =
-    Matrix4x4().Scale(aIncomingScale.mXScale, aIncomingScale.mYScale, 1.0);
+    Matrix4x4::Scaling(aIncomingScale.mXScale, aIncomingScale.mYScale, 1.0);
   if (aTransform) {
     // aTransform is applied first, then the scale is applied to the result
     transform = (*aTransform)*transform;
@@ -3764,7 +3764,9 @@ ChooseScaleAndSetTransform(FrameLayerBuilder* aLayerBuilder,
         NS_lround(NSAppUnitsToDoublePixels(appUnitOffset.x, appUnitsPerDevPixel)*aIncomingScale.mXScale),
         NS_lround(NSAppUnitsToDoublePixels(appUnitOffset.y, appUnitsPerDevPixel)*aIncomingScale.mYScale));
   }
-  transform = transform * Matrix4x4().Translate(offset.x + aIncomingScale.mOffset.x, offset.y + aIncomingScale.mOffset.y, 0);
+  transform.PostTranslate(offset.x + aIncomingScale.mOffset.x,
+                          offset.y + aIncomingScale.mOffset.y,
+                          0);
 
   if (transform.IsSingular()) {
     return false;
@@ -4137,7 +4139,7 @@ static gfxSize
 PredictScaleForContent(nsIFrame* aFrame, nsIFrame* aAncestorWithScale,
                        const gfxSize& aScale)
 {
-  Matrix4x4 transform = Matrix4x4().Scale(aScale.width, aScale.height, 1.0);
+  Matrix4x4 transform = Matrix4x4::Scaling(aScale.width, aScale.height, 1.0);
   if (aFrame != aAncestorWithScale) {
     // aTransform is applied first, then the scale is applied to the result
     transform = nsLayoutUtils::GetTransformToAncestor(aFrame, aAncestorWithScale)*transform;
@@ -4371,7 +4373,7 @@ FrameLayerBuilder::PaintItems(nsTArray<ClippedDisplayItem>& aItems,
 static bool ShouldDrawRectsSeparately(gfxContext* aContext, DrawRegionClip aClip)
 {
   if (!gfxPrefs::LayoutPaintRectsSeparately() ||
-      aClip == DrawRegionClip::CLIP_NONE) {
+      aClip == DrawRegionClip::NONE) {
     return false;
   }
 
@@ -4453,9 +4455,7 @@ FrameLayerBuilder::DrawPaintedLayer(PaintedLayer* aLayer,
   bool shouldDrawRectsSeparately = ShouldDrawRectsSeparately(aContext, aClip);
 
   if (!shouldDrawRectsSeparately) {
-    if (aClip == DrawRegionClip::DRAW_SNAPPED) {
-      gfxUtils::ClipToRegionSnapped(aContext, aRegionToDraw);
-    } else if (aClip == DrawRegionClip::DRAW) {
+    if (aClip == DrawRegionClip::DRAW) {
       gfxUtils::ClipToRegion(aContext, aRegionToDraw);
     }
 
@@ -4486,7 +4486,7 @@ FrameLayerBuilder::DrawPaintedLayer(PaintedLayer* aLayer,
     while (const nsIntRect* iterRect = it.Next()) {
       gfxContextAutoSaveRestore save(aContext);
       aContext->NewPath();
-      aContext->Rectangle(*iterRect, aClip == DrawRegionClip::DRAW_SNAPPED);
+      aContext->Rectangle(*iterRect);
       aContext->Clip();
 
       DrawForcedBackgroundColor(aContext, aLayer, userData->mForcedBackgroundColor);
@@ -4522,9 +4522,7 @@ FrameLayerBuilder::DrawPaintedLayer(PaintedLayer* aLayer,
   if (presContext->GetPaintFlashing() && isActiveLayerManager) {
     gfxContextAutoSaveRestore save(aContext);
     if (shouldDrawRectsSeparately) {
-      if (aClip == DrawRegionClip::DRAW_SNAPPED) {
-        gfxUtils::ClipToRegionSnapped(aContext, aRegionToDraw);
-      } else if (aClip == DrawRegionClip::DRAW) {
+      if (aClip == DrawRegionClip::DRAW) {
         gfxUtils::ClipToRegion(aContext, aRegionToDraw);
       }
     }

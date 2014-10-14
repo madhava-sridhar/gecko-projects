@@ -12,7 +12,6 @@
 
 #include "jscntxt.h"
 #include "jsgc.h"
-#include "jsonparser.h"
 #include "jsprf.h"
 #include "jstypes.h"
 #include "jswatchpoint.h"
@@ -25,6 +24,7 @@
 #include "jit/IonMacroAssembler.h"
 #include "js/HashTable.h"
 #include "vm/Debugger.h"
+#include "vm/JSONParser.h"
 #include "vm/PropDesc.h"
 
 #include "jsgcinlines.h"
@@ -158,7 +158,7 @@ ConservativeGCData::recordStackTop()
 void
 JS::AutoIdArray::trace(JSTracer *trc)
 {
-    JS_ASSERT(tag_ == IDARRAY);
+    MOZ_ASSERT(tag_ == IDARRAY);
     gc::MarkIdRange(trc, idArray->length, idArray->vector, "JSAutoIdArray.idArray");
 }
 
@@ -323,7 +323,7 @@ AutoGCRooter::trace(JSTracer *trc)
         return;
     }
 
-    JS_ASSERT(tag_ >= 0);
+    MOZ_ASSERT(tag_ >= 0);
     if (Value *vp = static_cast<AutoArrayRooter *>(this)->array)
         MarkValueRootRange(trc, tag_, vp, "JS::AutoArrayRooter.array");
 }
@@ -357,7 +357,14 @@ StackShape::trace(JSTracer *trc)
 {
     if (base)
         MarkBaseShapeRoot(trc, (BaseShape**) &base, "StackShape base");
+
     MarkIdRoot(trc, (jsid*) &propid, "StackShape id");
+
+    if ((attrs & JSPROP_GETTER) && rawGetter)
+        MarkObjectRoot(trc, (JSObject**)&rawGetter, "StackShape getter");
+
+    if ((attrs & JSPROP_SETTER) && rawSetter)
+        MarkObjectRoot(trc, (JSObject**)&rawSetter, "StackShape setter");
 }
 
 void
@@ -446,7 +453,7 @@ js::gc::MarkForkJoinStack(ForkJoinNurseryCollectionTracer *trc)
     // There should be only JIT activations on the stack
     for (ActivationIterator iter(ptd); !iter.done(); ++iter) {
         Activation *act = iter.activation();
-        JS_ASSERT(act->isJit());
+        MOZ_ASSERT(act->isJit());
     }
 #endif
 }
@@ -457,11 +464,11 @@ js::gc::GCRuntime::markRuntime(JSTracer *trc,
                                TraceOrMarkRuntime traceOrMark,
                                TraceRootsOrUsedSaved rootsSource)
 {
-    JS_ASSERT(trc->callback != GCMarker::GrayCallback);
-    JS_ASSERT(traceOrMark == TraceRuntime || traceOrMark == MarkRuntime);
-    JS_ASSERT(rootsSource == TraceRoots || rootsSource == UseSavedRoots);
+    MOZ_ASSERT(trc->callback != GCMarker::GrayCallback);
+    MOZ_ASSERT(traceOrMark == TraceRuntime || traceOrMark == MarkRuntime);
+    MOZ_ASSERT(rootsSource == TraceRoots || rootsSource == UseSavedRoots);
 
-    JS_ASSERT(!rt->mainThread.suppressGC);
+    MOZ_ASSERT(!rt->mainThread.suppressGC);
 
     if (traceOrMark == MarkRuntime) {
         for (CompartmentsIter c(rt, SkipAtoms); !c.done(); c.next()) {
@@ -527,7 +534,7 @@ js::gc::GCRuntime::markRuntime(JSTracer *trc,
                 JSScript *script = i.get<JSScript>();
                 if (script->hasScriptCounts()) {
                     MarkScriptRoot(trc, &script, "profilingScripts");
-                    JS_ASSERT(script == i.get<JSScript>());
+                    MOZ_ASSERT(script == i.get<JSScript>());
                 }
             }
         }

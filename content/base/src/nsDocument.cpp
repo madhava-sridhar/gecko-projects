@@ -18,10 +18,6 @@
 #include "mozilla/Likely.h"
 #include <algorithm>
 
-#ifdef MOZ_LOGGING
-// so we can get logging even in release builds
-#define FORCE_PR_LOG 1
-#endif
 #include "prlog.h"
 #include "plstr.h"
 #include "prprf.h"
@@ -223,6 +219,7 @@
 #include "mozilla/dom/DOMStringList.h"
 #include "nsWindowMemoryReporter.h"
 #include "nsLocation.h"
+#include "mozilla/dom/FontFaceSet.h"
 
 #ifdef MOZ_MEDIA_NAVIGATOR
 #include "mozilla/MediaManager.h"
@@ -554,7 +551,7 @@ namespace {
 struct PositionComparator
 {
   Element* const mElement;
-  PositionComparator(Element* const aElement) : mElement(aElement) {}
+  explicit PositionComparator(Element* const aElement) : mElement(aElement) {}
 
   int operator()(void* aElement) const {
     Element* curElement = static_cast<Element*>(aElement);
@@ -1997,6 +1994,8 @@ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INTERNAL(nsDocument)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mOnDemandBuiltInUASheets)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mPreloadingImages)
 
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mSubImportLinks)
+
   for (uint32_t i = 0; i < tmp->mFrameRequestCallbacks.Length(); ++i) {
     NS_CYCLE_COLLECTION_NOTE_EDGE_NAME(cb, "mFrameRequestCallbacks[i]");
     cb.NoteXPCOMChild(tmp->mFrameRequestCallbacks[i].mCallback.GetISupports());
@@ -2061,6 +2060,7 @@ NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(nsDocument)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mRegistry)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mMasterDocument)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mImportManager)
+  NS_IMPL_CYCLE_COLLECTION_UNLINK(mSubImportLinks)
 
   tmp->mParentDocument = nullptr;
 
@@ -2748,6 +2748,33 @@ AppendCSPFromHeader(nsIContentSecurityPolicy* csp,
   return NS_OK;
 }
 
+bool
+nsDocument::IsLoopDocument(nsIChannel *aChannel)
+{
+  nsCOMPtr<nsIURI> chanURI;
+  nsresult rv = aChannel->GetOriginalURI(getter_AddRefs(chanURI));
+  NS_ENSURE_SUCCESS(rv, false);
+
+  bool isAbout = false;
+  bool isLoop = false;
+  rv = chanURI->SchemeIs("about", &isAbout);
+  NS_ENSURE_SUCCESS(rv, false);
+  if (isAbout) {
+    nsCOMPtr<nsIURI> loopURI;
+    rv = NS_NewURI(getter_AddRefs(loopURI), "about:loopconversation");
+    NS_ENSURE_SUCCESS(rv, false);
+    rv = chanURI->EqualsExceptRef(loopURI, &isLoop);
+    NS_ENSURE_SUCCESS(rv, false);
+    if (!isLoop) {
+      rv = NS_NewURI(getter_AddRefs(loopURI), "about:looppanel");
+      NS_ENSURE_SUCCESS(rv, false);
+      rv = chanURI->EqualsExceptRef(loopURI, &isLoop);
+      NS_ENSURE_SUCCESS(rv, false);
+    }
+  }
+  return isLoop;
+}
+
 nsresult
 nsDocument::InitCSP(nsIChannel* aChannel)
 {
@@ -2801,9 +2828,13 @@ nsDocument::InitCSP(nsIChannel* aChannel)
     }
   }
 
+ // Check if this is part of the Loop/Hello service
+ bool applyLoopCSP = IsLoopDocument(aChannel);
+
   // If there's no CSP to apply, go ahead and return early
   if (!applyAppDefaultCSP &&
       !applyAppManifestCSP &&
+      !applyLoopCSP &&
       cspHeaderValue.IsEmpty() &&
       cspROHeaderValue.IsEmpty()) {
 #ifdef PR_LOGGING
@@ -2874,6 +2905,17 @@ nsDocument::InitCSP(nsIChannel* aChannel)
   // ----- if the doc is an app and specifies a CSP in its manifest, apply it.
   if (applyAppManifestCSP) {
     csp->AppendPolicy(appManifestCSP, false);
+  }
+
+  // ----- if the doc is part of Loop, apply the loop CSP
+  if (applyLoopCSP) {
+    nsAdoptingString loopCSP;
+    loopCSP = Preferences::GetString("loop.CSP");
+    NS_ASSERTION(loopCSP, "Missing loop.CSP preference");
+    // If the pref has been removed, we continue without setting a CSP
+    if (loopCSP) {
+      csp->AppendPolicy(loopCSP, false);
+    }
   }
 
   // ----- if there's a full-strength CSP header, apply it.
@@ -3516,6 +3558,10 @@ nsDocument::SetDocumentCharacterSet(const nsACString& aCharSetID)
   // but before we figure out what to do about non-Encoding Standard
   // encodings in the charset menu and in mailnews, assertions are futile.
   if (!mCharacterSet.Equals(aCharSetID)) {
+    if (mMasterDocument && !aCharSetID.EqualsLiteral("UTF-8")) {
+      // Imports are always UTF-8
+      return;
+    }
     mCharacterSet = aCharSetID;
 
     int32_t n = mCharSetObservers.Length();
@@ -5802,6 +5848,11 @@ nsDocument::ProcessTopElementQueue(bool aIsBaseQueue)
 {
   MOZ_ASSERT(nsContentUtils::IsSafeToRunScript());
 
+  if (sProcessingStack.isNothing()) {
+    // If XPCOM shutdown has reset the processing stack, don't do anything.
+    return;
+  }
+
   nsTArray<CustomElementData*>& stack = *sProcessingStack;
   uint32_t firstQueue = stack.LastIndexOf((CustomElementData*) nullptr);
 
@@ -5897,7 +5948,7 @@ nsDocument::RegisterElement(JSContext* aCx, const nsAString& aType,
   JSAutoCompartment ac(aCx, global);
 
   JS::Handle<JSObject*> htmlProto(
-    HTMLElementBinding::GetProtoObject(aCx, global));
+    HTMLElementBinding::GetProtoObjectHandle(aCx, global));
   if (!htmlProto) {
     rv.Throw(NS_ERROR_OUT_OF_MEMORY);
     return;
@@ -5943,7 +5994,7 @@ nsDocument::RegisterElement(JSContext* aCx, const nsAString& aType,
     }
 
     JS::Handle<JSObject*> svgProto(
-      SVGElementBinding::GetProtoObject(aCx, global));
+      SVGElementBinding::GetProtoObjectHandle(aCx, global));
     if (!svgProto) {
       rv.Throw(NS_ERROR_OUT_OF_MEMORY);
       return;
@@ -6052,7 +6103,8 @@ nsDocument::RegisterElement(JSContext* aCx, const nsAString& aType,
       }
 
       EnqueueLifecycleCallback(nsIDocument::eCreated, elem, nullptr, definition);
-      if (elem->GetCurrentDoc()) {
+      //XXXsmaug It is unclear if we should use GetComposedDoc() here.
+      if (elem->GetUncomposedDoc()) {
         // Normally callbacks can not be enqueued until the created
         // callback has been invoked, however, the attached callback
         // in element upgrade is an exception so pretend the created
@@ -9178,14 +9230,6 @@ nsDocument::CloneDocHelper(nsDocument* clone) const
   nsresult rv = clone->Init();
   NS_ENSURE_SUCCESS(rv, rv);
 
-  // Set URI/principal
-  clone->nsDocument::SetDocumentURI(nsIDocument::GetDocumentURI());
-  clone->SetChromeXHRDocURI(mChromeXHRDocURI);
-  // Must set the principal first, since SetBaseURI checks it.
-  clone->SetPrincipal(NodePrincipal());
-  clone->mDocumentBaseURI = mDocumentBaseURI;
-  clone->SetChromeXHRDocBaseURI(mChromeXHRDocBaseURI);
-
   if (mCreatingStaticClone) {
     nsCOMPtr<nsILoadGroup> loadGroup;
 
@@ -9209,6 +9253,18 @@ nsDocument::CloneDocHelper(nsDocument* clone) const
 
     clone->SetContainer(mDocumentContainer);
   }
+
+  // Now ensure that our clone has the same URI, base URI, and principal as us.
+  // We do this after the mCreatingStaticClone block above, because that block
+  // can set the base URI to an incorrect value in cases when base URI
+  // information came from the channel.  So we override explicitly, and do it
+  // for all these properties, in case ResetToURI messes with any of the rest of
+  // them.
+  clone->nsDocument::SetDocumentURI(nsIDocument::GetDocumentURI());
+  clone->SetChromeXHRDocURI(mChromeXHRDocURI);
+  clone->SetPrincipal(NodePrincipal());
+  clone->mDocumentBaseURI = mDocumentBaseURI;
+  clone->SetChromeXHRDocBaseURI(mChromeXHRDocBaseURI);
 
   // Set scripting object
   bool hasHadScriptObject = true;
@@ -11519,7 +11575,7 @@ public:
     nsCOMPtr<Element> e = do_QueryReferent(mElement);
     nsCOMPtr<nsIDocument> d = do_QueryReferent(mDocument);
     if (!e || !d || gPendingPointerLockRequest != this ||
-        e->GetCurrentDoc() != d) {
+        e->GetUncomposedDoc() != d) {
       Handled();
       DispatchPointerLockError(d);
       return NS_OK;
@@ -11634,7 +11690,7 @@ nsPointerLockPermissionRequest::Allow(JS::HandleValue aChoices)
   nsCOMPtr<nsIDocument> doc = do_QueryReferent(mDocument);
   nsDocument* d = static_cast<nsDocument*>(doc.get());
   if (!e || !d || gPendingPointerLockRequest != this ||
-      e->GetCurrentDoc() != d ||
+      e->GetUncomposedDoc() != d ||
       (!mUserInputOrChromeCaller && !d->mIsApprovedForFullscreen)) {
     Handled();
     DispatchPointerLockError(d);
@@ -11701,7 +11757,7 @@ nsDocument::Observe(nsISupports *aSubject,
       bool userInputOrChromeCaller =
         gPendingPointerLockRequest->mUserInputOrChromeCaller;
       gPendingPointerLockRequest->Handled();
-      if (doc == this && el && el->GetCurrentDoc() == doc) {
+      if (doc == this && el && el->GetUncomposedDoc() == doc) {
         nsPointerLockPermissionRequest* clone =
           new nsPointerLockPermissionRequest(el, userInputOrChromeCaller);
         gPendingPointerLockRequest = clone;
@@ -12408,3 +12464,20 @@ nsAutoSyncOperation::~nsAutoSyncOperation()
   nsContentUtils::SetMicroTaskLevel(mMicroTaskLevel);
 }
 
+FontFaceSet*
+nsIDocument::GetFonts(ErrorResult& aRv)
+{
+  nsIPresShell* shell = GetShell();
+  if (!shell) {
+    aRv.Throw(NS_ERROR_FAILURE);
+    return nullptr;
+  }
+
+  nsPresContext* presContext = shell->GetPresContext();
+  if (!presContext) {
+    aRv.Throw(NS_ERROR_FAILURE);
+    return nullptr;
+  }
+
+  return presContext->Fonts();
+}

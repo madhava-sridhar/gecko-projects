@@ -41,16 +41,6 @@ function debug(s) {
 
 const RILCONTENTHELPER_CID =
   Components.ID("{472816e1-1fd6-4405-996c-806f9ea68174}");
-const ICCINFO_CID =
-  Components.ID("{39d64d90-26a6-11e4-8c21-0800200c9a66}");
-const GSMICCINFO_CID =
-  Components.ID("{e0fa785b-ad3f-46ed-bc56-fcb0d6fe4fa8}");
-const CDMAICCINFO_CID =
-  Components.ID("{3d1f844f-9ec5-48fb-8907-aed2e5421709}");
-const CELLBROADCASTMESSAGE_CID =
-  Components.ID("{29474c96-3099-486f-bb4a-3c9a1da834e4}");
-const CELLBROADCASTETWSINFO_CID =
-  Components.ID("{59f176ee-9dcd-4005-9d47-f6be0cd08e17}");
 const ICCCARDLOCKERROR_CID =
   Components.ID("{08a71987-408c-44ff-93fd-177c0a85c3dd}");
 
@@ -61,7 +51,6 @@ const RIL_IPC_MSG_NAMES = [
   "RIL:CardLockRetryCount",
   "RIL:StkCommand",
   "RIL:StkSessionEnd",
-  "RIL:CellBroadcastReceived",
   "RIL:IccOpenChannel",
   "RIL:IccCloseChannel",
   "RIL:IccExchangeAPDU",
@@ -113,16 +102,9 @@ MobileIccCardLockRetryCount.prototype = {
 
 function IccInfo() {}
 IccInfo.prototype = {
-  QueryInterface: XPCOMUtils.generateQI([Ci.nsIDOMMozIccInfo]),
-  classID: ICCINFO_CID,
-  classInfo: XPCOMUtils.generateCI({
-    classID:          ICCINFO_CID,
-    classDescription: "MozIccInfo",
-    flags:            Ci.nsIClassInfo.DOM_OBJECT,
-    interfaces:       [Ci.nsIDOMMozIccInfo]
-  }),
+  QueryInterface: XPCOMUtils.generateQI([Ci.nsIIccInfo]),
 
-  // nsIDOMMozIccInfo
+  // nsIIccInfo
 
   iccType: null,
   iccid: null,
@@ -135,102 +117,23 @@ IccInfo.prototype = {
 
 function GsmIccInfo() {}
 GsmIccInfo.prototype = {
-  __proto__: IccInfo.prototype,
-  QueryInterface: XPCOMUtils.generateQI([Ci.nsIDOMMozGsmIccInfo]),
-  classID: GSMICCINFO_CID,
-  classInfo: XPCOMUtils.generateCI({
-    classID:          GSMICCINFO_CID,
-    classDescription: "MozGsmIccInfo",
-    flags:            Ci.nsIClassInfo.DOM_OBJECT,
-    interfaces:       [Ci.nsIDOMMozGsmIccInfo]
-  }),
+  QueryInterface: XPCOMUtils.generateQI([Ci.nsIGsmIccInfo,
+                                         Ci.nsIIccInfo]),
 
-  // nsIDOMMozGsmIccInfo
+  // nsIGsmIccInfo
 
   msisdn: null
 };
 
 function CdmaIccInfo() {}
 CdmaIccInfo.prototype = {
-  __proto__: IccInfo.prototype,
-  QueryInterface: XPCOMUtils.generateQI([Ci.nsIDOMMozCdmaIccInfo]),
-  classID: CDMAICCINFO_CID,
-  classInfo: XPCOMUtils.generateCI({
-    classID:          CDMAICCINFO_CID,
-    classDescription: "MozCdmaIccInfo",
-    flags:            Ci.nsIClassInfo.DOM_OBJECT,
-    interfaces:       [Ci.nsIDOMMozCdmaIccInfo]
-  }),
+  QueryInterface: XPCOMUtils.generateQI([Ci.nsICdmaIccInfo,
+                                         Ci.nsIIccInfo]),
 
-  // nsIDOMMozCdmaIccInfo
+  // nsICdmaIccInfo
 
   mdn: null,
   prlVersion: 0
-};
-
-function CellBroadcastMessage(clientId, pdu) {
-  this.serviceId = clientId;
-  this.gsmGeographicalScope = RIL.CB_GSM_GEOGRAPHICAL_SCOPE_NAMES[pdu.geographicalScope];
-  this.messageCode = pdu.messageCode;
-  this.messageId = pdu.messageId;
-  this.language = pdu.language;
-  this.body = pdu.fullBody;
-  this.messageClass = pdu.messageClass;
-  this.timestamp = pdu.timestamp;
-
-  if (pdu.etws != null) {
-    this.etws = new CellBroadcastEtwsInfo(pdu.etws);
-  }
-
-  this.cdmaServiceCategory = pdu.serviceCategory;
-}
-CellBroadcastMessage.prototype = {
-  QueryInterface: XPCOMUtils.generateQI([Ci.nsIDOMMozCellBroadcastMessage]),
-  classID:        CELLBROADCASTMESSAGE_CID,
-  classInfo:      XPCOMUtils.generateCI({
-    classID:          CELLBROADCASTMESSAGE_CID,
-    classDescription: "CellBroadcastMessage",
-    flags:            Ci.nsIClassInfo.DOM_OBJECT,
-    interfaces:       [Ci.nsIDOMMozCellBroadcastMessage]
-  }),
-
-  // nsIDOMMozCellBroadcastMessage
-  serviceId: -1,
-
-  gsmGeographicalScope: null,
-  messageCode: null,
-  messageId: null,
-  language: null,
-  body: null,
-  messageClass: null,
-  timestamp: null,
-
-  etws: null,
-  cdmaServiceCategory: null
-};
-
-function CellBroadcastEtwsInfo(etwsInfo) {
-  if (etwsInfo.warningType != null) {
-    this.warningType = RIL.CB_ETWS_WARNING_TYPE_NAMES[etwsInfo.warningType];
-  }
-  this.emergencyUserAlert = etwsInfo.emergencyUserAlert;
-  this.popup = etwsInfo.popup;
-}
-CellBroadcastEtwsInfo.prototype = {
-  QueryInterface: XPCOMUtils.generateQI([Ci.nsIDOMMozCellBroadcastEtwsInfo]),
-  classID:        CELLBROADCASTETWSINFO_CID,
-  classInfo:      XPCOMUtils.generateCI({
-    classID:          CELLBROADCASTETWSINFO_CID,
-    classDescription: "CellBroadcastEtwsInfo",
-    flags:            Ci.nsIClassInfo.DOM_OBJECT,
-    interfaces:       [Ci.nsIDOMMozCellBroadcastEtwsInfo]
-  }),
-
-  // nsIDOMMozCellBroadcastEtwsInfo
-
-  warningType: null,
-  emergencyUserAlert: null,
-  popup: null
 };
 
 function IccCardLockError() {
@@ -256,14 +159,13 @@ function RILContentHelper() {
   this.rilContexts = [];
   for (let clientId = 0; clientId < this.numClients; clientId++) {
     this.rilContexts[clientId] = {
-      cardState:            RIL.GECKO_CARDSTATE_UNKNOWN,
-      iccInfo:              null
+      cardState: Ci.nsIIccProvider.CARD_STATE_UNKNOWN,
+      iccInfo: null
     };
   }
 
   this.initDOMRequestHelper(/* aWindow */ null, RIL_IPC_MSG_NAMES);
   this._windowsMap = [];
-  this._cellBroadcastListeners = [];
   this._iccListeners = [];
 
   Services.obs.addObserver(this, NS_XPCOM_SHUTDOWN_OBSERVER_ID, false);
@@ -274,15 +176,13 @@ function RILContentHelper() {
 RILContentHelper.prototype = {
   __proto__: DOMRequestIpcHelper.prototype,
 
-  QueryInterface: XPCOMUtils.generateQI([Ci.nsICellBroadcastProvider,
-                                         Ci.nsIIccProvider,
+  QueryInterface: XPCOMUtils.generateQI([Ci.nsIIccProvider,
                                          Ci.nsIObserver,
                                          Ci.nsISupportsWeakReference]),
   classID:   RILCONTENTHELPER_CID,
   classInfo: XPCOMUtils.generateCI({classID: RILCONTENTHELPER_CID,
                                     classDescription: "RILContentHelper",
-                                    interfaces: [Ci.nsICellBroadcastProvider,
-                                                 Ci.nsIIccProvider]}),
+                                    interfaces: [Ci.nsIIccProvider]}),
 
   updateDebugFlag: function() {
     try {
@@ -638,7 +538,6 @@ RILContentHelper.prototype = {
     return request;
   },
 
-  _cellBroadcastListeners: null,
   _iccListeners: null,
 
   registerListener: function(listenerType, clientId, listener) {
@@ -672,22 +571,6 @@ RILContentHelper.prototype = {
       listeners.splice(index, 1);
       if (DEBUG) debug("Unregistered listener: " + listener);
     }
-  },
-
-  registerCellBroadcastMsg: function(listener) {
-    if (DEBUG) debug("Registering for Cell Broadcast related messages");
-    // Instead of registering multiple listeners for Multi-SIM, we reuse
-    // clientId 0 to route all CBS messages to single listener and provide the
-    // |clientId| info by |CellBroadcastMessage.serviceId|.
-    this.registerListener("_cellBroadcastListeners", 0, listener);
-    cpmm.sendAsyncMessage("RIL:RegisterCellBroadcastMsg");
-  },
-
-  unregisterCellBroadcastMsg: function(listener) {
-    // Instead of unregistering multiple listeners for Multi-SIM, we reuse
-    // clientId 0 to route all CBS messages to single listener and provide the
-    // |clientId| info by |CellBroadcastMessage.serviceId|.
-    this.unregisterListener("_cellBroadcastListeners", 0, listener);
   },
 
   registerIccMsg: function(clientId, listener) {
@@ -860,16 +743,6 @@ RILContentHelper.prototype = {
       case "RIL:MatchMvno":
         this.handleSimpleRequest(data.requestId, data.errorMsg, data.result);
         break;
-      case "RIL:CellBroadcastReceived": {
-        // All CBS messages are to routed the listener for clientId 0 and
-        // provide the |clientId| info by |CellBroadcastMessage.serviceId|.
-        let message = new CellBroadcastMessage(clientId, data);
-        this._deliverEvent(0, // route to clientId 0.
-                           "_cellBroadcastListeners",
-                           "notifyMessageReceived",
-                           [message]);
-        break;
-      }
     }
   },
 
@@ -899,7 +772,8 @@ RILContentHelper.prototype = {
     let window = this._windowsMap[message.requestId];
     delete this._windowsMap[message.requestId];
     let contacts = message.contacts;
-    let result = contacts.map(function(c) {
+    let result = new window.Array();
+    contacts.forEach(function(c) {
       let prop = {name: [c.alphaId], tel: [{value: c.number}]};
 
       if (c.email) {
@@ -914,7 +788,7 @@ RILContentHelper.prototype = {
 
       let contact = new window.mozContact(prop);
       contact.id = c.contactId;
-      return contact;
+      result.push(contact);
     });
 
     this.fireRequestSuccess(message.requestId, result);

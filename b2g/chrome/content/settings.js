@@ -486,11 +486,11 @@ let settingsToObserve = {
     resetToPref: true
   },
   'dom.mozApps.use_reviewer_certs': false,
+  'dom.mozApps.signed_apps_installable_from': 'https://marketplace.firefox.com',
   'layers.draw-borders': false,
   'layers.draw-tile-borders': false,
   'layers.dump': false,
   'layers.enable-tiles': true,
-  'layers.simple-tiles': false,
   'layers.effect.invert': false,
   'layers.effect.grayscale': false,
   'layers.effect.contrast': "0.0",

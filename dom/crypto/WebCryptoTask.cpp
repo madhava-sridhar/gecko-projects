@@ -65,6 +65,8 @@ enum TelemetryAlgorithm {
   TA_SHA_512         = 18,
   // Later additions
   TA_AES_KW          = 19,
+  TA_ECDH            = 20,
+  TA_PBKDF2          = 21
 };
 
 // Convenience functions for extracting / converting information
@@ -824,7 +826,7 @@ private:
     param.data = (unsigned char*) &oaepParams;
     param.len = sizeof(oaepParams);
 
-    uint32_t outLen;
+    uint32_t outLen = 0;
     if (mEncrypt) {
       // PK11_PubEncrypt() checks the plaintext's length and fails if it is too
       // long to encrypt, i.e. if it is longer than (k - 2hLen - 2) with 'k'
@@ -841,9 +843,9 @@ private:
              mResult.Elements(), &outLen, mResult.Length(),
              mData.Elements(), mData.Length()));
     }
-    mResult.SetLength(outLen);
-
     NS_ENSURE_SUCCESS(rv, NS_ERROR_DOM_OPERATION_ERR);
+
+    mResult.SetLength(outLen);
     return NS_OK;
   }
 };
@@ -2139,6 +2141,7 @@ public:
   void Init(JSContext* aCx, const ObjectOrString& aAlgorithm, CryptoKey& aKey,
             uint32_t aLength)
   {
+    Telemetry::Accumulate(Telemetry::WEBCRYPTO_ALG, TA_PBKDF2);
     CHECK_KEY_ALGORITHM(aKey.Algorithm(), WEBCRYPTO_ALG_PBKDF2);
 
     // Check that we got a symmetric key
@@ -2297,6 +2300,7 @@ public:
 
   void Init(JSContext* aCx, const ObjectOrString& aAlgorithm, CryptoKey& aKey)
   {
+    Telemetry::Accumulate(Telemetry::WEBCRYPTO_ALG, TA_ECDH);
     CHECK_KEY_ALGORITHM(aKey.Algorithm(), WEBCRYPTO_ALG_ECDH);
 
     // Check that we have a private key.

@@ -8,7 +8,6 @@
 #include "jsapi.h"
 #include "jsfriendapi.h"
 #include "jsprf.h"
-#include "js/OldDebugAPI.h"
 #include "mozilla/dom/ScriptSettings.h"
 #include "nsServiceManagerUtils.h"
 #include "nsComponentManagerUtils.h"
@@ -71,8 +70,9 @@ public:
     ~XPCShellDirProvider() { }
 
     // The platform resource folder
-    void SetGREDir(nsIFile *greDir);
-    void ClearGREDir() { mGREDir = nullptr; }
+    void SetGREDirs(nsIFile *greDir);
+    void ClearGREDirs() { mGREDir = nullptr;
+                          mGREBinDir = nullptr; }
     // The application resource folder
     void SetAppDir(nsIFile *appFile);
     void ClearAppDir() { mAppDir = nullptr; }
@@ -85,6 +85,7 @@ public:
 
 private:
     nsCOMPtr<nsIFile> mGREDir;
+    nsCOMPtr<nsIFile> mGREBinDir;
     nsCOMPtr<nsIFile> mAppDir;
     nsCOMPtr<nsIFile> mPluginDir;
     nsCOMPtr<nsIFile> mAppFile;
@@ -565,84 +566,6 @@ Btoa(JSContext *cx, unsigned argc, Value *vp)
   return xpc::Base64Encode(cx, args[0], args.rval());
 }
 
-static bool
-Blob(JSContext *cx, unsigned argc, Value *vp)
-{
-  JS::CallArgs args = CallArgsFromVp(argc, vp);
-
-  nsCOMPtr<nsISupports> native =
-    do_CreateInstance("@mozilla.org/dom/multipart-blob;1");
-  if (!native) {
-    JS_ReportError(cx, "Could not create native object!");
-    return false;
-  }
-
-  nsCOMPtr<nsIJSNativeInitializer> initializer = do_QueryInterface(native);
-  MOZ_ASSERT(initializer);
-
-  nsresult rv = initializer->Initialize(nullptr, cx, nullptr, args);
-  if (NS_FAILED(rv)) {
-    JS_ReportError(cx, "Could not initialize native object!");
-    return false;
-  }
-
-  nsCOMPtr<nsIXPConnect> xpc = do_GetService(kXPConnectServiceContractID, &rv);
-  if (NS_FAILED(rv)) {
-    JS_ReportError(cx, "Could not get XPConnent service!");
-    return false;
-  }
-
-  JSObject *global = JS::CurrentGlobalOrNull(cx);
-  rv = xpc->WrapNativeToJSVal(cx, global, native, nullptr,
-                              &NS_GET_IID(nsISupports), true,
-                              args.rval());
-  if (NS_FAILED(rv)) {
-    JS_ReportError(cx, "Could not wrap native object!");
-    return false;
-  }
-
-  return true;
-}
-
-static bool
-File(JSContext *cx, unsigned argc, Value *vp)
-{
-  JS::CallArgs args = CallArgsFromVp(argc, vp);
-
-  nsCOMPtr<nsISupports> native =
-    do_CreateInstance("@mozilla.org/dom/multipart-file;1");
-  if (!native) {
-    JS_ReportError(cx, "Could not create native object!");
-    return false;
-  }
-
-  nsCOMPtr<nsIJSNativeInitializer> initializer = do_QueryInterface(native);
-  MOZ_ASSERT(initializer);
-
-  nsresult rv = initializer->Initialize(nullptr, cx, nullptr, args);
-  if (NS_FAILED(rv)) {
-    JS_ReportError(cx, "Could not initialize native object!");
-    return false;
-  }
-
-  nsCOMPtr<nsIXPConnect> xpc = do_GetService(kXPConnectServiceContractID, &rv);
-  if (NS_FAILED(rv)) {
-    JS_ReportError(cx, "Could not get XPConnent service!");
-    return false;
-  }
-
-  JSObject *global = JS::CurrentGlobalOrNull(cx);
-  rv = xpc->WrapNativeToJSVal(cx, global, native, nullptr,
-                              &NS_GET_IID(nsISupports), true,
-                              args.rval());
-  if (NS_FAILED(rv)) {
-    JS_ReportError(cx, "Could not wrap native object!");
-    return false;
-  }
-
-  return true;
-}
-
 static Maybe<PersistentRootedValue> sScriptedInterruptCallback;
 
 static bool
@@ -729,8 +652,6 @@ static const JSFunctionSpec glob_functions[] = {
     JS_FS("sendCommand",     SendCommand,    1,0),
     JS_FS("atob",            Atob,           1,0),
     JS_FS("btoa",            Btoa,           1,0),
-    JS_FS("Blob",            Blob,           2,JSFUN_CONSTRUCTOR),
-    JS_FS("File",            File,           2,JSFUN_CONSTRUCTOR),
     JS_FS("setInterruptCallback", SetInterruptCallback, 1,0),
     JS_FS("simulateActivityCallback", SimulateActivityCallback, 1,0),
     JS_FS_END
@@ -1346,11 +1267,27 @@ XRE_XPCShellMain(int argc, char **argv, char **envp)
             return 1;
         }
 
-        dirprovider.SetGREDir(greDir);
+        dirprovider.SetGREDirs(greDir);
 
         argc -= 2;
         argv += 2;
     } else {
+#ifdef XP_MACOSX
+        // On OSX, the GreD needs to point to Contents/Resources in the .app
+        // bundle. Libraries will be loaded at a relative path to GreD, i.e.
+        // ../MacOS.
+        nsCOMPtr<nsIFile> tmpDir;
+        XRE_GetFileFromPath(argv[0], getter_AddRefs(tmpDir));
+        tmpDir->GetParent(getter_AddRefs(greDir));
+        greDir->SetNativeLeafName(NS_LITERAL_CSTRING("Resources"));
+        bool dirExists = false;
+        greDir->Exists(&dirExists);
+        if (!dirExists) {
+            printf("Setting GreD failed.\n");
+            return 1;
+        }
+        dirprovider.SetGREDirs(greDir);
+#else
         nsAutoString workingDir;
         if (!GetCurrentWorkingDirectory(workingDir)) {
             printf("GetCurrentWorkingDirectory failed.\n");
@@ -1361,6 +1298,7 @@ XRE_XPCShellMain(int argc, char **argv, char **envp)
             printf("NS_NewLocalFile failed.\n");
             return 1;
         }
+#endif
     }
 
     if (argc > 1 && !strcmp(argv[1], "-a")) {
@@ -1593,7 +1531,7 @@ XRE_XPCShellMain(int argc, char **argv, char **envp)
 
     appDir = nullptr;
     appFile = nullptr;
-    dirprovider.ClearGREDir();
+    dirprovider.ClearGREDirs();
     dirprovider.ClearAppDir();
     dirprovider.ClearPluginDir();
     dirprovider.ClearAppFile();
@@ -1610,9 +1548,13 @@ XRE_XPCShellMain(int argc, char **argv, char **envp)
 }
 
 void
-XPCShellDirProvider::SetGREDir(nsIFile* greDir)
+XPCShellDirProvider::SetGREDirs(nsIFile* greDir)
 {
     mGREDir = greDir;
+    mGREDir->Clone(getter_AddRefs(mGREBinDir));
+#ifdef XP_MACOSX
+    mGREBinDir->SetNativeLeafName(NS_LITERAL_CSTRING("MacOS"));
+#endif
 }
 
 void
@@ -1656,6 +1598,9 @@ XPCShellDirProvider::GetFile(const char *prop, bool *persistent,
     if (mGREDir && !strcmp(prop, NS_GRE_DIR)) {
         *persistent = true;
         return mGREDir->Clone(result);
+    } else if (mGREBinDir && !strcmp(prop, NS_GRE_BIN_DIR)) {
+        *persistent = true;
+        return mGREBinDir->Clone(result);
     } else if (mAppFile && !strcmp(prop, XRE_EXECUTABLE_FILE)) {
         *persistent = true;
         return mAppFile->Clone(result);

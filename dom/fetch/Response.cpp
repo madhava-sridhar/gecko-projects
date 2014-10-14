@@ -5,7 +5,6 @@
 
 #include "Response.h"
 
-#include "nsIDOMFile.h"
 #include "nsISupportsImpl.h"
 #include "nsIURI.h"
 #include "nsPIDOMWindow.h"
@@ -15,11 +14,9 @@
 #include "mozilla/dom/Headers.h"
 #include "mozilla/dom/Promise.h"
 
-#include "nsDOMBlobBuilder.h"
 #include "nsDOMString.h"
 
 #include "InternalResponse.h"
-#include "File.h" // workers/File.h
 
 namespace mozilla {
 namespace dom {
@@ -38,7 +35,6 @@ Response::Response(nsIGlobalObject* aGlobal, InternalResponse* aInternalResponse
   , mOwner(aGlobal)
   , mInternalResponse(aInternalResponse)
 {
-  SetIsDOMBinding();
 }
 
 Response::~Response()

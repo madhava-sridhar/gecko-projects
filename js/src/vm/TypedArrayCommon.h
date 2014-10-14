@@ -67,62 +67,32 @@ template<> inline Scalar::Type TypeIDOfType<double>() { return Scalar::Float64; 
 template<> inline Scalar::Type TypeIDOfType<uint8_clamped>() { return Scalar::Uint8Clamped; }
 
 inline bool
-IsAnyTypedArray(HandleObject obj)
-{
-    return obj->is<TypedArrayObject>() || obj->is<SharedTypedArrayObject>();
-}
-
-inline bool
-IsAnyTypedArray(const JSObject *obj)
+IsAnyTypedArray(JSObject *obj)
 {
     return obj->is<TypedArrayObject>() || obj->is<SharedTypedArrayObject>();
 }
 
 inline uint32_t
-AnyTypedArrayLength(HandleObject obj)
+AnyTypedArrayLength(JSObject *obj)
 {
     if (obj->is<TypedArrayObject>())
-	return obj->as<TypedArrayObject>().length();
-    return obj->as<SharedTypedArrayObject>().length();
-}
-
-inline uint32_t
-AnyTypedArrayLength(const JSObject *obj)
-{
-    if (obj->is<TypedArrayObject>())
-	return obj->as<TypedArrayObject>().length();
+        return obj->as<TypedArrayObject>().length();
     return obj->as<SharedTypedArrayObject>().length();
 }
 
 inline Scalar::Type
-AnyTypedArrayType(HandleObject obj)
+AnyTypedArrayType(JSObject *obj)
 {
     if (obj->is<TypedArrayObject>())
-	return obj->as<TypedArrayObject>().type();
-    return obj->as<SharedTypedArrayObject>().type();
-}
-
-inline Scalar::Type
-AnyTypedArrayType(const JSObject *obj)
-{
-    if (obj->is<TypedArrayObject>())
-	return obj->as<TypedArrayObject>().type();
+        return obj->as<TypedArrayObject>().type();
     return obj->as<SharedTypedArrayObject>().type();
 }
 
 inline Shape*
-AnyTypedArrayShape(HandleObject obj)
+AnyTypedArrayShape(JSObject *obj)
 {
     if (obj->is<TypedArrayObject>())
-	return obj->as<TypedArrayObject>().lastProperty();
-    return obj->as<SharedTypedArrayObject>().lastProperty();
-}
-
-inline Shape*
-AnyTypedArrayShape(const JSObject *obj)
-{
-    if (obj->is<TypedArrayObject>())
-	return obj->as<TypedArrayObject>().lastProperty();
+        return obj->as<TypedArrayObject>().lastProperty();
     return obj->as<SharedTypedArrayObject>().lastProperty();
 }
 
@@ -130,7 +100,7 @@ inline const TypedArrayLayout&
 AnyTypedArrayLayout(const JSObject *obj)
 {
     if (obj->is<TypedArrayObject>())
-	return obj->as<TypedArrayObject>().layout();
+        return obj->as<TypedArrayObject>().layout();
     return obj->as<SharedTypedArrayObject>().layout();
 }
 
@@ -138,7 +108,7 @@ inline void *
 AnyTypedArrayViewData(const JSObject *obj)
 {
     if (obj->is<TypedArrayObject>())
-	return obj->as<TypedArrayObject>().viewData();
+        return obj->as<TypedArrayObject>().viewData();
     return obj->as<SharedTypedArrayObject>().viewData();
 }
 
@@ -146,7 +116,7 @@ inline uint32_t
 AnyTypedArrayByteLength(const JSObject *obj)
 {
     if (obj->is<TypedArrayObject>())
-	return obj->as<TypedArrayObject>().byteLength();
+        return obj->as<TypedArrayObject>().byteLength();
     return obj->as<SharedTypedArrayObject>().byteLength();
 }
 
@@ -266,14 +236,14 @@ class ElementSpecific
         if (source->isNative()) {
             // Attempt fast-path infallible conversion of dense elements up to
             // the first potentially side-effectful lookup or conversion.
-            uint32_t bound = Min(source->getDenseInitializedLength(), len);
+            uint32_t bound = Min(source->as<NativeObject>().getDenseInitializedLength(), len);
 
             T *dest = static_cast<T*>(target->viewData()) + offset;
 
             MOZ_ASSERT(!canConvertInfallibly(MagicValue(JS_ELEMENTS_HOLE)),
                        "the following loop must abort on holes");
 
-            const Value *srcValues = source->getDenseElements();
+            const Value *srcValues = source->as<NativeObject>().getDenseElements();
             for (; i < bound; i++) {
                 if (!canConvertInfallibly(srcValues[i]))
                     break;
@@ -511,7 +481,7 @@ class TypedArrayMethods
         }
 
         if (!AnyTypedArray::ensureHasBuffer(cx, tarray))
-            return nullptr;
+            return false;
 
         Rooted<BufferType*> bufobj(cx, tarray->buffer());
         MOZ_ASSERT(bufobj);

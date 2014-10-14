@@ -31,22 +31,24 @@
 #include "IHistory.h"
 #include "mozIApplication.h"
 #include "mozilla/ClearOnShutdown.h"
-#include "mozilla/dom/asmjscache/AsmJSCache.h"
-#include "mozilla/dom/Element.h"
 #include "mozilla/dom/DataStoreService.h"
-#include "mozilla/dom/ExternalHelperAppParent.h"
-#include "mozilla/dom/PContentBridgeParent.h"
-#include "mozilla/dom/PCycleCollectWithLogsParent.h"
-#include "mozilla/dom/PMemoryReportRequestParent.h"
-#include "mozilla/dom/power/PowerManagerService.h"
 #include "mozilla/dom/DOMStorageIPC.h"
-#include "mozilla/dom/bluetooth/PBluetoothParent.h"
-#include "mozilla/dom/PFMRadioParent.h"
-#include "mozilla/dom/devicestorage/DeviceStorageRequestParent.h"
+#include "mozilla/dom/Element.h"
+#include "mozilla/dom/File.h"
+#include "mozilla/dom/ExternalHelperAppParent.h"
 #include "mozilla/dom/FileSystemRequestParent.h"
 #include "mozilla/dom/GeolocationBinding.h"
+#include "mozilla/dom/PContentBridgeParent.h"
+#include "mozilla/dom/PCycleCollectWithLogsParent.h"
+#include "mozilla/dom/PFMRadioParent.h"
+#include "mozilla/dom/PMemoryReportRequestParent.h"
+#include "mozilla/dom/asmjscache/AsmJSCache.h"
+#include "mozilla/dom/bluetooth/PBluetoothParent.h"
+#include "mozilla/dom/cellbroadcast/CellBroadcastParent.h"
+#include "mozilla/dom/devicestorage/DeviceStorageRequestParent.h"
 #include "mozilla/dom/mobileconnection/MobileConnectionParent.h"
 #include "mozilla/dom/mobilemessage/SmsParent.h"
+#include "mozilla/dom/power/PowerManagerService.h"
 #include "mozilla/dom/quota/QuotaManager.h"
 #include "mozilla/dom/telephony/TelephonyParent.h"
 #include "mozilla/dom/time/DateCacheCleaner.h"
@@ -77,7 +79,6 @@
 #include "nsConsoleMessage.h"
 #include "nsConsoleService.h"
 #include "nsDebugImpl.h"
-#include "nsDOMFile.h"
 #include "nsFrameMessageManager.h"
 #include "nsHashPropertyBag.h"
 #include "nsIAlertsService.h"
@@ -100,6 +101,7 @@
 #include "nsIPresShell.h"
 #include "nsIScriptError.h"
 #include "nsISiteSecurityService.h"
+#include "nsISpellChecker.h"
 #include "nsIStyleSheet.h"
 #include "nsISupportsPrimitives.h"
 #include "nsIURIFixup.h"
@@ -184,12 +186,17 @@ using namespace mozilla::system;
 #include "mozilla/Sandbox.h"
 #endif
 
+#ifdef MOZ_TOOLKIT_SEARCH
+#include "nsIBrowserSearchService.h"
+#endif
+
 static NS_DEFINE_CID(kCClipboardCID, NS_CLIPBOARD_CID);
 static const char* sClipboardTextFlavors[] = { kUnicodeMime };
 
 using base::ChildPrivileges;
 using base::KillProcess;
 using namespace mozilla::dom::bluetooth;
+using namespace mozilla::dom::cellbroadcast;
 using namespace mozilla::dom::devicestorage;
 using namespace mozilla::dom::indexedDB;
 using namespace mozilla::dom::power;
@@ -340,6 +347,7 @@ namespace mozilla {
 namespace dom {
 
 #ifdef MOZ_NUWA_PROCESS
+int32_t ContentParent::sNuwaPid = 0;
 bool ContentParent::sNuwaReady = false;
 #endif
 
@@ -585,6 +593,7 @@ ContentParent::RunNuwaProcess()
                           /* aIsNuwaProcess = */ true);
     nuwaProcess->Init();
 #ifdef MOZ_NUWA_PROCESS
+    sNuwaPid = nuwaProcess->Pid();
     sNuwaReady = false;
 #endif
     return nuwaProcess.forget();
@@ -1768,7 +1777,7 @@ ContentParent::NotifyTabDestroyed(PBrowserParent* aTab,
     }
 }
 
-jsipc::JavaScriptParent*
+jsipc::JavaScriptShared*
 ContentParent::GetCPOWManager()
 {
     if (ManagedPJavaScriptParent().Length()) {
@@ -1988,6 +1997,7 @@ ContentParent::~ContentParent()
 #ifdef MOZ_NUWA_PROCESS
     if (IsNuwaProcess()) {
         sNuwaReady = false;
+        sNuwaPid = 0;
     }
 #endif
 }
@@ -2487,7 +2497,8 @@ ContentParent::RecvAddNewProcess(const uint32_t& aPid,
 
     // Update offline settings.
     bool isOffline;
-    RecvGetXPCOMProcessAttributes(&isOffline);
+    InfallibleTArray<nsString> unusedDictionaries;
+    RecvGetXPCOMProcessAttributes(&isOffline, &unusedDictionaries);
     content->SendSetOffline(isOffline);
 
     PreallocatedProcessManager::PublishSpareProcess(content);
@@ -2735,12 +2746,18 @@ ContentParent::RecvGetProcessAttributes(uint64_t* aId,
 }
 
 bool
-ContentParent::RecvGetXPCOMProcessAttributes(bool* aIsOffline)
+ContentParent::RecvGetXPCOMProcessAttributes(bool* aIsOffline,
+                                             InfallibleTArray<nsString>* dictionaries)
 {
     nsCOMPtr<nsIIOService> io(do_GetIOService());
-    NS_ASSERTION(io, "No IO service?");
+    MOZ_ASSERT(io, "No IO service?");
     DebugOnly<nsresult> rv = io->GetOffline(aIsOffline);
-    NS_ASSERTION(NS_SUCCEEDED(rv), "Failed getting offline?");
+    MOZ_ASSERT(NS_SUCCEEDED(rv), "Failed getting offline?");
+
+    nsCOMPtr<nsISpellChecker> spellChecker(do_GetService(NS_SPELLCHECKER_CONTRACTID));
+    MOZ_ASSERT(spellChecker, "No spell checker?");
+
+    spellChecker->GetDictionaryList(dictionaries);
 
     return true;
 }
@@ -2864,7 +2881,7 @@ ContentParent::KillHard()
         FROM_HERE,
         NewRunnableFunction(&ProcessWatcher::EnsureProcessTerminated,
                             OtherProcess(), /*force=*/true));
-    //We do clean-up here 
+    //We do clean-up here
     MessageLoop::current()->PostDelayedTask(
         FROM_HERE,
         NewRunnableMethod(this, &ContentParent::ShutDownProcess,
@@ -3069,13 +3086,13 @@ ContentParent::AllocPExternalHelperAppParent(const OptionalURIParams& uri,
 {
     ExternalHelperAppParent *parent = new ExternalHelperAppParent(uri, aContentLength);
     parent->AddRef();
-    parent->Init(this, 
-                 aMimeContentType, 
+    parent->Init(this,
+                 aMimeContentType,
                  aContentDisposition,
                  aContentDispositionHint,
                  aContentDispositionFilename,
-                 aForceSave, 
-                 aReferrer, 
+                 aForceSave,
+                 aReferrer,
                  aBrowser);
     return parent;
 }
@@ -3086,6 +3103,31 @@ ContentParent::DeallocPExternalHelperAppParent(PExternalHelperAppParent* aServic
     ExternalHelperAppParent *parent = static_cast<ExternalHelperAppParent *>(aService);
     parent->Release();
     return true;
+}
+
+PCellBroadcastParent*
+ContentParent::AllocPCellBroadcastParent()
+{
+    if (!AssertAppProcessPermission(this, "cellbroadcast")) {
+        return nullptr;
+    }
+
+    CellBroadcastParent* actor = new CellBroadcastParent();
+    actor->AddRef();
+    return actor;
+}
+
+bool
+ContentParent::DeallocPCellBroadcastParent(PCellBroadcastParent* aActor)
+{
+    static_cast<CellBroadcastParent*>(aActor)->Release();
+    return true;
+}
+
+bool
+ContentParent::RecvPCellBroadcastConstructor(PCellBroadcastParent* aActor)
+{
+    return static_cast<CellBroadcastParent*>(aActor)->Init();
 }
 
 PSmsParent*
@@ -3475,14 +3517,14 @@ ContentParent::RecvSyncMessage(const nsString& aMsg,
 }
 
 bool
-ContentParent::AnswerRpcMessage(const nsString& aMsg,
-                                const ClonedMessageData& aData,
-                                const InfallibleTArray<CpowEntry>& aCpows,
-                                const IPC::Principal& aPrincipal,
-                                InfallibleTArray<nsString>* aRetvals)
+ContentParent::RecvRpcMessage(const nsString& aMsg,
+                              const ClonedMessageData& aData,
+                              const InfallibleTArray<CpowEntry>& aCpows,
+                              const IPC::Principal& aPrincipal,
+                              InfallibleTArray<nsString>* aRetvals)
 {
-    return nsIContentParent::AnswerRpcMessage(aMsg, aData, aCpows, aPrincipal,
-                                              aRetvals);
+    return nsIContentParent::RecvRpcMessage(aMsg, aData, aCpows, aPrincipal,
+                                            aRetvals);
 }
 
 bool
@@ -3672,6 +3714,12 @@ ContentParent::DoSendAsyncMessage(JSContext* aCx,
     if (aCpows && !GetCPOWManager()->Wrap(aCx, aCpows, &cpows)) {
         return false;
     }
+#ifdef MOZ_NUWA_PROCESS
+    if (IsNuwaProcess() && IsNuwaReady()) {
+        // Nuwa won't receive frame messages after it is frozen.
+        return true;
+    }
+#endif
     return SendAsyncMessage(nsString(aMessage), data, cpows, Principal(aPrincipal));
 }
 
@@ -3769,7 +3817,9 @@ ContentParent::RecvSetFakeVolumeState(const nsString& fsName, const int32_t& fsS
 }
 
 bool
-ContentParent::RecvKeywordToURI(const nsCString& aKeyword, OptionalInputStreamParams* aPostData,
+ContentParent::RecvKeywordToURI(const nsCString& aKeyword,
+                                nsString* aProviderName,
+                                OptionalInputStreamParams* aPostData,
                                 OptionalURIParams* aURI)
 {
     nsCOMPtr<nsIURIFixup> fixup = do_GetService(NS_URIFIXUP_CONTRACTID);
@@ -3778,26 +3828,48 @@ ContentParent::RecvKeywordToURI(const nsCString& aKeyword, OptionalInputStreamPa
     }
 
     nsCOMPtr<nsIInputStream> postData;
-    nsCOMPtr<nsIURI> uri;
+    nsCOMPtr<nsIURIFixupInfo> info;
+
     if (NS_FAILED(fixup->KeywordToURI(aKeyword, getter_AddRefs(postData),
-                                      getter_AddRefs(uri)))) {
+                                      getter_AddRefs(info)))) {
         return true;
     }
+    info->GetKeywordProviderName(*aProviderName);
 
     nsTArray<mozilla::ipc::FileDescriptor> fds;
     SerializeInputStream(postData, *aPostData, fds);
     MOZ_ASSERT(fds.IsEmpty());
 
+    nsCOMPtr<nsIURI> uri;
+    info->GetPreferredURI(getter_AddRefs(uri));
     SerializeURI(uri, *aURI);
+    return true;
+}
+
+bool
+ContentParent::RecvNotifyKeywordSearchLoading(const nsString &aProvider,
+                                              const nsString &aKeyword) {
+#ifdef MOZ_TOOLKIT_SEARCH
+    nsCOMPtr<nsIBrowserSearchService> searchSvc = do_GetService("@mozilla.org/browser/search-service;1");
+    if (searchSvc) {
+        nsCOMPtr<nsISearchEngine> searchEngine;
+        searchSvc->GetEngineByName(aProvider, getter_AddRefs(searchEngine));
+        if (searchEngine) {
+            nsCOMPtr<nsIObserverService> obsSvc = mozilla::services::GetObserverService();
+            if (obsSvc) {
+                // Note that "keyword-search" refers to a search via the url
+                // bar, not a bookmarks keyword search.
+                obsSvc->NotifyObservers(searchEngine, "keyword-search", aKeyword.get());
+            }
+        }
+    }
+#endif
     return true;
 }
 
 bool
 ContentParent::ShouldContinueFromReplyTimeout()
 {
-    // The only time ContentParent sends blocking messages is for CPOWs, so
-    // timeouts should only ever occur in electrolysis-enabled sessions.
-    MOZ_ASSERT(BrowserTabsRemote());
     return false;
 }
 
@@ -3987,6 +4059,23 @@ ContentParent::IgnoreIPCPrincipal()
                                  "dom.testing.ignore_ipc_principal", false);
   }
   return sIgnoreIPCPrincipal;
+}
+
+void
+ContentParent::NotifyUpdatedDictionaries()
+{
+    nsAutoTArray<ContentParent*, 8> processes;
+    GetAll(processes);
+
+    nsCOMPtr<nsISpellChecker> spellChecker(do_GetService(NS_SPELLCHECKER_CONTRACTID));
+    MOZ_ASSERT(spellChecker, "No spell checker?");
+
+    InfallibleTArray<nsString> dictionaries;
+    spellChecker->GetDictionaryList(&dictionaries);
+
+    for (size_t i = 0; i < processes.Length(); ++i) {
+        unused << processes[i]->SendUpdateDictionaryList(dictionaries);
+    }
 }
 
 } // namespace dom

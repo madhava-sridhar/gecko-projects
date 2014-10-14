@@ -98,7 +98,7 @@ ValidatePropertyDescriptor(JSContext *cx, bool extensible, Handle<PropDesc> desc
 
     // step 8
     if (IsDataDescriptor(current)) {
-        JS_ASSERT(desc.isDataDescriptor()); // by step 7a
+        MOZ_ASSERT(desc.isDataDescriptor()); // by step 7a
         if (current.isPermanent() && current.isReadonly()) {
             if (desc.hasWritable() && desc.writable()) {
                 *bp = false;
@@ -121,8 +121,8 @@ ValidatePropertyDescriptor(JSContext *cx, bool extensible, Handle<PropDesc> desc
     }
 
     // step 9
-    JS_ASSERT(IsAccessorDescriptor(current)); // by step 8
-    JS_ASSERT(desc.isAccessorDescriptor()); // by step 7a
+    MOZ_ASSERT(IsAccessorDescriptor(current)); // by step 8
+    MOZ_ASSERT(desc.isAccessorDescriptor()); // by step 7a
     *bp = (!current.isPermanent() ||
            ((!desc.hasSet() || desc.setter() == current.setter()) &&
             (!desc.hasGet() || desc.getter() == current.getter())));
@@ -157,7 +157,7 @@ HasOwn(JSContext *cx, HandleObject obj, HandleId id, bool *bp)
 static JSObject *
 GetDirectProxyHandlerObject(JSObject *proxy)
 {
-    JS_ASSERT(proxy->as<ProxyObject>().handler() == &ScriptedDirectProxyHandler::singleton);
+    MOZ_ASSERT(proxy->as<ProxyObject>().handler() == &ScriptedDirectProxyHandler::singleton);
     return proxy->as<ProxyObject>().extra(ScriptedDirectProxyHandler::HANDLER_EXTRA).toObjectOrNull();
 }
 
@@ -172,12 +172,12 @@ ReportInvalidTrapResult(JSContext *cx, JSObject *proxy, JSAtom *atom)
                          js::NullPtr(), bytes.ptr());
 }
 
-// This function is shared between getOwnPropertyNames, enumerate, and keys
+// This function is shared between ownPropertyKeys, enumerate, and keys
 static bool
 ArrayToIdVector(JSContext *cx, HandleObject proxy, HandleObject target, HandleValue v,
                 AutoIdVector &props, unsigned flags, JSAtom *trapName_)
 {
-    JS_ASSERT(v.isObject());
+    MOZ_ASSERT(v.isObject());
     RootedObject array(cx, &v.toObject());
     RootedAtom trapName(cx, trapName_);
 
@@ -227,7 +227,7 @@ ArrayToIdVector(JSContext *cx, HandleObject proxy, HandleObject target, HandleVa
 
     // step l
     AutoIdVector ownProps(cx);
-    if (!GetPropertyNames(cx, target, flags, &ownProps))
+    if (!GetPropertyKeys(cx, target, flags, &ownProps))
         return false;
 
     // step m
@@ -343,7 +343,7 @@ ScriptedDirectProxyHandler::getPropertyDescriptor(JSContext *cx, HandleObject pr
     if (!JSObject::getProto(cx, proxy, &proto))
         return false;
     if (!proto) {
-        JS_ASSERT(!desc.object());
+        MOZ_ASSERT(!desc.object());
         return true;
     }
     return JS_GetPropertyDescriptorById(cx, proto, id, desc);
@@ -558,11 +558,10 @@ ScriptedDirectProxyHandler::defineProperty(JSContext *cx, HandleObject proxy, Ha
     return true;
 }
 
-// This is secretly [[OwnPropertyKeys]]. SM uses the old wiki name, internally.
 // ES6 (5 April 2014) 9.5.12 Proxy.[[OwnPropertyKeys]]()
 bool
-ScriptedDirectProxyHandler::getOwnPropertyNames(JSContext *cx, HandleObject proxy,
-                                                AutoIdVector &props) const
+ScriptedDirectProxyHandler::ownPropertyKeys(JSContext *cx, HandleObject proxy,
+                                            AutoIdVector &props) const
 {
     // step 1
     RootedObject handler(cx, GetDirectProxyHandlerObject(proxy));
@@ -583,7 +582,7 @@ ScriptedDirectProxyHandler::getOwnPropertyNames(JSContext *cx, HandleObject prox
 
     // step 6
     if (trap.isUndefined())
-        return DirectProxyHandler::getOwnPropertyNames(cx, proxy, props);
+        return DirectProxyHandler::ownPropertyKeys(cx, proxy, props);
 
     // step 7-8
     Value argv[] = {

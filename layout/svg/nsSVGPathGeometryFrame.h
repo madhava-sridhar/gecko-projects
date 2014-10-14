@@ -15,6 +15,12 @@
 #include "nsQueryFrame.h"
 #include "nsSVGUtils.h"
 
+namespace mozilla {
+namespace gfx {
+class DrawTarget;
+}
+}
+
 class gfxContext;
 class nsDisplaySVGPathGeometry;
 class nsIAtom;
@@ -34,6 +40,8 @@ typedef nsFrame nsSVGPathGeometryFrameBase;
 class nsSVGPathGeometryFrame : public nsSVGPathGeometryFrameBase,
                                public nsISVGChildFrame
 {
+  typedef mozilla::gfx::DrawTarget DrawTarget;
+
   friend nsIFrame*
   NS_NewSVGPathGeometryFrame(nsIPresShell* aPresShell, nsStyleContext* aContext);
 
@@ -103,7 +111,6 @@ protected:
                                       uint32_t aFlags) MOZ_OVERRIDE;
   virtual bool IsDisplayContainer() MOZ_OVERRIDE { return false; }
 
-  void GeneratePath(gfxContext *aContext, const Matrix &aTransform);
   /**
    * This function returns a set of bit flags indicating which parts of the
    * element (fill, stroke, bounds) should intercept pointer events. It takes
@@ -113,7 +120,7 @@ protected:
   virtual uint16_t GetHitTestFlags();
 private:
   enum { eRenderFill = 1, eRenderStroke = 2 };
-  void Render(nsRenderingContext *aContext, uint32_t aRenderComponents,
+  void Render(gfxContext* aContext, uint32_t aRenderComponents,
               const gfxMatrix& aTransform);
 
   /**

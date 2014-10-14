@@ -535,6 +535,8 @@ public:
    * drawing. Future use of the builder results in a crash!
    */
   virtual TemporaryRef<Path> Finish() = 0;
+
+  virtual BackendType GetBackendType() const = 0;
 };
 
 struct Glyph
@@ -992,7 +994,7 @@ public:
   inline void ConcatTransform(const Matrix &aTransform)
     { SetTransform(aTransform * Matrix(GetTransform())); }
 
-  SurfaceFormat GetFormat() { return mFormat; }
+  SurfaceFormat GetFormat() const { return mFormat; }
 
   /** Tries to get a native surface for a DrawTarget, this may fail if the
    * draw target cannot convert to this surface type.

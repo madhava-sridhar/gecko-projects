@@ -8,21 +8,22 @@
 #include "nsIUnicodeDecoder.h"
 #include "nsIURI.h"
 
-#include "nsDOMFile.h"
 #include "nsDOMString.h"
 #include "nsNetUtil.h"
 #include "nsPIDOMWindow.h"
 #include "nsStreamUtils.h"
 #include "nsStringStream.h"
 
+#include "mozilla/ErrorResult.h"
 #include "mozilla/dom/EncodingUtils.h"
+#include "mozilla/dom/File.h"
+#include "mozilla/dom/Headers.h"
 #include "mozilla/dom/Fetch.h"
 #include "mozilla/dom/Promise.h"
 #include "mozilla/dom/URL.h"
 #include "mozilla/dom/workers/bindings/URL.h"
 
 // dom/workers
-#include "File.h"
 #include "WorkerPrivate.h"
 
 namespace mozilla {
@@ -38,11 +39,10 @@ NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(Request)
 NS_INTERFACE_MAP_END
 
 Request::Request(nsIGlobalObject* aOwner, InternalRequest* aRequest)
-  : FetchBody<Request>()
-  , mOwner(aOwner)
+  : mOwner(aOwner)
   , mRequest(aRequest)
+  , mBodyUsed(false)
 {
-  SetIsDOMBinding();
 }
 
 Request::~Request()
@@ -75,10 +75,13 @@ Request::Constructor(const GlobalObject& aGlobal,
     inputReq->SetBodyUsed();
     request = inputReq->GetInternalRequest();
   } else {
-    request = new InternalRequest(global);
+    request = new InternalRequest();
   }
 
-  request = request->GetRequestConstructorCopy(global);
+  request = request->GetRequestConstructorCopy(global, aRv);
+  if (NS_WARN_IF(aRv.Failed())) {
+    return nullptr;
+  }
 
   RequestMode fallbackMode = RequestMode::EndGuard_;
   RequestCredentials fallbackCredentials = RequestCredentials::EndGuard_;
@@ -86,21 +89,24 @@ Request::Constructor(const GlobalObject& aGlobal,
     nsString input;
     input.Assign(aInput.GetAsScalarValueString());
 
-    nsString sURL;
+    nsString requestURL;
     if (NS_IsMainThread()) {
       nsCOMPtr<nsPIDOMWindow> window = do_QueryInterface(global);
       MOZ_ASSERT(window);
       nsCOMPtr<nsIURI> docURI = window->GetDocumentURI();
       nsCString spec;
-      docURI->GetSpec(spec);
+      aRv = docURI->GetSpec(spec);
+      if (NS_WARN_IF(aRv.Failed())) {
+        return nullptr;
+      }
+
       nsRefPtr<mozilla::dom::URL> url =
-        mozilla::dom::URL::Constructor(aGlobal, input,
-                                       NS_ConvertUTF8toUTF16(spec), aRv);
+        dom::URL::Constructor(aGlobal, input, NS_ConvertUTF8toUTF16(spec), aRv);
       if (aRv.Failed()) {
         return nullptr;
       }
 
-      url->Stringify(sURL, aRv);
+      url->Stringify(requestURL, aRv);
       if (aRv.Failed()) {
         return nullptr;
       }
@@ -116,12 +122,12 @@ Request::Constructor(const GlobalObject& aGlobal,
         return nullptr;
       }
 
-      url->Stringify(sURL, aRv);
+      url->Stringify(requestURL, aRv);
       if (aRv.Failed()) {
         return nullptr;
       }
     }
-    request->SetURL(NS_ConvertUTF16toUTF8(sURL));
+    request->SetURL(NS_ConvertUTF16toUTF8(requestURL));
     fallbackMode = RequestMode::Cors;
     fallbackCredentials = RequestCredentials::Omit;
   }
@@ -141,13 +147,14 @@ Request::Constructor(const GlobalObject& aGlobal,
 
   if (aInit.mMethod.WasPassed()) {
     nsCString method = aInit.mMethod.Value();
+    ToLowerCase(method);
 
-    if (!method.LowerCaseEqualsLiteral("options") &&
-        !method.LowerCaseEqualsLiteral("get") &&
-        !method.LowerCaseEqualsLiteral("head") &&
-        !method.LowerCaseEqualsLiteral("post") &&
-        !method.LowerCaseEqualsLiteral("put") &&
-        !method.LowerCaseEqualsLiteral("delete")) {
+    if (!method.EqualsASCII("options") &&
+        !method.EqualsASCII("get") &&
+        !method.EqualsASCII("head") &&
+        !method.EqualsASCII("post") &&
+        !method.EqualsASCII("put") &&
+        !method.EqualsASCII("delete")) {
       NS_ConvertUTF8toUTF16 label(method);
       aRv.ThrowTypeError(MSG_INVALID_REQUEST_METHOD, &label);
       return nullptr;
@@ -160,14 +167,14 @@ Request::Constructor(const GlobalObject& aGlobal,
   nsRefPtr<Request> domRequest = new Request(global, request);
   nsRefPtr<Headers> domRequestHeaders = domRequest->Headers_();
 
-  // Step 13 - copy of domRequest headers.
-  nsRefPtr<Headers> headers = new Headers(*domRequestHeaders);
-
+  nsRefPtr<Headers> headers;
   if (aInit.mHeaders.WasPassed()) {
     headers = Headers::Constructor(aGlobal, aInit.mHeaders.Value(), aRv);
     if (aRv.Failed()) {
       return nullptr;
     }
+  } else {
+    headers = new Headers(*domRequestHeaders);
   }
 
   domRequestHeaders->Clear();
@@ -175,9 +182,10 @@ Request::Constructor(const GlobalObject& aGlobal,
   if (domRequest->Mode() == RequestMode::No_cors) {
     nsCString method;
     domRequest->GetMethod(method);
-    if (!method.LowerCaseEqualsLiteral("get") &&
-        !method.LowerCaseEqualsLiteral("head") &&
-        !method.LowerCaseEqualsLiteral("post")) {
+    ToLowerCase(method);
+    if (!method.EqualsASCII("get") &&
+        !method.EqualsASCII("head") &&
+        !method.EqualsASCII("post")) {
       NS_ConvertUTF8toUTF16 label(method);
       aRv.ThrowTypeError(MSG_INVALID_REQUEST_METHOD, &label);
       return nullptr;
@@ -200,6 +208,9 @@ Request::Constructor(const GlobalObject& aGlobal,
     nsCString contentType;
     aRv = ExtractByteStreamFromBody(bodyInit,
                                     getter_AddRefs(stream), contentType);
+    if (NS_WARN_IF(aRv.Failed())) {
+      return nullptr;
+    }
     request->SetBody(stream);
 
     if (!contentType.IsVoid() &&
@@ -213,7 +224,21 @@ Request::Constructor(const GlobalObject& aGlobal,
     }
   }
 
-  domRequest->SetMimeType(aRv);
+  // Extract mime type.
+  nsTArray<nsCString> contentTypeValues;
+  domRequestHeaders->GetAll(NS_LITERAL_CSTRING("Content-Type"),
+                            contentTypeValues, aRv);
+  if (aRv.Failed()) {
+    return nullptr;
+  }
+
+  // HTTP ABNF states Content-Type may have only one value.
+  // This is from the "parse a header value" of the fetch spec.
+  if (contentTypeValues.Length() == 1) {
+    domRequest->mMimeType = contentTypeValues[0];
+    ToLowerCase(domRequest->mMimeType);
+  }
+
   return domRequest.forget();
 }
 
@@ -226,6 +251,5 @@ Request::Clone() const
                                           new InternalRequest(*mRequest));
   return request.forget();
 }
-
 } // namespace dom
 } // namespace mozilla

@@ -55,8 +55,6 @@ CacheStorage::CacheStorage(Namespace aNamespace,
 {
   MOZ_ASSERT(mGlobal);
 
-  SetIsDOMBinding();
-
   if (mOrigin.EqualsLiteral("null") || mBaseDomain.EqualsLiteral("")) {
     ActorFailed();
     return;

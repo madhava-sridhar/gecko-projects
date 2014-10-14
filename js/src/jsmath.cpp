@@ -65,9 +65,9 @@ MathCache::MathCache() {
     memset(table, 0, sizeof(table));
 
     /* See comments in lookup(). */
-    JS_ASSERT(IsNegativeZero(-0.0));
-    JS_ASSERT(!IsNegativeZero(+0.0));
-    JS_ASSERT(hash(-0.0, MathCache::Sin) != hash(+0.0, MathCache::Sin));
+    MOZ_ASSERT(IsNegativeZero(-0.0));
+    MOZ_ASSERT(!IsNegativeZero(+0.0));
+    MOZ_ASSERT(hash(-0.0, MathCache::Sin) != hash(+0.0, MathCache::Sin));
 }
 
 size_t
@@ -742,9 +742,6 @@ random_generateSeed()
      * do, so just mix in the fd error code and the current time.
      */
     int fd = open("/dev/urandom", O_RDONLY);
-    if (fd < 0) {
-        perror("FITZGEN: error opening /dev/urandom: ");
-    }
     MOZ_ASSERT(fd >= 0, "Can't open /dev/urandom");
     if (fd >= 0) {
         (void)read(fd, seed.u8, mozilla::ArrayLength(seed.u8));
@@ -881,12 +878,18 @@ js::math_round(JSContext *cx, unsigned argc, Value *vp)
 double
 js::math_sin_impl(MathCache *cache, double x)
 {
-    return cache->lookup(sin, x, MathCache::Sin);
+    return cache->lookup(math_sin_uncached, x, MathCache::Sin);
 }
 
 double
 js::math_sin_uncached(double x)
 {
+#ifdef _WIN64
+    // Workaround MSVC bug where sin(-0) is +0 instead of -0 on x64 on
+    // CPUs without FMA3 (pre-Haswell). See bug 1076670.
+    if (IsNegativeZero(x))
+        return -0.0;
+#endif
     return sin(x);
 }
 

@@ -150,7 +150,8 @@ function clearSubview(aSubview) {
   parent.appendChild(aSubview);
 }
 
-const CustomizableWidgets = [{
+const CustomizableWidgets = [
+  {
     id: "history-panelmenu",
     type: "view",
     viewId: "PanelUI-history",
@@ -391,6 +392,24 @@ const CustomizableWidgets = [{
     onViewHiding: function(aEvent) {
       let doc = aEvent.target.ownerDocument;
       clearSubview(doc.getElementById("PanelUI-sidebarItems"));
+    }
+  }, {
+    id: "social-share-button",
+    tooltiptext: "social-share-button.label",
+    label: "social-share-button.tooltiptext",
+    // custom build our button so we can attach to the share command
+    type: "custom",
+    onBuild: function(aDocument) {
+      let node = aDocument.createElementNS(kNSXUL, "toolbarbutton");
+      node.setAttribute("id", this.id);
+      node.classList.add("toolbarbutton-1");
+      node.classList.add("chromeclass-toolbar-additional");
+      node.setAttribute("label", CustomizableUI.getLocalizedProperty(this, "label"));
+      node.setAttribute("tooltiptext", CustomizableUI.getLocalizedProperty(this, "tooltiptext"));
+      node.setAttribute("removable", "true");
+      node.setAttribute("observes", "Social:PageShareOrMark");
+      node.setAttribute("command", "Social:SharePage");
+      return node;
     }
   }, {
     id: "add-ons-button",
@@ -904,9 +923,8 @@ const CustomizableWidgets = [{
   }, {
     id: "loop-call-button",
     type: "custom",
-    // XXX Bug 1013989 will provide a label for the button
-    label: "loop-call-button.label",
-    tooltiptext: "loop-call-button.tooltiptext",
+    label: "loop-call-button2.label",
+    tooltiptext: "loop-call-button2.tooltiptext",
     defaultArea: CustomizableUI.AREA_NAVBAR,
     introducedInVersion: 1,
     onBuild: function(aDocument) {
@@ -914,7 +932,7 @@ const CustomizableWidgets = [{
       node.setAttribute("id", this.id);
       node.classList.add("toolbarbutton-1");
       node.classList.add("chromeclass-toolbar-additional");
-      node.setAttribute("type", "badged");
+      node.classList.add("badged-button");
       node.setAttribute("label", CustomizableUI.getLocalizedProperty(this, "label"));
       node.setAttribute("tooltiptext", CustomizableUI.getLocalizedProperty(this, "tooltiptext"));
       node.setAttribute("removable", "true");
@@ -922,6 +940,18 @@ const CustomizableWidgets = [{
         aDocument.defaultView.LoopUI.openCallPanel(event);
       });
       return node;
+    }
+  }, {
+    id: "web-apps-button",
+    label: "web-apps-button.label",
+    tooltiptext: "web-apps-button.tooltiptext",
+    onCommand: function(aEvent) {
+      let win = aEvent.target &&
+                aEvent.target.ownerDocument &&
+                aEvent.target.ownerDocument.defaultView;
+      if (win && typeof win.BrowserOpenApps == "function") {
+        win.BrowserOpenApps();
+      }
     }
   }];
 
@@ -1012,15 +1042,27 @@ if (Services.prefs.getBoolPref("privacy.panicButton.enabled")) {
     // Workaround bug 451997 by hardcoding heights for (potentially) wrapped items:
     _updateHeights: function(aContainer, aSetHeights) {
       // Make sure we don't get stuck not finding anything because of the XBL binding between
-      // the popup and the radio/label elements:
+      // the popup and the radio/label/description elements:
       let view = aContainer.ownerDocument.getElementById("PanelUI-panicView");
-      let variableHeightItems = view.querySelectorAll("radio, label");
+      let variableHeightItems = view.querySelectorAll("radio, label, description");
       let win = aContainer.ownerDocument.defaultView;
       for (let item of variableHeightItems) {
         if (aSetHeights) {
-          item.style.height = win.getComputedStyle(item, null).getPropertyValue("height");
+          let height = win.getComputedStyle(item, null).getPropertyValue("height");
+          item.style.height = height;
+          // In the main menu panel, need to set the height of the container of this
+          // description because otherwise the text will overflow:
+          if (item.id == "PanelUI-panic-mainDesc" &&
+              view.getAttribute("current") == "true" &&
+              // Ensure we don't make this less than the size of the icon:
+              parseInt(height) > 32) {
+            item.parentNode.style.minHeight = height;
+          }
         } else {
           item.style.removeProperty("height");
+          if (item.id == "PanelUI-panic-mainDesc") {
+            item.parentNode.style.removeProperty("min-height");
+          }
         }
       }
     },
@@ -1028,9 +1070,14 @@ if (Services.prefs.getBoolPref("privacy.panicButton.enabled")) {
       let view = aEvent.target;
       let forgetButton = view.querySelector("#PanelUI-panic-view-button");
       forgetButton.addEventListener("command", this);
-      // When the popup starts showing, fix the label and radio heights
-      // if we're in a standalone view (can't tell from here) - see updateHeights.
-      view.ownerDocument.addEventListener("popupshowing", this);
+      if (view.getAttribute("current") == "true") {
+        // In the main menupanel, fix heights immediately:
+        this._updateHeights(view, true);
+      } else {
+        // In a standalone panel, so fix the label and radio heights
+        // when the popup starts showing.
+        view.ownerDocument.addEventListener("popupshowing", this);
+      }
     },
     onViewHiding: function(aEvent) {
       let view = aEvent.target;
@@ -1043,33 +1090,31 @@ if (Services.prefs.getBoolPref("privacy.panicButton.enabled")) {
 
 #ifdef E10S_TESTING_ONLY
 /**
- * The e10s button's purpose is to lower the barrier of entry
- * for our Nightly testers to use e10s windows. We'll be removing it
- * once remote tabs are enabled. This button should never ever make it
- * to production. If it does, that'd be bad, and we should all feel bad.
- */
-if (Services.prefs.getBoolPref("browser.tabs.remote")) {
-  let getCommandFunction = function(aOpenRemote) {
-    return function(aEvent) {
-      let win = aEvent.view;
-      if (win && typeof win.OpenBrowserWindow == "function") {
-        win.OpenBrowserWindow({remote: aOpenRemote});
-      }
-    };
-  }
-
-  let openRemote = !Services.appinfo.browserTabsRemoteAutostart;
-  // Like the XUL menuitem counterparts, we hard-code these strings in because
-  // this button should never roll into production.
-  let buttonLabel = openRemote ? "New e10s Window"
-                               : "New Non-e10s Window";
-
-  CustomizableWidgets.push({
-    id: "e10s-button",
-    label: buttonLabel,
-    tooltiptext: buttonLabel,
-    defaultArea: CustomizableUI.AREA_PANEL,
-    onCommand: getCommandFunction(openRemote),
-  });
+  * The e10s button's purpose is to lower the barrier of entry
+  * for our Nightly testers to use e10s windows. We'll be removing it
+  * once remote tabs are enabled. This button should never ever make it
+  * to production. If it does, that'd be bad, and we should all feel bad.
+  */
+let getCommandFunction = function(aOpenRemote) {
+  return function(aEvent) {
+    let win = aEvent.view;
+    if (win && typeof win.OpenBrowserWindow == "function") {
+      win.OpenBrowserWindow({remote: aOpenRemote});
+    }
+  };
 }
+
+let openRemote = !Services.appinfo.browserTabsRemoteAutostart;
+// Like the XUL menuitem counterparts, we hard-code these strings in because
+// this button should never roll into production.
+let buttonLabel = openRemote ? "New e10s Window"
+                              : "New Non-e10s Window";
+
+CustomizableWidgets.push({
+  id: "e10s-button",
+  label: buttonLabel,
+  tooltiptext: buttonLabel,
+  defaultArea: CustomizableUI.AREA_PANEL,
+  onCommand: getCommandFunction(openRemote),
+});
 #endif

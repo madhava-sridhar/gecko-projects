@@ -31,7 +31,6 @@ ServiceWorkerClients::ServiceWorkerClients(ServiceWorkerGlobalScope* aWorkerScop
   : mWorkerScope(aWorkerScope)
 {
   MOZ_ASSERT(mWorkerScope);
-  SetIsDOMBinding();
 }
 
 JSObject*

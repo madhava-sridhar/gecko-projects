@@ -10,24 +10,23 @@
 #include "nsIStringStream.h"
 #include "nsIUnicodeEncoder.h"
 
-#include "nsDOMFile.h"
 #include "nsNetUtil.h"
 #include "nsStreamUtils.h"
 #include "nsStringStream.h"
 
 #include "mozilla/dom/EncodingUtils.h"
-#include "mozilla/dom/URLSearchParams.h"
+#include "mozilla/dom/File.h"
 #include "mozilla/dom/Promise.h"
 #include "mozilla/dom/PromiseWorkerProxy.h"
 #include "mozilla/dom/Request.h"
 #include "mozilla/dom/Response.h"
 #include "mozilla/dom/ScriptSettings.h"
+#include "mozilla/dom/URLSearchParams.h"
 #include "mozilla/dom/WorkerScope.h"
 #include "mozilla/dom/workers/Workers.h"
 
 #include "InternalResponse.h"
 // dom/workers
-#include "File.h"
 #include "WorkerPrivate.h"
 #include "WorkerRunnable.h"
 
@@ -264,26 +263,18 @@ FetchBody<Derived>::ConsumeBody(ConsumeType aType, ErrorResult& aRv)
       // with worker wrapping.
       uint32_t blobLen = buffer.Length();
       void* blobData = moz_malloc(blobLen);
-      nsCOMPtr<nsIDOMBlob> blob;
+      nsRefPtr<File> blob;
       if (blobData) {
         memcpy(blobData, buffer.BeginReading(), blobLen);
-        blob = DOMFile::CreateMemoryFile(blobData, blobLen,
-                                         NS_ConvertUTF8toUTF16(mMimeType));
+        blob = File::CreateMemoryFile(DerivedClass()->GetParentObject(),
+                                      blobData, blobLen,
+                                      NS_ConvertUTF8toUTF16(mMimeType));
       } else {
         aRv = NS_ERROR_OUT_OF_MEMORY;
         return nullptr;
       }
 
-      JS::Rooted<JS::Value> jsBlob(cx);
-      if (NS_IsMainThread()) {
-        aRv = nsContentUtils::WrapNative(cx, blob, &jsBlob);
-        if (aRv.Failed()) {
-          return nullptr;
-        }
-      } else {
-        jsBlob.setObject(*workers::file::CreateBlob(cx, blob));
-      }
-      promise->MaybeResolve(cx, jsBlob);
+      promise->MaybeResolve(blob);
       return promise.forget();
     }
     case CONSUME_JSON: {

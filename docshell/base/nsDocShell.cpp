@@ -26,11 +26,6 @@
 #include "mozilla/VisualEventTracer.h"
 #include "URIUtils.h"
 
-#ifdef MOZ_LOGGING
-// so we can get logging even in release builds (but only for some things)
-#define FORCE_PR_LOG 1
-#endif
-
 #include "nsIContent.h"
 #include "nsIContentInlines.h"
 #include "nsIDocument.h"
@@ -200,6 +195,10 @@
 #include "mozilla/dom/EncodingUtils.h"
 #include "mozilla/dom/ScriptSettings.h"
 #include "mozilla/dom/URLSearchParams.h"
+
+#ifdef MOZ_TOOLKIT_SEARCH
+#include "nsIBrowserSearchService.h"
+#endif
 
 static NS_DEFINE_CID(kAppShellCID, NS_APPSHELL_CID);
 
@@ -852,6 +851,7 @@ nsDocShell::nsDocShell():
 #endif
     mAffectPrivateSessionLifetime(true),
     mInvisible(false),
+    mHasLoadedNonBlankURI(false),
     mDefaultLoadFlags(nsIRequest::LOAD_NORMAL),
     mFrameType(eFrameTypeRegular),
     mOwnOrContainingAppId(nsIScriptSecurityManager::UNKNOWN_APP_ID),
@@ -1929,6 +1929,10 @@ nsDocShell::SetCurrentURI(nsIURI *aURI, nsIRequest *aRequest,
 
     mCurrentURI = NS_TryToMakeImmutable(aURI);
     
+    if (!NS_IsAboutBlank(mCurrentURI)) {
+      mHasLoadedNonBlankURI = true;
+    }
+
     bool isRoot = false;   // Is this the root docshell
     bool isSubFrame = false;  // Is this a subframe navigation?
 
@@ -2275,6 +2279,15 @@ nsDocShell::SetPrivateBrowsing(bool aUsePrivateBrowsing)
             }
         }
     }
+    return NS_OK;
+}
+
+NS_IMETHODIMP
+nsDocShell::GetHasLoadedNonBlankURI(bool* aResult)
+{
+    NS_ENSURE_ARG_POINTER(aResult);
+
+    *aResult = mHasLoadedNonBlankURI;
     return NS_OK;
 }
 
@@ -4378,22 +4391,22 @@ nsDocShell::GetWindow()
 NS_IMETHODIMP
 nsDocShell::SetDeviceSizeIsPageSize(bool aValue)
 {
-    if (mDeviceSizeIsPageSize != aValue) {
-      mDeviceSizeIsPageSize = aValue;
-      nsRefPtr<nsPresContext> presContext;
-      GetPresContext(getter_AddRefs(presContext));
-      if (presContext) {
-          presContext->MediaFeatureValuesChanged(presContext->eAlwaysRebuildStyle);
-      }
+  if (mDeviceSizeIsPageSize != aValue) {
+    mDeviceSizeIsPageSize = aValue;
+    nsRefPtr<nsPresContext> presContext;
+    GetPresContext(getter_AddRefs(presContext));
+    if (presContext) {
+      presContext->MediaFeatureValuesChanged(nsRestyleHint(0));
     }
-    return NS_OK;
+  }
+  return NS_OK;
 }
 
 NS_IMETHODIMP
 nsDocShell::GetDeviceSizeIsPageSize(bool* aValue)
 {
-    *aValue = mDeviceSizeIsPageSize;
-    return NS_OK;
+  *aValue = mDeviceSizeIsPageSize;
+  return NS_OK;
 }
 
 void
@@ -4583,6 +4596,7 @@ nsDocShell::LoadURIWithBase(const char16_t * aURI,
         aLoadFlags &= ~LOAD_FLAGS_ALLOW_THIRD_PARTY_FIXUP;
     }
     
+    nsCOMPtr<nsIURIFixupInfo> fixupInfo;
     if (sURIFixup) {
         // Call the fixup object.  This will clobber the rv from NS_NewURI
         // above, but that's fine with us.  Note that we need to do this even
@@ -4596,7 +4610,6 @@ nsDocShell::LoadURIWithBase(const char16_t * aURI,
           fixupFlags |= nsIURIFixup::FIXUP_FLAG_FIX_SCHEME_TYPOS;
         }
         nsCOMPtr<nsIInputStream> fixupStream;
-        nsCOMPtr<nsIURIFixupInfo> fixupInfo;
         rv = sURIFixup->GetFixupURIInfo(uriString, fixupFlags,
                                         getter_AddRefs(fixupStream),
                                         getter_AddRefs(fixupInfo));
@@ -4607,7 +4620,7 @@ nsDocShell::LoadURIWithBase(const char16_t * aURI,
         }
 
         if (fixupStream) {
-            // CreateFixupURI only returns a post data stream if it succeeded
+            // GetFixupURIInfo only returns a post data stream if it succeeded
             // and changed the URI, in which case we should override the
             // passed-in post data.
             postStream = fixupStream;
@@ -4665,6 +4678,13 @@ nsDocShell::LoadURIWithBase(const char16_t * aURI,
     loadInfo->SetReferrer(aReferringURI);
     loadInfo->SetHeadersStream(aHeaderStream);
     loadInfo->SetBaseURI(aBaseURI);
+
+    if (fixupInfo) {
+        nsAutoString searchProvider, keyword;
+        fixupInfo->GetKeywordProviderName(searchProvider);
+        fixupInfo->GetKeywordAsSent(keyword);
+        MaybeNotifyKeywordSearchLoading(searchProvider, keyword);
+    }
 
     rv = LoadURI(uri, loadInfo, extraFlags, true);
 
@@ -7382,6 +7402,7 @@ nsDocShell::EndPageLoad(nsIWebProgress * aProgress,
             //
             // First try keyword fixup
             //
+            nsAutoString keywordProviderName, keywordAsSent;
             if (aStatus == NS_ERROR_UNKNOWN_HOST && mAllowKeywordFixup) {
                 bool keywordsEnabled =
                     Preferences::GetBool("keyword.enabled", false);
@@ -7412,11 +7433,12 @@ nsDocShell::EndPageLoad(nsIWebProgress * aProgress,
                 }
 
                 if (keywordsEnabled && (kNotFound == dotLoc)) {
+                    nsCOMPtr<nsIURIFixupInfo> info;
                     // only send non-qualified hosts to the keyword server
                     if (!mOriginalUriString.IsEmpty()) {
                         sURIFixup->KeywordToURI(mOriginalUriString,
                                                 getter_AddRefs(newPostData),
-                                                getter_AddRefs(newURI));
+                                                getter_AddRefs(info));
                     }
                     else {
                         //
@@ -7438,12 +7460,18 @@ nsDocShell::EndPageLoad(nsIWebProgress * aProgress,
                             NS_SUCCEEDED(idnSrv->ConvertACEtoUTF8(host, utf8Host))) {
                             sURIFixup->KeywordToURI(utf8Host,
                                                     getter_AddRefs(newPostData),
-                                                    getter_AddRefs(newURI));
+                                                    getter_AddRefs(info));
                         } else {
                             sURIFixup->KeywordToURI(host,
                                                     getter_AddRefs(newPostData),
-                                                    getter_AddRefs(newURI));
+                                                    getter_AddRefs(info));
                         }
+                    }
+
+                    info->GetPreferredURI(getter_AddRefs(newURI));
+                    if (newURI) {
+                        info->GetKeywordAsSent(keywordAsSent);
+                        info->GetKeywordProviderName(keywordProviderName);
                     }
                 } // end keywordsEnabled
             }
@@ -7477,6 +7505,8 @@ nsDocShell::EndPageLoad(nsIWebProgress * aProgress,
                 if (doCreateAlternate) {
                     newURI = nullptr;
                     newPostData = nullptr;
+                    keywordProviderName.Truncate();
+                    keywordAsSent.Truncate();
                     sURIFixup->CreateFixupURI(oldSpec,
                       nsIURIFixup::FIXUP_FLAGS_MAKE_ALTERNATE_URI,
                                               getter_AddRefs(newPostData),
@@ -7496,6 +7526,10 @@ nsDocShell::EndPageLoad(nsIWebProgress * aProgress,
                     nsAutoCString newSpec;
                     newURI->GetSpec(newSpec);
                     NS_ConvertUTF8toUTF16 newSpecW(newSpec);
+
+                    // This notification is meant for Firefox Health Report so it
+                    // can increment counts from the search engine
+                    MaybeNotifyKeywordSearchLoading(keywordProviderName, keywordAsSent);
 
                     return LoadURI(newSpecW.get(),  // URI string
                                    LOAD_FLAGS_NONE, // Load flags
@@ -13507,4 +13541,37 @@ URLSearchParams*
 nsDocShell::GetURLSearchParams()
 {
   return mURLSearchParams;
+}
+
+void
+nsDocShell::MaybeNotifyKeywordSearchLoading(const nsString &aProvider,
+                                            const nsString &aKeyword) {
+
+  if (aProvider.IsEmpty()) {
+    return;
+  }
+
+  if (XRE_GetProcessType() == GeckoProcessType_Content) {
+    dom::ContentChild* contentChild = dom::ContentChild::GetSingleton();
+    if (contentChild) {
+      contentChild->SendNotifyKeywordSearchLoading(aProvider, aKeyword);
+    }
+    return;
+  }
+
+#ifdef MOZ_TOOLKIT_SEARCH
+  nsCOMPtr<nsIBrowserSearchService> searchSvc = do_GetService("@mozilla.org/browser/search-service;1");
+  if (searchSvc) {
+    nsCOMPtr<nsISearchEngine> searchEngine;
+    searchSvc->GetEngineByName(aProvider, getter_AddRefs(searchEngine));
+    if (searchEngine) {
+      nsCOMPtr<nsIObserverService> obsSvc = mozilla::services::GetObserverService();
+      if (obsSvc) {
+        // Note that "keyword-search" refers to a search via the url
+        // bar, not a bookmarks keyword search.
+        obsSvc->NotifyObservers(searchEngine, "keyword-search", aKeyword.get());
+      }
+    }
+  }
+#endif
 }

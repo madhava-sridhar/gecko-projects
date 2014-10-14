@@ -144,6 +144,8 @@ function BrowserElementParent(frameLoader, hasRemoteFrame, isPendingFrame) {
 
   defineMethod('addNextPaintListener', this._addNextPaintListener);
   defineMethod('removeNextPaintListener', this._removeNextPaintListener);
+  defineNoReturnMethod('setActive', this._setActive);
+  defineMethod('getActive', 'this._getActive');
 
   let principal = this._frameElement.ownerDocument.nodePrincipal;
   let perm = Services.perms
@@ -387,7 +389,8 @@ BrowserElementParent.prototype = {
       name: this._frameElement.getAttribute('name'),
       fullscreenAllowed:
         this._frameElement.hasAttribute('allowfullscreen') ||
-        this._frameElement.hasAttribute('mozallowfullscreen')
+        this._frameElement.hasAttribute('mozallowfullscreen'),
+      isPrivate: this._frameElement.hasAttribute('mozprivatebrowsing')
     };
   },
 
@@ -578,13 +581,22 @@ BrowserElementParent.prototype = {
     }
     else {
       debug("Got error in gotDOMRequestResult.");
-      Services.DOMRequest.fireErrorAsync(req, data.json.errorMsg);
+      Services.DOMRequest.fireErrorAsync(req,
+        Cu.cloneInto(data.json.errorMsg, this._window));
     }
   },
 
   _setVisible: function(visible) {
     this._sendAsyncMsg('set-visible', {visible: visible});
     this._frameLoader.visible = visible;
+  },
+
+  _setActive: function(active) {
+    this._frameLoader.visible = active;
+  },
+
+  _getActive: function() {
+    return this._frameLoader.visible;
   },
 
   _sendMouseEvent: function(type, x, y, button, clickCount, modifiers) {

@@ -13,6 +13,7 @@
 #include "nsMimeTypeArray.h"
 #include "mozilla/MemoryReporting.h"
 #include "mozilla/dom/DesktopNotification.h"
+#include "mozilla/dom/File.h"
 #include "nsGeolocation.h"
 #include "nsIHttpProtocolHandler.h"
 #include "nsIContentPolicy.h"
@@ -33,6 +34,7 @@
 #include "mozilla/dom/PowerManager.h"
 #include "mozilla/dom/WakeLock.h"
 #include "mozilla/dom/power/PowerManagerService.h"
+#include "mozilla/dom/CellBroadcast.h"
 #include "mozilla/dom/MobileMessageManager.h"
 #include "mozilla/dom/ServiceWorkerContainer.h"
 #include "mozilla/dom/Telephony.h"
@@ -49,7 +51,6 @@
 #endif
 #ifdef MOZ_B2G_RIL
 #include "mozilla/dom/IccManager.h"
-#include "mozilla/dom/CellBroadcast.h"
 #include "mozilla/dom/MobileConnectionArray.h"
 #endif
 #include "nsIIdleObserver.h"
@@ -139,7 +140,6 @@ Navigator::Navigator(nsPIDOMWindow* aWindow)
   : mWindow(aWindow)
 {
   MOZ_ASSERT(aWindow->IsInnerWindow(), "Navigator must get an inner window!");
-  SetIsDOMBinding();
 }
 
 Navigator::~Navigator()
@@ -173,13 +173,13 @@ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(Navigator)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mNotification)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mBatteryManager)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mPowerManager)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mCellBroadcast)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mMobileMessageManager)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mTelephony)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mVoicemail)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mConnection)
 #ifdef MOZ_B2G_RIL
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mMobileConnections)
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mCellBroadcast)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mIccManager)
 #endif
 #ifdef MOZ_B2G_BT
@@ -242,6 +242,10 @@ Navigator::Invalidate()
     mPowerManager = nullptr;
   }
 
+  if (mCellBroadcast) {
+    mCellBroadcast = nullptr;
+  }
+
   if (mMobileMessageManager) {
     mMobileMessageManager->Shutdown();
     mMobileMessageManager = nullptr;
@@ -264,10 +268,6 @@ Navigator::Invalidate()
 #ifdef MOZ_B2G_RIL
   if (mMobileConnections) {
     mMobileConnections = nullptr;
-  }
-
-  if (mCellBroadcast) {
-    mCellBroadcast = nullptr;
   }
 
   if (mIccManager) {
@@ -371,6 +371,8 @@ Navigator::GetAppName(nsAString& aAppName)
 Navigator::GetAcceptLanguages(nsTArray<nsString>& aLanguages)
 {
   MOZ_ASSERT(NS_IsMainThread());
+
+  aLanguages.Clear();
 
   // E.g. "de-de, en-us,en".
   const nsAdoptingString& acceptLang =
@@ -585,6 +587,11 @@ Navigator::CookieEnabled()
 bool
 Navigator::OnLine()
 {
+  if (mWindow && mWindow->GetDoc()) {
+    return !NS_IsOffline() &&
+      !NS_IsAppOffline(mWindow->GetDoc()->NodePrincipal());
+  }
+
   return !NS_IsOffline();
 }
 
@@ -1151,14 +1158,14 @@ Navigator::SendBeacon(const nsAString& aUrl,
       in = strStream;
 
     } else if (aData.Value().IsBlob()) {
-      nsCOMPtr<nsIDOMBlob> blob = aData.Value().GetAsBlob();
-      rv = blob->GetInternalStream(getter_AddRefs(in));
+      File& blob = aData.Value().GetAsBlob();
+      rv = blob.GetInternalStream(getter_AddRefs(in));
       if (NS_FAILED(rv)) {
         aRv.Throw(NS_ERROR_FAILURE);
         return false;
       }
       nsAutoString type;
-      rv = blob->GetType(type);
+      rv = blob.GetType(type);
       if (NS_FAILED(rv)) {
         aRv.Throw(NS_ERROR_FAILURE);
         return false;
@@ -1251,11 +1258,8 @@ Navigator::MozGetUserMedia(const MediaStreamConstraints& aConstraints,
     return;
   }
 
-  bool privileged = nsContentUtils::IsChromeDoc(mWindow->GetExtantDoc());
-
   MediaManager* manager = MediaManager::Get();
-  aRv = manager->GetUserMedia(privileged, mWindow, aConstraints,
-                              onsuccess, onerror);
+  aRv = manager->GetUserMedia(mWindow, aConstraints, onsuccess, onerror);
 }
 
 void
@@ -1495,7 +1499,7 @@ Navigator::HasFeature(const nsAString& aName, ErrorResult& aRv)
       p->MaybeResolve(true);
       return p.forget();
     }
-#endif 
+#endif
 
     if (featureName.EqualsLiteral("XMLHttpRequest.mozSystem")) {
       p->MaybeResolve(true);
@@ -1638,6 +1642,8 @@ Navigator::GetMozMobileConnections(ErrorResult& aRv)
   return mMobileConnections;
 }
 
+#endif // MOZ_B2G_RIL
+
 CellBroadcast*
 Navigator::GetMozCellBroadcast(ErrorResult& aRv)
 {
@@ -1651,8 +1657,6 @@ Navigator::GetMozCellBroadcast(ErrorResult& aRv)
 
   return mCellBroadcast;
 }
-
-#endif // MOZ_B2G_RIL
 
 Voicemail*
 Navigator::GetMozVoicemail(ErrorResult& aRv)
@@ -1724,8 +1728,7 @@ Navigator::GetConnection(ErrorResult& aRv)
       aRv.Throw(NS_ERROR_UNEXPECTED);
       return nullptr;
     }
-    mConnection = new network::Connection();
-    mConnection->Init(mWindow);
+    mConnection = new network::Connection(mWindow);
   }
 
   return mConnection;

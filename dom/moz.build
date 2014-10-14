@@ -47,6 +47,7 @@ DIRS += [
     'browser-element',
     'cache',
     'canvas',
+    'cellbroadcast',
     'contacts',
     'crypto',
     'phonenumberutils',
@@ -114,7 +115,6 @@ if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'gonk':
 if CONFIG['MOZ_B2G_RIL']:
     DIRS += [
         'icc',
-        'cellbroadcast',
         'wappush',
     ]
 

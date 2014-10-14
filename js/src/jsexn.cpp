@@ -167,7 +167,7 @@ js::CopyErrorReport(JSContext *cx, JSErrorReport *report)
                 argsCopySize += JS_CHARS_SIZE(report->messageArgs[i]);
 
             /* Non-null messageArgs should have at least one non-null arg. */
-            JS_ASSERT(i != 0);
+            MOZ_ASSERT(i != 0);
             argsArraySize = (i + 1) * sizeof(const char16_t *);
         }
     }
@@ -196,7 +196,7 @@ js::CopyErrorReport(JSContext *cx, JSErrorReport *report)
             cursor += argSize;
         }
         copy->messageArgs[i] = nullptr;
-        JS_ASSERT(cursor == (uint8_t *)copy->messageArgs[0] + argsCopySize);
+        MOZ_ASSERT(cursor == (uint8_t *)copy->messageArgs[0] + argsCopySize);
     }
 
     if (report->ucmessage) {
@@ -229,12 +229,10 @@ js::CopyErrorReport(JSContext *cx, JSErrorReport *report)
         copy->filename = (const char *)cursor;
         js_memcpy(cursor, report->filename, filenameSize);
     }
-    JS_ASSERT(cursor + filenameSize == (uint8_t *)copy + mallocSize);
-
-    /* HOLD called by the destination error object. */
-    copy->originPrincipals = report->originPrincipals;
+    MOZ_ASSERT(cursor + filenameSize == (uint8_t *)copy + mallocSize);
 
     /* Copy non-pointer members. */
+    copy->isMuted = report->isMuted;
     copy->lineno = report->lineno;
     copy->column = report->column;
     copy->errorNumber = report->errorNumber;
@@ -327,12 +325,8 @@ js::ComputeStackString(JSContext *cx)
 static void
 exn_finalize(FreeOp *fop, JSObject *obj)
 {
-    if (JSErrorReport *report = obj->as<ErrorObject>().getErrorReport()) {
-        /* These were held by ErrorObject::init. */
-        if (JSPrincipals *prin = report->originPrincipals)
-            JS_DropPrincipals(fop->runtime(), prin);
+    if (JSErrorReport *report = obj->as<ErrorObject>().getErrorReport())
         fop->free_(report);
-    }
 }
 
 JSErrorReport *
@@ -560,7 +554,7 @@ js_ErrorToException(JSContext *cx, const char *message, JSErrorReport *reportp,
                     JSErrorCallback callback, void *userRef)
 {
     // Tell our caller to report immediately if this report is just a warning.
-    JS_ASSERT(reportp);
+    MOZ_ASSERT(reportp);
     if (JSREPORT_IS_WARNING(reportp->flags))
         return false;
 
@@ -875,7 +869,7 @@ ErrorReport::populateUncaughtExceptionReportVA(JSContext *cx, va_list ap)
     if (!iter.done()) {
         ownedReport.filename = iter.scriptFilename();
         ownedReport.lineno = iter.computeLine(&ownedReport.column);
-        ownedReport.originPrincipals = iter.originPrincipals();
+        ownedReport.isMuted = iter.mutedErrors();
     }
 
     if (!js_ExpandErrorArguments(cx, js_GetErrorMessage, nullptr,

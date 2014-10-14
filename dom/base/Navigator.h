@@ -25,7 +25,6 @@ class nsPIDOMWindow;
 class nsIDOMNavigatorSystemMessages;
 class nsDOMCameraManager;
 class nsDOMDeviceStorage;
-class nsIDOMBlob;
 class nsIPrincipal;
 class nsIURI;
 
@@ -85,12 +84,12 @@ class BluetoothManager;
 #endif // MOZ_B2G_BT
 
 #ifdef MOZ_B2G_RIL
-class CellBroadcast;
 class IccManager;
 class MobileConnectionArray;
 #endif
 
 class PowerManager;
+class CellBroadcast;
 class Telephony;
 class Voicemail;
 
@@ -219,6 +218,7 @@ public:
                          nsTArray<nsRefPtr<nsDOMDeviceStorage> >& aStores,
                          ErrorResult& aRv);
   DesktopNotificationCenter* GetMozNotification(ErrorResult& aRv);
+  CellBroadcast* GetMozCellBroadcast(ErrorResult& aRv);
   MobileMessageManager* GetMozMobileMessage();
   Telephony* GetMozTelephony(ErrorResult& aRv);
   Voicemail* GetMozVoicemail(ErrorResult& aRv);
@@ -234,7 +234,6 @@ public:
 #endif
 #ifdef MOZ_B2G_RIL
   MobileConnectionArray* GetMozMobileConnections(ErrorResult& aRv);
-  CellBroadcast* GetMozCellBroadcast(ErrorResult& aRv);
   IccManager* GetMozIccManager(ErrorResult& aRv);
 #endif // MOZ_B2G_RIL
 #ifdef MOZ_GAMEPAD
@@ -330,13 +329,13 @@ private:
   nsRefPtr<FMRadio> mFMRadio;
 #endif
   nsRefPtr<PowerManager> mPowerManager;
+  nsRefPtr<CellBroadcast> mCellBroadcast;
   nsRefPtr<MobileMessageManager> mMobileMessageManager;
   nsRefPtr<Telephony> mTelephony;
   nsRefPtr<Voicemail> mVoicemail;
   nsRefPtr<network::Connection> mConnection;
 #ifdef MOZ_B2G_RIL
   nsRefPtr<MobileConnectionArray> mMobileConnections;
-  nsRefPtr<CellBroadcast> mCellBroadcast;
   nsRefPtr<IccManager> mIccManager;
 #endif
 #ifdef MOZ_B2G_BT

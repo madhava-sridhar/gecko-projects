@@ -80,6 +80,7 @@
 #include "UnitTransforms.h"
 #include "ClientLayerManager.h"
 #include "LayersLogging.h"
+#include "nsIOService.h"
 
 #include "nsColorPickerProxy.h"
 
@@ -106,7 +107,6 @@ static const CSSSize kDefaultViewportSize(980, 480);
 static const char BROWSER_ZOOM_TO_RECT[] = "browser-zoom-to-rect";
 static const char BEFORE_FIRST_PAINT[] = "before-first-paint";
 
-static bool sCpowsEnabled = false;
 static int32_t sActiveDurationMs = 10;
 static bool sActiveDurationMsSet = false;
 
@@ -2390,15 +2390,6 @@ TabChild::RecvCompositionEvent(const WidgetCompositionEvent& event)
 }
 
 bool
-TabChild::RecvTextEvent(const WidgetTextEvent& event)
-{
-  WidgetTextEvent localEvent(event);
-  localEvent.widget = mWidget;
-  DispatchWidgetEvent(localEvent);
-  return true;
-}
-
-bool
 TabChild::RecvSelectionEvent(const WidgetSelectionEvent& event)
 {
   WidgetSelectionEvent localEvent(event);
@@ -2575,9 +2566,21 @@ TabChild::RecvAsyncMessage(const nsString& aMessage,
     StructuredCloneData cloneData = UnpackClonedMessageDataForChild(aData);
     nsRefPtr<nsFrameMessageManager> mm =
       static_cast<nsFrameMessageManager*>(mTabChildGlobal->mMessageManager.get());
-    CpowIdHolder cpows(Manager()->GetCPOWManager(), aCpows);
+    CpowIdHolder cpows(Manager(), aCpows);
     mm->ReceiveMessage(static_cast<EventTarget*>(mTabChildGlobal),
                        aMessage, false, &cloneData, &cpows, aPrincipal, nullptr);
+  }
+  return true;
+}
+
+bool
+TabChild::RecvAppOfflineStatus(const uint32_t& aId, const bool& aOffline)
+{
+  // Instantiate the service to make sure gIOService is initialized
+  nsCOMPtr<nsIIOService> ioService = mozilla::services::GetIOService();
+  if (gIOService && ioService) {
+    gIOService->SetAppOfflineInternal(aId, aOffline ?
+      nsIAppOfflineInfo::OFFLINE : nsIAppOfflineInfo::ONLINE);
   }
   return true;
 }
@@ -2783,12 +2786,6 @@ TabChild::InitRenderingState()
                                      BEFORE_FIRST_PAINT,
                                      false);
     }
-
-    // This state can't change during the lifetime of the child.
-    sCpowsEnabled = BrowserTabsRemote();
-    if (Preferences::GetBool("dom.ipc.cpows.force-enabled", false))
-      sCpowsEnabled = true;
-
     return true;
 }
 
@@ -2917,17 +2914,15 @@ TabChild::DoSendBlockingMessage(JSContext* aCx,
     return false;
   }
   InfallibleTArray<CpowEntry> cpows;
-  if (sCpowsEnabled) {
-    if (!Manager()->GetCPOWManager()->Wrap(aCx, aCpows, &cpows)) {
-      return false;
-    }
+  if (aCpows && !Manager()->GetCPOWManager()->Wrap(aCx, aCpows, &cpows)) {
+    return false;
   }
   if (aIsSync) {
     return SendSyncMessage(PromiseFlatString(aMessage), data, cpows,
                            Principal(aPrincipal), aJSONRetVal);
   }
 
-  return CallRpcMessage(PromiseFlatString(aMessage), data, cpows,
+  return SendRpcMessage(PromiseFlatString(aMessage), data, cpows,
                         Principal(aPrincipal), aJSONRetVal);
 }
 
@@ -2943,10 +2938,8 @@ TabChild::DoSendAsyncMessage(JSContext* aCx,
     return false;
   }
   InfallibleTArray<CpowEntry> cpows;
-  if (sCpowsEnabled) {
-    if (!Manager()->GetCPOWManager()->Wrap(aCx, aCpows, &cpows)) {
-      return false;
-    }
+  if (aCpows && !Manager()->GetCPOWManager()->Wrap(aCx, aCpows, &cpows)) {
+    return false;
   }
   return SendAsyncMessage(PromiseFlatString(aMessage), data, cpows,
                           Principal(aPrincipal));

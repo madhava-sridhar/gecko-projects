@@ -199,6 +199,7 @@ let gInitialPages = [
 
 #include browser-addons.js
 #include browser-customization.js
+#include browser-devedition.js
 #include browser-feeds.js
 #include browser-fullScreen.js
 #include browser-fullZoom.js
@@ -515,6 +516,9 @@ var gPopupBlockerObserver = {
     var perm = shouldBlock ? pm.DENY_ACTION : pm.ALLOW_ACTION;
     pm.add(gBrowser.currentURI, "popup", perm);
 
+    if (!shouldBlock)
+      this.showAllBlockedPopups(gBrowser.selectedBrowser);
+
     gBrowser.getNotificationBox().removeCurrentNotification();
   },
 
@@ -569,6 +573,7 @@ var gPopupBlockerObserver = {
         // xxxdz this should make the option say "Show file picker" and do it (Bug 590306)
         if (!blockedPopup.popupWindowURI)
           continue;
+
         var popupURIspec = blockedPopup.popupWindowURI.spec;
 
         // Sometimes the popup URI that we get back from the blockedPopup
@@ -591,9 +596,6 @@ var gPopupBlockerObserver = {
         var label = gNavigatorBundle.getFormattedString("popupShowPopupPrefix",
                                                         [popupURIspec]);
         menuitem.setAttribute("label", label);
-        menuitem.setAttribute("popupWindowURI", popupURIspec);
-        menuitem.setAttribute("popupWindowFeatures", blockedPopup.popupWindowFeatures);
-        menuitem.setAttribute("popupWindowName", blockedPopup.popupWindowName);
         menuitem.setAttribute("oncommand", "gPopupBlockerObserver.showBlockedPopup(event);");
         menuitem.setAttribute("popupReportIndex", i);
         menuitem.popupReportBrowser = browser;
@@ -640,6 +642,18 @@ var gPopupBlockerObserver = {
     browser.unblockPopup(popupReportIndex);
   },
 
+  showAllBlockedPopups: function (aBrowser)
+  {
+    let popups = aBrowser.blockedPopups;
+    if (!popups)
+      return;
+
+    for (let i = 0; i < popups.length; i++) {
+      if (popups[i].popupWindowURI)
+        aBrowser.unblockPopup(i);
+    }
+  },
+
   editPopupSettings: function ()
   {
     var host = "";
@@ -681,7 +695,7 @@ function gKeywordURIFixup({ target: browser, data: fixupInfo }) {
   // whether the original input would be vaguely interpretable as a URL,
   // so figure that out first.
   let alternativeURI = deserializeURI(fixupInfo.fixedURI);
-  if (!fixupInfo.fixupUsedKeyword || !alternativeURI || !alternativeURI.host) {
+  if (!fixupInfo.keywordProviderName  || !alternativeURI || !alternativeURI.host) {
     return;
   }
 
@@ -774,7 +788,7 @@ function gKeywordURIFixup({ target: browser, data: fixupInfo }) {
 // Called when a docshell has attempted to load a page in an incorrect process.
 // This function is responsible for loading the page in the correct process.
 function RedirectLoad({ target: browser, data }) {
-  let tab = gBrowser._getTabForBrowser(browser);
+  let tab = gBrowser.getTabForBrowser(browser);
   // Flush the tab state before getting it
   TabState.flush(browser);
   let tabState = JSON.parse(SessionStore.getTabState(tab));
@@ -821,6 +835,7 @@ var gBrowserInit = {
     gPageStyleMenu.init();
     LanguageDetectionListener.init();
     BrowserOnClick.init();
+    DevEdition.init();
 
     let mm = window.getGroupMessageManager("browsers");
     mm.loadFrameScript("chrome://browser/content/content.js", true);
@@ -1377,6 +1392,8 @@ var gBrowserInit = {
     ToolbarIconColor.uninit();
 
     BrowserOnClick.uninit();
+
+    DevEdition.uninit();
 
     var enumerator = Services.wm.getEnumerator(null);
     enumerator.getNext();
@@ -2220,7 +2237,7 @@ function URLBarSetURI(aURI) {
     // Replace initial page URIs with an empty string
     // only if there's no opener (bug 370555).
     // Bug 863515 - Make content.opener checks work in electrolysis.
-    if (gInitialPages.contains(uri.spec))
+    if (gInitialPages.indexOf(uri.spec) != -1)
       value = !gMultiProcessBrowser && content.opener ? uri.spec : "";
     else
       value = losslessDecodeURI(uri);
@@ -2387,13 +2404,13 @@ let BrowserOnClick = {
   receiveMessage: function (msg) {
     switch (msg.name) {
       case "Browser:CertExceptionError":
-        this.onAboutCertError(msg.target, msg.json.elementId,
-                              msg.json.isTopFrame, msg.json.location,
-                              msg.objects.failedChannel);
+        this.onAboutCertError(msg.target, msg.data.elementId,
+                              msg.data.isTopFrame, msg.data.location,
+                              msg.data.sslStatusAsString);
       break;
       case "Browser:SiteBlockedError":
-        this.onAboutBlocked(msg.json.elementId, msg.json.isMalware,
-                            msg.json.isTopFrame, msg.json.location);
+        this.onAboutBlocked(msg.data.elementId, msg.data.isMalware,
+                            msg.data.isTopFrame, msg.data.location);
       break;
       case "Browser:NetworkError":
         // Reset network state, the error page will refresh on its own.
@@ -2402,7 +2419,7 @@ let BrowserOnClick = {
     }
   },
 
-  onAboutCertError: function (browser, elementId, isTopFrame, location, failedChannel) {
+  onAboutCertError: function (browser, elementId, isTopFrame, location, sslStatusAsString) {
     let secHistogram = Services.telemetry.getHistogramById("SECURITY_UI");
 
     switch (elementId) {
@@ -2410,8 +2427,11 @@ let BrowserOnClick = {
         if (isTopFrame) {
           secHistogram.add(Ci.nsISecurityUITelemetry.WARNING_BAD_CERT_TOP_CLICK_ADD_EXCEPTION);
         }
-        let sslStatus = failedChannel.securityInfo.QueryInterface(Ci.nsISSLStatusProvider)
-                                                  .SSLStatus;
+
+        let serhelper = Cc["@mozilla.org/network/serialization-helper;1"]
+                           .getService(Ci.nsISerializationHelper);
+        let sslStatus = serhelper.deserializeObject(sslStatusAsString);
+        sslStatus.QueryInterface(Components.interfaces.nsISSLStatus);
         let params = { exceptionAdded : false,
                        sslStatus : sslStatus };
 
@@ -2935,7 +2955,7 @@ const DOMLinkHandler = {
     if (gBrowser.isFailedIcon(aURL))
       return false;
 
-    let tab = gBrowser._getTabForBrowser(aBrowser);
+    let tab = gBrowser.getTabForBrowser(aBrowser);
     if (!tab)
       return false;
 
@@ -2944,7 +2964,7 @@ const DOMLinkHandler = {
   },
 
   addSearch: function(aBrowser, aEngine, aURL) {
-    let tab = gBrowser._getTabForBrowser(aBrowser);
+    let tab = gBrowser.getTabForBrowser(aBrowser);
     if (!tab)
       return false;
 
@@ -3754,7 +3774,7 @@ var XULBrowserWindow = {
         URLBarSetURI(aLocationURI);
 
         BookmarkingUI.onLocationChange();
-        SocialUI.updateState();
+        SocialUI.updateState(location);
       }
 
       // Utility functions for disabling find
@@ -6079,6 +6099,11 @@ function BrowserOpenAddonsMgr(aView) {
   }
 }
 
+function BrowserOpenApps() {
+  let appsURL = Services.urlFormatter.formatURLPref("browser.apps.URL");
+  switchToTabHavingURI(appsURL, true)
+}
+
 function GetSearchFieldBookmarkData(node) {
   var charset = node.ownerDocument.characterSet;
 
@@ -6779,11 +6804,11 @@ var gIdentityHandler = {
     if (gURLBar.getAttribute("pageproxystate") != "valid")
       return;
 
-    var value = content.location.href;
-    var urlString = value + "\n" + content.document.title;
-    var htmlString = "<a href=\"" + value + "\">" + value + "</a>";
+    let value = gBrowser.currentURI.spec;
+    let urlString = value + "\n" + gBrowser.contentTitle;
+    let htmlString = "<a href=\"" + value + "\">" + value + "</a>";
 
-    var dt = event.dataTransfer;
+    let dt = event.dataTransfer;
     dt.setData("text/x-moz-url", urlString);
     dt.setData("text/uri-list", value);
     dt.setData("text/plain", value);
@@ -6939,20 +6964,16 @@ let gRemoteTabsUI = {
       return;
     }
 
-    let remoteTabs = Services.appinfo.browserTabsRemote;
-    let autostart = Services.appinfo.browserTabsRemoteAutostart;
-
     let newRemoteWindow = document.getElementById("menu_newRemoteWindow");
     let newNonRemoteWindow = document.getElementById("menu_newNonRemoteWindow");
-
-    if (!remoteTabs) {
-      newRemoteWindow.hidden = true;
-      newNonRemoteWindow.hidden = true;
-      return;
-    }
-
+#ifdef E10S_TESTING_ONLY
+    let autostart = Services.appinfo.browserTabsRemoteAutostart;
     newRemoteWindow.hidden = autostart;
     newNonRemoteWindow.hidden = !autostart;
+#else
+    newRemoteWindow.hidden = true;
+    newNonRemoteWindow.hidden = true;
+#endif
   }
 };
 

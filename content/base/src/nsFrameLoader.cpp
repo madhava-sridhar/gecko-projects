@@ -192,7 +192,7 @@ nsFrameLoader::Create(Element* aOwner, bool aNetworkCreated)
   NS_ENSURE_TRUE(aOwner, nullptr);
   nsIDocument* doc = aOwner->OwnerDoc();
   NS_ENSURE_TRUE(!doc->IsResourceDoc() &&
-                 ((!doc->IsLoadedAsData() && aOwner->GetCurrentDoc()) ||
+                 ((!doc->IsLoadedAsData() && aOwner->GetUncomposedDoc()) ||
                    doc->IsStaticDocument()),
                  nullptr);
 
@@ -847,10 +847,11 @@ nsFrameLoader::MarginsChanged(uint32_t aMarginWidth,
   mDocShell->SetMarginHeight(aMarginHeight);
 
   // Trigger a restyle if there's a prescontext
+  // FIXME: This could do something much less expensive.
   nsRefPtr<nsPresContext> presContext;
   mDocShell->GetPresContext(getter_AddRefs(presContext));
   if (presContext)
-    presContext->RebuildAllStyleData(nsChangeHint(0));
+    presContext->RebuildAllStyleData(nsChangeHint(0), eRestyle_Subtree);
 }
 
 bool
@@ -873,12 +874,12 @@ nsFrameLoader::ShowRemoteFrame(const nsIntSize& size,
   // want here.  For now, hack.
   if (!mRemoteBrowserShown) {
     if (!mOwnerContent ||
-        !mOwnerContent->GetCurrentDoc()) {
+        !mOwnerContent->GetUncomposedDoc()) {
       return false;
     }
 
     nsRefPtr<layers::LayerManager> layerManager =
-      nsContentUtils::LayerManagerForDocument(mOwnerContent->GetCurrentDoc());
+      nsContentUtils::LayerManagerForDocument(mOwnerContent->GetUncomposedDoc());
     if (!layerManager) {
       // This is just not going to work.
       return false;
@@ -1073,8 +1074,8 @@ nsFrameLoader::SwapWithOtherLoader(nsFrameLoader* aOther,
     otherChildDocument->GetParentDocument();
 
   // Make sure to swap docshells between the two frames.
-  nsIDocument* ourDoc = ourContent->GetCurrentDoc();
-  nsIDocument* otherDoc = otherContent->GetCurrentDoc();
+  nsIDocument* ourDoc = ourContent->GetUncomposedDoc();
+  nsIDocument* otherDoc = otherContent->GetUncomposedDoc();
   if (!ourDoc || !otherDoc) {
     // Again, how odd, given that we had docshells
     return NS_ERROR_NOT_IMPLEMENTED;

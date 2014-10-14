@@ -136,7 +136,7 @@ InterpolationQualityFromFilter(Filter aFilter)
     case Filter::POINT:
       return kCGInterpolationNone;
     case Filter::GOOD:
-      return kCGInterpolationDefault;
+      return kCGInterpolationLow;
   }
 }
 
@@ -251,16 +251,7 @@ GetRetainedImageFromSourceSurface(SourceSurface *aSurface)
 TemporaryRef<SourceSurface>
 DrawTargetCG::OptimizeSourceSurface(SourceSurface *aSurface) const
 {
-  if (aSurface->GetType() == SurfaceType::COREGRAPHICS_IMAGE ||
-      aSurface->GetType() == SurfaceType::COREGRAPHICS_CGCONTEXT) {
-    return aSurface;
-  }
-  RefPtr<DataSourceSurface> data = aSurface->GetDataSurface();
-
-  return CreateSourceSurfaceFromData(data->GetData(),
-                                     data->GetSize(),
-                                     data->Stride(),
-                                     data->GetFormat());
+  return aSurface;
 }
 
 class UnboundnessFixer

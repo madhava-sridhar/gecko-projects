@@ -219,11 +219,14 @@ class CodeGeneratorX86Shared : public CodeGeneratorShared
     bool visitSimdInsertElementI(LSimdInsertElementI *lir);
     bool visitSimdInsertElementF(LSimdInsertElementF *lir);
     bool visitSimdSignMaskX4(LSimdSignMaskX4 *ins);
+    bool visitSimdUnaryArithIx4(LSimdUnaryArithIx4 *lir);
+    bool visitSimdUnaryArithFx4(LSimdUnaryArithFx4 *lir);
     bool visitSimdBinaryCompIx4(LSimdBinaryCompIx4 *lir);
     bool visitSimdBinaryCompFx4(LSimdBinaryCompFx4 *lir);
     bool visitSimdBinaryArithIx4(LSimdBinaryArithIx4 *lir);
     bool visitSimdBinaryArithFx4(LSimdBinaryArithFx4 *lir);
     bool visitSimdBinaryBitwiseX4(LSimdBinaryBitwiseX4 *lir);
+    bool visitSimdShift(LSimdShift *lir);
     bool visitSimdSelect(LSimdSelect *ins);
 
     // Out of line visitors.

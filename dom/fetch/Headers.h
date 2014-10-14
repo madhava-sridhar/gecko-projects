@@ -9,6 +9,7 @@
 
 #include "mozilla/dom/HeadersBinding.h"
 #include "mozilla/dom/UnionTypes.h"
+
 #include "nsClassHashtable.h"
 #include "nsWrapperCache.h"
 
@@ -44,7 +45,7 @@ private:
     nsCString mValue;
   };
 
-  nsRefPtr<nsISupports> mOwner;
+  nsCOMPtr<nsISupports> mOwner;
   HeadersGuardEnum mGuard;
   nsTArray<Entry> mList;
 
@@ -53,7 +54,6 @@ public:
     : mOwner(aOwner)
     , mGuard(aGuard)
   {
-    SetIsDOMBinding();
   }
 
   Headers(nsISupports* aOwner, const nsTArray<PHeadersEntry>& aHeaders,

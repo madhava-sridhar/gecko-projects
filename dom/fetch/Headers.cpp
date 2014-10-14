@@ -8,7 +8,6 @@
 
 #include "mozilla/ErrorResult.h"
 #include "mozilla/dom/PHeaders.h"
-#include "mozilla/dom/UnionTypes.h"
 #include "mozilla/dom/WorkerPrivate.h"
 #include "mozilla/Preferences.h"
 
@@ -62,8 +61,6 @@ Headers::Headers(nsISupports* aOwner, const nsTArray<PHeadersEntry>& aHeaders,
   : mOwner(aOwner)
   , mGuard(aGuard)
 {
-  SetIsDOMBinding();
-
   for (uint32_t i = 0; i < aHeaders.Length(); ++i) {
     mList.AppendElement(Entry(aHeaders[i].name(), aHeaders[i].value()));
   }
@@ -112,7 +109,7 @@ Headers::Constructor(const GlobalObject& aGlobal,
     headers->Fill(aInit.GetAsByteStringMozMap(), aRv);
   }
 
-  if (aRv.Failed()) {
+  if (NS_WARN_IF(aRv.Failed())) {
     return nullptr;
   }
 
@@ -123,9 +120,9 @@ Headers::Headers(const Headers& aOther)
   : mOwner(aOther.mOwner)
   , mGuard(aOther.mGuard)
 {
-  SetIsDOMBinding();
   ErrorResult result;
   Fill(aOther, result);
+  MOZ_ASSERT(!result.Failed());
 }
 
 void

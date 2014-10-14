@@ -83,7 +83,6 @@ ChannelMediaResource::ChannelMediaResource(MediaDecoder* aDecoder,
     mCacheStream(MOZ_THIS_IN_INITIALIZER_LIST()),
     mLock("ChannelMediaResource.mLock"),
     mIgnoreResume(false),
-    mSeekingForMetadata(false),
     mIsTransportSeekable(true)
 {
 #ifdef PR_LOGGING
@@ -358,11 +357,7 @@ ChannelMediaResource::OnStartRequest(nsIRequest* aRequest)
   }
 
   mReopenOnError = false;
-  // If we are seeking to get metadata, because we are playing an OGG file,
-  // ignore if the channel gets closed without us suspending it explicitly. We
-  // don't want to tell the element that the download has finished whereas we
-  // just happended to have reached the end of the media while seeking.
-  mIgnoreClose = mSeekingForMetadata;
+  mIgnoreClose = false;
 
   if (mSuspendCount > 0) {
     // Re-suspend the channel if it needs to be suspended
@@ -808,16 +803,6 @@ nsresult ChannelMediaResource::Seek(int32_t aWhence, int64_t aOffset)
   return mCacheStream.Seek(aWhence, aOffset);
 }
 
-void ChannelMediaResource::StartSeekingForMetadata()
-{
-  mSeekingForMetadata = true;
-}
-
-void ChannelMediaResource::EndSeekingForMetadata()
-{
-  mSeekingForMetadata = false;
-}
-
 int64_t ChannelMediaResource::Tell()
 {
   NS_ASSERTION(!NS_IsMainThread(), "Don't call on main thread");
@@ -905,8 +890,11 @@ void ChannelMediaResource::Resume()
         // There is (or may be) data to read at mOffset, so start reading it.
         // Need to recreate the channel.
         CacheClientSeek(mOffset, false);
+        element->DownloadResumed();
+      } else {
+        // The channel remains dead. Do not notify DownloadResumed() which
+        // will leave the media element in NETWORK_LOADING state.
       }
-      element->DownloadResumed();
     }
   }
 }
@@ -984,11 +972,24 @@ public:
     mDecoder(aDecoder), mStatus(aStatus) {}
   NS_IMETHOD Run() {
     mDecoder->NotifyDownloadEnded(mStatus);
+    if (NS_SUCCEEDED(mStatus)) {
+      MediaDecoderOwner* owner = mDecoder->GetMediaOwner();
+      if (owner) {
+        dom::HTMLMediaElement* element = owner->GetMediaElement();
+        if (element) {
+          element->DownloadSuspended();
+        }
+      }
+      // NotifySuspendedStatusChanged will tell the element that download
+      // has been suspended "by the cache", which is true since we never download
+      // anything. The element can then transition to HAVE_ENOUGH_DATA.
+      mDecoder->NotifySuspendedStatusChanged();
+    }
     return NS_OK;
   }
 private:
   nsRefPtr<MediaDecoder> mDecoder;
-  nsresult                 mStatus;
+  nsresult               mStatus;
 };
 
 void
@@ -1215,8 +1216,6 @@ public:
   virtual nsresult ReadAt(int64_t aOffset, char* aBuffer,
                           uint32_t aCount, uint32_t* aBytes);
   virtual nsresult Seek(int32_t aWhence, int64_t aOffset);
-  virtual void     StartSeekingForMetadata() {};
-  virtual void     EndSeekingForMetadata() {};
   virtual int64_t  Tell();
 
   // Any thread
@@ -1248,8 +1247,8 @@ public:
     return std::max(aOffset, mSize);
   }
   virtual bool    IsDataCachedToEndOfResource(int64_t aOffset) { return true; }
-  virtual bool    IsSuspendedByCache() { return false; }
-  virtual bool    IsSuspended() { return false; }
+  virtual bool    IsSuspendedByCache() { return true; }
+  virtual bool    IsSuspended() { return true; }
   virtual bool    IsTransportSeekable() MOZ_OVERRIDE { return true; }
 
   nsresult GetCachedRanges(nsTArray<MediaByteRange>& aRanges);

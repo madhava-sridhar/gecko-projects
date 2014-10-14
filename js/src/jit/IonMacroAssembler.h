@@ -134,7 +134,7 @@ class MacroAssembler : public MacroAssemblerSpecific
         { }
 
         void emit(MacroAssembler &masm) {
-            JS_ASSERT(isInitialized());
+            MOZ_ASSERT(isInitialized());
             MIRType mirType = MIRType_None;
 
             if (type_.isPrimitive()) {
@@ -175,7 +175,7 @@ class MacroAssembler : public MacroAssemblerSpecific
         { }
 
         void emit(MacroAssembler &masm) {
-            JS_ASSERT(isInitialized());
+            MOZ_ASSERT(isInitialized());
             masm.branchPtr(cond(), reg(), ptr_, jump());
         }
     };
@@ -215,7 +215,7 @@ class MacroAssembler : public MacroAssemblerSpecific
             constructRoot(cx);
 
         if (!icx->temp) {
-            JS_ASSERT(cx);
+            MOZ_ASSERT(cx);
             alloc_.emplace(cx);
         }
 
@@ -364,7 +364,7 @@ class MacroAssembler : public MacroAssemblerSpecific
     }
 
     void loadObjPrivate(Register obj, uint32_t nfixed, Register dest) {
-        loadPtr(Address(obj, JSObject::getPrivateDataOffset(nfixed)), dest);
+        loadPtr(Address(obj, NativeObject::getPrivateDataOffset(nfixed)), dest);
     }
 
     void loadObjProto(Register obj, Register dest) {
@@ -542,8 +542,8 @@ class MacroAssembler : public MacroAssemblerSpecific
     void branchIfFunctionHasNoScript(Register fun, Label *label) {
         // 16-bit loads are slow and unaligned 32-bit loads may be too so
         // perform an aligned 32-bit load and adjust the bitmask accordingly.
-        JS_ASSERT(JSFunction::offsetOfNargs() % sizeof(uint32_t) == 0);
-        JS_ASSERT(JSFunction::offsetOfFlags() == JSFunction::offsetOfNargs() + 2);
+        MOZ_ASSERT(JSFunction::offsetOfNargs() % sizeof(uint32_t) == 0);
+        MOZ_ASSERT(JSFunction::offsetOfFlags() == JSFunction::offsetOfNargs() + 2);
         Address address(fun, JSFunction::offsetOfNargs());
         int32_t bit = IMM32_16ADJ(JSFunction::INTERPRETED);
         branchTest32(Assembler::Zero, address, Imm32(bit), label);
@@ -551,8 +551,8 @@ class MacroAssembler : public MacroAssemblerSpecific
     void branchIfInterpreted(Register fun, Label *label) {
         // 16-bit loads are slow and unaligned 32-bit loads may be too so
         // perform an aligned 32-bit load and adjust the bitmask accordingly.
-        JS_ASSERT(JSFunction::offsetOfNargs() % sizeof(uint32_t) == 0);
-        JS_ASSERT(JSFunction::offsetOfFlags() == JSFunction::offsetOfNargs() + 2);
+        MOZ_ASSERT(JSFunction::offsetOfNargs() % sizeof(uint32_t) == 0);
+        MOZ_ASSERT(JSFunction::offsetOfFlags() == JSFunction::offsetOfNargs() + 2);
         Address address(fun, JSFunction::offsetOfNargs());
         int32_t bit = IMM32_16ADJ(JSFunction::INTERPRETED);
         branchTest32(Assembler::NonZero, address, Imm32(bit), label);
@@ -572,8 +572,8 @@ class MacroAssembler : public MacroAssemblerSpecific
 
             if (JSID_IS_STRING(id)) {
                 JSString *str = JSID_TO_STRING(id);
-                JS_ASSERT(((size_t)str & JSID_TYPE_MASK) == 0);
-                JS_ASSERT(JSID_TYPE_STRING == 0x0);
+                MOZ_ASSERT(((size_t)str & JSID_TYPE_MASK) == 0);
+                MOZ_ASSERT(JSID_TYPE_STRING == 0x0);
                 Push(ImmGCPtr(str));
             } else {
                 MOZ_ASSERT(JSID_IS_SYMBOL(id));
@@ -625,7 +625,7 @@ class MacroAssembler : public MacroAssemblerSpecific
     }
 
     void PushValue(const Address &addr) {
-        JS_ASSERT(addr.base != StackPointer);
+        MOZ_ASSERT(addr.base != StackPointer);
         pushValue(addr);
         framePushed_ += sizeof(Value);
     }
@@ -663,7 +663,7 @@ class MacroAssembler : public MacroAssemblerSpecific
     }
 
     void branchTestNeedsIncrementalBarrier(Condition cond, Label *label) {
-        JS_ASSERT(cond == Zero || cond == NonZero);
+        MOZ_ASSERT(cond == Zero || cond == NonZero);
         CompileZone *zone = GetIonContext()->compartment->zone();
         AbsoluteAddress needsBarrierAddr(zone->addressOfNeedsIncrementalBarrier());
         branchTest32(cond, needsBarrierAddr, Imm32(0x1), label);
@@ -772,7 +772,7 @@ class MacroAssembler : public MacroAssemblerSpecific
     Register extractObject(const TypedOrValueRegister &reg, Register scratch) {
         if (reg.hasValue())
             return extractObject(reg.valueReg(), scratch);
-        JS_ASSERT(reg.type() == MIRType_Object);
+        MOZ_ASSERT(reg.type() == MIRType_Object);
         return reg.typedReg().gpr();
     }
 
@@ -811,20 +811,20 @@ class MacroAssembler : public MacroAssemblerSpecific
     void allocateObject(Register result, Register slots, gc::AllocKind allocKind,
                         uint32_t nDynamicSlots, gc::InitialHeap initialHeap, Label *fail);
     void allocateNonObject(Register result, Register temp, gc::AllocKind allocKind, Label *fail);
-    void copySlotsFromTemplate(Register obj, const JSObject *templateObj,
+    void copySlotsFromTemplate(Register obj, const NativeObject *templateObj,
                                uint32_t start, uint32_t end);
     void fillSlotsWithUndefined(Address addr, Register temp, uint32_t start, uint32_t end);
-    void initGCSlots(Register obj, Register temp, JSObject *templateObj, bool initFixedSlots);
+    void initGCSlots(Register obj, Register temp, NativeObject *templateObj, bool initFixedSlots);
 
   public:
     void callMallocStub(size_t nbytes, Register result, Label *fail);
     void callFreeStub(Register slots);
-    void createGCObject(Register result, Register temp, JSObject *templateObj,
+    void createGCObject(Register result, Register temp, NativeObject *templateObj,
                         gc::InitialHeap initialHeap, Label *fail, bool initFixedSlots = true);
 
-    void newGCThing(Register result, Register temp, JSObject *templateObj,
+    void newGCThing(Register result, Register temp, NativeObject *templateObj,
                      gc::InitialHeap initialHeap, Label *fail);
-    void initGCThing(Register obj, Register temp, JSObject *templateObj,
+    void initGCThing(Register obj, Register temp, NativeObject *templateObj,
                      bool initFixedSlots = true);
 
     void newGCString(Register result, Register temp, Label *fail);
@@ -839,7 +839,7 @@ class MacroAssembler : public MacroAssemblerSpecific
     void newGCTenuredThingPar(Register result, Register cx, Register tempReg1, Register tempReg2,
                               gc::AllocKind allocKind, Label *fail);
     void newGCThingPar(Register result, Register cx, Register tempReg1, Register tempReg2,
-                       JSObject *templateObject, Label *fail);
+                       NativeObject *templateObject, Label *fail);
     void newGCStringPar(Register result, Register cx, Register tempReg1, Register tempReg2,
                         Label *fail);
     void newGCFatInlineStringPar(Register result, Register cx, Register tempReg1, Register tempReg2,
@@ -911,7 +911,7 @@ class MacroAssembler : public MacroAssemblerSpecific
     }
 
     void link(JitCode *code) {
-        JS_ASSERT(!oom());
+        MOZ_ASSERT(!oom());
         // If this code can transition to C++ code and witness a GC, then we need to store
         // the JitCode onto the stack in order to GC it correctly.  exitCodePatch should
         // be unset if the code never needed to push its JitCode*.
@@ -1206,7 +1206,7 @@ class MacroAssembler : public MacroAssemblerSpecific
 #endif
 
 #define DISPATCH_FLOATING_POINT_OP(method, type, arg1d, arg1f, arg2)    \
-    JS_ASSERT(IsFloatingPointType(type));                               \
+    MOZ_ASSERT(IsFloatingPointType(type));                              \
     if (type == MIRType_Double)                                         \
         method##Double(arg1d, arg2);                                    \
     else                                                                \
@@ -1450,14 +1450,14 @@ class MacroAssembler : public MacroAssemblerSpecific
 
     void icRestoreLive(RegisterSet &liveRegs, AfterICSaveLive &aic) {
         restoreFrameAlignmentForICArguments(aic);
-        JS_ASSERT(framePushed() == aic.initialStack);
+        MOZ_ASSERT(framePushed() == aic.initialStack);
         PopRegsInMask(liveRegs);
     }
 
     void assertStackAlignment(uint32_t alignment) {
 #ifdef DEBUG
         Label ok;
-        JS_ASSERT(IsPowerOfTwo(alignment));
+        MOZ_ASSERT(IsPowerOfTwo(alignment));
         branchTestPtr(Assembler::Zero, StackPointer, Imm32(alignment - 1), &ok);
         breakpoint();
         bind(&ok);

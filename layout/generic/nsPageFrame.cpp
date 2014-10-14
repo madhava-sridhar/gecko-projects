@@ -463,7 +463,7 @@ static void PaintHeaderFooter(nsIFrame* aFrame, nsRenderingContext* aCtx,
 static gfx::Matrix4x4 ComputePageTransform(nsIFrame* aFrame, float aAppUnitsPerPixel)
 {
   float scale = aFrame->PresContext()->GetPageScale();
-  return gfx::Matrix4x4().Scale(scale, scale, 1);
+  return gfx::Matrix4x4::Scaling(scale, scale, 1);
 }
 
 //------------------------------------------------------------------------------
@@ -583,6 +583,7 @@ nsPageFrame::PaintHeaderFooter(nsRenderingContext& aRenderingContext,
   // Get the FontMetrics to determine width.height of strings
   nsRefPtr<nsFontMetrics> fontMet;
   pc->DeviceContext()->GetMetricsFor(mPD->mHeadFootFont, nullptr,
+                                     gfxFont::eHorizontal,
                                      pc->GetUserFontSet(),
                                      pc->GetTextPerfMetrics(),
                                      *getter_AddRefs(fontMet));

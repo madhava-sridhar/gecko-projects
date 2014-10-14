@@ -3,10 +3,6 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#ifdef MOZ_LOGGING
-#define FORCE_PR_LOG /* Allow logging in the release build */
-#endif
-
 #include "mozilla/layers/AsyncTransactionTracker.h" // for AsyncTransactionTracker
 #include "mozilla/layers/CompositorChild.h"
 #include "mozilla/layers/CompositorParent.h"
@@ -1629,6 +1625,26 @@ gfxPlatform::TransformPixel(const gfxRGBA& in, gfxRGBA& out, qcms_transform *tra
 
     else if (&out != &in)
         out = in;
+}
+
+Color
+gfxPlatform::MaybeTransformColor(const gfxRGBA& aColor)
+{
+    // We only return this object to get some return value optimization goodness:
+    Color color;
+    if (GetCMSMode() == eCMSMode_All) {
+        gfxRGBA cms;
+        qcms_transform *transform = GetCMSRGBTransform();
+        if (transform) {
+            TransformPixel(aColor, cms, transform);
+            // Use the original alpha to avoid unnecessary float->byte->float
+            // conversion errors
+            color = ToColor(cms);
+            return color;
+        }
+    }
+    color = ToColor(aColor);
+    return color;
 }
 
 void

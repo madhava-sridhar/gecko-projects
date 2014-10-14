@@ -467,7 +467,10 @@ CreateStrokeStyleForOptions(const StrokeOptions &aStrokeOptions)
 
 
   HRESULT hr;
-  if (aStrokeOptions.mDashPattern) {
+  // We need to check mDashLength in addition to mDashPattern here since if
+  // mDashPattern is set but mDashLength is zero then the stroke will fail to
+  // paint.
+  if (aStrokeOptions.mDashLength > 0 && aStrokeOptions.mDashPattern) {
     typedef std::vector<Float> FloatVector;
     // D2D "helpfully" multiplies the dash pattern by the line width.
     // That's not what cairo does, or is what <canvas>'s dash wants.
@@ -510,7 +513,8 @@ CreateStrokeStyleForOptions(const StrokeOptions &aStrokeOptions)
 static TemporaryRef<ID2D1Bitmap>
 CreatePartialBitmapForSurface(DataSourceSurface *aSurface, const Matrix &aDestinationTransform,
                               const IntSize &aDestinationSize, ExtendMode aExtendMode,
-                              Matrix &aSourceTransform, ID2D1RenderTarget *aRT)
+                              Matrix &aSourceTransform, ID2D1RenderTarget *aRT,
+                              const IntRect* aSourceRect = nullptr)
 {
   RefPtr<ID2D1Bitmap> bitmap;
 
@@ -535,6 +539,9 @@ CreatePartialBitmapForSurface(DataSourceSurface *aSurface, const Matrix &aDestin
   IntSize size = aSurface->GetSize();
 
   Rect uploadRect(0, 0, Float(size.width), Float(size.height));
+  if (aSourceRect) {
+    uploadRect = Rect(aSourceRect->x, aSourceRect->y, aSourceRect->width, aSourceRect->height);
+  }
 
   // Limit the uploadRect as much as possible without supporting discontiguous uploads 
   //

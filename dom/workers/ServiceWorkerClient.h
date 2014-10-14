@@ -33,7 +33,6 @@ public:
     : mOwner(aOwner),
       mId(aId)
   {
-    SetIsDOMBinding();
   }
 
   uint32_t Id() const

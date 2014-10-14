@@ -9,6 +9,7 @@ include protocol PBackground;
 include protocol PBlob;
 include protocol PBluetooth;
 include protocol PBrowser;
+include protocol PCellBroadcast;
 include protocol PCompositor;
 include protocol PContentBridge;
 include protocol PCycleCollectWithLogs;
@@ -40,6 +41,11 @@ include PTabContext;
 include URIParams;
 include ProtocolTypes;
 
+// Workaround to prevent error if PContentChild.cpp & PContentBridgeParent.cpp
+// are put into different UnifiedProtocolsXX.cpp files.
+// XXX Remove this once bug 1069073 is fixed
+include "mozilla/dom/PContentBridgeParent.h";
+
 include "mozilla/dom/indexedDB/SerializationHelpers.h";
 
 using GeoPosition from "nsGeoPositionIPCSerialiser.h";
@@ -65,6 +71,7 @@ union ChromeRegistryItem
 {
     ChromePackage;
     OverrideMapping;
+    ResourceMapping;
 };
 
 namespace mozilla {
@@ -312,7 +319,7 @@ union MaybeFileDesc {
     void_t;
 };
 
-intr protocol PContent
+prio(normal upto high) intr protocol PContent
 {
     parent opens PCompositor;
     parent opens PSharedBufferManager;
@@ -323,6 +330,7 @@ intr protocol PContent
     manages PBlob;
     manages PBluetooth;
     manages PBrowser;
+    manages PCellBroadcast;
     manages PCrashReporter;
     manages PCycleCollectWithLogs;
     manages PDeviceStorageRequest;
@@ -426,6 +434,8 @@ child:
 
     GeolocationUpdate(GeoPosition somewhere);
 
+    UpdateDictionaryList(nsString[] dictionaries);
+
     // nsIPermissionManager messages
     AddPermission(Permission permission);
 
@@ -435,7 +445,7 @@ child:
 
     GarbageCollect();
     CycleCollect();
-    
+
     /**
      * Start accessibility engine in content process.
      */
@@ -497,7 +507,7 @@ parent:
     sync GetProcessAttributes()
         returns (uint64_t id, bool isForApp, bool isForBrowser);
     sync GetXPCOMProcessAttributes()
-        returns (bool isOffline);
+        returns (bool isOffline, nsString[] dictionaries);
 
     sync CreateChildProcess(IPCTabContext context,
                             ProcessPriority priority)
@@ -527,10 +537,12 @@ parent:
 
     PNecko();
 
-    rpc PScreenManager()
+    prio(high) sync PScreenManager()
         returns (uint32_t numberOfScreens,
                  float systemDefaultScale,
                  bool success);
+
+    PCellBroadcast();
 
     PSms();
 
@@ -565,8 +577,8 @@ parent:
                      CpowEntry[] aCpows, Principal aPrincipal)
       returns (nsString[] retval);
 
-    rpc RpcMessage(nsString aMessage, ClonedMessageData aData,
-                   CpowEntry[] aCpows, Principal aPrincipal)
+    prio(high) sync RpcMessage(nsString aMessage, ClonedMessageData aData,
+                               CpowEntry[] aCpows, Principal aPrincipal)
       returns (nsString[] retval);
 
     ShowAlertNotification(nsString imageUrl,
@@ -582,11 +594,11 @@ parent:
 
     CloseAlert(nsString name, Principal principal);
 
-    PExternalHelperApp(OptionalURIParams uri, 
+    PExternalHelperApp(OptionalURIParams uri,
                        nsCString aMimeContentType,
-                       nsCString aContentDisposition, 
-                       uint32_t aContentDispositionHint, 
-                       nsString aContentDispositionFilename, 
+                       nsCString aContentDisposition,
+                       uint32_t aContentDispositionHint,
+                       nsString aContentDispositionFilename,
                        bool aForceSave,
                        int64_t aContentLength,
                        OptionalURIParams aReferrer,
@@ -599,7 +611,7 @@ parent:
     ConsoleMessage(nsString message);
     ScriptError(nsString message, nsString sourceName, nsString sourceLine,
                 uint32_t lineNumber, uint32_t colNumber, uint32_t flags,
-                nsCString category); 
+                nsCString category);
 
     // nsIPermissionManager messages
     sync ReadPermissions() returns (Permission[] permissions);
@@ -661,7 +673,9 @@ parent:
     async SetFakeVolumeState(nsString fsName, int32_t fsState);
 
     sync KeywordToURI(nsCString keyword)
-        returns (OptionalInputStreamParams postData, OptionalURIParams uri);
+        returns (nsString providerName, OptionalInputStreamParams postData, OptionalURIParams uri);
+
+    sync NotifyKeywordSearchLoading(nsString providerName, nsString keyword);
 
     // Tell the compositor to allocate a layer tree id for nested remote mozbrowsers.
     sync AllocateLayerTreeId()

@@ -143,12 +143,10 @@ private:
 MessagePortBase::MessagePortBase(nsPIDOMWindow* aWindow)
   : DOMEventTargetHelper(aWindow)
 {
-  // SetIsDOMBinding() is called by DOMEventTargetHelper's ctor.
 }
 
 MessagePortBase::MessagePortBase()
 {
-  SetIsDOMBinding();
 }
 
 NS_IMPL_CYCLE_COLLECTION_CLASS(MessagePort)

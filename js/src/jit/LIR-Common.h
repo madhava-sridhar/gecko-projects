@@ -56,7 +56,7 @@ class LOsiPoint : public LInstructionHelper<0, 0, 0>
     LOsiPoint(LSafepoint *safepoint, LSnapshot *snapshot)
       : safepoint_(safepoint)
     {
-        JS_ASSERT(safepoint && snapshot);
+        MOZ_ASSERT(safepoint && snapshot);
         assignSnapshot(snapshot);
     }
 
@@ -194,7 +194,7 @@ class LSimdInsertElementBase : public LInstructionHelper<1, 2, 0>
     const LAllocation *value() {
         return getOperand(1);
     }
-    const SimdLane lane() const {
+    SimdLane lane() const {
         return mir_->toSimdInsertElement()->lane();
     }
 };
@@ -310,6 +310,34 @@ class LSimdBinaryArithFx4 : public LSimdBinaryArith
     LSimdBinaryArithFx4() : LSimdBinaryArith() {}
 };
 
+// Unary SIMD arithmetic operation on a SIMD operand
+class LSimdUnaryArith : public LInstructionHelper<1, 1, 0>
+{
+  public:
+    explicit LSimdUnaryArith(const LAllocation &in) {
+        setOperand(0, in);
+    }
+    MSimdUnaryArith::Operation operation() const {
+        return mir_->toSimdUnaryArith()->operation();
+    }
+};
+
+// Unary SIMD arithmetic operation on a Int32x4 operand
+class LSimdUnaryArithIx4 : public LSimdUnaryArith
+{
+  public:
+    LIR_HEADER(SimdUnaryArithIx4);
+    explicit LSimdUnaryArithIx4(const LAllocation &in) : LSimdUnaryArith(in) {}
+};
+
+// Unary SIMD arithmetic operation on a Float32x4 operand
+class LSimdUnaryArithFx4 : public LSimdUnaryArith
+{
+  public:
+    LIR_HEADER(SimdUnaryArithFx4);
+    explicit LSimdUnaryArithFx4(const LAllocation &in) : LSimdUnaryArith(in) {}
+};
+
 // Binary SIMD bitwise operation between two int32x4 or float32x4 operands
 class LSimdBinaryBitwiseX4 : public LInstructionHelper<1, 2, 0>
 {
@@ -323,6 +351,28 @@ class LSimdBinaryBitwiseX4 : public LInstructionHelper<1, 2, 0>
     }
     MSimdBinaryBitwise::Operation operation() const {
         return mir_->toSimdBinaryBitwise()->operation();
+    }
+};
+
+class LSimdShift : public LInstructionHelper<1, 2, 0>
+{
+  public:
+    LIR_HEADER(SimdShift)
+    LSimdShift(const LAllocation &vec, const LAllocation &val) {
+        setOperand(0, vec);
+        setOperand(1, val);
+    }
+    const LAllocation *vector() {
+        return getOperand(0);
+    }
+    const LAllocation *value() {
+        return getOperand(1);
+    }
+    MSimdShift::Operation operation() const {
+        return mir_->toSimdShift()->operation();
+    }
+    MSimdShift *mir() const {
+        return mir_->toSimdShift();
     }
 };
 
@@ -398,7 +448,7 @@ class LPointer : public LInstructionHelper<1, 0, 0>
     }
 
     gc::Cell *gcptr() const {
-        JS_ASSERT(kind() == GC_THING);
+        MOZ_ASSERT(kind() == GC_THING);
         return (gc::Cell *) ptr_;
     }
 };
@@ -1390,7 +1440,7 @@ class LJSCallInstructionHelper : public LCallInstructionHelper<Defs, Operands, T
     // argument includes the |undefined| padding added in case of underflow.
     // Does not include |this|.
     uint32_t numStackArgs() const {
-        JS_ASSERT(mir()->numStackArgs() >= 1);
+        MOZ_ASSERT(mir()->numStackArgs() >= 1);
         return mir()->numStackArgs() - 1; // |this| is not a formal argument.
     }
     // Does not include |this|.
@@ -3382,11 +3432,11 @@ class LValueToInt32 : public LInstructionHelper<1, BOX_PIECES, 2>
         return getTemp(1);
     }
     MToInt32 *mirNormal() const {
-        JS_ASSERT(mode_ == NORMAL);
+        MOZ_ASSERT(mode_ == NORMAL);
         return mir_->toToInt32();
     }
     MTruncateToInt32 *mirTruncate() const {
-        JS_ASSERT(mode_ == TRUNCATE);
+        MOZ_ASSERT(mode_ == TRUNCATE);
         return mir_->toTruncateToInt32();
     }
     MInstruction *mir() const {
@@ -4093,18 +4143,20 @@ class LTypedObjectElements : public LInstructionHelper<1, 1, 0>
 };
 
 // Load a typed array's elements vector.
-class LSetTypedObjectOffset : public LInstructionHelper<0, 2, 1>
+class LSetTypedObjectOffset : public LInstructionHelper<0, 2, 2>
 {
   public:
     LIR_HEADER(SetTypedObjectOffset)
 
     LSetTypedObjectOffset(const LAllocation &object,
                           const LAllocation &offset,
-                          const LDefinition &temp0)
+                          const LDefinition &temp0,
+                          const LDefinition &temp1)
     {
         setOperand(0, object);
         setOperand(1, offset);
         setTemp(0, temp0);
+        setTemp(1, temp1);
     }
     const LAllocation *object() {
         return getOperand(0);
@@ -4114,6 +4166,9 @@ class LSetTypedObjectOffset : public LInstructionHelper<0, 2, 1>
     }
     const LDefinition *temp0() {
         return getTemp(0);
+    }
+    const LDefinition *temp1() {
+        return getTemp(1);
     }
 };
 
@@ -6010,72 +6065,6 @@ class LGuardClass : public LInstructionHelper<0, 1, 1>
     }
 };
 
-class MPhi;
-
-// Phi is a pseudo-instruction that emits no code, and is an annotation for the
-// register allocator. Like its equivalent in MIR, phis are collected at the
-// top of blocks and are meant to be executed in parallel, choosing the input
-// corresponding to the predecessor taken in the control flow graph.
-class LPhi MOZ_FINAL : public LInstruction
-{
-    LAllocation *const inputs_;
-    LDefinition def_;
-
-  public:
-    LIR_HEADER(Phi)
-
-    LPhi(MPhi *ins, LAllocation *inputs)
-        : inputs_(inputs)
-    {
-        setMir(ins);
-    }
-
-    size_t numDefs() const {
-        return 1;
-    }
-    LDefinition *getDef(size_t index) {
-        JS_ASSERT(index == 0);
-        return &def_;
-    }
-    void setDef(size_t index, const LDefinition &def) {
-        JS_ASSERT(index == 0);
-        def_ = def;
-    }
-    size_t numOperands() const {
-        return mir_->toPhi()->numOperands();
-    }
-    LAllocation *getOperand(size_t index) {
-        JS_ASSERT(index < numOperands());
-        return &inputs_[index];
-    }
-    void setOperand(size_t index, const LAllocation &a) {
-        JS_ASSERT(index < numOperands());
-        inputs_[index] = a;
-    }
-    size_t numTemps() const {
-        return 0;
-    }
-    LDefinition *getTemp(size_t index) {
-        MOZ_CRASH("no temps");
-    }
-    void setTemp(size_t index, const LDefinition &temp) {
-        MOZ_CRASH("no temps");
-    }
-    size_t numSuccessors() const {
-        return 0;
-    }
-    MBasicBlock *getSuccessor(size_t i) const {
-        MOZ_CRASH("no successors");
-    }
-    void setSuccessor(size_t i, MBasicBlock *) {
-        MOZ_CRASH("no successors");
-    }
-
-    virtual void printInfo(FILE *fp) {
-        printOperands(fp);
-    }
-};
-
 class LIn : public LCallInstructionHelper<1, BOX_PIECES+1, 0>
 {
   public:
@@ -6366,23 +6355,23 @@ class LAsmJSCall MOZ_FINAL : public LInstruction
         return def_.isBogusTemp() ? 0 : 1;
     }
     LDefinition *getDef(size_t index) {
-        JS_ASSERT(numDefs() == 1);
-        JS_ASSERT(index == 0);
+        MOZ_ASSERT(numDefs() == 1);
+        MOZ_ASSERT(index == 0);
         return &def_;
     }
     void setDef(size_t index, const LDefinition &def) {
-        JS_ASSERT(index == 0);
+        MOZ_ASSERT(index == 0);
         def_ = def;
     }
     size_t numOperands() const {
         return numOperands_;
     }
     LAllocation *getOperand(size_t index) {
-        JS_ASSERT(index < numOperands_);
+        MOZ_ASSERT(index < numOperands_);
         return &operands_[index];
     }
     void setOperand(size_t index, const LAllocation &a) {
-        JS_ASSERT(index < numOperands_);
+        MOZ_ASSERT(index < numOperands_);
         operands_[index] = a;
     }
     size_t numTemps() const {

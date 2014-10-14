@@ -2725,6 +2725,13 @@ RilObject.prototype = {
   queryCallBarringStatus: function(options) {
     options.facility = CALL_BARRING_PROGRAM_TO_FACILITY[options.program];
     options.password = ""; // For query no need to provide it.
+
+    // For some operators, querying specific serviceClass doesn't work. We use
+    // serviceClass 0 instead, and then process the response to extract the
+    // answer for queryServiceClass.
+    options.queryServiceClass = options.serviceClass;
+    options.serviceClass = 0;
+
     this.queryICCFacilityLock(options);
   },
 
@@ -4121,10 +4128,8 @@ RilObject.prototype = {
     // can be removed if is the same as the current one.
     for each (let newDataCall in datacalls) {
       if (newDataCall.status != DATACALL_FAIL_NONE) {
-        if (newDataCallOptions) {
-          newDataCall.apn = newDataCallOptions.apn;
-        }
-        this._sendDataCallError(newDataCall, newDataCall.status);
+        this._sendDataCallError(newDataCallOptions || newDataCall,
+                                newDataCall.status);
       }
     }
 
@@ -5930,20 +5935,23 @@ RilObject.prototype[REQUEST_QUERY_FACILITY_LOCK] = function REQUEST_QUERY_FACILI
     return;
   }
 
-  let services;
-  if (length) {
-    // Buf.readInt32List()[0] for Call Barring is a bit vector of services.
-    services = this.context.Buf.readInt32List()[0];
-  } else {
+  if (!length) {
     options.success = false;
     options.errorMsg = GECKO_ERROR_GENERIC_FAILURE;
     this.sendChromeMessage(options);
     return;
   }
 
-  options.enabled = services === 0 ? false : true;
+  // Buf.readInt32List()[0] for Call Barring is a bit vector of services.
+  let services = this.context.Buf.readInt32List()[0];
 
-  if (options.success && (options.rilMessageType === "sendMMI")) {
+  if (options.queryServiceClass) {
+    options.enabled = (services & options.queryServiceClass) ? true : false;
+  } else {
+    options.enabled = services ? true : false;
+  }
+
+  if (options.rilMessageType === "sendMMI") {
     if (!options.enabled) {
       options.statusMessage = MMI_SM_KS_SERVICE_DISABLED;
     } else {
@@ -6738,7 +6746,14 @@ RilObject.prototype[UNSOLICITED_ON_USSD] = function UNSOLICITED_ON_USSD() {
     this.context.debug("On USSD. Type Code: " + typeCode + " Message: " + message);
   }
 
-  this._ussdSession = (typeCode != "0" && typeCode != "2");
+  let oldSession = this._ussdSession;
+
+  // Per ril.h the USSD session is assumed to persist if the type code is "1".
+  this._ussdSession = typeCode == "1";
+
+  if (!oldSession && !this._ussdSession && !message) {
+    return;
+  }
 
   this.sendChromeMessage({rilMessageType: "ussdreceived",
                           message: message,

@@ -59,6 +59,7 @@ WEBIDL_FILES = [
     'CameraCapabilities.webidl',
     'CameraControl.webidl',
     'CameraManager.webidl',
+    'CameraUtil.webidl',
     'CanvasRenderingContext2D.webidl',
     'CaretPosition.webidl',
     'CDATASection.webidl',
@@ -133,6 +134,9 @@ WEBIDL_FILES = [
     'FileReader.webidl',
     'FileReaderSync.webidl',
     'FocusEvent.webidl',
+    'FontFace.webidl',
+    'FontFaceSet.webidl',
+    'FontFaceSource.webidl',
     'FormData.webidl',
     'Function.webidl',
     'GainNode.webidl',
@@ -230,6 +234,7 @@ WEBIDL_FILES = [
     'IDBRequest.webidl',
     'IDBTransaction.webidl',
     'IDBVersionChangeEvent.webidl',
+    'Identity.webidl',
     'ImageCapture.webidl',
     'ImageData.webidl',
     'ImageDocument.webidl',
@@ -268,6 +273,8 @@ WEBIDL_FILES = [
     'MouseEvent.webidl',
     'MouseScrollEvent.webidl',
     'MozActivity.webidl',
+    'MozCellBroadcast.webidl',
+    'MozCellBroadcastMessage.webidl',
     'MozMmsMessage.webidl',
     'MozMobileCellInfo.webidl',
     'MozMobileConnection.webidl',
@@ -525,6 +532,7 @@ WEBIDL_FILES = [
     'XPathEvaluator.webidl',
     'XPathExpression.webidl',
     'XPathResult.webidl',
+    'XSLTProcessor.webidl',
     'XULCommandEvent.webidl',
     'XULDocument.webidl',
     'XULElement.webidl',
@@ -612,8 +620,8 @@ if CONFIG['MOZ_B2G_BT']:
 if CONFIG['MOZ_B2G_RIL']:
     WEBIDL_FILES += [
         'IccCardLockError.webidl',
-        'MozCellBroadcast.webidl',
         'MozIcc.webidl',
+        'MozIccInfo.webidl',
         'MozIccManager.webidl',
     ]
 
@@ -652,8 +660,12 @@ GENERATED_EVENTS_WEBIDL_FILES = [
     'BlobEvent.webidl',
     'CallEvent.webidl',
     'CallGroupErrorEvent.webidl',
+    'CameraConfigurationEvent.webidl',
+    'CameraFacesDetectedEvent.webidl',
+    'CameraStateChangeEvent.webidl',
     'CFStateChangeEvent.webidl',
     'CloseEvent.webidl',
+    'CSSFontFaceLoadEvent.webidl',
     'DataErrorEvent.webidl',
     'DataStoreChangeEvent.webidl',
     'DeviceLightEvent.webidl',
@@ -669,6 +681,7 @@ GENERATED_EVENTS_WEBIDL_FILES = [
     'MediaStreamEvent.webidl',
     'MediaStreamTrackEvent.webidl',
     'MozApplicationEvent.webidl',
+    'MozCellBroadcastEvent.webidl',
     'MozClirModeEvent.webidl',
     'MozContactChangeEvent.webidl',
     'MozEmergencyCbModeEvent.webidl',
@@ -729,11 +742,6 @@ if CONFIG['MOZ_B2G_BT']:
     GENERATED_EVENTS_WEBIDL_FILES += [
         'BluetoothDeviceEvent.webidl',
         'BluetoothStatusChangedEvent.webidl',
-    ]
-
-if CONFIG['MOZ_B2G_RIL']:
-    GENERATED_EVENTS_WEBIDL_FILES += [
-        'MozCellBroadcastEvent.webidl',
     ]
 
 if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'gonk':

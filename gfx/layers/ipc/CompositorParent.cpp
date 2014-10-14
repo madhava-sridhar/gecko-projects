@@ -60,6 +60,9 @@
 #include "mozilla/Hal.h"
 #include "mozilla/HalTypes.h"
 #include "mozilla/StaticPtr.h"
+#ifdef MOZ_ENABLE_PROFILER_SPS
+#include "ProfilerMarkers.h"
+#endif
 
 namespace mozilla {
 namespace layers {
@@ -685,6 +688,8 @@ CompositorParent::CompositeToTarget(DrawTarget* aTarget, const nsIntRect* aRect)
     }
   }
 
+  mCompositionManager->ComputeRotation();
+
   TimeStamp time = mIsTesting ? mTestTime : mLastCompose;
   bool requestNextFrame = mCompositionManager->TransformShadowTree(time);
   if (requestNextFrame) {
@@ -692,8 +697,6 @@ CompositorParent::CompositeToTarget(DrawTarget* aTarget, const nsIntRect* aRect)
   }
 
   RenderTraceLayers(mLayerManager->GetRoot(), "0000");
-
-  mCompositionManager->ComputeRotation();
 
 #ifdef MOZ_DUMP_PAINTING
   static bool gDumpCompositorTree = false;
@@ -1117,6 +1120,25 @@ CompositorParent::ComputeRenderIntegrity()
   return 1.0f;
 }
 
+static void
+InsertVsyncProfilerMarker(TimeStamp aVsyncTimestamp)
+{
+#ifdef MOZ_ENABLE_PROFILER_SPS
+  MOZ_ASSERT(CompositorParent::IsInCompositorThread());
+  MOZ_ASSERT(profiler_is_active());
+  VsyncPayload* payload = new VsyncPayload(aVsyncTimestamp);
+  PROFILER_MARKER_PAYLOAD("VsyncTimestamp", payload);
+#endif
+}
+
+/*static */ void
+CompositorParent::PostInsertVsyncProfilerMarker(TimeStamp aVsyncTimestamp)
+{
+  if (profiler_is_active()) {
+    CompositorLoop()->PostTask(FROM_HERE,
+      NewRunnableFunction(InsertVsyncProfilerMarker, aVsyncTimestamp));
+  }
+}
 
 /**
  * This class handles layer updates pushed directly from child

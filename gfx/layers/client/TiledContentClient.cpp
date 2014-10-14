@@ -512,7 +512,7 @@ TileClient::TileClient(const TileClient& o)
   mFrontBufferOnWhite = o.mFrontBufferOnWhite;
   mBackLock = o.mBackLock;
   mFrontLock = o.mFrontLock;
-  mCompositableClient = nullptr;
+  mCompositableClient = o.mCompositableClient;
 #ifdef GFX_TILEDLAYER_DEBUG_OVERLAY
   mLastUpdate = o.mLastUpdate;
 #endif
@@ -531,7 +531,7 @@ TileClient::operator=(const TileClient& o)
   mFrontBufferOnWhite = o.mFrontBufferOnWhite;
   mBackLock = o.mBackLock;
   mFrontLock = o.mFrontLock;
-  mCompositableClient = nullptr;
+  mCompositableClient = o.mCompositableClient;
 #ifdef GFX_TILEDLAYER_DEBUG_OVERLAY
   mLastUpdate = o.mLastUpdate;
 #endif
@@ -689,31 +689,10 @@ TileClient::DiscardBackBuffer()
        mManager->ReportClientLost(*mBackBufferOnWhite);
      }
     } else {
-#if defined(MOZ_WIDGET_GONK) && ANDROID_VERSION >= 17
-      // If this assertions stops being true, we need to add
-      // ReturnTextureClientDeferred(*mBackBufferOnWhite) below.
-      MOZ_ASSERT(!mBackBufferOnWhite);
-      if (mBackBuffer->GetIPDLActor() &&
-          mCompositableClient && mCompositableClient->GetIPDLActor()) {
-        // remove old buffer from CompositableHost
-        RefPtr<AsyncTransactionTracker> tracker = new RemoveTextureFromCompositableTracker();
-        // Hold TextureClient until transaction complete.
-        tracker->SetTextureClient(mBackBuffer);
-        mBackBuffer->SetRemoveFromCompositableTracker(tracker);
-        // RemoveTextureFromCompositableAsync() expects CompositorChild's presence.
-        mManager->AsShadowForwarder()->RemoveTextureFromCompositableAsync(tracker,
-                                                                          mCompositableClient,
-                                                                          mBackBuffer);
-      }
-      // TextureClient can be reused after transaction complete,
-      // when RemoveTextureFromCompositableTracker is used.
-      mManager->ReturnTextureClientDeferred(*mBackBuffer);
-#else
       mManager->ReturnTextureClient(*mBackBuffer);
       if (mBackBufferOnWhite) {
         mManager->ReturnTextureClient(*mBackBufferOnWhite);
       }
-#endif
     }
     mBackLock->ReadUnlock();
     if (mBackBuffer->IsLocked()) {
@@ -955,7 +934,7 @@ ClientTiledLayerBuffer::PaintThebes(const nsIntRegion& aNewValidRegion,
     PROFILER_LABEL("ClientTiledLayerBuffer", "PaintThebesSingleBufferDraw",
       js::ProfileEntry::Category::GRAPHICS);
 
-    mCallback(mPaintedLayer, ctxt, aPaintRegion, DrawRegionClip::CLIP_NONE, nsIntRegion(), mCallbackData);
+    mCallback(mPaintedLayer, ctxt, aPaintRegion, DrawRegionClip::NONE, nsIntRegion(), mCallbackData);
   }
 
 #ifdef GFX_TILEDLAYER_PREF_WARNINGS
@@ -1325,7 +1304,7 @@ ClientTiledLayerBuffer::ValidateTile(TileClient aTile,
                             Scale(mResolution, mResolution));
     mCallback(mPaintedLayer, ctxt,
               tileRegion.GetBounds(),
-              DrawRegionClip::CLIP_NONE,
+              DrawRegionClip::NONE,
               nsIntRegion(), mCallbackData);
 
   }
@@ -1387,7 +1366,7 @@ GetCompositorSideCompositionBounds(const LayerMetricsWrapper& aScrollAncestor,
                                    const Matrix4x4& aTransformToCompBounds,
                                    const ViewTransform& aAPZTransform)
 {
-  Matrix4x4 nonTransientAPZUntransform = Matrix4x4().Scale(
+  Matrix4x4 nonTransientAPZUntransform = Matrix4x4::Scaling(
     aScrollAncestor.Metrics().mResolution.scale,
     aScrollAncestor.Metrics().mResolution.scale,
     1.f);
