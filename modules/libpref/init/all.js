@@ -129,7 +129,7 @@ pref("dom.workers.maxPerDomain", 20);
 pref("dom.workers.sharedWorkers.enabled", true);
 
 // Service workers
-pref("dom.serviceWorkers.enabled", false);
+pref("dom.serviceWorkers.enabled", true);
 
 // Whether nonzero values can be returned from performance.timing.*
 pref("dom.enable_performance", true);
@@ -4334,7 +4334,11 @@ pref("camera.control.autofocus_moving_callback.enabled", true);
 pref("camera.control.face_detection.enabled", true);
 
 // Fetch API.
-pref("dom.fetch.enabled", false);
+pref("dom.fetch.enabled", true);
+
+// Cache API.
+pref("dom.window-caches.enabled", true);
+
 #ifdef MOZ_WIDGET_GONK
 // Empirically, this is the value returned by hal::GetTotalSystemMemory()
 // when Flame's memory is limited to 512MiB. If the camera stack determines
