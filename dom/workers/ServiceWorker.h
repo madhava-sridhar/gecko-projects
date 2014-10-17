@@ -47,7 +47,7 @@ public:
   }
 
   void
-  GetUrl(nsString& aURL) const
+  GetScriptURL(nsString& aURL) const
   {
     aURL = mURL;
   }

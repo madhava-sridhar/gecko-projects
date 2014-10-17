@@ -16,6 +16,7 @@
 #include "mozilla/WeakPtr.h"
 #include "mozilla/dom/BindingUtils.h"
 #include "mozilla/dom/Promise.h"
+#include "mozilla/dom/ServiceWorkerBinding.h" // For ServiceWorkerState
 #include "mozilla/dom/ServiceWorkerCommon.h"
 #include "nsRefPtrHashtable.h"
 #include "nsTArrayForwardDeclare.h"
@@ -81,6 +82,7 @@ private:
 class ServiceWorkerInfo MOZ_FINAL
 {
   nsCString mScriptSpec;
+  ServiceWorkerState mState;
 
   ~ServiceWorkerInfo()
   { }
@@ -96,6 +98,7 @@ public:
 
   explicit ServiceWorkerInfo(const nsACString& aScriptSpec)
     : mScriptSpec(aScriptSpec)
+    , mState(ServiceWorkerState::EndGuard_)
   { }
 };
 
