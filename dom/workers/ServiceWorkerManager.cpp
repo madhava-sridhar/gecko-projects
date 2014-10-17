@@ -506,12 +506,6 @@ ServiceWorkerManager::Register(const nsAString& aScope,
     return NS_ERROR_FAILURE;
   }
 
-  // Although the spec says that the same-origin checks should also be done
-  // asynchronously, we do them in sync because the Promise created by the
-  // WebIDL infrastructure due to a returned error will be resolved
-  // asynchronously. We aren't making any internal state changes in these
-  // checks, so ordering of multiple calls is not affected.
-
   nsCOMPtr<nsIURI> documentURI = doc->GetBaseURI();
 
   bool httpsNeeded = true;
@@ -537,11 +531,15 @@ ServiceWorkerManager::Register(const nsAString& aScope,
   }
 
   if (httpsNeeded) {
-    bool isHttps;
-    result = documentURI->SchemeIs("https", &isHttps);
-    if (result.Failed() || !isHttps) {
-      NS_WARNING("ServiceWorker registration from insecure websites is not allowed.");
-      return NS_ERROR_DOM_SECURITY_ERR;
+    bool isFile;
+    result = documentURI->SchemeIs("file", &isFile);
+    if (result.Failed() || !isFile) {
+      bool isHttps;
+      result = documentURI->SchemeIs("https", &isHttps);
+      if (result.Failed() || !isHttps) {
+        NS_WARNING("ServiceWorker registration from insecure websites is not allowed.");
+        return NS_ERROR_DOM_SECURITY_ERR;
+      }
     }
   }
 
