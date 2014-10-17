@@ -362,6 +362,9 @@ private:
   already_AddRefed<ServiceWorkerDomainInfo>
   GetDomainInfo(const nsCString& aURL);
 
+  nsresult
+  GetDocumentRegistration(nsIDocument* aDoc, ServiceWorkerRegistrationInfo** aRegistrationInfo);
+
   NS_IMETHODIMP
   GetServiceWorkerForScope(nsIDOMWindow* aWindow,
                            const nsAString& aScope,

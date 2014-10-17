@@ -1,0 +1,61 @@
+<!--
+  Any copyright is dedicated to the Public Domain.
+  http://creativecommons.org/publicdomain/zero/1.0/
+-->
+<!DOCTYPE HTML>
+<html>
+<head>
+  <title>Bug 94048 - test install event.</title>
+  <script type="text/javascript" src="/tests/SimpleTest/SimpleTest.js"></script>
+  <link rel="stylesheet" type="text/css" href="/tests/SimpleTest/test.css" />
+</head>
+<body>
+<p id="display"></p>
+<div id="content" style="display: none"></div>
+<pre id="test"></pre>
+<script class="testbody" type="text/javascript">
+
+  function my_ok(result, msg) {
+    window.opener.postMessage({status: "ok", result: result, message: msg}, "*");
+  }
+
+  var expected = 2;
+  var encountered = 0;
+  function finish() {
+    encountered++;
+    if (encountered == expected) {
+      window.opener.postMessage({status: "done"}, "*");
+    }
+  }
+
+  my_ok(navigator.serviceWorker.controller != null, "should be controlled");
+  var x = new XMLHttpRequest();
+  x.open('GET', 'nonexistent.txt', true);
+  x.onload = function() {
+    my_ok(x.status == 200, "load should be successful");
+    my_ok(x.responseText == "synthesized response body", "load should have synthesized response");
+    finish();
+  };
+  x.onerror = function() {
+    my_ok(false, "load should be intercepted successfully");
+    finish();
+  };
+  x.send();
+
+  var x2 = new XMLHttpRequest();
+  x2.open('GET', 'nonexistent2.txt', true);
+  x2.onload = function() {
+    my_ok(x2.status == 404, "load should be uninterrupted");
+    finish();
+  };
+  x2.onerror = function() {
+    my_ok(false, "load should be intercepted successfully");
+    finish();
+  };
+  x2.send();
+</script>
+</pre>
+</body>
+</html>
+
+

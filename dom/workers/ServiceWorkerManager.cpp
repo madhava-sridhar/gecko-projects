@@ -6,16 +6,21 @@
 
 #include "nsIDOMEventTarget.h"
 #include "nsIDocument.h"
+#include "nsIHttpChannelInternal.h"
+#include "nsINetworkInterceptController.h"
 #include "nsIScriptSecurityManager.h"
 #include "nsPIDOMWindow.h"
+#include "nsDebug.h"
 
 #include "jsapi.h"
 
 #include "mozilla/dom/BindingUtils.h"
 #include "mozilla/dom/DOMError.h"
 #include "mozilla/dom/ErrorEvent.h"
+#include "mozilla/dom/Headers.h"
 #include "mozilla/dom/InstallEventBinding.h"
 #include "mozilla/dom/PromiseNativeHandler.h"
+#include "mozilla/dom/Request.h"
 
 #include "nsContentUtils.h"
 #include "nsNetUtil.h"
@@ -1984,6 +1989,193 @@ ServiceWorkerManager::GetServiceWorkerForScope(nsIDOMWindow* aWindow,
   return NS_OK;
 }
 
+class FetchEventRunnable : public WorkerRunnable {
+  nsMainThreadPtrHandle<nsIInterceptedChannel> mInterceptedChannel;
+  uint64_t mWindowId;
+  nsCString mSpec;
+  nsCString mMethod;
+  bool mIsReload;
+ public:
+  explicit FetchEventRunnable(WorkerPrivate* aWorkerPrivate,
+                              nsMainThreadPtrHandle<nsIInterceptedChannel>& aChannel,
+                              uint64_t aWindowId)
+  : WorkerRunnable(aWorkerPrivate, WorkerThreadModifyBusyCount)
+  , mInterceptedChannel(aChannel)
+  , mWindowId(aWindowId)
+  {
+    MOZ_ASSERT(aWorkerPrivate);
+  }
+
+  nsresult
+  Init()
+  {
+    nsCOMPtr<nsIChannel> channel;
+    nsresult rv = mInterceptedChannel->GetChannel(getter_AddRefs(channel));
+    NS_ENSURE_SUCCESS(rv, rv);
+
+    nsCOMPtr<nsIURI> uri;
+    rv = channel->GetURI(getter_AddRefs(uri));
+    NS_ENSURE_SUCCESS(rv, rv);
+
+    rv = uri->GetSpec(mSpec);
+    NS_ENSURE_SUCCESS(rv, rv);
+
+    nsCOMPtr<nsIHttpChannel> httpChannel = do_QueryInterface(channel);
+    rv = httpChannel->GetRequestMethod(mMethod);
+    NS_ENSURE_SUCCESS(rv, rv);
+
+    uint32_t loadFlags;
+    rv = channel->GetLoadFlags(&loadFlags);
+    NS_ENSURE_SUCCESS(rv, rv);
+
+    //XXXjdm not sure this is a good heuristic - we should probably include reload-ness
+    //       in the loadinfo or as a separate load flag
+    //mIsReload = loadFlags & (HttpBaseChannel::LOAD_BYPASS_CACHE | HttpBaseChannel::LOAD_FRESH_CONNECTION);
+    mIsReload = false;
+
+    return NS_OK;
+  }
+
+  bool
+  WorkerRun(JSContext* aCx, WorkerPrivate* aWorkerPrivate)
+  {
+    MOZ_ASSERT(aWorkerPrivate);
+    return DispatchFetchEvent(aCx, aWorkerPrivate);
+  }
+
+private:
+  class ResumeRequest : public nsRunnable {
+    nsMainThreadPtrHandle<nsIInterceptedChannel> mChannel;
+  public:
+    explicit ResumeRequest(nsMainThreadPtrHandle<nsIInterceptedChannel>& aChannel)
+      : mChannel(aChannel)
+    {
+    }
+
+    NS_IMETHOD
+    Run()
+    {
+      AssertIsOnMainThread();
+      nsresult rv = mChannel->ResetInterception();
+      NS_WARN_IF_FALSE(NS_SUCCEEDED(rv), "Failed to resume intercepted network request");
+      return rv;
+    }
+  };
+
+  bool
+  DispatchFetchEvent(JSContext* aCx, WorkerPrivate* aWorkerPrivate)
+  {
+    MOZ_ASSERT(aWorkerPrivate->IsServiceWorker());
+    GlobalObject globalObj(aCx, aWorkerPrivate->GlobalScope()->GetWrapper());
+
+    RequestOrScalarValueString requestInfo;
+    *requestInfo.SetAsScalarValueString().ToAStringPtr() = NS_ConvertUTF8toUTF16(mSpec);
+
+    RequestInit reqInit;
+    reqInit.mMethod.Construct(mMethod);
+
+    //XXXjdm get headers from the channel
+    nsRefPtr<Headers> headers = new Headers(globalObj.GetAsSupports());
+    reqInit.mHeaders.Construct();
+    reqInit.mHeaders.Value().SetAsHeaders() = headers;
+
+    reqInit.mBody.Construct();
+    reqInit.mBody.Value().SetAsScalarValueString() = EmptyString(); //XXXjdm get this from the channel
+
+    reqInit.mMode.Construct(RequestMode::Same_origin); //XXXjdm how to find this out?
+    reqInit.mCredentials.Construct(RequestCredentials::Same_origin); //XXXjdm how to find this out?
+
+    ErrorResult rv;
+    nsRefPtr<Request> request = Request::Constructor(globalObj, requestInfo, reqInit, rv);
+    if (rv.Failed()) {
+      return false;
+    }
+
+    FetchEventInit init;
+    init.mRequest.Construct();
+    init.mRequest.Value() = request;
+    init.mBubbles = false;
+    init.mCancelable = true;
+    init.mContext.Construct(dom::Context::Connect); //XXXjdm get this from channel loadinfo
+    init.mIsReload.Construct(mIsReload);
+    nsRefPtr<FetchEvent> event =
+        FetchEvent::Constructor(globalObj, NS_LITERAL_STRING("fetch"), init, rv);
+    if (rv.Failed()) {
+      return false;
+    }
+
+    event->PostInit(mInterceptedChannel, mWindowId);
+    event->SetTrusted(true);
+
+    nsRefPtr<EventTarget> target = do_QueryObject(aWorkerPrivate->GlobalScope());
+    nsresult rv2 = target->DispatchDOMEvent(nullptr, event, nullptr, nullptr);
+    if (NS_FAILED(rv2) || !event->WaitToRespond()) {
+      nsCOMPtr<nsIRunnable> runnable = new ResumeRequest(mInterceptedChannel);
+      NS_DispatchToMainThread(runnable);
+    }
+    return true;
+  }
+};
+
+NS_IMETHODIMP
+ServiceWorkerManager::DispatchFetchEvent(nsIDocument* aDoc, nsIInterceptedChannel* aChannel)
+{
+  nsCOMPtr<nsISupports> serviceWorker;
+  nsresult rv = GetDocumentController(aDoc->GetWindow(), getter_AddRefs(serviceWorker));
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+
+  uint64_t windowId = aDoc->GetInnerWindow()->WindowID();
+
+  nsRefPtr<ServiceWorker> sw = static_cast<ServiceWorker*>(serviceWorker.get());
+  nsMainThreadPtrHandle<nsIInterceptedChannel> handle(
+      new nsMainThreadPtrHolder<nsIInterceptedChannel>(aChannel, false));
+
+  nsRefPtr<FetchEventRunnable> event =
+      new FetchEventRunnable(sw->GetWorkerPrivate(), handle, windowId);
+  rv = event->Init();
+  NS_ENSURE_SUCCESS(rv, rv);
+
+  AutoSafeJSContext cx;
+  if (!event->Dispatch(cx)) {
+    return NS_ERROR_FAILURE;
+  }
+
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+ServiceWorkerManager::IsControlled(nsIDocument* aDoc, bool* aIsControlled)
+{
+  nsRefPtr<ServiceWorkerRegistrationInfo> registration;
+  nsresult rv = GetDocumentRegistration(aDoc, getter_AddRefs(registration));
+  NS_ENSURE_SUCCESS(rv, rv);
+  *aIsControlled = !!registration;
+  return NS_OK;
+}
+
+nsresult
+ServiceWorkerManager::GetDocumentRegistration(nsIDocument* aDoc,
+                                              ServiceWorkerRegistrationInfo** aRegistrationInfo)
+{
+  nsRefPtr<ServiceWorkerDomainInfo> domainInfo = GetDomainInfo(aDoc);
+  if (!domainInfo) {
+    return NS_ERROR_FAILURE;
+  }
+
+  nsRefPtr<ServiceWorkerRegistrationInfo> registration;
+  if (!domainInfo->mControlledDocuments.Get(aDoc, getter_AddRefs(registration))) {
+    return NS_ERROR_FAILURE;
+  }
+
+  // If the document is controlled, the current worker MUST be non-null.
+  MOZ_ASSERT(registration->mCurrentWorker);
+
+  registration.forget(aRegistrationInfo);
+  return NS_OK;
+}
+
 /*
  * The .controller is for the registration associated with the document when
  * the document was loaded.
@@ -1999,24 +2191,17 @@ ServiceWorkerManager::GetDocumentController(nsIDOMWindow* aWindow, nsISupports**
 
   nsCOMPtr<nsIDocument> doc = window->GetExtantDoc();
 
-  nsRefPtr<ServiceWorkerDomainInfo> domainInfo = GetDomainInfo(doc);
-  if (!domainInfo) {
-    return NS_ERROR_FAILURE;
-  }
-
   nsRefPtr<ServiceWorkerRegistrationInfo> registration;
-  if (!domainInfo->mControlledDocuments.Get(doc, getter_AddRefs(registration))) {
-    return NS_ERROR_FAILURE;
+  nsresult rv = GetDocumentRegistration(doc, getter_AddRefs(registration));
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
   }
-
-  // If the document is controlled, the current worker MUST be non-null.
-  MOZ_ASSERT(registration->mCurrentWorker);
 
   nsRefPtr<ServiceWorker> serviceWorker;
-  nsresult rv = CreateServiceWorkerForWindow(window,
-                                             registration->mCurrentWorker->GetScriptSpec(),
-                                             registration->mScope,
-                                             getter_AddRefs(serviceWorker));
+  rv = CreateServiceWorkerForWindow(window,
+                                    registration->mCurrentWorker->GetScriptSpec(),
+                                    registration->mScope,
+                                    getter_AddRefs(serviceWorker));
   if (NS_WARN_IF(NS_FAILED(rv))) {
     return rv;
   }

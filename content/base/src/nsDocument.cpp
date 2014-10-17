@@ -1351,6 +1351,7 @@ IMPL_SHIM(nsIProgressEventSink)
 IMPL_SHIM(nsIChannelEventSink)
 IMPL_SHIM(nsISecurityEventSink)
 IMPL_SHIM(nsIApplicationCacheContainer)
+IMPL_SHIM(nsINetworkInterceptController)
 
 #undef IMPL_SHIM
 
@@ -1389,6 +1390,7 @@ nsExternalResourceMap::LoadgroupCallbacks::GetInterface(const nsIID & aIID,
   TRY_SHIM(nsIChannelEventSink);
   TRY_SHIM(nsISecurityEventSink);
   TRY_SHIM(nsIApplicationCacheContainer);
+  TRY_SHIM(nsINetworkInterceptController);
 
   return NS_NOINTERFACE;
 }
@@ -1774,6 +1776,7 @@ NS_INTERFACE_TABLE_HEAD(nsDocument)
     NS_INTERFACE_TABLE_ENTRY(nsDocument, nsIRadioGroupContainer)
     NS_INTERFACE_TABLE_ENTRY(nsDocument, nsIMutationObserver)
     NS_INTERFACE_TABLE_ENTRY(nsDocument, nsIApplicationCacheContainer)
+    NS_INTERFACE_TABLE_ENTRY(nsDocument, nsINetworkInterceptController)
     NS_INTERFACE_TABLE_ENTRY(nsDocument, nsIObserver)
     NS_INTERFACE_TABLE_ENTRY(nsDocument, nsIDOMXPathEvaluator)
   NS_INTERFACE_TABLE_END
@@ -3146,6 +3149,24 @@ nsDocument::SetApplicationCache(nsIApplicationCache *aApplicationCache)
   mApplicationCache = aApplicationCache;
 
   return NS_OK;
+}
+
+NS_IMETHODIMP
+nsDocument::ShouldPrepareForIntercept(nsIURI* aURI, bool* aShouldIntercept)
+{
+    nsCOMPtr<nsIServiceWorkerManager> swm = mozilla::services::GetServiceWorkerManager();
+    if (!swm) {
+        *aShouldIntercept = false;
+        return NS_OK;
+    }
+    return swm->IsControlled(this, aShouldIntercept);
+}
+
+NS_IMETHODIMP
+nsDocument::ChannelIntercepted(nsIInterceptedChannel* aChannel)
+{
+    nsCOMPtr<nsIServiceWorkerManager> swm = mozilla::services::GetServiceWorkerManager();
+    return swm->DispatchFetchEvent(this, aChannel);
 }
 
 NS_IMETHODIMP

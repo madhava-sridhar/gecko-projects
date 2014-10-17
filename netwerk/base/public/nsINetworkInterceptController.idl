@@ -5,7 +5,7 @@
 
 #include "nsISupports.idl"
 
-interface nsIHttpChannelInternal;
+interface nsIChannel;
 interface nsIOutputStream;
 interface nsIURI;
 
@@ -16,7 +16,7 @@ interface nsIURI;
  * which do not implement nsIChannel.
  */
 
-[scriptable, uuid(0b5f82a7-5824-4a0d-bf5c-8a8a7684c0c8)]
+[scriptable, uuid(4584e2a0-7ffb-416d-8466-475bc3912b44)]
 interface nsIInterceptedChannel : nsISupports
 {
     /**
@@ -37,6 +37,16 @@ interface nsIInterceptedChannel : nsISupports
      * after this point.
      */
     void finishSynthesizedResponse();
+
+    /**
+     * The synthesized response body to be produced.
+     */
+    readonly attribute nsIOutputStream responseBody;
+
+    /**
+     * The underlying channel object that was intercepted.
+     */
+    readonly attribute nsIChannel channel;
 };
 
 /**
@@ -45,7 +55,7 @@ interface nsIInterceptedChannel : nsISupports
  * request should be intercepted before any network request is initiated.
  */
 
-[scriptable, uuid(b3ad3e9b-91d8-44d0-a0c5-dc2e9374f599)]
+[scriptable, uuid(f4f7a081-3948-4033-8767-58171e36b395)]
 interface nsINetworkInterceptController : nsISupports
 {
     /**
@@ -61,7 +71,6 @@ interface nsINetworkInterceptController : nsISupports
      * response via the provided stream.
      *
      * @param aChannel the controlling interface for a channel that has been intercepted
-     * @param aStream a stream directly into the channel's synthesized response body
      */
-    void channelIntercepted(in nsIInterceptedChannel aChannel, in nsIOutputStream aStream);
+    void channelIntercepted(in nsIInterceptedChannel aChannel);
 };

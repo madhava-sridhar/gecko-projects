@@ -46,19 +46,19 @@ function make_channel(url, body, cb) {
       this.numChecks++;
       return true;
     },
-    channelIntercepted: function(channel, stream) {
+    channelIntercepted: function(channel) {
       channel.QueryInterface(Ci.nsIInterceptedChannel);
       if (body) {
         var synthesized = Cc["@mozilla.org/io/string-input-stream;1"]
                             .createInstance(Ci.nsIStringInputStream);
         synthesized.data = body;
 
-        NetUtil.asyncCopy(synthesized, stream, function() {
+        NetUtil.asyncCopy(synthesized, channel.responseBody, function() {
           channel.finishSynthesizedResponse();
         });
       }
       if (cb) {
-        cb(channel, stream);
+        cb(channel);
       }
     },
   };
@@ -134,12 +134,12 @@ add_test(function() {
 
 // ensure that the channel waits for a decision and synthesizes headers correctly
 add_test(function() {
-  var chan = make_channel(URL + '/body', null, function(channel, stream) {
+  var chan = make_channel(URL + '/body', null, function(channel) {
     do_timeout(100, function() {
       var synthesized = Cc["@mozilla.org/io/string-input-stream;1"]
                           .createInstance(Ci.nsIStringInputStream);
       synthesized.data = NON_REMOTE_BODY;
-      NetUtil.asyncCopy(synthesized, stream, function() {
+      NetUtil.asyncCopy(synthesized, channel.responseBody, function() {
         channel.synthesizeHeader("Content-Length", NON_REMOTE_BODY.length);
         channel.finishSynthesizedResponse();
       });
@@ -160,12 +160,12 @@ add_test(function() {
 
 // ensure that the intercepted channel supports suspend/resume
 add_test(function() {
-  var chan = make_channel(URL + '/body', null, function(intercepted, stream) {
+  var chan = make_channel(URL + '/body', null, function(intercepted) {
     var synthesized = Cc["@mozilla.org/io/string-input-stream;1"]
                         .createInstance(Ci.nsIStringInputStream);
     synthesized.data = NON_REMOTE_BODY;
 
-    NetUtil.asyncCopy(synthesized, stream, function() {
+    NetUtil.asyncCopy(synthesized, intercepted.responseBody, function() {
       // set the content-type to ensure that the stream converter doesn't hold up notifications
       // and cause the test to fail
       intercepted.synthesizeHeader("Content-Type", "text/plain");

@@ -111,6 +111,7 @@
 #include "nsINSSErrorsService.h"
 #include "nsIApplicationCacheChannel.h"
 #include "nsIApplicationCacheContainer.h"
+#include "nsINetworkInterceptController.h"
 #include "nsStreamUtils.h"
 #include "nsIController.h"
 #include "nsPICommandUpdater.h"
@@ -1035,7 +1036,8 @@ NS_IMETHODIMP nsDocShell::GetInterface(const nsIID & aIID, void **aSink)
         doc.forget(aSink);
         return *aSink ? NS_OK : NS_NOINTERFACE;
     }
-    else if (aIID.Equals(NS_GET_IID(nsIApplicationCacheContainer))) {
+    else if (aIID.Equals(NS_GET_IID(nsIApplicationCacheContainer)) ||
+             aIID.Equals(NS_GET_IID(nsINetworkInterceptController))) {
         *aSink = nullptr;
 
         // Return application cache associated with this docshell, if any

@@ -35,6 +35,13 @@ InterceptedChannelBase::~InterceptedChannelBase()
 {
 }
 
+NS_IMETHODIMP
+InterceptedChannelBase::GetResponseBody(nsIOutputStream** aStream)
+{
+  NS_IF_ADDREF(*aStream = mResponseBody);
+  return NS_OK;
+}
+
 void
 InterceptedChannelBase::EnsureSynthesizedResponse()
 {
@@ -44,9 +51,9 @@ InterceptedChannelBase::EnsureSynthesizedResponse()
 }
 
 void
-InterceptedChannelBase::DoNotifyController(nsIOutputStream* aOut)
+InterceptedChannelBase::DoNotifyController()
 {
-    nsresult rv = mController->ChannelIntercepted(this, aOut);
+    nsresult rv = mController->ChannelIntercepted(this);
     NS_ENSURE_SUCCESS_VOID(rv);
 }
 
@@ -76,10 +83,17 @@ InterceptedChannelChrome::NotifyController()
 {
   nsCOMPtr<nsIOutputStream> out;
 
-  nsresult rv = mSynthesizedCacheEntry->OpenOutputStream(0, getter_AddRefs(out));
+  nsresult rv = mSynthesizedCacheEntry->OpenOutputStream(0, getter_AddRefs(mResponseBody));
   NS_ENSURE_SUCCESS_VOID(rv);
 
-  DoNotifyController(out);
+  DoNotifyController();
+}
+
+NS_IMETHODIMP
+InterceptedChannelChrome::GetChannel(nsIChannel** aChannel)
+{
+  NS_IF_ADDREF(*aChannel = mChannel);
+  return NS_OK;
 }
 
 NS_IMETHODIMP
@@ -169,11 +183,18 @@ void
 InterceptedChannelContent::NotifyController()
 {
   nsresult rv = NS_NewPipe(getter_AddRefs(mSynthesizedInput),
-                           getter_AddRefs(mSynthesizedOutput),
+                           getter_AddRefs(mResponseBody),
                            0, UINT32_MAX, true, true);
   NS_ENSURE_SUCCESS_VOID(rv);
 
-  DoNotifyController(mSynthesizedOutput);
+  DoNotifyController();
+}
+
+NS_IMETHODIMP
+InterceptedChannelContent::GetChannel(nsIChannel** aChannel)
+{
+  NS_IF_ADDREF(*aChannel = mChannel);
+  return NS_OK;
 }
 
 NS_IMETHODIMP
@@ -183,7 +204,7 @@ InterceptedChannelContent::ResetInterception()
     return NS_ERROR_NOT_AVAILABLE;
   }
 
-  mSynthesizedOutput = nullptr;
+  mResponseBody = nullptr;
   mSynthesizedInput = nullptr;
 
   mChannel->ResetInterception();
@@ -194,7 +215,7 @@ InterceptedChannelContent::ResetInterception()
 NS_IMETHODIMP
 InterceptedChannelContent::SynthesizeHeader(const nsACString& aName, const nsACString& aValue)
 {
-  if (!mSynthesizedOutput) {
+  if (!mResponseBody) {
     return NS_ERROR_NOT_AVAILABLE;
   }
 
@@ -217,7 +238,7 @@ InterceptedChannelContent::FinishSynthesizedResponse()
     return rv;
   }
 
-  mSynthesizedOutput = nullptr;
+  mResponseBody = nullptr;
 
   rv = mStoragePump->AsyncRead(mStreamListener, nullptr);
   NS_ENSURE_SUCCESS(rv, rv);

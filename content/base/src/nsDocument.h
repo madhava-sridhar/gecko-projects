@@ -58,6 +58,7 @@
 #include "nsIProgressEventSink.h"
 #include "nsISecurityEventSink.h"
 #include "nsIChannelEventSink.h"
+#include "nsINetworkInterceptController.h"
 #include "imgIRequest.h"
 #include "mozilla/EventListenerManager.h"
 #include "mozilla/EventStates.h"
@@ -614,6 +615,7 @@ protected:
     DECL_SHIM(nsIChannelEventSink, NSICHANNELEVENTSINK)
     DECL_SHIM(nsISecurityEventSink, NSISECURITYEVENTSINK)
     DECL_SHIM(nsIApplicationCacheContainer, NSIAPPLICATIONCACHECONTAINER)
+    DECL_SHIM(nsINetworkInterceptController, NSINETWORKINTERCEPTCONTROLLER)
 #undef DECL_SHIM
   };
   
@@ -673,7 +675,8 @@ class nsDocument : public nsIDocument,
                    public nsIApplicationCacheContainer,
                    public nsStubMutationObserver,
                    public nsIObserver,
-                   public nsIDOMXPathEvaluator
+                   public nsIDOMXPathEvaluator,
+                   public nsINetworkInterceptController
 {
   friend class nsIDocument;
 
@@ -973,6 +976,8 @@ public:
 
   // nsIApplicationCacheContainer
   NS_DECL_NSIAPPLICATIONCACHECONTAINER
+
+  NS_DECL_NSINETWORKINTERCEPTCONTROLLER
 
   // nsIObserver
   NS_DECL_NSIOBSERVER
