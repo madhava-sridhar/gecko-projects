@@ -4338,6 +4338,7 @@ pref("dom.fetch.enabled", true);
 
 // Cache API.
 pref("dom.window-caches.enabled", true);
+pref("dom.worker-caches.enabled", true);
 
 #ifdef MOZ_WIDGET_GONK
 // Empirically, this is the value returned by hal::GetTotalSystemMemory()
