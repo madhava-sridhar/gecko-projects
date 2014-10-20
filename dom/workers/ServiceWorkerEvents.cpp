@@ -15,6 +15,7 @@
 #include "nsStreamUtils.h"
 #include "nsNetCID.h"
 
+#include "mozilla/dom/FetchEventBinding.h"
 #include "mozilla/dom/Promise.h"
 #include "mozilla/dom/PromiseNativeHandler.h"
 #include "mozilla/dom/Request.h"
@@ -71,7 +72,7 @@ FetchEvent::Constructor(const GlobalObject& aGlobal,
   e->mRequest = aOptions.mRequest.WasPassed() ?
       &aOptions.mRequest.Value() : nullptr;;
   e->mContext = aOptions.mContext.WasPassed() ?
-      aOptions.mContext.Value() : Context::Connect;
+      aOptions.mContext.Value() : dom::Context::Connect;
   e->mIsReload = aOptions.mIsReload.WasPassed() ?
       aOptions.mIsReload.Value() : false;
   e->mClient = aOptions.mClient.WasPassed() ?
