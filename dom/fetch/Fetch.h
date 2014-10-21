@@ -90,6 +90,9 @@ public:
     return ConsumeBody(CONSUME_TEXT, aRv);
   }
 
+  void
+  TryFinishConsumeBody();
+
 protected:
   FetchBody()
     : mBodyUsed(false)
@@ -115,11 +118,22 @@ private:
     return static_cast<Derived*>(const_cast<FetchBody*>(this));
   }
 
+  void
+  FinishConsumeBody();
+
   already_AddRefed<Promise>
   ConsumeBody(ConsumeType aType, ErrorResult& aRv);
 
   bool mBodyUsed;
   nsCString mMimeType;
+
+  // If the body stream is not yet available, the consume body algorithm will
+  // initialize this promise, then wait for the stream to be available, and
+  // resolve this Promise with the contents.
+  //
+  // The first call to ConsumeBody() sets these, subsequent calls are rejected.
+  nsRefPtr<Promise> mDelayedConsumePromise;
+  ConsumeType mDelayedConsumeType;
 };
 
 } // namespace dom

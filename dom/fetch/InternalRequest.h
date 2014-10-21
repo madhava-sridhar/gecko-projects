@@ -248,6 +248,8 @@ public:
   void
   SetBody(nsIInputStream* aStream)
   {
+    // A request's body may not be reset once set.
+    MOZ_ASSERT(!mBodyStream);
     mBodyStream = aStream;
   }
 

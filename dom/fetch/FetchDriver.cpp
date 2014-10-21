@@ -5,6 +5,8 @@
 
 #include "mozilla/dom/FetchDriver.h"
 
+#include "nsIHttpHeaderVisitor.h"
+#include "nsIMultiplexInputStream.h"
 #include "nsIScriptSecurityManager.h"
 
 #include "nsContentPolicyUtils.h"
@@ -13,6 +15,7 @@
 #include "nsNetUtil.h"
 #include "nsStringStream.h"
 
+#include "mozilla/dom/BlobSet.h"
 #include "mozilla/dom/File.h"
 #include "mozilla/dom/workers/Workers.h"
 
@@ -23,8 +26,12 @@
 namespace mozilla {
 namespace dom {
 
-FetchDriver::FetchDriver(InternalRequest* aRequest)
-  : mRequest(aRequest)
+NS_IMPL_ISUPPORTS(FetchDriver, nsIStreamListener)
+
+FetchDriver::FetchDriver(InternalRequest* aRequest, nsIPrincipal* aPrincipal)
+  : mPrincipal(aPrincipal)
+  , mRequest(aRequest)
+  , mResponseBody(new BlobSet())
   , mFetchRecursionCount(0)
 {
 }
@@ -112,14 +119,14 @@ FetchDriver::ContinueFetch(bool aCORSFlag)
     return FailWithNetworkError();
   }
 
+  bool corsPreflight = false;
   if (mRequest->Mode() == RequestMode::Cors_with_forced_preflight ||
       (mRequest->UnsafeRequest() && (mRequest->HasSimpleMethod() || !mRequest->Headers()->HasOnlySimpleHeaders()))) {
-    // FIXME(nsm): Set corsPreflight;
+    corsPreflight = true;
   }
 
   mRequest->SetResponseTainting(InternalRequest::RESPONSETAINT_CORS);
-  // FIXME(nsm): HttpFetch.
-  return FailWithNetworkError();
+  return HttpFetch(true /* aCORSFlag */, corsPreflight);
 }
 
 nsresult
@@ -245,15 +252,107 @@ FetchDriver::BasicFetch()
   if (scheme.LowerCaseEqualsLiteral("file")) {
   } else if (scheme.LowerCaseEqualsLiteral("http") ||
              scheme.LowerCaseEqualsLiteral("https")) {
-    // FIXME(nsm): HttpFetch.
-    return FailWithNetworkError();
+    return HttpFetch();
   }
 
   return FailWithNetworkError();
 }
 
 nsresult
-FetchDriver::BeginResponse(InternalResponse* aResponse)
+FetchDriver::HttpFetch(bool aCORSFlag, bool aPreflightCORSFlag, bool aAuthenticationFlag)
+{
+  mResponse = nullptr;
+
+  // FIXME(nsm): See if ServiceWorker can handle it.
+  return ContinueHttpFetchAfterServiceWorker();
+}
+
+NS_IMETHODIMP
+FetchDriver::ContinueHttpFetchAfterServiceWorker()
+{
+  if (!mResponse) {
+    // FIXME(nsm): Set skip SW flag.
+    // FIXME(nsm): Deal with CORS flags cases which will also call
+    // ContinueHttpFetchAfterCORSPreflight().
+    return ContinueHttpFetchAfterCORSPreflight();
+  }
+
+  // Otherwise ServiceWorker replied with a response.
+  return ContinueHttpFetchAfterNetworkFetch();
+}
+
+NS_IMETHODIMP
+FetchDriver::ContinueHttpFetchAfterCORSPreflight()
+{
+  // mResponse is currently the CORS response.
+  // We may have to pass it via argument.
+  if (mResponse && mResponse->IsError()) {
+    return FailWithNetworkError();
+  }
+
+  return HttpNetworkFetch();
+}
+
+NS_IMETHODIMP
+FetchDriver::HttpNetworkFetch()
+{
+  nsRefPtr<InternalRequest> httpRequest = new InternalRequest(*mRequest);
+  // FIXME(nsm): Figure out how to tee request's body.
+
+  // FIXME(nsm): Http network fetch steps 2-7.
+  nsresult rv;
+
+  nsCOMPtr<nsIIOService> ios = do_GetIOService(&rv);
+  NS_ENSURE_SUCCESS(rv, rv);
+
+  nsCString url;
+  httpRequest->GetURL(url);
+  nsCOMPtr<nsIURI> uri;
+  rv = NS_NewURI(getter_AddRefs(uri),
+                          url,
+                          nullptr,
+                          nullptr,
+                          ios);
+  NS_ENSURE_SUCCESS(rv, rv);
+  nsCOMPtr<nsIChannel> chan;
+  rv = NS_NewChannel(getter_AddRefs(chan),
+                     uri,
+                     mPrincipal,
+                     nsILoadInfo::SEC_NORMAL,
+                     mRequest->GetContext(),
+                     nullptr, /* FIXME(nsm): loadgroup */
+                     nullptr, /* aCallbacks */
+                     nsIRequest::LOAD_NORMAL,
+                     ios);
+  NS_ENSURE_SUCCESS(rv, rv);
+
+  nsCOMPtr<nsIHttpChannel> httpChan = do_QueryInterface(chan);
+  if (httpChan) {
+    nsCString method;
+    mRequest->GetMethod(method);
+    rv = httpChan->SetRequestMethod(method);
+    NS_ENSURE_SUCCESS(rv, rv);
+  }
+
+  return chan->AsyncOpen(this, nullptr);
+}
+
+NS_IMETHODIMP
+FetchDriver::ContinueHttpFetchAfterNetworkFetch()
+{
+  workers::AssertIsOnMainThread();
+  MOZ_ASSERT(mResponse);
+  MOZ_ASSERT(!mResponse->IsError());
+
+  /*switch (mResponse->GetStatus()) {
+    default:
+  }*/
+
+  return SucceedWithResponse();
+}
+
+already_AddRefed<InternalResponse>
+FetchDriver::BeginAndGetFilteredResponse(InternalResponse* aResponse)
 {
   MOZ_ASSERT(aResponse);
   nsAutoCString reqURL;
@@ -279,12 +378,20 @@ FetchDriver::BeginResponse(InternalResponse* aResponse)
 
   MOZ_ASSERT(filteredResponse);
   mObserver->OnResponseAvailable(filteredResponse);
-  return NS_OK;
+  return filteredResponse.forget();
+}
+
+void
+FetchDriver::BeginResponse(InternalResponse* aResponse)
+{
+  nsRefPtr<InternalResponse> r = BeginAndGetFilteredResponse(aResponse);
+  // Release the ref.
 }
 
 nsresult
 FetchDriver::SucceedWithResponse()
 {
+  mObserver->OnResponseEnd();
   return NS_OK;
 }
 
@@ -293,7 +400,139 @@ FetchDriver::FailWithNetworkError()
 {
   nsRefPtr<InternalResponse> error = InternalResponse::NetworkError();
   mObserver->OnResponseAvailable(error);
-  // FIXME(nsm): Some sort of shutdown?
+  mObserver->OnResponseEnd();
+  return NS_OK;
+}
+
+namespace {
+class FillResponseHeaders MOZ_FINAL : public nsIHttpHeaderVisitor {
+  InternalResponse* mResponse;
+
+  ~FillResponseHeaders()
+  { }
+public:
+  NS_DECL_ISUPPORTS
+
+  FillResponseHeaders(InternalResponse* aResponse)
+    : mResponse(aResponse)
+  {
+  }
+
+  NS_IMETHOD
+  VisitHeader(const nsACString & aHeader, const nsACString & aValue) MOZ_OVERRIDE
+  {
+    ErrorResult result;
+    mResponse->Headers()->Append(aHeader, aValue, result);
+    return result.ErrorCode();
+  }
+};
+
+NS_IMPL_ISUPPORTS(FillResponseHeaders, nsIHttpHeaderVisitor)
+} // anonymous namespace
+
+NS_IMETHODIMP
+FetchDriver::OnStartRequest(nsIRequest* aRequest,
+                            nsISupports* aContext)
+{
+  nsresult requestStatus;
+  aRequest->GetStatus(&requestStatus);
+  if (NS_WARN_IF(NS_FAILED(requestStatus))) {
+    return FailWithNetworkError();
+  }
+
+  nsCOMPtr<nsIHttpChannel> channel = do_QueryInterface(aRequest);
+  // For now we only support HTTP.
+  MOZ_ASSERT(channel);
+
+  uint32_t status;
+  channel->GetResponseStatus(&status);
+
+  nsCString statusText;
+  channel->GetResponseStatusText(statusText);
+
+  nsRefPtr<InternalResponse> response = new InternalResponse(status, statusText);
+
+  nsRefPtr<FillResponseHeaders> visitor = new FillResponseHeaders(response);
+  nsresult rv = channel->VisitResponseHeaders(visitor);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    NS_WARNING("Failed to visit all headers.");
+  }
+
+  mResponse = BeginAndGetFilteredResponse(response);
+
+  return NS_OK;
+}
+
+/* static */ NS_IMETHODIMP
+FetchDriver::StreamReaderFunc(nsIInputStream* aInputStream,
+                              void* aClosure,
+                              const char* aFragment,
+                              uint32_t aToOffset,
+                              uint32_t aCount,
+                              uint32_t* aWriteCount)
+{
+  FetchDriver* driver = static_cast<FetchDriver*>(aClosure);
+
+  nsresult rv = driver->mResponseBody->AppendVoidPtr(aFragment, aCount);
+  if (NS_SUCCEEDED(rv)) {
+    *aWriteCount = aCount;
+  }
+  return rv;
+}
+
+NS_IMETHODIMP
+FetchDriver::OnDataAvailable(nsIRequest* aRequest,
+                             nsISupports* aContext,
+                             nsIInputStream* aInputStream,
+                             uint64_t aOffset,
+                             uint32_t aCount)
+{
+  uint32_t aRead;
+  MOZ_ASSERT(mResponse);
+
+  nsresult rv = aInputStream->ReadSegments(FetchDriver::StreamReaderFunc,
+                                           static_cast<void*>(this),
+                                           aCount, &aRead);
+  return rv;
+}
+
+NS_IMETHODIMP
+FetchDriver::OnStopRequest(nsIRequest* aRequest,
+                           nsISupports* aContext,
+                           nsresult aStatusCode)
+{
+  if (NS_FAILED(aStatusCode)) {
+    return FailWithNetworkError();
+  }
+
+  MOZ_ASSERT(mResponse);
+  nsCOMPtr<nsIChannel> chan = do_QueryInterface(aRequest);
+  MOZ_ASSERT(chan);
+  nsCString contentType;
+  chan->GetContentType(contentType);
+
+  nsTArray<nsRefPtr<FileImpl>>& blobImpls = mResponseBody->GetBlobImpls();
+  nsCOMPtr<nsIMultiplexInputStream> stream =
+    do_CreateInstance("@mozilla.org/io/multiplex-input-stream;1");
+  NS_ENSURE_TRUE(stream, NS_ERROR_FAILURE);
+
+  nsresult rv;
+  uint32_t i;
+  for (i = 0; i < blobImpls.Length(); i++) {
+    nsCOMPtr<nsIInputStream> scratchStream;
+    FileImpl* blobImpl = blobImpls.ElementAt(i).get();
+
+    rv = blobImpl->GetInternalStream(getter_AddRefs(scratchStream));
+    NS_ENSURE_SUCCESS(rv, rv);
+
+    rv = stream->AppendStream(scratchStream);
+    NS_ENSURE_SUCCESS(rv, rv);
+  }
+
+  nsCOMPtr<nsIInputStream> inputStream = do_QueryInterface(stream);
+  mResponse->SetBody(inputStream);
+
+  ContinueHttpFetchAfterNetworkFetch();
   return NS_OK;
 }
 

@@ -6,14 +6,17 @@
 #ifndef mozilla_dom_FetchDriver_h
 #define mozilla_dom_FetchDriver_h
 
+#include "nsAutoPtr.h"
 #include "nsIStreamListener.h"
 #include "nsRefPtr.h"
 
+class nsIPrincipal;
 class nsPIDOMWindow;
 
 namespace mozilla {
 namespace dom {
 
+class BlobSet;
 class InternalRequest;
 class InternalResponse;
 
@@ -22,21 +25,30 @@ class FetchDriverObserver
 public:
   NS_INLINE_DECL_THREADSAFE_REFCOUNTING(FetchDriverObserver);
   virtual void OnResponseAvailable(InternalResponse* aResponse) = 0;
+  // This is triggered after the response's body has been set to a valid
+  // stream. ConsumeBody may proceed to read the stream.
+  virtual void OnResponseEnd() = 0;
 
 protected:
   virtual ~FetchDriverObserver()
   { };
 };
 
-class FetchDriver MOZ_FINAL
+class FetchDriver MOZ_FINAL : public nsIStreamListener
 {
-  NS_INLINE_DECL_REFCOUNTING(FetchDriver)
 public:
-  explicit FetchDriver(InternalRequest* aRequest);
+  NS_DECL_ISUPPORTS
+  NS_DECL_NSIREQUESTOBSERVER
+  NS_DECL_NSISTREAMLISTENER
+
+  explicit FetchDriver(InternalRequest* aRequest, nsIPrincipal* aPrincipal);
   NS_IMETHOD Fetch(FetchDriverObserver* aObserver);
 
 private:
+  nsCOMPtr<nsIPrincipal> mPrincipal;
   nsRefPtr<InternalRequest> mRequest;
+  nsRefPtr<InternalResponse> mResponse;
+  nsAutoPtr<BlobSet> mResponseBody;
   nsRefPtr<FetchDriverObserver> mObserver;
   uint32_t mFetchRecursionCount;
 
@@ -48,9 +60,27 @@ private:
   nsresult Fetch(bool aCORSFlag);
   nsresult ContinueFetch(bool aCORSFlag);
   nsresult BasicFetch();
+  nsresult HttpFetch(bool aCORSFlag = false, bool aPreflightCORSFlag = false, bool aAuthenticationFlag = false);
+  nsresult ContinueHttpFetchAfterServiceWorker();
+  nsresult ContinueHttpFetchAfterCORSPreflight();
+  nsresult HttpNetworkFetch();
+  nsresult ContinueHttpFetchAfterNetworkFetch();
+  // Returns the filtered response sent to the observer.
+  already_AddRefed<InternalResponse>
+  BeginAndGetFilteredResponse(InternalResponse* aResponse);
+  // Utility since not all cases need to do any post processing of the filtered
+  // response.
+  void BeginResponse(InternalResponse* aResponse);
   nsresult FailWithNetworkError();
-  nsresult BeginResponse(InternalResponse* aResponse);
   nsresult SucceedWithResponse();
+
+  static nsresult
+  StreamReaderFunc(nsIInputStream* aInputStream,
+                              void* aClosure,
+                              const char* aFragment,
+                              uint32_t aToOffset,
+                              uint32_t aCount,
+                              uint32_t* aWriteCount);
 };
 
 } // namespace dom
