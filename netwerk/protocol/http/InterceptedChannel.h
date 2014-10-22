@@ -69,6 +69,7 @@ public:
   NS_IMETHOD FinishSynthesizedResponse() MOZ_OVERRIDE;
   NS_IMETHOD GetChannel(nsIChannel** aChannel) MOZ_OVERRIDE;
   NS_IMETHOD SynthesizeHeader(const nsACString& aName, const nsACString& aValue) MOZ_OVERRIDE;
+  NS_IMETHOD Cancel() MOZ_OVERRIDE;
 
   virtual void NotifyController() MOZ_OVERRIDE;
 };
@@ -96,6 +97,7 @@ public:
   NS_IMETHOD FinishSynthesizedResponse() MOZ_OVERRIDE;
   NS_IMETHOD GetChannel(nsIChannel** aChannel) MOZ_OVERRIDE;
   NS_IMETHOD SynthesizeHeader(const nsACString& aName, const nsACString& aValue) MOZ_OVERRIDE;
+  NS_IMETHOD Cancel() MOZ_OVERRIDE;
 
   virtual void NotifyController() MOZ_OVERRIDE;
 };

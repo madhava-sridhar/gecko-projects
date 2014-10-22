@@ -19,40 +19,62 @@
     window.opener.postMessage({status: "ok", result: result, message: msg}, "*");
   }
 
-  var expected = 2;
-  var encountered = 0;
+  function fetch(name, onload, onerror) {
+    gExpected++;
+
+    onload = onload || function() {
+      my_ok(false, "load should not complete successfully");
+      finish();
+    };
+    onerror = onerror || function() {
+      my_ok(false, "load should be intercepted successfully");
+      finish();
+    };
+
+    var x = new XMLHttpRequest();
+    x.open('GET', name, true);
+    x.onload = function() { onload(x) };
+    x.onerror = function() { onerror(x) };
+    x.send();
+  }
+
+  var gExpected = 0;
+  var gEncountered = 0;
   function finish() {
-    encountered++;
-    if (encountered == expected) {
+    gEncountered++;
+    if (gEncountered == gExpected) {
       window.opener.postMessage({status: "done"}, "*");
     }
   }
 
   my_ok(navigator.serviceWorker.controller != null, "should be controlled");
-  var x = new XMLHttpRequest();
-  x.open('GET', 'nonexistent.txt', true);
-  x.onload = function() {
-    my_ok(x.status == 200, "load should be successful");
-    my_ok(x.responseText == "synthesized response body", "load should have synthesized response");
-    finish();
-  };
-  x.onerror = function() {
-    my_ok(false, "load should be intercepted successfully");
-    finish();
-  };
-  x.send();
 
-  var x2 = new XMLHttpRequest();
-  x2.open('GET', 'nonexistent2.txt', true);
-  x2.onload = function() {
-    my_ok(x2.status == 404, "load should be uninterrupted");
+  fetch('synthesized.txt', function(xhr) {
+    my_ok(xhr.status == 200, "load should be successful");
+    my_ok(xhr.responseText == "synthesized response body", "load should have synthesized response");
     finish();
-  };
-  x2.onerror = function() {
-    my_ok(false, "load should be intercepted successfully");
+  });
+
+  fetch('ignored.txt', function(xhr) {
+    my_ok(xhr.status == 404, "load should be uninterrupted");
     finish();
-  };
-  x2.send();
+  });
+
+  fetch('rejected.txt', null, function(xhr) {
+    my_ok(xhr.status == 0, "load should not complete");
+    finish();
+  });
+
+  fetch('nonresponse.txt', null, function(xhr) {
+    my_ok(xhr.status == 0, "load should not complete");
+    finish();
+  });
+
+  fetch('nonresponse2.txt', null, function(xhr) {
+    my_ok(xhr.status == 0, "load should not complete");
+    finish();
+  });
+
 </script>
 </pre>
 </body>

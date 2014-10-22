@@ -42,8 +42,6 @@ FetchEvent::FetchEvent(EventTarget* aOwner)
   , mWindowId(0)
   , mIsReload(false)
   , mWaitToRespond(false)
-  , mRespondWithEntered(false)
-  , mRespondWithError(false)
 {
 }
 
@@ -102,6 +100,8 @@ class FinishResponse : public nsRunnable {
 
 class RespondWithHandler MOZ_FINAL : public PromiseNativeHandler {
   nsMainThreadPtrHandle<nsIInterceptedChannel> mInterceptedChannel;
+
+  void CancelRequest();
 public:
   RespondWithHandler(nsMainThreadPtrHandle<nsIInterceptedChannel>& aChannel)
   : mInterceptedChannel(aChannel)
@@ -131,18 +131,41 @@ void RespondWithCopyComplete(void* closure, nsresult status)
   NS_DispatchToMainThread(event);
 }
 
+class AutoCancel
+{
+  nsRefPtr<RespondWithHandler> mOwner;
+
+public:
+  AutoCancel(RespondWithHandler* aOwner)
+  : mOwner(aOWner)
+  {
+  }
+
+  ~AutoCancel()
+  {
+    if (mOwner) {
+      mOwner->CancelRequest();
+    }
+  }
+
+  void Reset()
+  {
+    mOwner = nullptr;
+  }
+};
+
 void
 RespondWithHandler::ResolvedCallback(JSContext* aCx, JS::Handle<JS::Value> aValue)
 {
+  AutoCancel autoCancel(this);
+
   if (!aValue.isObject()) {
-    //https://github.com/slightlyoff/ServiceWorker/issues/454
     return;
   }
 
   nsRefPtr<Response> response;
   nsresult rv = UNWRAP_OBJECT(Response, &aValue.toObject(), response);
   if (NS_FAILED(rv)) {
-    //https://github.com/slightlyoff/ServiceWorker/issues/454
     return;
   }
 
@@ -151,20 +174,50 @@ RespondWithHandler::ResolvedCallback(JSContext* aCx, JS::Handle<JS::Value> aValu
 
   nsCOMPtr<nsIOutputStream> responseBody;
   rv = mInterceptedChannel->GetResponseBody(getter_AddRefs(responseBody));
-  MOZ_ASSERT(NS_SUCCEEDED(rv));
+  if (NS_FAILED(rv)) {
+    return;
+  }
 
   nsAutoPtr<RespondWithClosure> closure(new RespondWithClosure(mInterceptedChannel));
 
   nsCOMPtr<nsIEventTarget> stsThread = do_GetService(NS_SOCKETTRANSPORTSERVICE_CONTRACTID, &rv);
   rv = NS_AsyncCopy(body, responseBody, stsThread, NS_ASYNCCOPY_VIA_READSEGMENTS, 4096,
                     RespondWithCopyComplete, closure.forget());
-  MOZ_ASSERT(NS_SUCCEEDED(rv));
+  if (NS_FAILED(rv)) {
+    return;
+  }
+
+  autoCancel->Reset();
 }
+
+class CancelChannelRunnable: public nsRunnable {
+  nsMainThreadPtrHandle<nsIInterceptedChannel> mChannel;
+public:
+  CancelChannelRunnable(nsMainThreadPtrHandle<nsIInterceptedChannel>& aChannel)
+  : mChannel(aChannel)
+  {
+  }
+
+  NS_IMETHOD Run()
+  {
+    MOZ_ASSERT(NS_IsMainThread());
+    nsresult rv = mChannel->Cancel();
+    NS_ENSURE_SUCCESS(rv, rv);
+    return NS_OK;
+  }
+};
 
 void
 RespondWithHandler::RejectedCallback(JSContext* aCx, JS::Handle<JS::Value> aValue)
 {
-  //https://github.com/slightlyoff/ServiceWorker/issues/454
+  CancelRequest();
+}
+
+void
+RespondWithHandler::CancelRequest()
+{
+  nsCOMPtr<nsIRunnable> runnable = new CancelChannelRunnable(mInterceptedChannel);
+  NS_DispatchToMainThread(runnable);
 }
 
 } // anonymous namespace
@@ -172,13 +225,12 @@ RespondWithHandler::RejectedCallback(JSContext* aCx, JS::Handle<JS::Value> aValu
 void
 FetchEvent::RespondWith(Promise& aPromise, ErrorResult& aRv)
 {
-  if (mRespondWithEntered) {
+  if (mWaitToRespond) {
     aRv.Throw(NS_ERROR_DOM_INVALID_STATE_ERR);
     return;
   }
 
   mWaitToRespond = true;
-  mRespondWithEntered = true;
   nsRefPtr<RespondWithHandler> handler = new RespondWithHandler(mChannel);
   aPromise.AppendNativeHandler(handler);
 }

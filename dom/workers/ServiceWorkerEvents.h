@@ -38,8 +38,6 @@ class FetchEvent : public Event
   uint64_t mWindowId;
   bool mIsReload;
   bool mWaitToRespond;
-  bool mRespondWithEntered;
-  bool mRespondWithError;
 protected:
   explicit FetchEvent(mozilla::dom::EventTarget* aOwner);
   ~FetchEvent();

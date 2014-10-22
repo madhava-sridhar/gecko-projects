@@ -170,6 +170,18 @@ InterceptedChannelChrome::FinishSynthesizedResponse()
   return NS_OK;
 }
 
+NS_IMETHODIMP
+InterceptedChannelChrome::Cancel()
+{
+  if (!mChannel) {
+    return NS_ERROR_FAILURE;
+  }
+
+  nsresult rv = mChannel->AsyncAbort(NS_BINDING_ABORTED);
+  NS_ENSURE_SUCCESS(rv, rv);
+  return NS_OK;
+}
+
 InterceptedChannelContent::InterceptedChannelContent(HttpChannelChild* aChannel,
                                                      nsINetworkInterceptController* aController,
                                                      nsIStreamListener* aListener)
@@ -246,6 +258,18 @@ InterceptedChannelContent::FinishSynthesizedResponse()
   mChannel->OverrideWithSynthesizedResponse(mSynthesizedResponseHead.ptr(), mStoragePump);
 
   mChannel = nullptr;
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+InterceptedChannelContent::Cancel()
+{
+  if (!mChannel) {
+    return NS_ERROR_FAILURE;
+  }
+
+  nsresult rv = mChannel->AsyncAbort(NS_BINDING_ABORTED);
+  NS_ENSURE_SUCCESS(rv, rv);
   return NS_OK;
 }
 

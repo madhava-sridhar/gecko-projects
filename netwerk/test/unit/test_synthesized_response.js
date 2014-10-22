@@ -176,6 +176,49 @@ add_test(function() {
 				     CL_ALLOW_UNKNOWN_CL | CL_SUSPEND | CL_EXPECT_3S_DELAY), null);
 });
 
+// ensure that the intercepted channel can be cancelled
+add_test(function() {
+  var chan = make_channel(URL + '/body', null, function(intercepted) {
+    intercepted.cancel();
+  });
+  chan.asyncOpen(new ChannelListener(run_next_test, null,
+				     CL_EXPECT_FAILURE), null);
+});
+
+// ensure that the channel can't be cancelled via nsIInterceptedChannel after making a decision
+add_test(function() {
+  var chan = make_channel(URL + '/body', null, function(chan) {
+    chan.resetInterception();
+    do_timeout(0, function() {
+      var gotexception = false;
+      try {
+        chan.cancel();
+      } catch (x) {
+        gotexception = true;
+      }
+      do_check_true(gotexception);
+    });
+  });
+  chan.asyncOpen(new ChannelListener(handle_remote_response, null), null);
+});
+
+// ensure that the intercepted channel can be canceled during the response
+add_test(function() {
+  var chan = make_channel(URL + '/body', null, function(intercepted) {
+    var synthesized = Cc["@mozilla.org/io/string-input-stream;1"]
+                        .createInstance(Ci.nsIStringInputStream);
+    synthesized.data = NON_REMOTE_BODY;
+
+    NetUtil.asyncCopy(synthesized, intercepted.responseBody, function() {
+      let channel = intercepted.channel;
+      intercepted.finishSynthesizedResponse();
+      channel.cancel(Cr.NS_BINDING_ABORTED);
+    });
+  });
+  chan.asyncOpen(new ChannelListener(run_next_test, null,
+                                     CL_EXPECT_FAILURE | CL_ALLOW_UNKNOWN_CL), null);
+});
+
 add_test(function() {
   httpServer.stop(run_next_test);
 });

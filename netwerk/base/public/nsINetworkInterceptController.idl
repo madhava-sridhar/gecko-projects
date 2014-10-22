@@ -39,6 +39,13 @@ interface nsIInterceptedChannel : nsISupports
     void finishSynthesizedResponse();
 
     /**
+     * Cancel the pending intercepted request.
+     * @return NS_ERROR_FAILURE if the response has already been synthesized or
+     *         the original request has been instructed to continue.
+     */
+    void cancel();
+
+    /**
      * The synthesized response body to be produced.
      */
     readonly attribute nsIOutputStream responseBody;
