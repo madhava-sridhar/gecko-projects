@@ -10,7 +10,7 @@
 #include "nsPIDOMWindow.h"
 
 #include "mozilla/ErrorResult.h"
-#include "mozilla/UniquePtr.h"
+#include "mozilla/dom/FetchBinding.h"
 #include "mozilla/dom/Headers.h"
 #include "mozilla/dom/Promise.h"
 
@@ -23,7 +23,7 @@ namespace dom {
 
 NS_IMPL_CYCLE_COLLECTING_ADDREF(Response)
 NS_IMPL_CYCLE_COLLECTING_RELEASE(Response)
-NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE(Response, mOwner)
+NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE(Response, mOwner, mHeaders)
 
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(Response)
   NS_WRAPPERCACHE_INTERFACE_MAP_ENTRY
@@ -56,14 +56,14 @@ Response::Redirect(const GlobalObject& aGlobal, const nsAString& aUrl,
 {
   ErrorResult result;
   ResponseInit init;
-  Optional<ArrayBufferOrArrayBufferViewOrScalarValueStringOrURLSearchParams> body;
+  Optional<ArrayBufferOrArrayBufferViewOrBlobOrScalarValueStringOrURLSearchParams> body;
   nsRefPtr<Response> r = Response::Constructor(aGlobal, body, init, result);
   return r.forget();
 }
 
 /*static*/ already_AddRefed<Response>
 Response::Constructor(const GlobalObject& aGlobal,
-                      const Optional<ArrayBufferOrArrayBufferViewOrScalarValueStringOrURLSearchParams>& aBody,
+                      const Optional<ArrayBufferOrArrayBufferViewOrBlobOrScalarValueStringOrURLSearchParams>& aBody,
                       const ResponseInit& aInit, ErrorResult& aRv)
 {
   if (aInit.mStatus < 200 || aInit.mStatus > 599) {
@@ -99,7 +99,7 @@ Response::Constructor(const GlobalObject& aGlobal,
   nsRefPtr<Response> r = new Response(global, internalResponse);
 
   if (aInit.mHeaders.WasPassed()) {
-    internalResponse->Headers_()->Clear();
+    internalResponse->Headers()->Clear();
 
     // Instead of using Fill, create an object to allow the constructor to
     // unwrap the HeadersInit.
@@ -109,7 +109,7 @@ Response::Constructor(const GlobalObject& aGlobal,
       return nullptr;
     }
 
-    internalResponse->Headers_()->Fill(*headers, aRv);
+    internalResponse->Headers()->Fill(*headers->GetInternalHeaders(), aRv);
     if (NS_WARN_IF(aRv.Failed())) {
       return nullptr;
     }
@@ -122,10 +122,9 @@ Response::Constructor(const GlobalObject& aGlobal,
     internalResponse->SetBody(bodyStream);
 
     if (!contentType.IsVoid() &&
-        !internalResponse->Headers_()->Has(NS_LITERAL_CSTRING("Content-Type"), aRv)) {
-      internalResponse->Headers_()->Append(NS_LITERAL_CSTRING("Content-Type"), contentType, aRv);
+        !internalResponse->Headers()->Has(NS_LITERAL_CSTRING("Content-Type"), aRv)) {
+      internalResponse->Headers()->Append(NS_LITERAL_CSTRING("Content-Type"), contentType, aRv);
     }
-
     if (aRv.Failed()) {
       return nullptr;
     }
@@ -142,6 +141,16 @@ Response::Clone()
   nsCOMPtr<nsIGlobalObject> global = do_QueryInterface(mOwner);
   nsRefPtr<Response> response = new Response(global, mInternalResponse);
   return response.forget();
+}
+
+Headers*
+Response::Headers_()
+{
+  if (!mHeaders) {
+    mHeaders = new Headers(mOwner, mInternalResponse->Headers());
+  }
+
+  return mHeaders;
 }
 
 void

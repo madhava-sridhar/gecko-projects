@@ -14,23 +14,42 @@
 namespace mozilla {
 namespace dom {
 
+class InternalHeaders;
+
 class InternalResponse MOZ_FINAL
 {
+  friend class FetchDriver;
 
 public:
   NS_INLINE_DECL_THREADSAFE_REFCOUNTING(InternalResponse)
 
   InternalResponse(uint16_t aStatus, const nsACString& aStatusText);
 
-  explicit InternalResponse(const InternalResponse& aOther) MOZ_DELETE;
-
   static already_AddRefed<InternalResponse>
   NetworkError()
   {
-    nsRefPtr<InternalResponse> response = new InternalResponse(0, NS_LITERAL_CSTRING(""));
+    nsRefPtr<InternalResponse> response = new InternalResponse(0, EmptyCString());
     response->mType = ResponseType::Error;
     return response.forget();
   }
+
+  static already_AddRefed<InternalResponse>
+  OpaqueResponse()
+  {
+    nsRefPtr<InternalResponse> response = new InternalResponse(0, EmptyCString());
+    response->mType = ResponseType::Opaque;
+    return response.forget();
+  }
+
+  // DO NOT use the inner response after filtering it since the filtered
+  // response will adopt the inner response's body.
+  static already_AddRefed<InternalResponse>
+  BasicResponse(InternalResponse* aInner);
+
+  // DO NOT use the inner response after filtering it since the filtered
+  // response will adopt the inner response's body.
+  static already_AddRefed<InternalResponse>
+  CORSResponse(InternalResponse* aInner);
 
   ResponseType
   Type() const
@@ -45,10 +64,16 @@ public:
   }
 
   // FIXME(nsm): Return with exclude fragment.
-  nsCString&
-  GetUrl()
+  void
+  GetUrl(nsCString& aURL) const
   {
-    return mURL;
+    aURL.Assign(mURL);
+  }
+
+  void
+  SetUrl(const nsACString& aURL)
+  {
+    mURL.Assign(aURL);
   }
 
   uint16_t
@@ -63,14 +88,14 @@ public:
     return mStatusText;
   }
 
-  Headers*
-  Headers_()
+  InternalHeaders*
+  Headers()
   {
     return mHeaders;
   }
 
   void
-  GetBody(nsIInputStream** aStream)
+  GetBody(nsIInputStream** aStream) const
   {
     nsCOMPtr<nsIInputStream> stream = mBody;
     stream.forget(aStream);
@@ -86,12 +111,16 @@ private:
   ~InternalResponse()
   { }
 
+  // Used to create filtered responses.
+  // Does not copy headers.
+  explicit InternalResponse(const InternalResponse& aOther);
+
   ResponseType mType;
   nsCString mTerminationReason;
   nsCString mURL;
   const uint16_t mStatus;
   const nsCString mStatusText;
-  nsRefPtr<Headers> mHeaders;
+  nsRefPtr<InternalHeaders> mHeaders;
   nsCOMPtr<nsIInputStream> mBody;
   nsCString mContentType;
 };

@@ -1960,7 +1960,8 @@ private:
     reqInit.mMethod.Construct(mMethod);
 
     //XXXjdm get headers from the channel
-    nsRefPtr<Headers> headers = new Headers(globalObj.GetAsSupports());
+    nsRefPtr<InternalHeaders> internalHeaders = new InternalHeaders();
+    nsRefPtr<Headers> headers = new Headers(globalObj.GetAsSupports(), internalHeaders);
     reqInit.mHeaders.Construct();
     reqInit.mHeaders.Value().SetAsHeaders() = headers;
 

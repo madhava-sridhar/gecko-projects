@@ -49,7 +49,7 @@ protected:
   NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(FetchEvent, Event)
   NS_FORWARD_TO_EVENT
 
-  virtual JSObject* WrapObject(JSContext* aCx) MOZ_OVERRIDE
+  virtual JSObject* WrapObjectInternal(JSContext* aCx) MOZ_OVERRIDE
   {
     return mozilla::dom::FetchEventBinding::Wrap(aCx, this);
   }
@@ -114,7 +114,7 @@ public:
   NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(InstallPhaseEvent, Event)
   NS_FORWARD_TO_EVENT
 
-  virtual JSObject* WrapObject(JSContext* aCx) MOZ_OVERRIDE
+  virtual JSObject* WrapObjectInternal(JSContext* aCx) MOZ_OVERRIDE
   {
     return mozilla::dom::InstallPhaseEventBinding_workers::Wrap(aCx, this);
   }
@@ -167,7 +167,7 @@ public:
   NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(InstallEvent, InstallPhaseEvent)
   NS_FORWARD_TO_EVENT
 
-  virtual JSObject* WrapObject(JSContext* aCx) MOZ_OVERRIDE
+  virtual JSObject* WrapObjectInternal(JSContext* aCx) MOZ_OVERRIDE
   {
     return mozilla::dom::InstallEventBinding_workers::Wrap(aCx, this);
   }

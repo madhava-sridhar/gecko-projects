@@ -5,25 +5,16 @@
 
 #include "Request.h"
 
-#include "nsIUnicodeDecoder.h"
 #include "nsIURI.h"
-
-#include "nsDOMString.h"
-#include "nsNetUtil.h"
 #include "nsPIDOMWindow.h"
-#include "nsStreamUtils.h"
-#include "nsStringStream.h"
 
 #include "mozilla/ErrorResult.h"
-#include "mozilla/dom/EncodingUtils.h"
-#include "mozilla/dom/File.h"
 #include "mozilla/dom/Headers.h"
 #include "mozilla/dom/Fetch.h"
 #include "mozilla/dom/Promise.h"
 #include "mozilla/dom/URL.h"
 #include "mozilla/dom/workers/bindings/URL.h"
 
-// dom/workers
 #include "WorkerPrivate.h"
 
 namespace mozilla {
@@ -31,7 +22,7 @@ namespace dom {
 
 NS_IMPL_CYCLE_COLLECTING_ADDREF(Request)
 NS_IMPL_CYCLE_COLLECTING_RELEASE(Request)
-NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE(Request, mOwner)
+NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE(Request, mOwner, mHeaders)
 
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(Request)
   NS_WRAPPERCACHE_INTERFACE_MAP_ENTRY
@@ -39,9 +30,9 @@ NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(Request)
 NS_INTERFACE_MAP_END
 
 Request::Request(nsIGlobalObject* aOwner, InternalRequest* aRequest)
-  : mOwner(aOwner)
+  : FetchBody<Request>()
+  , mOwner(aOwner)
   , mRequest(aRequest)
-  , mBodyUsed(false)
 {
 }
 
@@ -166,47 +157,44 @@ Request::Constructor(const GlobalObject& aGlobal,
     request->SetMethod(method);
   }
 
-  nsRefPtr<Request> domRequest = new Request(global, request);
-  nsRefPtr<Headers> domRequestHeaders = domRequest->Headers_();
+  nsRefPtr<InternalHeaders> requestHeaders = request->Headers();
 
-  nsRefPtr<Headers> headers;
+  nsRefPtr<InternalHeaders> headers;
   if (aInit.mHeaders.WasPassed()) {
-    headers = Headers::Constructor(aGlobal, aInit.mHeaders.Value(), aRv);
+    nsRefPtr<Headers> h = Headers::Constructor(aGlobal, aInit.mHeaders.Value(), aRv);
     if (NS_WARN_IF(aRv.Failed())) {
       return nullptr;
     }
+    headers = h->GetInternalHeaders();
   } else {
-    headers = new Headers(*domRequestHeaders);
+    headers = new InternalHeaders(*requestHeaders);
   }
 
-  domRequestHeaders->Clear();
+  requestHeaders->Clear();
 
-  if (domRequest->Mode() == RequestMode::No_cors) {
-    nsCString method;
-    domRequest->GetMethod(method);
-    ToLowerCase(method);
-    if (!method.EqualsASCII("get") &&
-        !method.EqualsASCII("head") &&
-        !method.EqualsASCII("post")) {
+  if (request->Mode() == RequestMode::No_cors) {
+    if (!request->HasSimpleMethod()) {
+      nsAutoCString method;
+      request->GetMethod(method);
       NS_ConvertUTF8toUTF16 label(method);
       aRv.ThrowTypeError(MSG_INVALID_REQUEST_METHOD, &label);
       NS_WARNING("Bad method 2");
       return nullptr;
     }
 
-    domRequestHeaders->SetGuard(HeadersGuardEnum::Request_no_cors, aRv);
+    requestHeaders->SetGuard(HeadersGuardEnum::Request_no_cors, aRv);
     if (NS_WARN_IF(aRv.Failed())) {
       return nullptr;
     }
   }
 
-  domRequestHeaders->Fill(*headers, aRv);
+  requestHeaders->Fill(*headers, aRv);
   if (NS_WARN_IF(aRv.Failed())) {
     return nullptr;
   }
 
   if (aInit.mBody.WasPassed()) {
-    const OwningArrayBufferOrArrayBufferViewOrScalarValueStringOrURLSearchParams& bodyInit = aInit.mBody.Value();
+    const OwningArrayBufferOrArrayBufferViewOrBlobOrScalarValueStringOrURLSearchParams& bodyInit = aInit.mBody.Value();
     nsCOMPtr<nsIInputStream> stream;
     nsCString contentType;
     aRv = ExtractByteStreamFromBody(bodyInit,
@@ -217,9 +205,9 @@ Request::Constructor(const GlobalObject& aGlobal,
     request->SetBody(stream);
 
     if (!contentType.IsVoid() &&
-        !domRequestHeaders->Has(NS_LITERAL_CSTRING("Content-Type"), aRv)) {
-      domRequestHeaders->Append(NS_LITERAL_CSTRING("Content-Type"),
-                                contentType, aRv);
+        !requestHeaders->Has(NS_LITERAL_CSTRING("Content-Type"), aRv)) {
+      requestHeaders->Append(NS_LITERAL_CSTRING("Content-Type"),
+                             contentType, aRv);
     }
 
     if (NS_WARN_IF(aRv.Failed())) {
@@ -227,6 +215,7 @@ Request::Constructor(const GlobalObject& aGlobal,
     }
   }
 
+  nsRefPtr<Request> domRequest = new Request(global, request);
   domRequest->SetMimeType(aRv);
   if (NS_WARN_IF(aRv.Failed())) {
     return nullptr;
@@ -242,6 +231,15 @@ Request::Clone() const
   nsRefPtr<Request> request = new Request(mOwner,
                                           new InternalRequest(*mRequest));
   return request.forget();
+}
+
+Headers*
+Request::Headers_()
+{
+  if (!mHeaders) {
+    mHeaders = new Headers(mOwner, mRequest->Headers());
+  }
+  return mHeaders;
 }
 } // namespace dom
 } // namespace mozilla

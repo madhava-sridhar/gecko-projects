@@ -136,7 +136,7 @@ TypeUtils::ToPCacheRequest(PCacheRequest& aOut, const Request& aIn)
     return rv;
   }
   aIn.GetReferrer(aOut.referrer());
-  nsRefPtr<Headers> headers = aIn.Headers_();
+  nsRefPtr<InternalHeaders> headers = aIn.GetInternalHeaders();
   MOZ_ASSERT(headers);
   headers->GetPHeaders(aOut.headers());
   aOut.headersGuard() = headers->Guard();
@@ -228,7 +228,7 @@ TypeUtils::ToPCacheResponse(PCacheResponse& aOut, const Response& aIn)
   aIn.GetUrl(aOut.url());
   aOut.status() = aIn.Status();
   aIn.GetStatusText(aOut.statusText());
-  nsRefPtr<Headers> headers = aIn.Headers_();
+  nsRefPtr<InternalHeaders> headers = aIn.GetInternalHeaders();
   MOZ_ASSERT(headers);
   headers->GetPHeaders(aOut.headers());
   aOut.headersGuard() = headers->Guard();
@@ -294,11 +294,11 @@ TypeUtils::ToRequest(nsIGlobalObject* aGlobal, const PCacheRequest& aIn,
   internalRequest->SetMode(aIn.mode());
   internalRequest->SetCredentialsMode(aIn.credentials());
 
-  nsRefPtr<Headers> headers = new Headers(aGlobal, aIn.headers(),
-                                          aIn.headersGuard());
+  nsRefPtr<InternalHeaders> internalHeaders =
+    new InternalHeaders(aIn.headers(), aIn.headersGuard());
   ErrorResult result;
-  internalRequest->Headers_()->SetGuard(aIn.headersGuard(), result);
-  internalRequest->Headers_()->Fill(*headers, result);
+  internalRequest->Headers()->SetGuard(aIn.headersGuard(), result);
+  internalRequest->Headers()->Fill(*internalHeaders, result);
   MOZ_ASSERT(!result.Failed());
 
   nsCOMPtr<nsIInputStream> stream = ReadStream::Create(aStreamControl,

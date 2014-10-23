@@ -6,18 +6,35 @@
 #ifndef mozilla_dom_Fetch_h
 #define mozilla_dom_Fetch_h
 
-#include "nsISupportsImpl.h"
-
+#include "nsCOMPtr.h"
+#include "nsError.h"
+#include "nsString.h"
+#include "mozilla/ErrorResult.h"
 #include "mozilla/dom/RequestBinding.h"
-#include "mozilla/dom/UnionTypes.h"
 
 class nsIGlobalObject;
 class nsIInputStream;
+class nsIGlobalObject;
 
 namespace mozilla {
 namespace dom {
 
+class ArrayBufferOrArrayBufferViewOrBlobOrScalarValueStringOrURLSearchParams;
+class InternalRequest;
+class OwningArrayBufferOrArrayBufferViewOrBlobOrScalarValueStringOrURLSearchParams;
 class Promise;
+class RequestOrScalarValueString;
+
+namespace workers {
+class WorkerPrivate;
+} // namespace workers
+
+already_AddRefed<Promise>
+FetchRequest(nsIGlobalObject* aGlobal, const RequestOrScalarValueString& aInput,
+             const RequestInit& aInit, ErrorResult& aRv);
+
+nsresult
+GetRequestReferrer(nsIGlobalObject* aGlobal, const InternalRequest* aRequest, nsCString& aReferrer);
 
 /*
  * Creates an nsIInputStream based on the fetch specifications 'extract a byte
@@ -25,7 +42,7 @@ class Promise;
  * Stores content type in out param aContentType.
  */
 nsresult
-ExtractByteStreamFromBody(const OwningArrayBufferOrArrayBufferViewOrScalarValueStringOrURLSearchParams& aBodyInit,
+ExtractByteStreamFromBody(const OwningArrayBufferOrArrayBufferViewOrBlobOrScalarValueStringOrURLSearchParams& aBodyInit,
                           nsIInputStream** aStream,
                           nsCString& aContentType);
 
@@ -33,7 +50,7 @@ ExtractByteStreamFromBody(const OwningArrayBufferOrArrayBufferViewOrScalarValueS
  * Non-owning version.
  */
 nsresult
-ExtractByteStreamFromBody(const ArrayBufferOrArrayBufferViewOrScalarValueStringOrURLSearchParams& aBodyInit,
+ExtractByteStreamFromBody(const ArrayBufferOrArrayBufferViewOrBlobOrScalarValueStringOrURLSearchParams& aBodyInit,
                           nsIInputStream** aStream,
                           nsCString& aContentType);
 
@@ -104,6 +121,7 @@ private:
   bool mBodyUsed;
   nsCString mMimeType;
 };
+
 } // namespace dom
 } // namespace mozilla
 

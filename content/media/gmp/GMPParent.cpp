@@ -60,6 +60,7 @@ GMPParent::GMPParent()
   , mAbnormalShutdownInProgress(false)
   , mAsyncShutdownRequired(false)
   , mAsyncShutdownInProgress(false)
+  , mHasAccessedStorage(false)
 {
 }
 
@@ -174,6 +175,49 @@ GMPParent::LoadProcess()
 }
 
 void
+AbortWaitingForGMPAsyncShutdown(nsITimer* aTimer, void* aClosure)
+{
+  NS_WARNING("Timed out waiting for GMP async shutdown!");
+  GMPParent* parent = reinterpret_cast<GMPParent*>(aClosure);
+  nsRefPtr<GeckoMediaPluginService> service =
+    GeckoMediaPluginService::GetGeckoMediaPluginService();
+  if (service) {
+    service->AsyncShutdownComplete(parent);
+  }
+}
+
+nsresult
+GMPParent::EnsureAsyncShutdownTimeoutSet()
+{
+  if (mAsyncShutdownTimeout) {
+    return NS_OK;
+  }
+
+  nsresult rv;
+  mAsyncShutdownTimeout = do_CreateInstance(NS_TIMER_CONTRACTID, &rv);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+
+  // Set timer to abort waiting for plugin to shutdown if it takes
+  // too long.
+  rv = mAsyncShutdownTimeout->SetTarget(mGMPThread);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+   return rv;
+  }
+
+  int32_t timeout = GMP_DEFAULT_ASYNC_SHUTDONW_TIMEOUT;
+  nsRefPtr<GeckoMediaPluginService> service =
+    GeckoMediaPluginService::GetGeckoMediaPluginService();
+  if (service) {
+    timeout = service->AsyncShutdownTimeoutMs();
+  }
+  return mAsyncShutdownTimeout->InitWithFuncCallback(
+    &AbortWaitingForGMPAsyncShutdown, this, timeout,
+    nsITimer::TYPE_ONE_SHOT);
+}
+
+void
 GMPParent::CloseIfUnused()
 {
   MOZ_ASSERT(GMPThread() == NS_GetCurrentThread());
@@ -198,7 +242,8 @@ GMPParent::CloseIfUnused()
         LOGD(("%s::%s: %p sending async shutdown notification", __CLASS__,
               __FUNCTION__, this));
         mAsyncShutdownInProgress = true;
-        if (!SendBeginAsyncShutdown()) {
+        if (!SendBeginAsyncShutdown() ||
+            NS_FAILED(EnsureAsyncShutdownTimeoutSet())) {
           AbortAsyncShutdown();
         }
       }
@@ -217,6 +262,15 @@ GMPParent::AbortAsyncShutdown()
 {
   MOZ_ASSERT(GMPThread() == NS_GetCurrentThread());
   LOGD(("%s::%s: %p", __CLASS__, __FUNCTION__, this));
+
+  if (mAsyncShutdownTimeout) {
+    mAsyncShutdownTimeout->Cancel();
+    mAsyncShutdownTimeout = nullptr;
+  }
+
+  if (!mAsyncShutdownRequired || !mAsyncShutdownInProgress) {
+    return;
+  }
 
   nsRefPtr<GMPParent> kungFuDeathGrip(this);
   mService->AsyncShutdownComplete(this);
@@ -283,6 +337,8 @@ GMPParent::Shutdown()
 {
   LOGD(("%s::%s: %p", __CLASS__, __FUNCTION__, this));
   MOZ_ASSERT(GMPThread() == NS_GetCurrentThread());
+
+  MOZ_ASSERT(!mAsyncShutdownTimeout, "Should have canceled shutdown timeout");
 
   if (mAbnormalShutdownInProgress) {
     return;
@@ -611,6 +667,12 @@ GMPParent::ActorDestroy(ActorDestroyReason aWhy)
   }
 }
 
+bool
+GMPParent::HasAccessedStorage() const
+{
+  return mHasAccessedStorage;
+}
+
 mozilla::dom::PCrashReporterParent*
 GMPParent::AllocPCrashReporterParent(const NativeThreadId& aThread)
 {
@@ -717,6 +779,7 @@ GMPParent::RecvPGMPStorageConstructor(PGMPStorageParent* aActor)
   if (NS_WARN_IF(NS_FAILED(p->Init()))) {
     return false;
   }
+  mHasAccessedStorage = true;
   return true;
 }
 

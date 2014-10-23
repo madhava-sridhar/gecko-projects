@@ -17,13 +17,13 @@
 #include "DecoderTraits.h"
 #include "nsIAudioChannelAgent.h"
 #include "mozilla/Attributes.h"
-#include "mozilla/dom/AudioChannelBinding.h"
 #include "mozilla/dom/Promise.h"
 #include "mozilla/dom/TextTrackManager.h"
 #include "MediaDecoder.h"
 #ifdef MOZ_EME
 #include "mozilla/dom/MediaKeys.h"
 #endif
+#include "nsGkAtoms.h"
 
 // Something on Linux #defines None, which is an entry in the
 // MediaWaitingFor enum, so undef it here before including the binfing,
@@ -284,13 +284,6 @@ public:
   void NotifyLoadError();
 
   void NotifyMediaTrackEnabled(MediaTrack* aTrack);
-
-  /**
-   * Called by a DOMMediaStream when it has tracks available.
-   * This allows us to setup audio and video outputs after the stream
-   * has already reported that playback started, in case they are added late.
-   */
-  void NotifyMediaStreamTracksAvailable(DOMMediaStream* aStream);
 
   virtual bool IsNodeOfType(uint32_t aFlags) const MOZ_OVERRIDE;
 
@@ -623,7 +616,6 @@ protected:
 
   class MediaLoadListener;
   class StreamListener;
-  class MediaStreamTracksAvailableCallback;
 
   virtual void GetItemValueText(nsAString& text) MOZ_OVERRIDE;
   virtual void SetItemValueText(const nsAString& text) MOZ_OVERRIDE;
@@ -1025,9 +1017,6 @@ protected:
   //   http://www.whatwg.org/specs/web-apps/current-work/#video)
   nsMediaNetworkState mNetworkState;
   nsMediaReadyState mReadyState;
-
-  // Last value passed from codec or stream source to UpdateReadyStateForData.
-  NextFrameStatus mLastNextFrameStatus;
 
   enum LoadAlgorithmState {
     // No load algorithm instance is waiting for a source to be added to the
