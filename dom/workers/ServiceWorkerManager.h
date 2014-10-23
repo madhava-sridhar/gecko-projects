@@ -287,6 +287,7 @@ class ServiceWorkerManager MOZ_FINAL : public nsIServiceWorkerManager
   friend class GetReadyPromiseRunnable;
   friend class GetRegistrationsRunnable;
   friend class GetRegistrationRunnable;
+  friend class QueueFireUpdateFoundRunnable;
   friend class UnregisterRunnable;
 
 public:
@@ -459,6 +460,10 @@ private:
 
   static void
   RemoveScope(nsTArray<nsCString>& aList, const nsACString& aScope);
+
+  void
+  QueueFireEventOnServiceWorkerRegistrations(ServiceWorkerRegistrationInfo* aRegistration,
+                                             const nsAString& aName);
 
   void
   FireEventOnServiceWorkerRegistrations(ServiceWorkerRegistrationInfo* aRegistration,

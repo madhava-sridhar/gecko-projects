@@ -231,6 +231,24 @@ ServiceWorkerRegistrationInfo::~ServiceWorkerRegistrationInfo()
   }
 }
 
+class QueueFireUpdateFoundRunnable MOZ_FINAL : public nsRunnable
+{
+  nsRefPtr<ServiceWorkerRegistrationInfo> mRegistration;
+public:
+  QueueFireUpdateFoundRunnable(ServiceWorkerRegistrationInfo* aReg)
+    : mRegistration(aReg)
+  { }
+
+  NS_IMETHOD
+  Run()
+  {
+    nsRefPtr<ServiceWorkerManager> swm = ServiceWorkerManager::GetInstance();
+    swm->FireEventOnServiceWorkerRegistrations(mRegistration,
+                                               NS_LITERAL_STRING("updatefound"));
+    return NS_OK;
+  }
+};
+
 //////////////////////////
 // ServiceWorkerManager //
 //////////////////////////
@@ -632,8 +650,9 @@ public:
       new ServiceWorkerRegistration(window, scope);
     p->MaybeResolve(swr);
 
-    swm->FireEventOnServiceWorkerRegistrations(mRegistration,
-                                               NS_LITERAL_STRING("updatefound"));
+    nsRefPtr<QueueFireUpdateFoundRunnable> upr =
+      new QueueFireUpdateFoundRunnable(mRegistration);
+    NS_DispatchToMainThread(upr);
 
     // XXXnsm this leads to double fetches right now, ideally we'll be able to
     // use the persistent cache later.
