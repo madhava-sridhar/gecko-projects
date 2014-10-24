@@ -999,8 +999,8 @@ ServiceWorkerRegistrationInfo::Activate()
   MOZ_ASSERT(mWaitingToActivate);
   mWaitingToActivate = false;
 
-  nsRefPtr<ServiceWorkerInfo> activatingWorker = mWaitingWorker.forget();
-  nsRefPtr<ServiceWorkerInfo> exitingWorker = mActiveWorker.forget();
+  nsRefPtr<ServiceWorkerInfo> activatingWorker = mWaitingWorker;
+  nsRefPtr<ServiceWorkerInfo> exitingWorker = mActiveWorker;
 
   nsRefPtr<ServiceWorkerManager> swm = ServiceWorkerManager::GetInstance();
   swm->InvalidateServiceWorkerRegistrationWorker(this, WhichServiceWorker::WAITING_WORKER | WhichServiceWorker::ACTIVE_WORKER);
@@ -1016,6 +1016,7 @@ ServiceWorkerRegistrationInfo::Activate()
   }
 
   mActiveWorker = activatingWorker.forget();
+  mWaitingWorker = nullptr;
   mActiveWorker->UpdateState(ServiceWorkerState::Activating);
 
   swm->CheckPendingReadyPromises();
