@@ -49,7 +49,10 @@ NS_IMPL_ISUPPORTS0(ServiceWorkerRegistrationInfo)
 void
 ServiceWorkerJob::Done(nsresult aStatus)
 {
-  NS_WARN_IF(NS_FAILED(aStatus));
+  if (NS_WARN_IF(NS_FAILED(aStatus))) {
+    // Windows builds complain if the return value of NS_WARN_IF isn't used.
+  }
+
   if (mQueue) {
     mQueue->Done(this);
   }
@@ -384,7 +387,6 @@ public:
   void
   Start() MOZ_OVERRIDE
   {
-    NS_WARNING(__PRETTY_FUNCTION__);
     MOZ_ASSERT(mJobType == REGISTER_JOB);
     nsCOMPtr<nsPIDOMWindow> window = do_QueryInterface(mGlobal);
 
@@ -573,7 +575,6 @@ public:
   void
   ContinueAfterInstallEvent(bool aSuccess, bool aActivateImmediately)
   {
-    NS_WARNING(__PRETTY_FUNCTION__);
     if (!mRegistration->mInstallingWorker) {
       NS_WARNING("mInstallingWorker was null.");
       return Done(NS_ERROR_DOM_ABORT_ERR);
@@ -905,7 +906,6 @@ public:
   void
   ResolvedCallback(JSContext* aCx, JS::Handle<JS::Value> aValue) MOZ_OVERRIDE
   {
-    NS_WARNING(__PRETTY_FUNCTION__);
     nsRefPtr<FinishActivationRunnable> r = new FinishActivationRunnable(true /* success */, mRegistration);
     NS_DispatchToMainThread(r);
   }
@@ -913,7 +913,6 @@ public:
   void
   RejectedCallback(JSContext* aCx, JS::Handle<JS::Value> aValue) MOZ_OVERRIDE
   {
-    NS_WARNING(__PRETTY_FUNCTION__);
     nsRefPtr<FinishActivationRunnable> r = new FinishActivationRunnable(false /* success */, mRegistration);
     NS_DispatchToMainThread(r);
   }
@@ -943,7 +942,6 @@ private:
   bool
   DispatchActivateEvent(JSContext* aCx, WorkerPrivate* aWorkerPrivate)
   {
-    NS_WARNING(__PRETTY_FUNCTION__);
     MOZ_ASSERT(aWorkerPrivate->IsServiceWorker());
     nsRefPtr<EventTarget> target = do_QueryObject(aWorkerPrivate->GlobalScope());
 
@@ -988,7 +986,6 @@ private:
 void
 ServiceWorkerRegistrationInfo::TryToActivate()
 {
-  NS_WARNING(__PRETTY_FUNCTION__);
   mWaitingToActivate = true;
   if (!IsControllingDocuments()) {
     Activate();
@@ -998,7 +995,6 @@ ServiceWorkerRegistrationInfo::TryToActivate()
 void
 ServiceWorkerRegistrationInfo::Activate()
 {
-  NS_WARNING(__PRETTY_FUNCTION__);
   MOZ_ASSERT(mWaitingToActivate);
   mWaitingToActivate = false;
 
@@ -1329,7 +1325,6 @@ ServiceWorkerManager::StorePendingReadyPromise(nsPIDOMWindow* aWindow,
                                                nsIURI* aURI,
                                                Promise* aPromise)
 {
-  NS_WARNING(__PRETTY_FUNCTION__);
   PendingReadyPromise* data;
 
   // We should not have 2 pending promises for the same window.
@@ -1351,7 +1346,6 @@ ServiceWorkerManager::CheckPendingReadyPromisesEnumerator(
                                           nsAutoPtr<PendingReadyPromise>& aData,
                                           void* aPtr)
 {
-  NS_WARNING(__PRETTY_FUNCTION__);
   ServiceWorkerManager* aSwm = static_cast<ServiceWorkerManager*>(aPtr);
 
   nsCOMPtr<nsPIDOMWindow> window = do_QueryInterface(aSupports);
@@ -1367,7 +1361,6 @@ bool
 ServiceWorkerManager::CheckReadyPromise(nsPIDOMWindow* aWindow,
                                         nsIURI* aURI, Promise* aPromise)
 {
-  NS_WARNING(__PRETTY_FUNCTION__);
   nsRefPtr<ServiceWorkerRegistrationInfo> registration =
     GetServiceWorkerRegistrationInfo(aURI);
 
@@ -1518,7 +1511,6 @@ ServiceWorkerManager::HandleError(JSContext* aCx,
 void
 ServiceWorkerRegistrationInfo::FinishActivate(bool aSuccess)
 {
-  NS_WARNING(__PRETTY_FUNCTION__);
   MOZ_ASSERT(mActiveWorker);
   if (aSuccess) {
     mActiveWorker->UpdateState(ServiceWorkerState::Activated);
@@ -2070,7 +2062,7 @@ NS_IMETHODIMP
 ServiceWorkerManager::IsControlled(nsIDocument* aDoc, bool* aIsControlled)
 {
   nsRefPtr<ServiceWorkerRegistrationInfo> registration;
-  nsresult rv = GetDocumentRegistration(aDoc, getter_AddRefs(registration));
+  GetDocumentRegistration(aDoc, getter_AddRefs(registration));
   *aIsControlled = !!registration;
   return NS_OK;
 }
