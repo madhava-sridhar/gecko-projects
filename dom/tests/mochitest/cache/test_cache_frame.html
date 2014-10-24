@@ -17,12 +17,9 @@
     var request = new Request("http://example.com/hmm?q=foobar");
     var response = new Response();
     success = success && !!caches;
-    caches.create("foobar").then(function(createCache) {
-      success = success && !!createCache;
-      return caches.get("foobar");
-    }).then(function(getCache) {
-      success = success && !!getCache;
-      c = getCache;
+    caches.open("foobar").then(function(openCache) {
+      success = success && !!openCache;
+      c = openCache;
       return c.put(request, response);
     }).then(function(putResponse) {
       success = success && !!putResponse;
@@ -73,9 +70,9 @@
       return caches.delete("foobar");
     }).then(function(deleteResult) {
       success = success && deleteResult;
-      return caches.get("foobar");
-    }).then(function(getMissingCache) {
-      success = success && getMissingCache === undefined;
+      return caches.has("foobar");
+    }).then(function(hasMissingCache) {
+      success = success && !hasMissingCache;
       parent.postMessage({
         type: "result",
         success: success

@@ -30,12 +30,10 @@ public:
   virtual bool RecvMatch(const RequestId& aRequestId,
                          const PCacheRequest& aRequest,
                          const PCacheQueryParams& aParams) MOZ_OVERRIDE;
-  virtual bool RecvGet(const RequestId& aRequestId,
-                       const nsString& aKey) MOZ_OVERRIDE;
   virtual bool RecvHas(const RequestId& aRequestId,
                        const nsString& aKey) MOZ_OVERRIDE;
-  virtual bool RecvCreate(const RequestId& aRequestId,
-                          const nsString& aKey) MOZ_OVERRIDE;
+  virtual bool RecvOpen(const RequestId& aRequestId,
+                        const nsString& aKey) MOZ_OVERRIDE;
   virtual bool RecvDelete(const RequestId& aRequestId,
                           const nsString& aKey) MOZ_OVERRIDE;
   virtual bool RecvKeys(const RequestId& aRequestId) MOZ_OVERRIDE;
@@ -44,13 +42,10 @@ public:
   virtual void OnStorageMatch(RequestId aRequestId, nsresult aRv,
                               const SavedResponse* aResponse,
                               Manager::StreamList* aStreamList) MOZ_OVERRIDE;
-  virtual void OnStorageGet(RequestId aRequestId, nsresult aRv,
-                            bool aCacheFound,
-                            CacheId aCacheId) MOZ_OVERRIDE;
   virtual void OnStorageHas(RequestId aRequestId, nsresult aRv,
                             bool aCacheFound) MOZ_OVERRIDE;
-  virtual void OnStorageCreate(RequestId aRequestId, nsresult aRv,
-                               CacheId aCacheId) MOZ_OVERRIDE;
+  virtual void OnStorageOpen(RequestId aRequestId, nsresult aRv,
+                             CacheId aCacheId) MOZ_OVERRIDE;
   virtual void OnStorageDelete(RequestId aRequestId, nsresult aRv,
                                bool aCacheDeleted) MOZ_OVERRIDE;
   virtual void OnStorageKeys(RequestId aRequestId, nsresult aRv,

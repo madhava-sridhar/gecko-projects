@@ -23,9 +23,8 @@ protocol PCacheStorage
 parent:
   Match(RequestId aRequestId, PCacheRequest aRequest,
         PCacheQueryParams aParams);
-  Get(RequestId aRequestId, nsString aKey);
   Has(RequestId aRequestId, nsString aKey);
-  Create(RequestId aRequestId, nsString aKey);
+  Open(RequestId aRequestId, nsString aKey);
   Delete(RequestId aRequestId, nsString aKey);
   Keys(RequestId aRequestId);
 
@@ -33,9 +32,8 @@ child:
   MatchResponse(RequestId aRequestId, nsresult aRv,
                 PCacheResponseOrVoid aResponseOrVoid,
                 nullable PCacheStreamControl aStreamControl);
-  GetResponse(RequestId aRequestId, nsresult aRv, nullable PCache aActor);
   HasResponse(RequestId aRequestId, nsresult aRv, bool aSuccess);
-  CreateResponse(RequestId aRequestId, nsresult aRv, nullable PCache aActor);
+  OpenResponse(RequestId aRequestId, nsresult aRv, nullable PCache aActor);
   DeleteResponse(RequestId aRequestId, nsresult aRv, bool aSuccess);
   KeysResponse(RequestId aRequestId, nsresult aRv, nsString[] aKeys);
 

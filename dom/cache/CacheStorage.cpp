@@ -119,37 +119,6 @@ CacheStorage::Match(const RequestOrScalarValueString& aRequest,
 }
 
 already_AddRefed<Promise>
-CacheStorage::Get(const nsAString& aKey, ErrorResult& aRv)
-{
-  NS_ASSERT_OWNINGTHREAD(CacheStorage);
-
-  nsRefPtr<Promise> promise = Promise::Create(mGlobal, aRv);
-  if (!promise) {
-    return nullptr;
-  }
-
-  if (mFailedActor) {
-    promise->MaybeReject(NS_ERROR_UNEXPECTED);
-    return promise.forget();
-  }
-
-  RequestId requestId = AddRequestPromise(promise, aRv);
-
-  if (!mActor) {
-    Entry* entry = mPendingRequests.AppendElement();
-    entry->mRequestId = requestId;
-    entry->mOp = OP_GET;
-    entry->mKey = aKey;
-
-    return promise.forget();
-  }
-
-  unused << mActor->SendGet(requestId, nsString(aKey));
-
-  return promise.forget();
-}
-
-already_AddRefed<Promise>
 CacheStorage::Has(const nsAString& aKey, ErrorResult& aRv)
 {
   NS_ASSERT_OWNINGTHREAD(CacheStorage);
@@ -181,7 +150,7 @@ CacheStorage::Has(const nsAString& aKey, ErrorResult& aRv)
 }
 
 already_AddRefed<Promise>
-CacheStorage::Create(const nsAString& aKey, ErrorResult& aRv)
+CacheStorage::Open(const nsAString& aKey, ErrorResult& aRv)
 {
   NS_ASSERT_OWNINGTHREAD(CacheStorage);
 
@@ -200,13 +169,13 @@ CacheStorage::Create(const nsAString& aKey, ErrorResult& aRv)
   if (!mActor) {
     Entry* entry = mPendingRequests.AppendElement();
     entry->mRequestId = requestId;
-    entry->mOp = OP_CREATE;
+    entry->mOp = OP_OPEN;
     entry->mKey = aKey;
 
     return promise.forget();
   }
 
-  unused << mActor->SendCreate(requestId, nsString(aKey));
+  unused << mActor->SendOpen(requestId, nsString(aKey));
 
   return promise.forget();
 }
@@ -330,14 +299,11 @@ CacheStorage::ActorCreated(PBackgroundChild* aActor)
         unused << mActor->SendMatch(requestId, request, params);
         break;
       }
-      case OP_GET:
-        unused << mActor->SendGet(requestId, entry.mKey);
-        break;
       case OP_HAS:
         unused << mActor->SendHas(requestId, entry.mKey);
         break;
-      case OP_CREATE:
-        unused << mActor->SendCreate(requestId, entry.mKey);
+      case OP_OPEN:
+        unused << mActor->SendOpen(requestId, entry.mKey);
         break;
       case OP_DELETE:
         unused << mActor->SendDelete(requestId, entry.mKey);
@@ -407,35 +373,6 @@ CacheStorage::RecvMatchResponse(RequestId aRequestId, nsresult aRv,
 }
 
 void
-CacheStorage::RecvGetResponse(RequestId aRequestId, nsresult aRv,
-                              PCacheChild* aActor)
-{
-  NS_ASSERT_OWNINGTHREAD(CacheStorage);
-
-  nsRefPtr<Promise> promise = RemoveRequestPromise(aRequestId);
-  if (NS_WARN_IF(!promise)) {
-    if (aActor) {
-      PCacheChild::Send__delete__(aActor);
-    }
-    return;
-  }
-
-  if (NS_FAILED(aRv)) {
-    promise->MaybeReject(aRv);
-    return;
-  }
-
-  if (!aActor) {
-    promise->MaybeResolve(JS::UndefinedHandleValue);
-    return;
-  }
-
-  nsRefPtr<Cache> cache = new Cache(mOwner, mGlobal, mOrigin, mBaseDomain,
-                                    aActor);
-  promise->MaybeResolve(cache);
-}
-
-void
 CacheStorage::RecvHasResponse(RequestId aRequestId, nsresult aRv, bool aSuccess)
 {
   NS_ASSERT_OWNINGTHREAD(CacheStorage);
@@ -455,8 +392,8 @@ CacheStorage::RecvHasResponse(RequestId aRequestId, nsresult aRv, bool aSuccess)
 }
 
 void
-CacheStorage::RecvCreateResponse(RequestId aRequestId, nsresult aRv,
-                                 PCacheChild* aActor)
+CacheStorage::RecvOpenResponse(RequestId aRequestId, nsresult aRv,
+                               PCacheChild* aActor)
 {
   NS_ASSERT_OWNINGTHREAD(CacheStorage);
 

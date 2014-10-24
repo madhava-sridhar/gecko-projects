@@ -44,16 +44,6 @@ CacheStorageChild::RecvMatchResponse(const RequestId& aRequestId,
 }
 
 bool
-CacheStorageChild::RecvGetResponse(const RequestId& aRequestId,
-                                   const nsresult& aRv,
-                                   PCacheChild* aActor)
-{
-  MOZ_ASSERT(mListener);
-  mListener->RecvGetResponse(aRequestId, aRv, aActor);
-  return true;
-}
-
-bool
 CacheStorageChild::RecvHasResponse(const RequestId& aRequestId,
                                    const nsresult& aRv,
                                    const bool& aSuccess)
@@ -64,12 +54,12 @@ CacheStorageChild::RecvHasResponse(const RequestId& aRequestId,
 }
 
 bool
-CacheStorageChild::RecvCreateResponse(const RequestId& aRequestId,
-                                      const nsresult& aRv,
-                                      PCacheChild* aActor)
+CacheStorageChild::RecvOpenResponse(const RequestId& aRequestId,
+                                    const nsresult& aRv,
+                                    PCacheChild* aActor)
 {
   MOZ_ASSERT(mListener);
-  mListener->RecvCreateResponse(aRequestId, aRv, aActor);
+  mListener->RecvOpenResponse(aRequestId, aRv, aActor);
   return true;
 }
 

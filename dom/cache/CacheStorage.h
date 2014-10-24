@@ -51,9 +51,8 @@ public:
   // webidl interface methods
   already_AddRefed<Promise> Match(const RequestOrScalarValueString& aRequest,
                                   const QueryParams& aParams, ErrorResult& aRv);
-  already_AddRefed<Promise> Get(const nsAString& aKey, ErrorResult& aRv);
   already_AddRefed<Promise> Has(const nsAString& aKey, ErrorResult& aRv);
-  already_AddRefed<Promise> Create(const nsAString& aKey, ErrorResult& aRv);
+  already_AddRefed<Promise> Open(const nsAString& aKey, ErrorResult& aRv);
   already_AddRefed<Promise> Delete(const nsAString& aKey, ErrorResult& aRv);
   already_AddRefed<Promise> Keys(ErrorResult& aRv);
 
@@ -72,12 +71,10 @@ public:
   virtual void RecvMatchResponse(RequestId aRequestId, nsresult aRv,
                            const PCacheResponseOrVoid& aResponse,
                            PCacheStreamControlChild* aStreamControl) MOZ_OVERRIDE;
-  virtual void RecvGetResponse(RequestId aRequestId, nsresult aRv,
-                               PCacheChild* aActor) MOZ_OVERRIDE;
   virtual void RecvHasResponse(RequestId aRequestId, nsresult aRv,
                                bool aSuccess) MOZ_OVERRIDE;
-  virtual void RecvCreateResponse(RequestId aRequestId, nsresult aRv,
-                                  PCacheChild* aActor) MOZ_OVERRIDE;
+  virtual void RecvOpenResponse(RequestId aRequestId, nsresult aRv,
+                                PCacheChild* aActor) MOZ_OVERRIDE;
   virtual void RecvDeleteResponse(RequestId aRequestId, nsresult aRv,
                                   bool aSuccess) MOZ_OVERRIDE;
   virtual void RecvKeysResponse(RequestId aRequestId, nsresult aRv,
@@ -100,9 +97,8 @@ private:
   enum Op
   {
     OP_MATCH,
-    OP_GET,
     OP_HAS,
-    OP_CREATE,
+    OP_OPEN,
     OP_DELETE,
     OP_KEYS
   };

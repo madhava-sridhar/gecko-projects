@@ -13,9 +13,8 @@
 interface CacheStorage {
    [Throws] Promise<Response> match((Request or ScalarValueString) request,
                                     optional QueryParams params);
-   [Throws] Promise<Cache> get(DOMString cacheName);
    [Throws] Promise<boolean> has(DOMString cacheName);
-   [Throws] Promise<Cache> create(DOMString cacheName);
+   [Throws] Promise<Cache> open(DOMString cacheName);
    [Throws] Promise<boolean> delete(DOMString cacheName);
    [Throws] Promise<sequence<DOMString>> keys();
 };

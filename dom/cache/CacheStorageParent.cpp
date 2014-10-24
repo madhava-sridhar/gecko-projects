@@ -62,13 +62,6 @@ CacheStorageParent::RecvMatch(const RequestId& aRequestId,
 }
 
 bool
-CacheStorageParent::RecvGet(const RequestId& aRequestId, const nsString& aKey)
-{
-  mManager->StorageGet(this, aRequestId, mNamespace, aKey);
-  return true;
-}
-
-bool
 CacheStorageParent::RecvHas(const RequestId& aRequestId, const nsString& aKey)
 {
   mManager->StorageHas(this, aRequestId, mNamespace, aKey);
@@ -76,10 +69,10 @@ CacheStorageParent::RecvHas(const RequestId& aRequestId, const nsString& aKey)
 }
 
 bool
-CacheStorageParent::RecvCreate(const RequestId& aRequestId,
+CacheStorageParent::RecvOpen(const RequestId& aRequestId,
                                const nsString& aKey)
 {
-  mManager->StorageCreate(this, aRequestId, mNamespace, aKey);
+  mManager->StorageOpen(this, aRequestId, mNamespace, aKey);
   return true;
 }
 
@@ -131,21 +124,6 @@ CacheStorageParent::OnStorageMatch(RequestId aRequestId, nsresult aRv,
 }
 
 void
-CacheStorageParent::OnStorageGet(RequestId aRequestId, nsresult aRv,
-                                 bool aCacheFound, CacheId aCacheId)
-{
-  if (NS_FAILED(aRv) || !aCacheFound) {
-    unused << SendGetResponse(aRequestId, aRv, nullptr);
-    return;
-  }
-
-  CacheParent* actor = new CacheParent(mOrigin, mBaseDomain, aCacheId);
-  PCacheParent* base = Manager()->SendPCacheConstructor(actor);
-  actor = static_cast<CacheParent*>(base);
-  unused << SendGetResponse(aRequestId, aRv, actor);
-}
-
-void
 CacheStorageParent::OnStorageHas(RequestId aRequestId, nsresult aRv,
                                  bool aCacheFound)
 {
@@ -153,18 +131,18 @@ CacheStorageParent::OnStorageHas(RequestId aRequestId, nsresult aRv,
 }
 
 void
-CacheStorageParent::OnStorageCreate(RequestId aRequestId, nsresult aRv,
-                                    CacheId aCacheId)
+CacheStorageParent::OnStorageOpen(RequestId aRequestId, nsresult aRv,
+                                  CacheId aCacheId)
 {
   if (NS_FAILED(aRv)) {
-    unused << SendCreateResponse(aRequestId, aRv, nullptr);
+    unused << SendOpenResponse(aRequestId, aRv, nullptr);
     return;
   }
 
   CacheParent* actor = new CacheParent(mOrigin, mBaseDomain, aCacheId);
   PCacheParent* base = Manager()->SendPCacheConstructor(actor);
   actor = static_cast<CacheParent*>(base);
-  unused << SendCreateResponse(aRequestId, aRv, actor);
+  unused << SendOpenResponse(aRequestId, aRv, actor);
 }
 
 void

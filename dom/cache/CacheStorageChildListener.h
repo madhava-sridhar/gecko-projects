@@ -34,12 +34,10 @@ public:
   virtual void RecvMatchResponse(RequestId aRequestId, nsresult aRv,
                                  const PCacheResponseOrVoid& aResponse,
                                  PCacheStreamControlChild* aStreamControl)=0;
-  virtual void RecvGetResponse(cache::RequestId aRequestId,
-                               nsresult aRv, PCacheChild* aActor)=0;
   virtual void RecvHasResponse(cache::RequestId aRequestId, nsresult aRv,
                                bool aSuccess)=0;
-  virtual void RecvCreateResponse(cache::RequestId aRequestId, nsresult aRv,
-                                  PCacheChild* aActor)=0;
+  virtual void RecvOpenResponse(cache::RequestId aRequestId, nsresult aRv,
+                                PCacheChild* aActor)=0;
   virtual void RecvDeleteResponse(cache::RequestId aRequestId, nsresult aRv,
                                   bool aSuccess)=0;
   virtual void RecvKeysResponse(cache::RequestId aRequestId, nsresult aRv,

@@ -27,15 +27,12 @@ public:
                              const nsresult& aRv,
                              const PCacheResponseOrVoid& response,
                              PCacheStreamControlChild* aStreamControl) MOZ_OVERRIDE;
-  virtual bool RecvGetResponse(const cache::RequestId& aRequestId,
-                               const nsresult& aRv,
-                               PCacheChild* aActor) MOZ_OVERRIDE;
   virtual bool RecvHasResponse(const cache::RequestId& aRequestId,
                                const nsresult& aRv,
                                const bool& aSuccess) MOZ_OVERRIDE;
-  virtual bool RecvCreateResponse(const cache::RequestId& aRequestId,
-                                  const nsresult& aRv,
-                                  PCacheChild* aActor) MOZ_OVERRIDE;
+  virtual bool RecvOpenResponse(const cache::RequestId& aRequestId,
+                                const nsresult& aRv,
+                                PCacheChild* aActor) MOZ_OVERRIDE;
   virtual bool RecvDeleteResponse(const cache::RequestId& aRequestId,
                                   const nsresult& aRv,
                                   const bool& aResult) MOZ_OVERRIDE;

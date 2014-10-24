@@ -105,12 +105,10 @@ public:
     virtual void OnStorageMatch(RequestId aRequestId, nsresult aRv,
                                 const SavedResponse* aResponse,
                                 StreamList* aStreamList) { }
-    virtual void OnStorageGet(RequestId aRequestId, nsresult aRv,
-                              bool aCacheFound, CacheId aCacheId) { }
     virtual void OnStorageHas(RequestId aRequestId, nsresult aRv,
                               bool aCacheFound) { }
-    virtual void OnStorageCreate(RequestId aRequestId, nsresult aRv,
-                                 CacheId aCacheId) { }
+    virtual void OnStorageOpen(RequestId aRequestId, nsresult aRv,
+                               CacheId aCacheId) { }
     virtual void OnStorageDelete(RequestId aRequestId, nsresult aRv,
                                  bool aCacheDeleted) { }
     virtual void OnStorageKeys(RequestId aRequestId, nsresult aRv,
@@ -149,12 +147,10 @@ public:
   void StorageMatch(Listener* aListener, RequestId aRequestId,
                     Namespace aNamespace, const PCacheRequest& aRequest,
                     const PCacheQueryParams& aParams);
-  void StorageGet(Listener* aListener, RequestId aRequestId,
-                  Namespace aNamespace, const nsAString& aKey);
   void StorageHas(Listener* aListener, RequestId aRequestId,
                   Namespace aNamespace, const nsAString& aKey);
-  void StorageCreate(Listener* aListener, RequestId aRequestId,
-                     Namespace aNamespace, const nsAString& aKey);
+  void StorageOpen(Listener* aListener, RequestId aRequestId,
+                   Namespace aNamespace, const nsAString& aKey);
   void StorageDelete(Listener* aListener, RequestId aRequestId,
                      Namespace aNamespace, const nsAString& aKey);
   void StorageKeys(Listener* aListener, RequestId aRequestId,
@@ -179,9 +175,8 @@ private:
   class CacheKeysAction;
 
   class StorageMatchAction;
-  class StorageGetAction;
   class StorageHasAction;
-  class StorageCreateAction;
+  class StorageOpenAction;
   class StorageDeleteAction;
   class StorageKeysAction;
 

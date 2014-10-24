@@ -847,49 +847,26 @@ protected:
   SavedResponse mSavedResponse;
 };
 
-class Manager::StorageGetAction : public Manager::BaseAction
+class Manager::StorageHasAction : public Manager::BaseAction
 {
 public:
-  StorageGetAction(Manager* aManager, ListenerId aListenerId,
+  StorageHasAction(Manager* aManager, ListenerId aListenerId,
                    RequestId aRequestId, Namespace aNamespace,
                    const nsAString& aKey)
     : BaseAction(aManager, aListenerId, aRequestId)
     , mNamespace(aNamespace)
     , mKey(aKey)
     , mCacheFound(false)
-    , mCacheId(0)
   { }
 
   virtual nsresult
   RunSyncWithDBOnTarget(nsIFile* aDBDir,
                         mozIStorageConnection* aConn) MOZ_OVERRIDE
   {
+    CacheId cacheId;
     return DBSchema::StorageGetCacheId(aConn, mNamespace, mKey,
-                                       &mCacheFound, &mCacheId);
+                                       &mCacheFound, &cacheId);
   }
-
-  virtual void
-  Complete(Listener* aListener, nsresult aRv) MOZ_OVERRIDE
-  {
-    aListener->OnStorageGet(mRequestId, aRv, mCacheFound, mCacheId);
-  }
-
-protected:
-  virtual ~StorageGetAction() { }
-  const Namespace mNamespace;
-  const nsString mKey;
-  bool mCacheFound;
-  CacheId mCacheId;
-};
-
-class Manager::StorageHasAction MOZ_FINAL : public Manager::StorageGetAction
-{
-public:
-  StorageHasAction(Manager* aManager, ListenerId aListenerId,
-                   RequestId aRequestId, Namespace aNamespace,
-                   const nsAString& aKey)
-    : StorageGetAction(aManager, aListenerId, aRequestId, aNamespace, aKey)
-  { }
 
   virtual void
   Complete(Listener* aListener, nsresult aRv) MOZ_OVERRIDE
@@ -897,16 +874,19 @@ public:
     aListener->OnStorageHas(mRequestId, aRv, mCacheFound);
   }
 
-private:
+protected:
   virtual ~StorageHasAction() { }
+  const Namespace mNamespace;
+  const nsString mKey;
+  bool mCacheFound;
 };
 
-class Manager::StorageCreateAction MOZ_FINAL : public Manager::BaseAction
+class Manager::StorageOpenAction MOZ_FINAL : public Manager::BaseAction
 {
 public:
-  StorageCreateAction(Manager* aManager, ListenerId aListenerId,
-                      RequestId aRequestId, Namespace aNamespace,
-                      const nsAString& aKey)
+  StorageOpenAction(Manager* aManager, ListenerId aListenerId,
+                    RequestId aRequestId, Namespace aNamespace,
+                    const nsAString& aKey)
     : BaseAction(aManager, aListenerId, aRequestId)
     , mNamespace(aNamespace)
     , mKey(aKey)
@@ -917,10 +897,20 @@ public:
   RunSyncWithDBOnTarget(nsIFile* aDBDir,
                         mozIStorageConnection* aConn) MOZ_OVERRIDE
   {
+    // Look for existing cache
+    bool cacheFound;
+    nsresult rv = DBSchema::StorageGetCacheId(aConn, mNamespace, mKey,
+                                              &cacheFound, &mCacheId);
+    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
+    if (cacheFound) {
+      return rv;
+    }
+
+    // Cache does not exist, create it instead
     mozStorageTransaction trans(aConn, false,
                                 mozIStorageConnection::TRANSACTION_IMMEDIATE);
 
-    nsresult rv = DBSchema::CreateCache(aConn, &mCacheId);
+    rv = DBSchema::CreateCache(aConn, &mCacheId);
     if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 
     rv = DBSchema::StoragePutCache(aConn, mNamespace, mKey, mCacheId);
@@ -935,11 +925,11 @@ public:
   virtual void
   Complete(Listener* aListener, nsresult aRv) MOZ_OVERRIDE
   {
-    aListener->OnStorageCreate(mRequestId, aRv, mCacheId);
+    aListener->OnStorageOpen(mRequestId, aRv, mCacheId);
   }
 
 private:
-  virtual ~StorageCreateAction() { }
+  virtual ~StorageOpenAction() { }
   const Namespace mNamespace;
   const nsString mKey;
   CacheId mCacheId;
@@ -1369,23 +1359,6 @@ Manager::StorageMatch(Listener* aListener, RequestId aRequestId,
 }
 
 void
-Manager::StorageGet(Listener* aListener, RequestId aRequestId,
-                    Namespace aNamespace, const nsAString& aKey)
-{
-  NS_ASSERT_OWNINGTHREAD(Manager);
-  MOZ_ASSERT(aListener);
-  if (mShuttingDown) {
-    aListener->OnStorageGet(aRequestId, NS_ERROR_ILLEGAL_DURING_SHUTDOWN,
-                            false, 0);
-    return;
-  }
-  ListenerId listenerId = SaveListener(aListener);
-  nsRefPtr<Action> action = new StorageGetAction(this, listenerId, aRequestId,
-                                                 aNamespace, aKey);
-  CurrentContext()->Dispatch(mIOThread, action);
-}
-
-void
 Manager::StorageHas(Listener* aListener, RequestId aRequestId,
                     Namespace aNamespace, const nsAString& aKey)
 {
@@ -1403,18 +1376,18 @@ Manager::StorageHas(Listener* aListener, RequestId aRequestId,
 }
 
 void
-Manager::StorageCreate(Listener* aListener, RequestId aRequestId,
-                       Namespace aNamespace, const nsAString& aKey)
+Manager::StorageOpen(Listener* aListener, RequestId aRequestId,
+                     Namespace aNamespace, const nsAString& aKey)
 {
   NS_ASSERT_OWNINGTHREAD(Manager);
   MOZ_ASSERT(aListener);
   if (mShuttingDown) {
-    aListener->OnStorageCreate(aRequestId, NS_ERROR_ILLEGAL_DURING_SHUTDOWN, 0);
+    aListener->OnStorageOpen(aRequestId, NS_ERROR_ILLEGAL_DURING_SHUTDOWN, 0);
     return;
   }
   ListenerId listenerId = SaveListener(aListener);
-  nsRefPtr<Action> action = new StorageCreateAction(this, listenerId, aRequestId,
-                                                    aNamespace, aKey);
+  nsRefPtr<Action> action = new StorageOpenAction(this, listenerId, aRequestId,
+                                                  aNamespace, aKey);
   CurrentContext()->Dispatch(mIOThread, action);
 }
 

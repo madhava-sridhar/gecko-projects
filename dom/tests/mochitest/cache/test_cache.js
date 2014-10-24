@@ -1,9 +1,6 @@
 ok(!!caches, 'caches object should be available on global');
-caches.create('snafu').then(function(createCache) {
-  ok(!!createCache, 'cache object should be resolved from caches.create');
-  return caches.get('snafu');
-}).then(function(getCache) {
-  ok(!!getCache, 'cache object should be resolved from caches.get');
+caches.open('snafu').then(function(openCache) {
+  ok(!!openCache, 'cache object should be resolved from caches.open');
   return caches.has('snafu');
 }).then(function(hasResult) {
   ok(hasResult, 'caches.has() should resolve true');
@@ -15,8 +12,8 @@ caches.create('snafu').then(function(createCache) {
   return caches.delete('snafu');
 }).then(function(deleteResult) {
   ok(deleteResult, 'caches.delete() should resolve true');
-  return caches.get('snafu');
-}).then(function(getMissingCache) {
-  is(undefined, getMissingCache, 'missing key should resolve to undefined cache');
+  return caches.has('snafu');
+}).then(function(hasMissingCache) {
+  ok(!hasMissingCache, 'missing key should return false from has');
   workerTestDone();
 });
