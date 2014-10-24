@@ -101,8 +101,9 @@ class FinishResponse : public nsRunnable {
 class RespondWithHandler MOZ_FINAL : public PromiseNativeHandler {
   nsMainThreadPtrHandle<nsIInterceptedChannel> mInterceptedChannel;
 
-  void CancelRequest();
 public:
+  void CancelRequest();
+
   RespondWithHandler(nsMainThreadPtrHandle<nsIInterceptedChannel>& aChannel)
   : mInterceptedChannel(aChannel)
   {
@@ -137,7 +138,7 @@ class AutoCancel
 
 public:
   AutoCancel(RespondWithHandler* aOwner)
-  : mOwner(aOWner)
+  : mOwner(aOwner)
   {
   }
 
@@ -187,7 +188,7 @@ RespondWithHandler::ResolvedCallback(JSContext* aCx, JS::Handle<JS::Value> aValu
     return;
   }
 
-  autoCancel->Reset();
+  autoCancel.Reset();
 }
 
 class CancelChannelRunnable: public nsRunnable {
