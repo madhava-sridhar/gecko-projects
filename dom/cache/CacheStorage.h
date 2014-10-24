@@ -7,6 +7,7 @@
 #ifndef mozilla_dom_cache_CacheStorage_h
 #define mozilla_dom_cache_CacheStorage_h
 
+#include "mozilla/dom/CacheBinding.h"
 #include "mozilla/dom/cache/CacheStorageChildListener.h"
 #include "mozilla/dom/cache/Types.h"
 #include "nsAutoPtr.h"
@@ -29,8 +30,8 @@ namespace ipc {
 namespace dom {
 
 class Promise;
-struct QueryParams;
-class RequestOrScalarValueString;
+//struct QueryParams;
+//class RequestOrScalarValueString;
 
 namespace cache {
 
@@ -95,6 +96,36 @@ private:
   const nsCString mBaseDomain;
   CacheStorageChild* mActor;
   nsTArray<nsRefPtr<Promise>> mRequestPromises;
+
+  enum Op
+  {
+    OP_MATCH,
+    OP_GET,
+    OP_HAS,
+    OP_CREATE,
+    OP_DELETE,
+    OP_KEYS
+  };
+
+  struct Entry
+  {
+    Entry() { }
+    ~Entry() { }
+    RequestId mRequestId;
+    Op mOp;
+    // Would prefer to use PCacheRequest/PCacheQueryParams, but can't
+    // because they introduce a header dependency on windows.h which
+    // breaks the bindings build.
+    RequestOrScalarValueString mRequest;
+    QueryParams mParams;
+    // It would also be nice to union the key with the match args above,
+    // but VS2013 doesn't like these types in unions because of copy
+    // constructors.
+    nsString mKey;
+  };
+
+  nsTArray<Entry> mPendingRequests;
+  bool mFailedActor;
 
 public:
   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
