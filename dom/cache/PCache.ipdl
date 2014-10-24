@@ -33,12 +33,9 @@ child:
                 nullable PCacheStreamControl aStreamControl);
   MatchAllResponse(RequestId requestId, nsresult aRv, PCacheResponse[] responses,
                    nullable PCacheStreamControl aStreamControl);
-  AddResponse(RequestId requestId, nsresult aRv, PCacheResponseOrVoid response,
-              nullable PCacheStreamControl aStreamControl);
-  AddAllResponse(RequestId requestId, nsresult aRv, PCacheResponse[] responses,
-                 nullable PCacheStreamControl aStreamControl);
-  PutResponse(RequestId requestId, nsresult aRv, PCacheResponseOrVoid response,
-              nullable PCacheStreamControl aStreamControl);
+  AddResponse(RequestId requestId, nsresult aRv);
+  AddAllResponse(RequestId requestId, nsresult aRv);
+  PutResponse(RequestId requestId, nsresult aRv);
   DeleteResponse(RequestId requestId, nsresult aRv, bool success);
   KeysResponse(RequestId requestId, nsresult aRv, PCacheRequest[] requests,
                nullable PCacheStreamControl aStreamControl);

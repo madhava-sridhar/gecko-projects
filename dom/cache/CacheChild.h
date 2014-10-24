@@ -38,17 +38,14 @@ public:
                        const nsTArray<PCacheResponse>& responses,
                        PCacheStreamControlChild* aStreamControl) MOZ_OVERRIDE;
   virtual bool
-  RecvAddResponse(const RequestId& requestId, const nsresult& aRv,
-                  const PCacheResponseOrVoid& response,
-                  PCacheStreamControlChild* aStreamControl) MOZ_OVERRIDE;
+  RecvAddResponse(const RequestId& requestId, const nsresult& aRv) MOZ_OVERRIDE;
+
   virtual bool
-  RecvAddAllResponse(const RequestId& requestId, const nsresult& aRv,
-                     const nsTArray<PCacheResponse>& responses,
-                     PCacheStreamControlChild* aStreamControl) MOZ_OVERRIDE;
+  RecvAddAllResponse(const RequestId& requestId,
+                     const nsresult& aRv) MOZ_OVERRIDE;
   virtual bool
-  RecvPutResponse(const RequestId& aRequestId, const nsresult& aRv,
-                  const PCacheResponseOrVoid& aResponse,
-                  PCacheStreamControlChild* aStreamControl) MOZ_OVERRIDE;
+  RecvPutResponse(const RequestId& aRequestId,
+                  const nsresult& aRv) MOZ_OVERRIDE;
   virtual bool
   RecvDeleteResponse(const RequestId& requestId, const nsresult& aRv,
                      const bool& result) MOZ_OVERRIDE;

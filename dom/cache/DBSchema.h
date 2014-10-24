@@ -56,8 +56,7 @@ public:
                            const nsID* aRequestBodyId,
                            const PCacheResponse& aResponse,
                            const nsID* aResponseBodyId,
-                           nsTArray<nsID>& aDeletedBodyIdListOut,
-                           SavedResponse* aSavedResponseOut);
+                           nsTArray<nsID>& aDeletedBodyIdListOut);
   static nsresult CacheDelete(mozIStorageConnection* aConn, CacheId aCacheId,
                               const PCacheRequest& aRequest,
                               const PCacheQueryParams& aParams,
@@ -107,8 +106,7 @@ private:
                               const PCacheRequest& aRequest,
                               const nsID* aRequestBodyId,
                               const PCacheResponse& aResponse,
-                              const nsID* aResponseBodyId,
-                              SavedResponse* aSavedResponseOut);
+                              const nsID* aResponseBodyId);
   static nsresult ReadResponse(mozIStorageConnection* aConn, EntryId aEntryId,
                                SavedResponse* aSavedResponseOut);
   static nsresult ReadRequest(mozIStorageConnection* aConn, EntryId aEntryId,

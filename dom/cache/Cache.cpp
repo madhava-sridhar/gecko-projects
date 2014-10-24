@@ -345,9 +345,7 @@ Cache::RecvMatchAllResponse(RequestId aRequestId, nsresult aRv,
 }
 
 void
-Cache::RecvAddResponse(RequestId aRequestId, nsresult aRv,
-                       const PCacheResponseOrVoid& aResponse,
-                       PCacheStreamControlChild* aStreamControl)
+Cache::RecvAddResponse(RequestId aRequestId, nsresult aRv)
 {
   nsRefPtr<Promise> promise = RemoveRequestPromise(aRequestId);
   if (NS_WARN_IF(!promise)) {
@@ -359,15 +357,11 @@ Cache::RecvAddResponse(RequestId aRequestId, nsresult aRv,
     return;
   }
 
-  nsRefPtr<Response> response = TypeUtils::ToResponse(mGlobal, aResponse,
-                                                      aStreamControl);
-  promise->MaybeResolve(response);
+  promise->MaybeResolve(JS::UndefinedHandleValue);
 }
 
 void
-Cache::RecvAddAllResponse(RequestId aRequestId, nsresult aRv,
-                          const nsTArray<PCacheResponse>& aResponses,
-                          PCacheStreamControlChild* aStreamControl)
+Cache::RecvAddAllResponse(RequestId aRequestId, nsresult aRv)
 {
   nsRefPtr<Promise> promise = RemoveRequestPromise(aRequestId);
   if (NS_WARN_IF(!promise)) {
@@ -379,19 +373,11 @@ Cache::RecvAddAllResponse(RequestId aRequestId, nsresult aRv,
     return;
   }
 
-  nsTArray<nsRefPtr<Response>> responses;
-  for (uint32_t i = 0; i < aResponses.Length(); ++i) {
-    nsRefPtr<Response> response = TypeUtils::ToResponse(mGlobal, aResponses[i],
-                                                        aStreamControl);
-    responses.AppendElement(response);
-  }
-  promise->MaybeResolve(responses);
+  promise->MaybeResolve(JS::UndefinedHandleValue);
 }
 
 void
-Cache::RecvPutResponse(RequestId aRequestId, nsresult aRv,
-                       const PCacheResponseOrVoid& aResponse,
-                       PCacheStreamControlChild* aStreamControl)
+Cache::RecvPutResponse(RequestId aRequestId, nsresult aRv)
 {
   nsRefPtr<Promise> promise = RemoveRequestPromise(aRequestId);
   if (NS_WARN_IF(!promise)) {
@@ -403,14 +389,7 @@ Cache::RecvPutResponse(RequestId aRequestId, nsresult aRv,
     return;
   }
 
-  if (aResponse.type() == PCacheResponseOrVoid::Tvoid_t) {
-    promise->MaybeResolve(nullptr);
-    return;
-  }
-
-  nsRefPtr<Response> response = TypeUtils::ToResponse(mGlobal, aResponse,
-                                                      aStreamControl);
-  promise->MaybeResolve(response);
+  promise->MaybeResolve(JS::UndefinedHandleValue);
 }
 
 void

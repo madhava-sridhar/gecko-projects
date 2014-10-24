@@ -81,17 +81,12 @@ public:
                        const nsTArray<PCacheResponse>& aResponses,
                        PCacheStreamControlChild* aStreamControl) MOZ_OVERRIDE;
   virtual void
-  RecvAddResponse(RequestId aRequestId, nsresult aRv,
-                  const PCacheResponseOrVoid& aResponse,
-                  PCacheStreamControlChild* aStreamControl) MOZ_OVERRIDE;
+  RecvAddResponse(RequestId aRequestId, nsresult aRv) MOZ_OVERRIDE;
   virtual void
-  RecvAddAllResponse(RequestId aRequestId, nsresult aRv,
-                     const nsTArray<PCacheResponse>& aResponses,
-                     PCacheStreamControlChild* aStreamControl) MOZ_OVERRIDE;
+  RecvAddAllResponse(RequestId aRequestId, nsresult aRv) MOZ_OVERRIDE;
   virtual void
-  RecvPutResponse(RequestId aRequestId, nsresult aRv,
-                  const PCacheResponseOrVoid& aResponse,
-                  PCacheStreamControlChild* aStreamControl);
+  RecvPutResponse(RequestId aRequestId, nsresult aRv) MOZ_OVERRIDE;
+
   virtual void
   RecvDeleteResponse(RequestId aRequestId, nsresult aRv,
                      bool aSuccess) MOZ_OVERRIDE;

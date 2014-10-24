@@ -500,7 +500,7 @@ public:
                             mRequestBodyStream ? &mRequestBodyId : nullptr,
                             mResponse,
                             mResponseBodyStream ? &mResponseBodyId : nullptr,
-                            deletedBodyIdList, &mSavedResponse);
+                            deletedBodyIdList);
     if (NS_WARN_IF(NS_FAILED(rv))) {
       DoResolve(rv);
       return;
@@ -510,23 +510,6 @@ public:
     if (NS_WARN_IF(NS_FAILED(rv))) {
       DoResolve(rv);
       return;
-    }
-
-    if (mSavedResponse.mHasBodyId) {
-      nsCOMPtr<nsIInputStream> stream;
-      rv = FileUtils::BodyOpen(mManager->Origin(), mManager->BaseDomain(),
-                               mDBDir, mCacheId, mSavedResponse.mBodyId,
-                               getter_AddRefs(stream));
-      if (NS_WARN_IF(NS_FAILED(rv))) {
-        DoResolve(rv);
-        return;
-      }
-      if (NS_WARN_IF(!stream)) {
-        DoResolve(NS_ERROR_FILE_NOT_FOUND);
-        return;
-      }
-
-      mStreamList->Add(mSavedResponse.mBodyId, stream);
     }
 
     rv = trans.Commit();
@@ -548,10 +531,10 @@ public:
       return;
     }
     if (NS_FAILED(aRv)) {
-      listener->OnCachePut(mRequestId, aRv, nullptr, nullptr);
+      listener->OnCachePut(mRequestId, aRv);
     } else {
       mStreamList->Activate(mCacheId);
-      listener->OnCachePut(mRequestId, aRv, &mSavedResponse, mStreamList);
+      listener->OnCachePut(mRequestId, aRv);
     }
     mStreamList = nullptr;
   }
@@ -662,7 +645,6 @@ private:
   nsCOMPtr<nsISupports> mRequestBodyCopyContext;
   nsID mResponseBodyId;
   nsCOMPtr<nsISupports> mResponseBodyCopyContext;
-  SavedResponse mSavedResponse;
 };
 
 class Manager::CacheDeleteAction MOZ_FINAL : public Manager::BaseAction
@@ -1287,8 +1269,7 @@ Manager::CachePut(Listener* aListener, RequestId aRequestId, CacheId aCacheId,
   NS_ASSERT_OWNINGTHREAD(Manager);
   MOZ_ASSERT(aListener);
   if (mShuttingDown) {
-    aListener->OnCachePut(aRequestId, NS_ERROR_ILLEGAL_DURING_SHUTDOWN,
-                          nullptr, nullptr);
+    aListener->OnCachePut(aRequestId, NS_ERROR_ILLEGAL_DURING_SHUTDOWN);
     return;
   }
   nsRefPtr<StreamList> streamList = new StreamList(this, CurrentContext());

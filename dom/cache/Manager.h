@@ -93,9 +93,7 @@ public:
     virtual void OnCacheMatchAll(RequestId aRequestId, nsresult aRv,
                                  const nsTArray<SavedResponse>& aSavedResponses,
                                  StreamList* aStreamList) { }
-    virtual void OnCachePut(RequestId aRequestId, nsresult aRv,
-                            const SavedResponse* aSavedResponse,
-                            StreamList* aStreamList) { }
+    virtual void OnCachePut(RequestId aRequestId, nsresult aRv) { }
     virtual void OnCacheDelete(RequestId aRequestId, nsresult aRv,
                                bool aSuccess) { }
     virtual void OnCacheKeys(RequestId aRequestId, nsresult aRv,

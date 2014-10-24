@@ -22,7 +22,7 @@
       c = openCache;
       return c.put(request, response);
     }).then(function(putResponse) {
-      success = success && !!putResponse;
+      success = success && putResponse === undefined;
       return c.keys(request);
     }).then(function(keys) {
       success = success && !!keys;

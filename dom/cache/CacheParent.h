@@ -61,9 +61,7 @@ public:
   virtual void OnCacheMatchAll(RequestId aRequestId, nsresult aRv,
                                const nsTArray<SavedResponse>& aSavedResponses,
                                Manager::StreamList* aStreamList) MOZ_OVERRIDE;
-  virtual void OnCachePut(RequestId aRequestId, nsresult aRv,
-                          const SavedResponse* aSavedResponse,
-                          Manager::StreamList* aStreamList) MOZ_OVERRIDE;
+  virtual void OnCachePut(RequestId aRequestId, nsresult aRv) MOZ_OVERRIDE;
   virtual void OnCacheDelete(RequestId aRequestId, nsresult aRv,
                              bool aSuccess) MOZ_OVERRIDE;
   virtual void OnCacheKeys(RequestId aRequestId, nsresult aRv,

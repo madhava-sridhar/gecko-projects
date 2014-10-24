@@ -297,11 +297,9 @@ DBSchema::CachePut(mozIStorageConnection* aConn, CacheId aCacheId,
                    const nsID* aRequestBodyId,
                    const PCacheResponse& aResponse,
                    const nsID* aResponseBodyId,
-                   nsTArray<nsID>& aDeletedBodyIdListOut,
-                   SavedResponse* aSavedResponseOut)
+                   nsTArray<nsID>& aDeletedBodyIdListOut)
 {
   MOZ_ASSERT(aConn);
-  MOZ_ASSERT(aSavedResponseOut);
 
   PCacheQueryParams params(false, false, false, false, false,
                            NS_LITERAL_STRING(""));
@@ -313,7 +311,7 @@ DBSchema::CachePut(mozIStorageConnection* aConn, CacheId aCacheId,
   if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 
   rv = InsertEntry(aConn, aCacheId, aRequest, aRequestBodyId, aResponse,
-                   aResponseBodyId, aSavedResponseOut);
+                   aResponseBodyId);
   if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 
   return rv;
@@ -845,7 +843,7 @@ DBSchema::DeleteEntries(mozIStorageConnection* aConn,
   rv = state->Execute();
   if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 
-  return NS_OK;
+  return rv;
 }
 
 // static
@@ -854,11 +852,9 @@ DBSchema::InsertEntry(mozIStorageConnection* aConn, CacheId aCacheId,
                       const PCacheRequest& aRequest,
                       const nsID* aRequestBodyId,
                       const PCacheResponse& aResponse,
-                      const nsID* aResponseBodyId,
-                      SavedResponse* aSavedResponseOut)
+                      const nsID* aResponseBodyId)
 {
   MOZ_ASSERT(aConn);
-  MOZ_ASSERT(aSavedResponseOut);
 
   nsCOMPtr<mozIStorageStatement> state;
   nsresult rv = aConn->CreateStatement(NS_LITERAL_CSTRING(
@@ -994,12 +990,7 @@ DBSchema::InsertEntry(mozIStorageConnection* aConn, CacheId aCacheId,
     if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
   }
 
-  rv = ReadResponse(aConn, entryId, aSavedResponseOut);
-  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
-
-  aSavedResponseOut->mCacheId = aCacheId;
-
-  return NS_OK;
+  return rv;
 }
 
 // static

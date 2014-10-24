@@ -39,17 +39,14 @@ public:
                        const nsTArray<PCacheResponse>& aResponses,
                        PCacheStreamControlChild* aStreamControl)=0;
   virtual void
-  RecvAddResponse(RequestId aRequestId, nsresult aRv,
-                  const PCacheResponseOrVoid& aResponse,
-                  PCacheStreamControlChild* aStreamControl)=0;
+  RecvAddResponse(RequestId aRequestId, nsresult aRv)=0;
+
   virtual void
-  RecvAddAllResponse(RequestId aRequestId, nsresult aRv,
-                     const nsTArray<PCacheResponse>& aResponses,
-                     PCacheStreamControlChild* aStreamControl)=0;
+  RecvAddAllResponse(RequestId aRequestId, nsresult aRv)=0;
+
   virtual void
-  RecvPutResponse(RequestId aRequestId, nsresult aRv,
-                  const PCacheResponseOrVoid& aResponse,
-                  PCacheStreamControlChild* aStreamControl)=0;
+  RecvPutResponse(RequestId aRequestId, nsresult aRv)=0;
+
   virtual void
   RecvDeleteResponse(RequestId aRequestId, nsresult aRv,
                      bool aSuccess)=0;

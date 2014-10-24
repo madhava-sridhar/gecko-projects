@@ -72,10 +72,7 @@ CacheParent::RecvMatchAll(const RequestId& aRequestId,
 bool
 CacheParent::RecvAdd(const RequestId& aRequestId, const PCacheRequest& aRequest)
 {
-  PCacheResponseOrVoid responseOrVoid;
-  responseOrVoid = void_t();
-  unused << SendAddResponse(aRequestId, NS_ERROR_NOT_IMPLEMENTED,
-                            responseOrVoid, nullptr);
+  unused << SendAddResponse(aRequestId, NS_ERROR_NOT_IMPLEMENTED);
   return true;
 }
 
@@ -84,8 +81,7 @@ CacheParent::RecvAddAll(const RequestId& aRequestId,
                         const nsTArray<PCacheRequest>& aRequests)
 {
   nsTArray<PCacheResponse> responses;
-  unused << SendAddAllResponse(aRequestId, NS_ERROR_NOT_IMPLEMENTED, responses,
-                               nullptr);
+  unused << SendAddAllResponse(aRequestId, NS_ERROR_NOT_IMPLEMENTED);
   return true;
 }
 
@@ -187,36 +183,10 @@ CacheParent::OnCacheMatchAll(RequestId aRequestId, nsresult aRv,
 }
 
 void
-CacheParent::OnCachePut(RequestId aRequestId, nsresult aRv,
-                        const SavedResponse* aSavedResponse,
-                        Manager::StreamList* aStreamList)
+CacheParent::OnCachePut(RequestId aRequestId, nsresult aRv)
 {
-  PCacheResponseOrVoid responseOrVoid;
-
-  // no match
-  if (NS_FAILED(aRv) || !aSavedResponse) {
-    responseOrVoid = void_t();
-    unused << SendPutResponse(aRequestId, aRv, responseOrVoid, nullptr);
-    return;
-  }
-
-  // match without body data to stream
-  if (!aSavedResponse->mHasBodyId) {
-    responseOrVoid = aSavedResponse->mValue;
-    responseOrVoid.get_PCacheResponse().body() = void_t();
-    unused << SendPutResponse(aRequestId, aRv, responseOrVoid, nullptr);
-    return;
-  }
-
-  PCacheReadStream readStream;
-  Manager::StreamControl* streamControl =
-    SerializeReadStream(nullptr, aSavedResponse->mBodyId, aStreamList,
-                        &readStream);
-
-  responseOrVoid = aSavedResponse->mValue;
-  responseOrVoid.get_PCacheResponse().body() = readStream;
-
-  unused << SendPutResponse(aRequestId, aRv, responseOrVoid, streamControl);
+  unused << SendPutResponse(aRequestId, aRv);
+  return;
 }
 
 void
