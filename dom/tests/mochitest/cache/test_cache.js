@@ -15,5 +15,35 @@ caches.open('snafu').then(function(openCache) {
   return caches.has('snafu');
 }).then(function(hasMissingCache) {
   ok(!hasMissingCache, 'missing key should return false from has');
+}).then(function() {
+  return caches.create('snafu');
+}).then(function(snafu) {
+  return snafu.keys();
+}).then(function(empty) {
+  is(0, empty.length, 'cache.keys() should resolve to an array of length 0');
+}).then(function() {
+  return caches.get('snafu');
+}).then(function(snafu) {
+  var req = './cachekey';
+  var res = new Response("Hello world");
+  return snafu.put(req, res).then(function(v) {
+    return snafu;
+  });
+}).then(function(snafu) {
+  return Promise.all([snafu, snafu.keys()]);
+}).then(function(args) {
+  var snafu = args[0];
+  var keys = args[1];
+  is(1, keys.length, 'cache.keys() should resolve to an array of length 1');
+  ok(keys[0] instanceof Request, 'key should be a Request');
+  ok(keys[0].url.match(/cachekey$/), 'Request URL should match original');
+  return snafu.match(keys[0]);
+}).then(function(response) {
+  ok(response instanceof Response, 'value should be a Response');
+  is(response.status, 200, 'Response status should be 200');
+  return response.text().then(function(v) {
+    is(v, "Hello world", "Response body should match original");
+  });
+}).then(function() {
   workerTestDone();
-});
+})

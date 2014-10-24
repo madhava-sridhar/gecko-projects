@@ -33,6 +33,8 @@ namespace cache {
 
 class CacheChild;
 class PCacheChild;
+class PCacheRequest;
+class PCacheRequestOrVoid;
 
 class Cache MOZ_FINAL : public nsISupports
                       , public nsWrapperCache
@@ -100,6 +102,12 @@ private:
 
   RequestId AddRequestPromise(Promise* aPromise, ErrorResult& aRv);
   already_AddRefed<Promise> RemoveRequestPromise(RequestId aRequestId);
+  nsresult ToPCacheRequest(PCacheRequest& aOut,
+                           const RequestOrScalarValueString& aIn);
+  nsresult ToPCacheRequest(PCacheRequest& aOut,
+                           const OwningRequestOrScalarValueString& aIn);
+  nsresult ToPCacheRequestOrVoid(PCacheRequestOrVoid& aOut,
+                                 const Optional<RequestOrScalarValueString>& aIn);
 
 private:
   nsCOMPtr<nsISupports> mOwner;

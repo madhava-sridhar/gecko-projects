@@ -30,6 +30,7 @@
 #include "SerializedLoadContext.h"
 #include "nsInputStreamPump.h"
 #include "InterceptedChannel.h"
+#include "nsPerformance.h"
 
 using namespace mozilla::dom;
 using namespace mozilla::ipc;
@@ -545,34 +546,39 @@ class StopRequestEvent : public ChannelEvent
 {
  public:
   StopRequestEvent(HttpChannelChild* child,
-                   const nsresult& channelStatus)
+                   const nsresult& channelStatus,
+                   const ResourceTimingStruct& timing)
   : mChild(child)
-  , mChannelStatus(channelStatus) {}
+  , mChannelStatus(channelStatus)
+  , mTiming(timing) {}
 
-  void Run() { mChild->OnStopRequest(mChannelStatus); }
+  void Run() { mChild->OnStopRequest(mChannelStatus, mTiming); }
  private:
   HttpChannelChild* mChild;
   nsresult mChannelStatus;
+  ResourceTimingStruct mTiming;
 };
 
 bool
-HttpChannelChild::RecvOnStopRequest(const nsresult& channelStatus)
+HttpChannelChild::RecvOnStopRequest(const nsresult& channelStatus,
+                                    const ResourceTimingStruct& timing)
 {
   MOZ_RELEASE_ASSERT(!mFlushedForDiversion,
     "Should not be receiving any more callbacks from parent!");
 
   if (mEventQ->ShouldEnqueue()) {
-    mEventQ->Enqueue(new StopRequestEvent(this, channelStatus));
+    mEventQ->Enqueue(new StopRequestEvent(this, channelStatus, timing));
   } else {
     MOZ_ASSERT(!mDivertingToParent, "ShouldEnqueue when diverting to parent!");
 
-    OnStopRequest(channelStatus);
+    OnStopRequest(channelStatus, timing);
   }
   return true;
 }
 
 void
-HttpChannelChild::OnStopRequest(const nsresult& channelStatus)
+HttpChannelChild::OnStopRequest(const nsresult& channelStatus,
+                                const ResourceTimingStruct& timing)
 {
   LOG(("HttpChannelChild::OnStopRequest [this=%p status=%x]\n",
            this, channelStatus));
@@ -583,6 +589,21 @@ HttpChannelChild::OnStopRequest(const nsresult& channelStatus)
 
     SendDivertOnStopRequest(channelStatus);
     return;
+  }
+
+  mTransactionTimings.domainLookupStart = timing.domainLookupStart;
+  mTransactionTimings.domainLookupEnd = timing.domainLookupEnd;
+  mTransactionTimings.connectStart = timing.connectStart;
+  mTransactionTimings.connectEnd = timing.connectEnd;
+  mTransactionTimings.requestStart = timing.requestStart;
+  mTransactionTimings.responseStart = timing.responseStart;
+  mTransactionTimings.responseEnd = timing.responseEnd;
+  mAsyncOpenTime = timing.fetchStart;
+  mRedirectStartTimeStamp = timing.redirectStart;
+  mRedirectEndTimeStamp = timing.redirectEnd;
+  nsPerformance* documentPerformance = GetPerformance();
+  if (documentPerformance) {
+      documentPerformance->AddEntry(this, this);
   }
 
   DoPreOnStopRequest(channelStatus);
@@ -1390,7 +1411,11 @@ HttpChannelChild::AsyncOpen(nsIStreamListener *listener, nsISupports *aContext)
 
     nsRefPtr<InterceptedChannelContent> intercepted =
         new InterceptedChannelContent(this, controller, mInterceptListener);
-    intercepted->NotifyController();
+    nsresult rv = intercepted->NotifyController();
+    if (NS_FAILED(rv)) {
+        nsCOMPtr<nsIRunnable> r = NS_NewRunnableMethod(intercepted, &InterceptedChannelContent::ResetInterception);
+        NS_DispatchToMainThread(r);
+    }
     return NS_OK;
   }
 

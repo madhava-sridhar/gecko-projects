@@ -108,7 +108,7 @@ CacheStorage::Match(const RequestOrScalarValueString& aRequest,
   }
 
   PCacheRequest request;
-  TypeUtils::ToPCacheRequest(request, aRequest);
+  ToPCacheRequest(request, aRequest);
 
   PCacheQueryParams params;
   TypeUtils::ToPCacheQueryParams(params, aParams);
@@ -291,7 +291,7 @@ CacheStorage::ActorCreated(PBackgroundChild* aActor)
       case OP_MATCH:
       {
         PCacheRequest request;
-        TypeUtils::ToPCacheRequest(request, entry.mRequest);
+        ToPCacheRequest(request, entry.mRequest);
 
         PCacheQueryParams params;
         TypeUtils::ToPCacheQueryParams(params, entry.mParams);
@@ -501,6 +501,20 @@ CacheStorage::RemoveRequestPromise(RequestId aRequestId)
     }
   }
   return nullptr;
+}
+
+nsresult
+CacheStorage::ToPCacheRequest(PCacheRequest& aOut, const RequestOrScalarValueString& aIn)
+{
+  AutoJSAPI jsapi;
+  jsapi.Init(mGlobal);
+  JSContext* cx = jsapi.cx();
+  JS::Rooted<JSObject*> jsGlobal(cx, mGlobal->GetGlobalJSObject());
+  JSAutoCompartment ac(cx, jsGlobal);
+
+  GlobalObject global(cx, jsGlobal);
+
+  return TypeUtils::ToPCacheRequest(global, aOut, aIn);
 }
 
 } // namespace cache

@@ -13,7 +13,6 @@
 // Required here due to certain WebIDL enums/classes being declared in both
 // files.
 #include "mozilla/dom/RequestBinding.h"
-#include "mozilla/dom/UnionTypes.h"
 
 #include "InternalRequest.h"
 
@@ -22,7 +21,9 @@ class nsPIDOMWindow;
 namespace mozilla {
 namespace dom {
 
+class InternalHeaders;
 class Promise;
+class RequestOrScalarValueString;
 
 class Request MOZ_FINAL : public nsISupports
                         , public nsWrapperCache
@@ -76,10 +77,16 @@ public:
     aReferrer = NS_ConvertUTF8toUTF16(mRequest->mReferrerURL);
   }
 
-  Headers* Headers_() const { return mRequest->Headers_(); }
+  InternalHeaders*
+  GetInternalHeaders() const
+  {
+    return mRequest->Headers();
+  }
+
+  Headers* Headers_();
 
   void
-  GetBody(nsIInputStream** aStream) { return mRequest->GetBody(aStream); }
+  GetBody(nsIInputStream** aStream) const { return mRequest->GetBody(aStream); }
 
   static already_AddRefed<Request>
   Constructor(const GlobalObject& aGlobal, const RequestOrScalarValueString& aInput,
@@ -96,30 +103,12 @@ public:
   already_AddRefed<InternalRequest>
   GetInternalRequest() const;
 private:
-  enum ConsumeType
-  {
-    CONSUME_ARRAYBUFFER,
-    CONSUME_BLOB,
-    // FormData not supported right now,
-    CONSUME_JSON,
-    CONSUME_TEXT,
-  };
-
   ~Request();
-
-  already_AddRefed<Promise>
-  ConsumeBody(ConsumeType aType, ErrorResult& aRv);
-
-  void
-  SetBodyUsed()
-  {
-    mBodyUsed = true;
-  }
 
   nsCOMPtr<nsIGlobalObject> mOwner;
   nsRefPtr<InternalRequest> mRequest;
-  bool mBodyUsed;
-  nsCString mMimeType;
+  // Lazily created.
+  nsRefPtr<Headers> mHeaders;
 };
 
 } // namespace dom

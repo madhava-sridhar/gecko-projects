@@ -14,7 +14,10 @@
     removeEventListener("message", messageListener);
     var success = true;
     var c = null
-    var request = new Request("http://example.com/hmm?q=foobar");
+    // FIXME(nsm): Can't use a Request object for now since the operations
+    // consume it's 'body'. See
+    // https://github.com/slightlyoff/ServiceWorker/issues/510.
+    var request = "http://example.com/hmm?q=foobar";
     var response = new Response();
     success = success && !!caches;
     caches.open("foobar").then(function(openCache) {

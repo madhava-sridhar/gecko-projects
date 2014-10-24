@@ -19,6 +19,7 @@
 #include "nsITimer.h"
 #include "nsClassHashtable.h"
 #include "nsDataHashtable.h"
+#include "mozilla/Atomics.h"
 
 template <class> struct already_AddRefed;
 
@@ -26,6 +27,8 @@ namespace mozilla {
 namespace gmp {
 
 class GMPParent;
+
+#define GMP_DEFAULT_ASYNC_SHUTDONW_TIMEOUT 3000
 
 class GeckoMediaPluginService MOZ_FINAL : public mozIGeckoMediaPluginService
                                         , public nsIObserver
@@ -44,13 +47,20 @@ public:
   void AsyncShutdownComplete(GMPParent* aParent);
   void AbortAsyncShutdown();
 
+  int32_t AsyncShutdownTimeoutMs();
+
 private:
   ~GeckoMediaPluginService();
 
+  void ClearStorage();
+
   GMPParent* SelectPluginForAPI(const nsACString& aNodeId,
                                 const nsCString& aAPI,
-                                const nsTArray<nsCString>& aTags,
-                                bool aCloneCrossNodeIds = true);
+                                const nsTArray<nsCString>& aTags);
+  GMPParent* FindPluginForAPIFrom(size_t aSearchStartIndex,
+                                  const nsCString& aAPI,
+                                  const nsTArray<nsCString>& aTags,
+                                  size_t* aOutPluginIndex);
 
   void UnloadPlugins();
   void CrashPlugins();
@@ -94,6 +104,10 @@ private:
   bool mShuttingDown;
   bool mShuttingDownOnGMPThread;
 
+  // True if we've inspected MOZ_GMP_PATH on the GMP thread and loaded any
+  // plugins found there into mPlugins.
+  Atomic<bool> mScannedPluginOnDisk;
+
   template<typename T>
   class MainThreadOnly {
   public:
@@ -112,7 +126,6 @@ private:
   MainThreadOnly<bool> mWaitingForPluginsAsyncShutdown;
 
   nsTArray<nsRefPtr<GMPParent>> mAsyncShutdownPlugins; // GMP Thread only.
-  nsCOMPtr<nsITimer> mAsyncShutdownTimeout; // GMP Thread only.
 
 #ifndef MOZ_WIDGET_GONK
   nsCOMPtr<nsIFile> mStorageBaseDir;

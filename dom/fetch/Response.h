@@ -11,7 +11,8 @@
 
 #include "mozilla/dom/Fetch.h"
 #include "mozilla/dom/ResponseBinding.h"
-#include "mozilla/dom/UnionTypes.h"
+
+#include "InternalResponse.h"
 
 #include "InternalResponse.h"
 
@@ -20,7 +21,9 @@ class nsPIDOMWindow;
 namespace mozilla {
 namespace dom {
 
+class ArrayBufferOrArrayBufferViewOrScalarValueStringOrURLSearchParams;
 class Headers;
+class InternalHeaders;
 
 class Response MOZ_FINAL : public nsISupports
                          , public nsWrapperCache
@@ -49,7 +52,9 @@ public:
   void
   GetUrl(nsAString& aUrl) const
   {
-    aUrl = NS_ConvertUTF8toUTF16(mInternalResponse->GetUrl());
+    nsCString url;
+    mInternalResponse->GetUrl(url);
+    aUrl = NS_ConvertUTF8toUTF16(url);
   }
 
   // Undo X11 macro brain damage
@@ -69,11 +74,16 @@ public:
     aStatusText = mInternalResponse->GetStatusText();
   }
 
-  Headers*
-  Headers_() const { return mInternalResponse->Headers_(); }
+  InternalHeaders*
+  GetInternalHeaders() const
+  {
+    return mInternalResponse->Headers();
+  }
+
+  Headers* Headers_();
 
   void
-  GetBody(nsIInputStream** aStream) { return mInternalResponse->GetBody(aStream); }
+  GetBody(nsIInputStream** aStream) const { return mInternalResponse->GetBody(aStream); }
 
   static already_AddRefed<Response>
   Error(const GlobalObject& aGlobal);
@@ -83,7 +93,7 @@ public:
 
   static already_AddRefed<Response>
   Constructor(const GlobalObject& aGlobal,
-              const Optional<ArrayBufferOrArrayBufferViewOrScalarValueStringOrURLSearchParams>& aBody,
+              const Optional<ArrayBufferOrArrayBufferViewOrBlobOrScalarValueStringOrURLSearchParams>& aBody,
               const ResponseInit& aInit, ErrorResult& rv);
 
   nsIGlobalObject* GetParentObject() const
@@ -101,6 +111,8 @@ private:
 
   nsCOMPtr<nsIGlobalObject> mOwner;
   nsRefPtr<InternalResponse> mInternalResponse;
+  // Lazily created
+  nsRefPtr<Headers> mHeaders;
 };
 
 } // namespace dom

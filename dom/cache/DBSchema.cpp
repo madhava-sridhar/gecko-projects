@@ -7,6 +7,7 @@
 #include "mozilla/dom/cache/DBSchema.h"
 
 #include "ipc/IPCMessageUtils.h"
+#include "mozilla/dom/InternalHeaders.h"
 #include "mozilla/dom/cache/PCacheTypes.h"
 #include "mozilla/dom/cache/SavedTypes.h"
 #include "mozIStorageConnection.h"
@@ -717,7 +718,7 @@ DBSchema::MatchByVaryHeader(mozIStorageConnection* aConn,
   rv = state->BindInt32Parameter(0, entryId);
   if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 
-  nsRefPtr<Headers> cachedHeaders = new Headers(nullptr, HeadersGuardEnum::MozNone);
+  nsRefPtr<InternalHeaders> cachedHeaders = new InternalHeaders(HeadersGuardEnum::MozNone);
 
   ErrorResult errorResult;
 
@@ -734,7 +735,7 @@ DBSchema::MatchByVaryHeader(mozIStorageConnection* aConn,
   }
   if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 
-  nsRefPtr<Headers> queryHeaders = new Headers(nullptr, aRequest.headers());
+  nsRefPtr<InternalHeaders> queryHeaders = new InternalHeaders(aRequest.headers());
 
   for (uint32_t i = 0; i < varyValues.Length(); ++i) {
     if (varyValues[i].EqualsLiteral("*")) {

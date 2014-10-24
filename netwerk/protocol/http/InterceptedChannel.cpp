@@ -50,11 +50,11 @@ InterceptedChannelBase::EnsureSynthesizedResponse()
   }
 }
 
-void
+nsresult
 InterceptedChannelBase::DoNotifyController()
 {
     nsresult rv = mController->ChannelIntercepted(this);
-    NS_ENSURE_SUCCESS_VOID(rv);
+    return rv;
 }
 
 nsresult
@@ -78,15 +78,15 @@ InterceptedChannelChrome::InterceptedChannelChrome(nsHttpChannel* aChannel,
 {
 }
 
-void
+nsresult
 InterceptedChannelChrome::NotifyController()
 {
   nsCOMPtr<nsIOutputStream> out;
 
   nsresult rv = mSynthesizedCacheEntry->OpenOutputStream(0, getter_AddRefs(mResponseBody));
-  NS_ENSURE_SUCCESS_VOID(rv);
+  NS_ENSURE_SUCCESS(rv, rv);
 
-  DoNotifyController();
+  return DoNotifyController();
 }
 
 NS_IMETHODIMP
@@ -191,15 +191,15 @@ InterceptedChannelContent::InterceptedChannelContent(HttpChannelChild* aChannel,
 {
 }
 
-void
+nsresult
 InterceptedChannelContent::NotifyController()
 {
   nsresult rv = NS_NewPipe(getter_AddRefs(mSynthesizedInput),
                            getter_AddRefs(mResponseBody),
                            0, UINT32_MAX, true, true);
-  NS_ENSURE_SUCCESS_VOID(rv);
+  NS_ENSURE_SUCCESS(rv, rv);
 
-  DoNotifyController();
+  return DoNotifyController();
 }
 
 NS_IMETHODIMP

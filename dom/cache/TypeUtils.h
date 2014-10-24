@@ -8,6 +8,7 @@
 #define mozilla_dom_cache_TypesUtils_h
 
 #include "mozilla/Attributes.h"
+#include "mozilla/dom/BindingUtils.h"
 #include "nsCOMPtr.h"
 #include "nsError.h"
 
@@ -40,14 +41,15 @@ public:
   ToPCacheRequest(PCacheRequest& aOut, const Request& aIn);
 
   static nsresult
-  ToPCacheRequest(PCacheRequest& aOut, const RequestOrScalarValueString& aIn);
+  ToPCacheRequest(const GlobalObject& aGlobal, PCacheRequest& aOut, const RequestOrScalarValueString& aIn);
 
   static nsresult
-  ToPCacheRequestOrVoid(PCacheRequestOrVoid& aOut,
+  ToPCacheRequestOrVoid(const GlobalObject& aGlobal,
+                        PCacheRequestOrVoid& aOut,
                         const Optional<RequestOrScalarValueString>& aIn);
 
   static nsresult
-  ToPCacheRequest(PCacheRequest& aOut,
+  ToPCacheRequest(const GlobalObject& aGlobal, PCacheRequest& aOut,
                   const OwningRequestOrScalarValueString& aIn);
 
   static nsresult

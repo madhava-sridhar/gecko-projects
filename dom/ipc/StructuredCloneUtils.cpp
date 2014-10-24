@@ -11,6 +11,7 @@
 #include "nsIMutable.h"
 #include "nsIXPConnect.h"
 
+#include "mozilla/dom/BindingUtils.h"
 #include "mozilla/dom/BlobBinding.h"
 #include "mozilla/dom/File.h"
 #include "nsContentUtils.h"

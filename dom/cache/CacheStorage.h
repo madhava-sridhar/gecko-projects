@@ -36,6 +36,7 @@ class Promise;
 namespace cache {
 
 class CacheStorageChild;
+class PCacheRequest;
 
 class CacheStorage MOZ_FINAL : public nsIIPCBackgroundChildCreateCallback
                              , public nsWrapperCache
@@ -85,6 +86,9 @@ private:
 
   RequestId AddRequestPromise(Promise* aPromise, ErrorResult& aRv);
   already_AddRefed<Promise> RemoveRequestPromise(RequestId aRequestId);
+
+  nsresult
+  ToPCacheRequest(PCacheRequest& aOut, const RequestOrScalarValueString& aIn);
 
   const Namespace mNamespace;
   nsCOMPtr<nsISupports> mOwner;

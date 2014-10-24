@@ -4,19 +4,19 @@
  * You can obtain one at http://mozilla.org/MPL/2.0/.
  *
  * The origin of this IDL file is
- * http://slightlyoff.github.io/ServiceWorker/spec/service_worker/index.html
+ * http://slightlyoff.github.io/ServiceWorker/spec/service_worker/index.html#service-worker-obj
  *
  */
 
 [Pref="dom.serviceWorkers.enabled",
  // XXXbz I have no idea where this should be exposed.  The spec makes
  // no sense.  But since it's got a pref, let's say window.
+ // FIXME(nsm): Should also be exposed on ServiceWorker once we allow access to registrations from ServiceWorkers.
  Exposed=Window]
 interface ServiceWorker : EventTarget {
-  readonly attribute DOMString scope;
-  readonly attribute DOMString url;
-
+  readonly attribute ScalarValueString scriptURL;
   readonly attribute ServiceWorkerState state;
+
   attribute EventHandler onstatechange;
 
   // FIXME(catalinb): Bug 1053483 - This should be inherited from MessageUtils
