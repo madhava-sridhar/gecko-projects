@@ -2795,7 +2795,11 @@ nsHttpChannel::OpenCacheEntry(bool isHttps)
 
         nsRefPtr<InterceptedChannelChrome> intercepted =
                 new InterceptedChannelChrome(this, controller, entry);
-        intercepted->NotifyController();
+        rv = intercepted->NotifyController();
+        if (NS_FAILED(rv)) {
+            nsCOMPtr<nsIRunnable> r = NS_NewRunnableMethod(intercepted, &InterceptedChannelChrome::ResetInterception);
+            NS_DispatchToMainThread(r);
+        }
     } else {
         rv = cacheStorage->AsyncOpenURI(openURI, extension, cacheEntryOpenFlags, this);
         NS_ENSURE_SUCCESS(rv, rv);

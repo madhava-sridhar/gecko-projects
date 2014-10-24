@@ -1411,7 +1411,11 @@ HttpChannelChild::AsyncOpen(nsIStreamListener *listener, nsISupports *aContext)
 
     nsRefPtr<InterceptedChannelContent> intercepted =
         new InterceptedChannelContent(this, controller, mInterceptListener);
-    intercepted->NotifyController();
+    nsresult rv = intercepted->NotifyController();
+    if (NS_FAILED(rv)) {
+        nsCOMPtr<nsIRunnable> r = NS_NewRunnableMethod(intercepted, &InterceptedChannelContent::ResetInterception);
+        NS_DispatchToMainThread(r);
+    }
     return NS_OK;
   }
 

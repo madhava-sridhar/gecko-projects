@@ -37,7 +37,7 @@ protected:
   Maybe<nsHttpResponseHead> mSynthesizedResponseHead;
 
   void EnsureSynthesizedResponse();
-  void DoNotifyController();
+  nsresult DoNotifyController();
   nsresult DoSynthesizeHeader(const nsACString& aName, const nsACString& aValue);
 
   virtual ~InterceptedChannelBase();
@@ -46,7 +46,7 @@ public:
 
   // Notify the interception controller that the channel has been intercepted
   // and prepare the response body output stream.
-  virtual void NotifyController() = 0;
+  virtual nsresult NotifyController() = 0;
 
   NS_DECL_ISUPPORTS
 
@@ -70,7 +70,7 @@ public:
   NS_IMETHOD GetChannel(nsIChannel** aChannel) MOZ_OVERRIDE;
   NS_IMETHOD SynthesizeHeader(const nsACString& aName, const nsACString& aValue) MOZ_OVERRIDE;
 
-  virtual void NotifyController() MOZ_OVERRIDE;
+  virtual nsresult NotifyController() MOZ_OVERRIDE;
 };
 
 class InterceptedChannelContent : public InterceptedChannelBase
@@ -97,7 +97,7 @@ public:
   NS_IMETHOD GetChannel(nsIChannel** aChannel) MOZ_OVERRIDE;
   NS_IMETHOD SynthesizeHeader(const nsACString& aName, const nsACString& aValue) MOZ_OVERRIDE;
 
-  virtual void NotifyController() MOZ_OVERRIDE;
+  virtual nsresult NotifyController() MOZ_OVERRIDE;
 };
 
 } // namespace net

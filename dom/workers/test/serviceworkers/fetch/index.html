@@ -28,31 +28,36 @@
     }
   }
 
-  my_ok(navigator.serviceWorker.controller != null, "should be controlled");
-  var x = new XMLHttpRequest();
-  x.open('GET', 'nonexistent.txt', true);
-  x.onload = function() {
-    my_ok(x.status == 200, "load should be successful");
-    my_ok(x.responseText == "synthesized response body", "load should have synthesized response");
-    finish();
-  };
-  x.onerror = function() {
-    my_ok(false, "load should be intercepted successfully");
-    finish();
-  };
-  x.send();
+  navigator.serviceWorker.ready.then(function() {
+    my_ok(navigator.serviceWorker.controller != null, "should be controlled");
+    var x = new XMLHttpRequest();
+    x.open('GET', 'nonexistent.txt', true);
+    x.onload = function() {
+      my_ok(x.status == 200, "load should be successful");
+      my_ok(x.responseText == "synthesized response body", "load should have synthesized response");
+      finish();
+    };
+    x.onerror = function() {
+      my_ok(false, "load should be intercepted successfully");
+      finish();
+    };
+    x.send();
 
-  var x2 = new XMLHttpRequest();
-  x2.open('GET', 'nonexistent2.txt', true);
-  x2.onload = function() {
-    my_ok(x2.status == 404, "load should be uninterrupted");
-    finish();
-  };
-  x2.onerror = function() {
-    my_ok(false, "load should be intercepted successfully");
-    finish();
-  };
-  x2.send();
+    var x2 = new XMLHttpRequest();
+    x2.open('GET', 'nonexistent2.txt', true);
+    x2.onload = function() {
+      my_ok(x2.status == 404, "load should be uninterrupted");
+      finish();
+    };
+    x2.onerror = function() {
+      my_ok(false, "load should be intercepted successfully");
+      finish();
+    };
+    x2.send();
+  }).catch(function(e) {
+    my_ok(false, "Unexpected failure " + e);
+    window.opener.postMessage({status: "done"}, "*");
+  });
 </script>
 </pre>
 </body>
