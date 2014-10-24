@@ -119,6 +119,7 @@ public:
 
   static already_AddRefed<Manager> ForOrigin(const nsACString& aOrigin,
                                              const nsACString& aBaseDomain);
+  static already_AddRefed<Manager> ForExistingOrigin(const nsACString& aOrigin);
 
   void RemoveListener(Listener* aListener);
   void AddRefCacheId(CacheId aCacheId);
@@ -211,6 +212,8 @@ private:
 
   // weak ref as Context destructor clears this pointer
   Context* mContext;
+
+  bool mShuttingDown;
 
 public:
   NS_INLINE_DECL_REFCOUNTING(mozilla::dom::cache::Manager)

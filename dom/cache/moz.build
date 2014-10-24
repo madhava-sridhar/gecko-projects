@@ -25,6 +25,7 @@ EXPORTS.mozilla.dom.cache += [
     'Manager.h',
     'ReadStream.h',
     'SavedTypes.h',
+    'ShutdownObserver.h',
     'Types.h',
     'TypeUtils.h',
 ]
@@ -46,6 +47,7 @@ SOURCES += [
     'FileUtils.cpp',
     'Manager.cpp',
     'ReadStream.cpp',
+    'ShutdownObserver.cpp',
     'TypeUtils.cpp',
 ]
 

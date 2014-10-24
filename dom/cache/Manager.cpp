@@ -11,6 +11,7 @@
 #include "mozilla/dom/cache/FileUtils.h"
 #include "mozilla/dom/cache/PCacheTypes.h"
 #include "mozilla/dom/cache/SavedTypes.h"
+#include "mozilla/dom/cache/ShutdownObserver.h"
 #include "mozilla/dom/cache/Types.h"
 #include "mozilla/ipc/BackgroundParent.h"
 #include "mozStorageHelper.h"
@@ -91,6 +92,19 @@ public:
   {
     mozilla::ipc::AssertIsOnBackgroundThread();
 
+    nsRefPtr<Manager> ref = Get(aOrigin);
+    if (!ref) {
+      ref = new Manager(aOrigin, aBaseDomain);
+      mManagerList.AppendElement(ref);
+    }
+
+    return ref.forget();
+  }
+
+  already_AddRefed<Manager> Get(const nsACString& aOrigin)
+  {
+    mozilla::ipc::AssertIsOnBackgroundThread();
+
     for (uint32_t i = 0; i < mManagerList.Length(); ++i) {
       if (mManagerList[i]->Origin() == aOrigin) {
         nsRefPtr<Manager> ref = mManagerList[i];
@@ -98,11 +112,7 @@ public:
       }
     }
 
-    nsRefPtr<Manager> ref = new Manager(aOrigin, aBaseDomain);
-
-    mManagerList.AppendElement(ref);
-
-    return ref.forget();
+    return nullptr;
   }
 
   void Remove(Manager* aManager)
@@ -1149,6 +1159,14 @@ Manager::ForOrigin(const nsACString& aOrigin, const nsACString& aBaseDomain)
   return Factory::Instance().GetOrCreate(aOrigin, aBaseDomain);
 }
 
+// static
+already_AddRefed<Manager>
+Manager::ForExistingOrigin(const nsACString& aOrigin)
+{
+  mozilla::ipc::AssertIsOnBackgroundThread();
+  return Factory::Instance().Get(aOrigin);
+}
+
 void
 Manager::RemoveListener(Listener* aListener)
 {
@@ -1182,8 +1200,11 @@ Manager::ReleaseCacheId(CacheId aCacheId)
       MOZ_ASSERT(mCacheIdRefs[i].mCount < oldRef);
       if (mCacheIdRefs[i].mCount < 1) {
         mCacheIdRefs.RemoveElementAt(i);
-        nsRefPtr<Action> action = new CheckCacheOrphanedAction(this, aCacheId);
-        CurrentContext()->Dispatch(mIOThread, action);
+        // TODO: note that we need to check this cache for staleness on startup
+        if (!mShuttingDown) {
+          nsRefPtr<Action> action = new CheckCacheOrphanedAction(this, aCacheId);
+          CurrentContext()->Dispatch(mIOThread, action);
+        }
       }
       return;
     }
@@ -1204,21 +1225,24 @@ Manager::GetCacheIdRefCount(CacheId aCacheId)
   return 0;
 }
 
-// TODO: Call Manager::Shutdown from observer on main thread at shutdown
-// Notes:
-//  - implement a singleton called ShutdownObserver
-//  - Manager calls ShutdownObserver::AddManager(origin) at creation
-//  - Manager calls ShutdownObserver::RemoveManager(origin) at creation
-//  - origins are proxied to main thread and kept in a list
-//  - at shutdown time origins are sent to IPC thread to call Manager::Shutdown()
 void
 Manager::Shutdown()
 {
   NS_ASSERT_OWNINGTHREAD(Manager);
+  mShuttingDown = true;
   for (uint32_t i = 0; i < mStreamLists.Length(); ++i) {
     mStreamLists[i]->CloseAll();
   }
-  if (mContext) {
+
+  // If there is no context, then note that we're done shutting down
+  if (!mContext) {
+    nsRefPtr<ShutdownObserver> so = ShutdownObserver::Instance();
+    if (so) {
+      so->RemoveOrigin(mOrigin);
+    }
+
+  // Otherwise, cancel the context and note complete when it cleans up
+  } else {
     mContext->CancelAll();
   }
 }
@@ -1230,6 +1254,11 @@ Manager::CacheMatch(Listener* aListener, RequestId aRequestId, CacheId aCacheId,
 {
   NS_ASSERT_OWNINGTHREAD(Manager);
   MOZ_ASSERT(aListener);
+  if (mShuttingDown) {
+    aListener->OnCacheMatch(aRequestId, NS_ERROR_ILLEGAL_DURING_SHUTDOWN,
+                            nullptr, nullptr);
+    return;
+  }
   nsRefPtr<StreamList> streamList = new StreamList(this, CurrentContext());
   ListenerId listenerId = SaveListener(aListener);
   nsRefPtr<Action> action = new CacheMatchAction(this, listenerId, aRequestId,
@@ -1245,6 +1274,11 @@ Manager::CacheMatchAll(Listener* aListener, RequestId aRequestId,
 {
   NS_ASSERT_OWNINGTHREAD(Manager);
   MOZ_ASSERT(aListener);
+  if (mShuttingDown) {
+    aListener->OnCacheMatchAll(aRequestId, NS_ERROR_ILLEGAL_DURING_SHUTDOWN,
+                               nsTArray<SavedResponse>(), nullptr);
+    return;
+  }
   nsRefPtr<StreamList> streamList = new StreamList(this, CurrentContext());
   ListenerId listenerId = SaveListener(aListener);
   nsRefPtr<Action> action = new CacheMatchAllAction(this, listenerId, aRequestId,
@@ -1262,6 +1296,11 @@ Manager::CachePut(Listener* aListener, RequestId aRequestId, CacheId aCacheId,
 {
   NS_ASSERT_OWNINGTHREAD(Manager);
   MOZ_ASSERT(aListener);
+  if (mShuttingDown) {
+    aListener->OnCachePut(aRequestId, NS_ERROR_ILLEGAL_DURING_SHUTDOWN,
+                          nullptr, nullptr);
+    return;
+  }
   nsRefPtr<StreamList> streamList = new StreamList(this, CurrentContext());
   ListenerId listenerId = SaveListener(aListener);
   nsRefPtr<Action> action = new CachePutAction(this, listenerId, aRequestId,
@@ -1279,6 +1318,10 @@ Manager::CacheDelete(Listener* aListener, RequestId aRequestId,
 {
   NS_ASSERT_OWNINGTHREAD(Manager);
   MOZ_ASSERT(aListener);
+  if (mShuttingDown) {
+    aListener->OnCacheDelete(aRequestId, NS_ERROR_ILLEGAL_DURING_SHUTDOWN, false);
+    return;
+  }
   ListenerId listenerId = SaveListener(aListener);
   nsRefPtr<Action> action = new CacheDeleteAction(this, listenerId, aRequestId,
                                                   aCacheId, aRequest, aParams);
@@ -1292,6 +1335,11 @@ Manager::CacheKeys(Listener* aListener, RequestId aRequestId,
 {
   NS_ASSERT_OWNINGTHREAD(Manager);
   MOZ_ASSERT(aListener);
+  if (mShuttingDown) {
+    aListener->OnCacheKeys(aRequestId, NS_ERROR_ILLEGAL_DURING_SHUTDOWN,
+                           nsTArray<SavedRequest>(), nullptr);
+    return;
+  }
   nsRefPtr<StreamList> streamList = new StreamList(this, CurrentContext());
   ListenerId listenerId = SaveListener(aListener);
   nsRefPtr<Action> action = new CacheKeysAction(this, listenerId, aRequestId,
@@ -1307,6 +1355,11 @@ Manager::StorageMatch(Listener* aListener, RequestId aRequestId,
 {
   NS_ASSERT_OWNINGTHREAD(Manager);
   MOZ_ASSERT(aListener);
+  if (mShuttingDown) {
+    aListener->OnStorageMatch(aRequestId, NS_ERROR_ILLEGAL_DURING_SHUTDOWN,
+                              nullptr, nullptr);
+    return;
+  }
   nsRefPtr<StreamList> streamList = new StreamList(this, CurrentContext());
   ListenerId listenerId = SaveListener(aListener);
   nsRefPtr<Action> action = new StorageMatchAction(this, listenerId, aRequestId,
@@ -1321,6 +1374,11 @@ Manager::StorageGet(Listener* aListener, RequestId aRequestId,
 {
   NS_ASSERT_OWNINGTHREAD(Manager);
   MOZ_ASSERT(aListener);
+  if (mShuttingDown) {
+    aListener->OnStorageGet(aRequestId, NS_ERROR_ILLEGAL_DURING_SHUTDOWN,
+                            false, 0);
+    return;
+  }
   ListenerId listenerId = SaveListener(aListener);
   nsRefPtr<Action> action = new StorageGetAction(this, listenerId, aRequestId,
                                                  aNamespace, aKey);
@@ -1333,6 +1391,11 @@ Manager::StorageHas(Listener* aListener, RequestId aRequestId,
 {
   NS_ASSERT_OWNINGTHREAD(Manager);
   MOZ_ASSERT(aListener);
+  if (mShuttingDown) {
+    aListener->OnStorageHas(aRequestId, NS_ERROR_ILLEGAL_DURING_SHUTDOWN,
+                            false);
+    return;
+  }
   ListenerId listenerId = SaveListener(aListener);
   nsRefPtr<Action> action = new StorageHasAction(this, listenerId, aRequestId,
                                                  aNamespace, aKey);
@@ -1345,6 +1408,10 @@ Manager::StorageCreate(Listener* aListener, RequestId aRequestId,
 {
   NS_ASSERT_OWNINGTHREAD(Manager);
   MOZ_ASSERT(aListener);
+  if (mShuttingDown) {
+    aListener->OnStorageCreate(aRequestId, NS_ERROR_ILLEGAL_DURING_SHUTDOWN, 0);
+    return;
+  }
   ListenerId listenerId = SaveListener(aListener);
   nsRefPtr<Action> action = new StorageCreateAction(this, listenerId, aRequestId,
                                                     aNamespace, aKey);
@@ -1357,6 +1424,11 @@ Manager::StorageDelete(Listener* aListener, RequestId aRequestId,
 {
   NS_ASSERT_OWNINGTHREAD(Manager);
   MOZ_ASSERT(aListener);
+  if (mShuttingDown) {
+    aListener->OnStorageDelete(aRequestId, NS_ERROR_ILLEGAL_DURING_SHUTDOWN,
+                               false);
+    return;
+  }
   ListenerId listenerId = SaveListener(aListener);
   nsRefPtr<Action> action = new StorageDeleteAction(this, listenerId, aRequestId,
                                                     aNamespace, aKey);
@@ -1369,6 +1441,11 @@ Manager::StorageKeys(Listener* aListener, RequestId aRequestId,
 {
   NS_ASSERT_OWNINGTHREAD(Manager);
   MOZ_ASSERT(aListener);
+  if (mShuttingDown) {
+    aListener->OnStorageKeys(aRequestId, NS_ERROR_ILLEGAL_DURING_SHUTDOWN,
+                             nsTArray<nsString>());
+    return;
+  }
   ListenerId listenerId = SaveListener(aListener);
   nsRefPtr<Action> action = new StorageKeysAction(this, listenerId, aRequestId,
                                                   aNamespace);
@@ -1382,17 +1459,32 @@ Manager::RemoveContext(Context* aContext)
   MOZ_ASSERT(mContext);
   MOZ_ASSERT(mContext == aContext);
   mContext = nullptr;
+
+  if (mShuttingDown) {
+    nsRefPtr<ShutdownObserver> so = ShutdownObserver::Instance();
+    if (so) {
+      so->RemoveOrigin(mOrigin);
+    }
+  }
 }
 
 Manager::Manager(const nsACString& aOrigin, const nsACString& aBaseDomain)
   : mOrigin(aOrigin)
   , mBaseDomain(aBaseDomain)
   , mContext(nullptr)
+  , mShuttingDown(false)
 {
   nsresult rv = NS_NewNamedThread("DOMCacheThread",
                                   getter_AddRefs(mIOThread));
   if (NS_FAILED(rv)) {
     MOZ_CRASH("Failed to spawn cache manager IO thread.");
+  }
+
+  nsRefPtr<ShutdownObserver> so = ShutdownObserver::Instance();
+  if (so) {
+    so->AddOrigin(mOrigin);
+  } else {
+    Shutdown();
   }
 }
 
@@ -1412,6 +1504,7 @@ Manager::CurrentContext()
 {
   NS_ASSERT_OWNINGTHREAD(Manager);
   if (!mContext) {
+    MOZ_ASSERT(!mShuttingDown);
     nsRefPtr<Action> setupAction = new SetupAction(mOrigin, mBaseDomain);
     mContext = new Context(this, mOrigin, mBaseDomain, setupAction);
   }
