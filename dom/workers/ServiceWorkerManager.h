@@ -208,10 +208,6 @@ public:
   nsRefPtr<ServiceWorkerInfo> mWaitingWorker;
   nsRefPtr<ServiceWorkerInfo> mInstallingWorker;
 
-  nsRefPtr<Promise> mRegistrationPromise;
-
-  nsAutoPtr<ServiceWorkerJobQueue> mRegisterQueue;
-
   // When unregister() is called on a registration, it is not immediately
   // removed since documents may be controlled. It is marked as
   // pendingUninstall and when all controlling documents go away, removed.
@@ -250,7 +246,7 @@ public:
   bool
   IsControllingDocuments() const
   {
-    return mControlledDocumentsCounter > 0;
+    return mActiveWorker && mControlledDocumentsCounter > 0;
   }
 
   void
@@ -283,7 +279,7 @@ class ServiceWorkerManager MOZ_FINAL : public nsIServiceWorkerManager
 {
   friend class ActivationRunnable;
   friend class ServiceWorkerRegistrationInfo;
-  friend class ServiceWorkerUpdateJob;
+  friend class ServiceWorkerRegisterJob;
   friend class GetReadyPromiseRunnable;
   friend class GetRegistrationsRunnable;
   friend class GetRegistrationRunnable;
@@ -330,6 +326,8 @@ public:
 
     nsRefPtrHashtable<nsISupportsHashKey, ServiceWorkerRegistrationInfo> mControlledDocuments;
 
+    nsClassHashtable<nsCStringHashKey, ServiceWorkerJobQueue> mJobQueues;
+
     ServiceWorkerDomainInfo()
     { }
 
@@ -359,6 +357,12 @@ public:
       MOZ_ASSERT(mServiceWorkerRegistrationInfos.Contains(aRegistration->mScope));
       ServiceWorkerManager::RemoveScope(mOrderedScopes, aRegistration->mScope);
       mServiceWorkerRegistrationInfos.Remove(aRegistration->mScope);
+    }
+
+    ServiceWorkerJobQueue*
+    GetOrCreateJobQueue(const nsCString& aScope)
+    {
+      return mJobQueues.LookupOrAdd(aScope);
     }
 
     NS_INLINE_DECL_REFCOUNTING(ServiceWorkerDomainInfo)
