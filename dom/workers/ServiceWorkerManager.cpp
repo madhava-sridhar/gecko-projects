@@ -596,6 +596,7 @@ public:
       // FIXME(nsm): Terminate
       mRegistration->mWaitingWorker->UpdateState(ServiceWorkerState::Redundant);
     }
+
     mRegistration->mWaitingWorker = mRegistration->mInstallingWorker.forget();
     mRegistration->mWaitingToActivate = false;
     mRegistration->mWaitingWorker->UpdateState(ServiceWorkerState::Installed);
@@ -1705,6 +1706,34 @@ ServiceWorkerManager::MaybeStartControlling(nsIDocument* aDoc)
   }
 }
 
+class ServiceWorkerActivateAfterUnloadingJob MOZ_FINAL : public ServiceWorkerJob
+{
+  nsRefPtr<ServiceWorkerRegistrationInfo> mRegistration;
+public:
+  ServiceWorkerActivateAfterUnloadingJob(ServiceWorkerJobQueue* aQueue,
+                                         ServiceWorkerRegistrationInfo* aReg)
+    : ServiceWorkerJob(aQueue)
+    , mRegistration(aReg)
+  { }
+
+  void
+  Start()
+  {
+    nsRefPtr<ServiceWorkerManager> swm = ServiceWorkerManager::GetInstance();
+    nsRefPtr<ServiceWorkerManager::ServiceWorkerDomainInfo> domainInfo =
+      swm->GetDomainInfo(mRegistration->mScope);
+
+    if (mRegistration->mPendingUninstall) {
+      mRegistration->Clear();
+      domainInfo->RemoveRegistration(mRegistration);
+      return Done(NS_OK);
+    }
+
+    mRegistration->TryToActivate();
+    Done(NS_OK);
+  }
+};
+
 void
 ServiceWorkerManager::MaybeStopControlling(nsIDocument* aDoc)
 {
@@ -1725,6 +1754,9 @@ ServiceWorkerManager::MaybeStopControlling(nsIDocument* aDoc)
   // associated registration. So this check is required.
   if (registration) {
     registration->StopControllingADocument();
+    ServiceWorkerJobQueue* queue = domainInfo->GetOrCreateJobQueue(registration->mScope);
+    nsRefPtr<ServiceWorkerActivateAfterUnloadingJob> job = new ServiceWorkerActivateAfterUnloadingJob(queue, registration);
+    queue->Append(job);
   }
 }
 
@@ -2021,8 +2053,10 @@ private:
     event->SetTrusted(true);
 
     nsRefPtr<EventTarget> target = do_QueryObject(aWorkerPrivate->GlobalScope());
+    fprintf(stderr, "\n\nNSM Dispatching fetch event\n\n");
     nsresult rv2 = target->DispatchDOMEvent(nullptr, event, nullptr, nullptr);
     if (NS_FAILED(rv2) || !event->WaitToRespond()) {
+    fprintf(stderr, "\n\nNSM Resuming after fetch event\n\n");
       nsCOMPtr<nsIRunnable> runnable = new ResumeRequest(mInterceptedChannel);
       NS_DispatchToMainThread(runnable);
     }

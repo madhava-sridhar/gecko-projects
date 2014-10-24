@@ -278,12 +278,13 @@ public:
 class ServiceWorkerManager MOZ_FINAL : public nsIServiceWorkerManager
 {
   friend class ActivationRunnable;
-  friend class ServiceWorkerRegistrationInfo;
-  friend class ServiceWorkerRegisterJob;
   friend class GetReadyPromiseRunnable;
   friend class GetRegistrationsRunnable;
   friend class GetRegistrationRunnable;
   friend class QueueFireUpdateFoundRunnable;
+  friend class ServiceWorkerActivateAfterUnloadingJob;
+  friend class ServiceWorkerRegistrationInfo;
+  friend class ServiceWorkerRegisterJob;
   friend class UnregisterRunnable;
 
 public:
