@@ -38,7 +38,6 @@ public:
   RunSyncWithDBOnTarget(nsIFile* aDBDir,
                         mozIStorageConnection* aConn) MOZ_OVERRIDE
   {
-    // TODO: create body directory structure
     // TODO: init maintainance marker
     // TODO: perform maintainance if necessary
     // TODO: find orphaned caches in database

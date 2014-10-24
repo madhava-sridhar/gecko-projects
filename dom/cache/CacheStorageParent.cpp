@@ -17,9 +17,6 @@
 #include "mozilla/unused.h"
 #include "nsCOMPtr.h"
 
-// TODO: remove testing only headers
-#include "../../dom/filehandle/MemoryStreams.h"
-
 namespace mozilla {
 namespace dom {
 namespace cache {
