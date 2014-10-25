@@ -13,7 +13,9 @@
 <script type="text/javascript">
 
   onmessage = function(e) { parent.postMessage(e.data, "*"); }
-  navigator.serviceWorker.controller.postMessage("GO");
+  navigator.serviceWorker.ready.then(function() {
+    navigator.serviceWorker.controller.postMessage("GO");
+  });
 
 </script>
 </pre>

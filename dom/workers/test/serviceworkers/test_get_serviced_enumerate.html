@@ -19,6 +19,7 @@
   var results = [];
 
   function start() {
+  dump("~*~*~*~*~*~*~*~*~*~*~ About to register\n");
     return navigator.serviceWorker.register("get_serviced_worker_enumerate.js",
                                             { scope: "./sw_clients/" }).then((swr) => registration = swr);
   }
@@ -29,6 +30,7 @@
       window.onmessage = function(e) {
         if (e.data === "READY") {
           opened.push(w);
+  dump("~*~*~*~*~*~*~*~*~*~*~ Opened window is ready\n");
           res();
         }
       }
@@ -39,6 +41,14 @@
   function testGetServiced() {
     var count = 0;
     return new Promise(function (res, rej) {
+      ok(registration.active, "Registration has active ServiceWorker");
+      var isCorrectWorker = registration.active.scriptURL.match(/enumerate.js$/);
+      ok(isCorrectWorker, "Active ServiceWorker must be get_serviced_worker_enumerate.js");
+      if (!isCorrectWorker) {
+        opened.forEach((w) => w.close());
+        rej();
+        return;
+      }
       registration.active.postMessage("getServiced");
       // wait for response
       window.onmessage = function(msg) {

@@ -75,19 +75,24 @@
     });
   }
 
-  function abortPrevious() {
+  // p & q should resolve in order.
+  function backToBack() {
     var p = navigator.serviceWorker.register("worker2.js", { scope: "foo/" });
     var q = navigator.serviceWorker.register("worker3.js", { scope: "foo/" });
 
+    var pDone = false;
     return Promise.all([
       p.then(function(wr) {
-        ok(false, "First registration should fail with AbortError");
+        ok(wr.installing.scriptURL.match(/worker2.js$/), "worker2.js should be installing");
+        ok(!pDone, "p should finish first");
+        pDone = true;
       }, function(e) {
         ok(e.name === "AbortError", "First registration should fail with AbortError");
       }),
 
       q.then(function(wr) {
-        ok(wr instanceof ServiceWorkerRegistration, "Second registration should succeed");
+        ok(wr.installing.scriptURL.match(/worker3.js$/), "worker3.js should be installing");
+        ok(pDone, "q should finish second");
       }, function(e) {
         ok(false, "Second registration should succeed");
       })
@@ -179,9 +184,9 @@
       .then(sameOriginScope)
       .then(httpsOnly)
       .then(realWorker)
-      .then(abortPrevious)
-      .then(networkError404)
-      .then(parseError)
+      .then(backToBack)
+      //.then(networkError404)
+      //.then(parseError)
       .then(updatefound)
       .then(checkReadyPromise)
       // put more tests here.

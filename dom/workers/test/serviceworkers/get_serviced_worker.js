@@ -9,8 +9,8 @@ onactivate = function(e) {
   loop();
 }
 
-onclose = function(e) {
-  for (var i = 0; i < 100; ++i) {
-    self.clients.getServiced();
-  }
-}
+//onclose = function(e) {
+//  for (var i = 0; i < 100; ++i) {
+//    self.clients.getServiced();
+//  }
+//}

@@ -10,7 +10,6 @@
     Paged controlled by a service worker for testing getServiced().
     See bug 982726.
   -->
-<script type="text/javascript" src="/tests/SimpleTest/SimpleTest.js"></script>
 <script class="testbody" type="text/javascript">
   function fail(msg) {
     info("service_worker_controlled.html: " + msg);
@@ -22,7 +21,10 @@
   }
 
   window.onload = function() {
+  dump("~*~*~*~*~*~*~*~*~*~*~ Opened window onload triggered\n");
+    dump("WAITING ON READY\n\n");
     navigator.serviceWorker.ready.then(function(swr) {
+      dump("DONE ON READY\n\n");
       opener.postMessage("READY", "*");
     });
   }
