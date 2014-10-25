@@ -1444,9 +1444,9 @@ Manager::Manager(const nsACString& aOrigin, const nsACString& aBaseDomain)
 Manager::~Manager()
 {
   NS_ASSERT_OWNINGTHREAD(Manager);
+  Shutdown();
   Factory::Instance().Remove(this);
   if (mContext) {
-    mContext->CancelAll();
     mContext->ClearListener();
   }
   mIOThread->Shutdown();
