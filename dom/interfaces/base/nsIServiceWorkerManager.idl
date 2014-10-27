@@ -18,7 +18,7 @@ interface nsIServiceWorkerUnregisterCallback : nsISupports
   [noscript] void UnregisterFailed();
 };
 
-[builtinclass, uuid(23f5f5b3-ec13-4b63-8748-5ae9856874b6)]
+[builtinclass, uuid(dfd97cef-3bda-4e59-b1d2-6c8ba361e993)]
 interface nsIServiceWorkerManager : nsISupports
 {
   /**
@@ -57,8 +57,8 @@ interface nsIServiceWorkerManager : nsISupports
   void dispatchFetchEvent(in nsIDocument aDoc, in nsIInterceptedChannel aChannel);
 
   // aTarget MUST be a ServiceWorkerRegistration.
-  [noscript] void AddRegistrationEventListener(in nsIURI aPageURI, in nsIDOMEventTarget aTarget);
-  [noscript] void RemoveRegistrationEventListener(in nsIURI aPageURI, in nsIDOMEventTarget aTarget);
+  [noscript] void AddRegistrationEventListener(in DOMString aScope, in nsIDOMEventTarget aTarget);
+  [noscript] void RemoveRegistrationEventListener(in DOMString aScope, in nsIDOMEventTarget aTarget);
 
   /**
    * Call this to request that document `aDoc` be controlled by a ServiceWorker

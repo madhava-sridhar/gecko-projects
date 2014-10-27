@@ -1782,14 +1782,19 @@ ServiceWorkerManager::GetScopeForUrl(const nsAString& aUrl, nsAString& aScope)
 }
 
 NS_IMETHODIMP
-ServiceWorkerManager::AddRegistrationEventListener(nsIURI* aDocumentURI, nsIDOMEventTarget* aListener)
+ServiceWorkerManager::AddRegistrationEventListener(const nsAString& aScope, nsIDOMEventTarget* aListener)
 {
-  MOZ_ASSERT(aDocumentURI);
   AssertIsOnMainThread();
-  nsRefPtr<ServiceWorkerDomainInfo> domainInfo = GetDomainInfo(aDocumentURI);
+  nsCString scope = NS_ConvertUTF16toUTF8(aScope);
+  nsRefPtr<ServiceWorkerDomainInfo> domainInfo = GetDomainInfo(scope);
   if (!domainInfo) {
+    nsCOMPtr<nsIURI> scopeAsURI;
+    nsresult rv = NS_NewURI(getter_AddRefs(scopeAsURI), scope, nullptr, nullptr);
+    if (NS_WARN_IF(NS_FAILED(rv))) {
+      return rv;
+    }
     nsCString domain;
-    nsresult rv = aDocumentURI->GetHost(domain);
+    rv = scopeAsURI->GetHost(domain);
     if (NS_WARN_IF(NS_FAILED(rv))) {
       return rv;
     }
@@ -1803,22 +1808,36 @@ ServiceWorkerManager::AddRegistrationEventListener(nsIURI* aDocumentURI, nsIDOME
   // TODO: this is very very bad:
   ServiceWorkerRegistration* registration = static_cast<ServiceWorkerRegistration*>(aListener);
   MOZ_ASSERT(!domainInfo->mServiceWorkerRegistrations.Contains(registration));
+#ifdef DEBUG
+  // Ensure a registration is only listening for it's own scope.
+  nsString regScope;
+  registration->GetScope(regScope);
+  MOZ_ASSERT(!regScope.IsEmpty());
+  MOZ_ASSERT(scope.Equals(NS_ConvertUTF16toUTF8(regScope)));
+#endif
   domainInfo->mServiceWorkerRegistrations.AppendElement(registration);
   return NS_OK;
 }
 
 NS_IMETHODIMP
-ServiceWorkerManager::RemoveRegistrationEventListener(nsIURI* aDocumentURI, nsIDOMEventTarget* aListener)
+ServiceWorkerManager::RemoveRegistrationEventListener(const nsAString& aScope, nsIDOMEventTarget* aListener)
 {
   AssertIsOnMainThread();
-  MOZ_ASSERT(aDocumentURI);
-  nsRefPtr<ServiceWorkerDomainInfo> domainInfo = GetDomainInfo(aDocumentURI);
+  nsCString scope = NS_ConvertUTF16toUTF8(aScope);
+  nsRefPtr<ServiceWorkerDomainInfo> domainInfo = GetDomainInfo(scope);
   if (!domainInfo) {
     return NS_OK;
   }
 
   ServiceWorkerRegistration* registration = static_cast<ServiceWorkerRegistration*>(aListener);
   MOZ_ASSERT(domainInfo->mServiceWorkerRegistrations.Contains(registration));
+#ifdef DEBUG
+  // Ensure a registration is unregistering for it's own scope.
+  nsString regScope;
+  registration->GetScope(regScope);
+  MOZ_ASSERT(!regScope.IsEmpty());
+  MOZ_ASSERT(scope.Equals(NS_ConvertUTF16toUTF8(regScope)));
+#endif
   domainInfo->mServiceWorkerRegistrations.RemoveElement(registration);
   return NS_OK;
 }
@@ -1830,31 +1849,23 @@ ServiceWorkerManager::FireEventOnServiceWorkerRegistrations(
 {
   AssertIsOnMainThread();
   nsRefPtr<ServiceWorkerDomainInfo> domainInfo =
-    GetDomainInfo(aRegistration->mScriptSpec);
+    GetDomainInfo(aRegistration->mScope);
 
   if (domainInfo) {
     nsTObserverArray<ServiceWorkerRegistration*>::ForwardIterator it(domainInfo->mServiceWorkerRegistrations);
     while (it.HasMore()) {
       nsRefPtr<ServiceWorkerRegistration> target = it.GetNext();
-      nsIURI* targetURI = target->GetDocumentURI();
-      if (!targetURI) {
-        NS_WARNING("Controlled domain cannot have page with null URI!");
-        continue;
-      }
+      nsString regScope;
+      target->GetScope(regScope);
+      MOZ_ASSERT(!regScope.IsEmpty());
 
-      nsCString path;
-      nsresult rv = targetURI->GetSpec(path);
-      if (NS_WARN_IF(NS_FAILED(rv))) {
-        continue;
+      nsCString utf8Scope = NS_ConvertUTF16toUTF8(regScope);
+      if (utf8Scope.Equals(aRegistration->mScope)) {
+        nsresult rv = target->DispatchTrustedEvent(aName);
+        if (NS_WARN_IF(NS_FAILED(rv))) {
+          // Just for the warning.
+        }
       }
-
-      nsCString scope = FindScopeForPath(domainInfo->mOrderedScopes, path);
-      if (scope.IsEmpty() ||
-          !scope.Equals(aRegistration->mScope)) {
-        continue;
-      }
-
-      target->DispatchTrustedEvent(aName);
     }
   }
 }
@@ -2056,10 +2067,8 @@ private:
     event->SetTrusted(true);
 
     nsRefPtr<EventTarget> target = do_QueryObject(aWorkerPrivate->GlobalScope());
-    fprintf(stderr, "\n\nNSM Dispatching fetch event\n\n");
     nsresult rv2 = target->DispatchDOMEvent(nullptr, event, nullptr, nullptr);
     if (NS_FAILED(rv2) || !event->WaitToRespond()) {
-    fprintf(stderr, "\n\nNSM Resuming after fetch event\n\n");
       nsCOMPtr<nsIRunnable> runnable = new ResumeRequest(mInterceptedChannel);
       NS_DispatchToMainThread(runnable);
     }
@@ -2250,21 +2259,15 @@ ServiceWorkerManager::InvalidateServiceWorkerRegistrationWorker(ServiceWorkerReg
     nsTObserverArray<ServiceWorkerRegistration*>::ForwardIterator it(domainInfo->mServiceWorkerRegistrations);
     while (it.HasMore()) {
       nsRefPtr<ServiceWorkerRegistration> target = it.GetNext();
+      nsString regScope;
+      target->GetScope(regScope);
+      MOZ_ASSERT(!regScope.IsEmpty());
 
-      nsIURI* targetURI = target->GetDocumentURI();
-      nsCString path;
-      nsresult rv = targetURI->GetSpec(path);
-      if (NS_WARN_IF(NS_FAILED(rv))) {
-        continue;
+      nsCString utf8Scope = NS_ConvertUTF16toUTF8(regScope);
+
+      if (utf8Scope.Equals(aRegistration->mScope)) {
+        target->InvalidateWorkerReference(aWhichOnes);
       }
-
-      nsCString scope = FindScopeForPath(domainInfo->mOrderedScopes, path);
-      if (scope.IsEmpty() ||
-          !scope.Equals(aRegistration->mScope)) {
-        continue;
-      }
-
-      target->InvalidateWorkerReference(aWhichOnes);
     }
   }
 }
