@@ -71,7 +71,7 @@ FetchEvent::Constructor(const GlobalObject& aGlobal,
   e->mRequest = aOptions.mRequest.WasPassed() ?
       &aOptions.mRequest.Value() : nullptr;;
   e->mContext = aOptions.mContext.WasPassed() ?
-      aOptions.mContext.Value() : dom::Context::Connect;
+      aOptions.mContext.Value() : static_cast<dom::Context>(dom::Context::Connect);
   e->mIsReload = aOptions.mIsReload.WasPassed() ?
       aOptions.mIsReload.Value() : false;
   e->mClient = aOptions.mClient.WasPassed() ?
