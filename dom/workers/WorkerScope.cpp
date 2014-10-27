@@ -463,9 +463,16 @@ class WorkerScopeUnregisterRunnable MOZ_FINAL : public nsRunnable
                                               , public WorkerFeature
 {
   WorkerPrivate* mWorkerPrivate;
-  nsRefPtr<Promise> mWorkerPromise;
   nsString mScope;
+
+  // Worker thread only.
+  nsRefPtr<Promise> mWorkerPromise;
   bool mCleanedUp;
+
+  ~WorkerScopeUnregisterRunnable()
+  {
+    MOZ_ASSERT(mCleanedUp);
+  }
 
 public:
   NS_DECL_ISUPPORTS_INHERITED
@@ -474,8 +481,8 @@ public:
                                 Promise* aWorkerPromise,
                                 const nsAString& aScope)
     : mWorkerPrivate(aWorkerPrivate)
-    , mWorkerPromise(aWorkerPromise)
     , mScope(aScope)
+    , mWorkerPromise(aWorkerPromise)
     , mCleanedUp(false)
   {
     MOZ_ASSERT(aWorkerPrivate);
@@ -484,6 +491,7 @@ public:
 
     if (!mWorkerPrivate->AddFeature(mWorkerPrivate->GetJSContext(), this)) {
       MOZ_ASSERT(false, "cannot add the worker feature!");
+      mWorkerPromise = nullptr;
       mCleanedUp = true;
       return;
     }
@@ -493,6 +501,7 @@ public:
   WorkerPromise() const
   {
     mWorkerPrivate->AssertIsOnWorkerThread();
+    MOZ_ASSERT(!mCleanedUp);
     return mWorkerPromise;
   }
 
@@ -530,13 +539,8 @@ public:
     }
 
     mWorkerPrivate->RemoveFeature(aCx, this);
+    mWorkerPromise = nullptr;
     mCleanedUp = true;
-  }
-
-private:
-  ~WorkerScopeUnregisterRunnable()
-  {
-    MOZ_ASSERT(mCleanedUp);
   }
 
   NS_IMETHODIMP
@@ -568,8 +572,7 @@ private:
   {
     mWorkerPrivate->AssertIsOnWorkerThread();
     MOZ_ASSERT(aStatus > workers::Running);
-
-    mCleanedUp = true;
+    CleanUp(aCx);
     return true;
   }
 };
@@ -583,11 +586,10 @@ UnregisterResultRunnable::WorkerRun(JSContext* aCx,
 {
   if (mState == Failed) {
     mRunnable->WorkerPromise()->MaybeReject(aCx, JS::UndefinedHandleValue);
-    mRunnable->CleanUp(aCx);
-    return true;
+  } else {
+    mRunnable->WorkerPromise()->MaybeResolve(mValue);
   }
 
-  mRunnable->WorkerPromise()->MaybeResolve(mValue);
   mRunnable->CleanUp(aCx);
   return true;
 }
@@ -607,7 +609,13 @@ ServiceWorkerGlobalScope::Unregister(ErrorResult& aRv)
 
   nsRefPtr<WorkerScopeUnregisterRunnable> runnable =
     new WorkerScopeUnregisterRunnable(mWorkerPrivate, promise, mScope);
-  NS_DispatchToMainThread(runnable);
+
+  // Ensure the AddFeature succeeded before dispatching.
+  // Otherwise we let the promise remain pending since script is going to stop
+  // soon anyway.
+  if (runnable->WorkerPromise()) {
+    NS_DispatchToMainThread(runnable);
+  }
 
   return promise.forget();
 }
