@@ -16,13 +16,13 @@ caches.open('snafu').then(function(openCache) {
 }).then(function(hasMissingCache) {
   ok(!hasMissingCache, 'missing key should return false from has');
 }).then(function() {
-  return caches.create('snafu');
+  return caches.open('snafu');
 }).then(function(snafu) {
   return snafu.keys();
 }).then(function(empty) {
   is(0, empty.length, 'cache.keys() should resolve to an array of length 0');
 }).then(function() {
-  return caches.get('snafu');
+  return caches.open('snafu');
 }).then(function(snafu) {
   var req = './cachekey';
   var res = new Response("Hello world");

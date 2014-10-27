@@ -493,7 +493,8 @@ FetchBody<Derived>::ConsumeBody(ConsumeType aType, ErrorResult& aRv)
 
   // We can make this assertion because for now we only support memory backed
   // structures for the body argument for a Request.
-  MOZ_ASSERT(NS_InputStreamIsBuffered(stream));
+  // (bkelly: removed assert because streams produced by cache are file backed)
+  // MOZ_ASSERT(NS_InputStreamIsBuffered(stream));
   nsCString buffer;
   uint64_t len;
   aRv = stream->Available(&len);
