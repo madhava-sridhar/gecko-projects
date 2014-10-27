@@ -15,6 +15,7 @@
 
 #include "jsapi.h"
 
+#include "mozilla/DebugOnly.h"
 #include "mozilla/dom/BindingUtils.h"
 #include "mozilla/dom/DOMError.h"
 #include "mozilla/dom/ErrorEvent.h"
@@ -363,10 +364,11 @@ class ServiceWorkerRegisterJob MOZ_FINAL : public ServiceWorkerJob,
   ~ServiceWorkerRegisterJob()
   { }
 
-  enum
+  enum JobType
   {
     REGISTER_JOB = 0
-  } mJobType;
+  };
+  DebugOnly<JobType> mJobType;
 
 public:
   NS_DECL_ISUPPORTS
