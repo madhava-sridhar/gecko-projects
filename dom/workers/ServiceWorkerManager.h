@@ -34,46 +34,6 @@ namespace workers {
 
 class ServiceWorker;
 
-/**
- * UpdatePromise is a utility class that sort of imitates Promise, but not
- * completely. Using DOM Promise from C++ is a pain when we know the precise types
- * we're dealing with since it involves dealing with JSAPI. In this case we
- * also don't (yet) need the 'thenables added after resolution should trigger
- * immediately' support and other things like that. All we want is something
- * that works reasonably Promise like and can resolve real DOM Promises added
- * pre-emptively.
- */
-class UpdatePromise MOZ_FINAL
-{
-public:
-  NS_INLINE_DECL_REFCOUNTING(UpdatePromise)
-
-  UpdatePromise();
-
-  void AddPromise(Promise* aPromise);
-  void ResolveAllPromises(const nsACString& aScriptSpec, const nsACString& aScope);
-  void RejectAllPromises(nsresult aRv);
-  void RejectAllPromises(const ErrorEventInit& aErrorDesc);
-
-  bool
-  IsRejected() const
-  {
-    return mState == Rejected;
-  }
-
-private:
-  enum {
-    Pending,
-    Resolved,
-    Rejected
-  } mState;
-
-  ~UpdatePromise();
-  // XXXnsm: Right now we don't need to support AddPromise() after
-  // already being resolved (i.e. true Promise-like behaviour).
-  nsTArray<WeakPtr<Promise>> mPromises;
-};
-
 /*
  * Wherever the spec treats a worker instance and a description of said worker
  * as the same thing; i.e. "Resolve foo with
@@ -374,9 +334,6 @@ public:
   };
 
   nsRefPtrHashtable<nsCStringHashKey, ServiceWorkerDomainInfo> mDomainMap;
-
-  already_AddRefed<Promise>
-  Update(nsIGlobalObject* aGlobal, ServiceWorkerRegistrationInfo* aRegistration);
 
   void
   FinishFetch(ServiceWorkerRegistrationInfo* aRegistration);
