@@ -67,21 +67,20 @@ ServiceWorkerRegistrationInfo::Clear()
 {
   if (mInstallingWorker) {
     // FIXME(nsm): Terminate installing worker.
-    // Bug 1043701 Set state to redundant.
-    // Fire statechange.
+    mInstallingWorker->UpdateState(ServiceWorkerState::Redundant);
     mInstallingWorker = nullptr;
     // FIXME(nsm): Abort any inflight requests from installing worker.
   }
 
   if (mWaitingWorker) {
-    // FIXME(nsm): Bug 1043701 Set state to redundant.
+    mWaitingWorker->UpdateState(ServiceWorkerState::Redundant);
     // Fire statechange.
     mWaitingWorker = nullptr;
     mWaitingToActivate = false;
   }
 
   if (mActiveWorker) {
-    // FIXME(nsm): Bug 1043701 Set state to redundant.
+    mActiveWorker->UpdateState(ServiceWorkerState::Redundant);
     mActiveWorker = nullptr;
   }
 
@@ -401,7 +400,7 @@ private:
   {
     if (mRegistration->mInstallingWorker) {
       // FIXME(nsm): "Terminate installing worker".
-      // "Run the update state"
+      mRegistration->mInstallingWorker->UpdateState(ServiceWorkerState::Redundant);
       mRegistration->mInstallingWorker = nullptr;
     }
 
@@ -474,6 +473,7 @@ private:
   {
     if (mRegistration->mInstallingWorker) {
       // FIXME(nsm): Terminate and stuff
+      mRegistration->mInstallingWorker->UpdateState(ServiceWorkerState::Redundant);
     }
 
     nsRefPtr<ServiceWorkerManager> swm = ServiceWorkerManager::GetInstance();
@@ -501,8 +501,8 @@ private:
                                getter_AddRefs(serviceWorker));
 
     if (NS_WARN_IF(NS_FAILED(rv))) {
-      // FIXME(nsm):
-      MOZ_CRASH("Shouldn't happen yet");
+      ContinueAfterInstallEvent(false /* success */, false /* activate immediately */);
+      return;
     }
 
     nsRefPtr<InstallEventRunnable> r =
@@ -975,8 +975,8 @@ ServiceWorkerRegistrationInfo::Activate()
                              mScope,
                              getter_AddRefs(serviceWorker));
   if (NS_WARN_IF(NS_FAILED(rv))) {
-    // FIXME(nsm): Do the same thing as when "activate" event failed to
-    // dispatch.
+    FinishActivate(false /* success */);
+    return;
   }
 
   nsMainThreadPtrHandle<ServiceWorkerRegistrationInfo> handle(

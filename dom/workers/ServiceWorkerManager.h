@@ -78,7 +78,7 @@ public:
     MOZ_ASSERT_IF(mState == ServiceWorkerState::Activated, aState == ServiceWorkerState::Redundant);
 #endif
     mState = aState;
-    // FIXME(nsm): Inform all relevant ServiceWorker instances.
+    // FIXME(nsm): Bug 1043701 Inform all relevant ServiceWorker instances.
   }
 };
 
