@@ -30,6 +30,7 @@ private:
   ShutdownObserver();
   virtual ~ShutdownObserver();
 
+  void InitOnMainThread();
   void AddOriginOnMainThread(const nsACString& aOrigin);
   void RemoveOriginOnMainThread(const nsACString& aOrigin);
 

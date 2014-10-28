@@ -85,11 +85,35 @@ ShutdownObserver::ShutdownObserver()
   , mShuttingDown(false)
 {
   mozilla::ipc::AssertIsOnBackgroundThread();
+
+  nsCOMPtr<nsIRunnable> runnable =
+    NS_NewRunnableMethod(this, &ShutdownObserver::InitOnMainThread);
+  DebugOnly<nsresult> rv =
+    NS_DispatchToMainThread(runnable, nsIThread::DISPATCH_NORMAL);
+  MOZ_ASSERT(NS_SUCCEEDED(rv));
 }
 
 ShutdownObserver::~ShutdownObserver()
 {
   // This can happen on either main thread or background thread.
+}
+
+void
+ShutdownObserver::InitOnMainThread()
+{
+  MOZ_ASSERT(NS_IsMainThread());
+
+  nsCOMPtr<nsIObserverService> os = GetObserverService();
+
+  // If there is no observer service then we are already shutting down,
+  // but content just tried to use the Cache API for the first time.
+  // Trigger an immediate Cache shutdown.
+  if (!os) {
+    DoShutdown();
+    return;
+  }
+
+  os->AddObserver(this, "profile-before-change", false /* weak ref */);
 }
 
 void
@@ -99,25 +123,6 @@ ShutdownObserver::AddOriginOnMainThread(const nsACString& aOrigin)
 
   if (!mOrigins.Contains(aOrigin)) {
     mOrigins.AppendElement(aOrigin);
-
-    if (mOrigins.Length() == 1) {
-      nsCOMPtr<nsIObserverService> os = GetObserverService();
-
-      // If there is no observer service then we are already shutting down,
-      // but content just tried to use the Cache API for the first time.
-      // Trigger an immediate Cache shutdown.
-      if (!os) {
-        nsCOMPtr<nsIRunnable> runnable =
-          NS_NewRunnableMethod(this, &ShutdownObserver::DoShutdown);
-
-        DebugOnly<nsresult> rv =
-          NS_DispatchToMainThread(runnable, nsIThread::DISPATCH_NORMAL);
-
-        return;
-      }
-
-      os->AddObserver(this, "profile-before-change", false /* weak ref */);
-    }
   }
 }
 
@@ -129,13 +134,6 @@ ShutdownObserver::RemoveOriginOnMainThread(const nsACString& aOrigin)
   size_t index = mOrigins.IndexOf(aOrigin);
   if (index != nsTArray<nsCString>::NoIndex) {
     mOrigins.RemoveElementAt(index);
-
-    if (mOrigins.Length() == 0) {
-      nsCOMPtr<nsIObserverService> os = mozilla::services::GetObserverService();
-      if (os) {
-        os->RemoveObserver(this, "profile-before-change");
-      }
-    }
   }
 }
 
@@ -168,6 +166,11 @@ ShutdownObserver::DoShutdown()
 {
   MOZ_ASSERT(NS_IsMainThread());
 
+  nsCOMPtr<nsIObserverService> os = mozilla::services::GetObserverService();
+  if (os) {
+    os->RemoveObserver(this, "profile-before-change");
+  }
+
   // Copy origins to separate array to process to avoid races
   mOriginsInProcess = mOrigins;
 
@@ -180,7 +183,7 @@ ShutdownObserver::DoShutdown()
 
   runnable = nullptr;
 
-  // What for managers to shutdown
+  // Wait for managers to shutdown
   while (!mOrigins.IsEmpty()) {
     if (!NS_ProcessNextEvent()) {
       NS_WARNING("Something bad happened!");
