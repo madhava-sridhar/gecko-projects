@@ -87,6 +87,10 @@ var interfaceNamesInGlobalScope =
 // IMPORTANT: Do not change this list without review from a DOM peer!
     "Blob",
 // IMPORTANT: Do not change this list without review from a DOM peer!
+    { name: "Cache", pref: "dom.worker-caches.enabled" },
+// IMPORTANT: Do not change this list without review from a DOM peer!
+    { name: "CacheStorage", pref: "dom.worker-caches.enabled" },
+// IMPORTANT: Do not change this list without review from a DOM peer!
     "DedicatedWorkerGlobalScope",
 // IMPORTANT: Do not change this list without review from a DOM peer!
     { name: "DataStore", b2g: true },
@@ -114,6 +118,10 @@ var interfaceNamesInGlobalScope =
     "Performance",
 // IMPORTANT: Do not change this list without review from a DOM peer!
     "Promise",
+// IMPORTANT: Do not change this list without review from a DOM peer!
+    { name: "Request", pref: "dom.fetch.enabled" },
+// IMPORTANT: Do not change this list without review from a DOM peer!
+    { name: "Response", pref: "dom.fetch.enabled" },
 // IMPORTANT: Do not change this list without review from a DOM peer!
     "TextDecoder",
 // IMPORTANT: Do not change this list without review from a DOM peer!
