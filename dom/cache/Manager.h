@@ -207,9 +207,6 @@ private:
   Context* mContext;
 
   bool mShuttingDown;
-
-public:
-  NS_INLINE_DECL_REFCOUNTING(mozilla::dom::cache::Manager)
 };
 
 } // namespace cache

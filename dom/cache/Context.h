@@ -28,17 +28,18 @@ class Context MOZ_FINAL
 public:
   class Listener
   {
-  public:
+  protected:
     virtual ~Listener() { }
+  public:
     // Called from the Context destructor on the thread that originally
     // created the Context.
     virtual void RemoveContext(Context* aContext)=0;
+
+    NS_INLINE_DECL_REFCOUNTING(mozilla::dom::cache::Context::Listener)
   };
 
   Context(Listener* aListener, const nsACString& aOrigin,
           const nsACString& aBaseDomain, Action* aQuotaIOThreadAction);
-
-  void ClearListener();
 
   // Execute given action on the target once the quota manager has been
   // initialized.
@@ -81,7 +82,7 @@ private:
   void OnQuotaInit(nsresult aRv, nsIFile* aQuotaDir);
   void OnActionRunnableComplete(ActionRunnable* const aAction);
 
-  Listener* mListener;
+  nsRefPtr<Listener> mListener;
   const nsCString mOrigin;
   State mState;
   nsCOMPtr<nsIFile> mQuotaDir;

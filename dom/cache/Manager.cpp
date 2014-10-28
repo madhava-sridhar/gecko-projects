@@ -1141,14 +1141,14 @@ Manager::ForExistingOrigin(const nsACString& aOrigin)
 void
 Manager::RemoveListener(Listener* aListener)
 {
-  NS_ASSERT_OWNINGTHREAD(Manager);
+  NS_ASSERT_OWNINGTHREAD(Context::Listener);
   mListeners.RemoveElement(aListener);
 }
 
 void
 Manager::AddRefCacheId(CacheId aCacheId)
 {
-  NS_ASSERT_OWNINGTHREAD(Manager);
+  NS_ASSERT_OWNINGTHREAD(Context::Listener);
   for (uint32_t i = 0; i < mCacheIdRefs.Length(); ++i) {
     if (mCacheIdRefs[i].mCacheId == aCacheId) {
       mCacheIdRefs[i].mCount += 1;
@@ -1163,7 +1163,7 @@ Manager::AddRefCacheId(CacheId aCacheId)
 void
 Manager::ReleaseCacheId(CacheId aCacheId)
 {
-  NS_ASSERT_OWNINGTHREAD(Manager);
+  NS_ASSERT_OWNINGTHREAD(Context::Listener);
   for (uint32_t i = 0; i < mCacheIdRefs.Length(); ++i) {
     if (mCacheIdRefs[i].mCacheId == aCacheId) {
       DebugOnly<uint32_t> oldRef = mCacheIdRefs[i].mCount;
@@ -1186,7 +1186,7 @@ Manager::ReleaseCacheId(CacheId aCacheId)
 uint32_t
 Manager::GetCacheIdRefCount(CacheId aCacheId)
 {
-  NS_ASSERT_OWNINGTHREAD(Manager);
+  NS_ASSERT_OWNINGTHREAD(Context::Listener);
   for (uint32_t i = 0; i < mCacheIdRefs.Length(); ++i) {
     if (mCacheIdRefs[i].mCacheId == aCacheId) {
       MOZ_ASSERT(mCacheIdRefs[i].mCount > 0);
@@ -1199,7 +1199,7 @@ Manager::GetCacheIdRefCount(CacheId aCacheId)
 void
 Manager::Shutdown()
 {
-  NS_ASSERT_OWNINGTHREAD(Manager);
+  NS_ASSERT_OWNINGTHREAD(Context::Listener);
   mShuttingDown = true;
   for (uint32_t i = 0; i < mStreamLists.Length(); ++i) {
     mStreamLists[i]->CloseAll();
@@ -1223,7 +1223,7 @@ Manager::CacheMatch(Listener* aListener, RequestId aRequestId, CacheId aCacheId,
                     const PCacheRequest& aRequest,
                     const PCacheQueryParams& aParams)
 {
-  NS_ASSERT_OWNINGTHREAD(Manager);
+  NS_ASSERT_OWNINGTHREAD(Context::Listener);
   MOZ_ASSERT(aListener);
   if (mShuttingDown) {
     aListener->OnCacheMatch(aRequestId, NS_ERROR_ILLEGAL_DURING_SHUTDOWN,
@@ -1243,7 +1243,7 @@ Manager::CacheMatchAll(Listener* aListener, RequestId aRequestId,
                        CacheId aCacheId, const PCacheRequestOrVoid& aRequest,
                        const PCacheQueryParams& aParams)
 {
-  NS_ASSERT_OWNINGTHREAD(Manager);
+  NS_ASSERT_OWNINGTHREAD(Context::Listener);
   MOZ_ASSERT(aListener);
   if (mShuttingDown) {
     aListener->OnCacheMatchAll(aRequestId, NS_ERROR_ILLEGAL_DURING_SHUTDOWN,
@@ -1265,7 +1265,7 @@ Manager::CachePut(Listener* aListener, RequestId aRequestId, CacheId aCacheId,
                   const PCacheResponse& aResponse,
                   nsIInputStream* aResponseBodyStream)
 {
-  NS_ASSERT_OWNINGTHREAD(Manager);
+  NS_ASSERT_OWNINGTHREAD(Context::Listener);
   MOZ_ASSERT(aListener);
   if (mShuttingDown) {
     aListener->OnCachePut(aRequestId, NS_ERROR_ILLEGAL_DURING_SHUTDOWN);
@@ -1286,7 +1286,7 @@ Manager::CacheDelete(Listener* aListener, RequestId aRequestId,
                      CacheId aCacheId, const PCacheRequest& aRequest,
                      const PCacheQueryParams& aParams)
 {
-  NS_ASSERT_OWNINGTHREAD(Manager);
+  NS_ASSERT_OWNINGTHREAD(Context::Listener);
   MOZ_ASSERT(aListener);
   if (mShuttingDown) {
     aListener->OnCacheDelete(aRequestId, NS_ERROR_ILLEGAL_DURING_SHUTDOWN, false);
@@ -1303,7 +1303,7 @@ Manager::CacheKeys(Listener* aListener, RequestId aRequestId,
                    CacheId aCacheId, const PCacheRequestOrVoid& aRequestOrVoid,
                    const PCacheQueryParams& aParams)
 {
-  NS_ASSERT_OWNINGTHREAD(Manager);
+  NS_ASSERT_OWNINGTHREAD(Context::Listener);
   MOZ_ASSERT(aListener);
   if (mShuttingDown) {
     aListener->OnCacheKeys(aRequestId, NS_ERROR_ILLEGAL_DURING_SHUTDOWN,
@@ -1323,7 +1323,7 @@ Manager::StorageMatch(Listener* aListener, RequestId aRequestId,
                       Namespace aNamespace, const PCacheRequest& aRequest,
                       const PCacheQueryParams& aParams)
 {
-  NS_ASSERT_OWNINGTHREAD(Manager);
+  NS_ASSERT_OWNINGTHREAD(Context::Listener);
   MOZ_ASSERT(aListener);
   if (mShuttingDown) {
     aListener->OnStorageMatch(aRequestId, NS_ERROR_ILLEGAL_DURING_SHUTDOWN,
@@ -1342,7 +1342,7 @@ void
 Manager::StorageHas(Listener* aListener, RequestId aRequestId,
                     Namespace aNamespace, const nsAString& aKey)
 {
-  NS_ASSERT_OWNINGTHREAD(Manager);
+  NS_ASSERT_OWNINGTHREAD(Context::Listener);
   MOZ_ASSERT(aListener);
   if (mShuttingDown) {
     aListener->OnStorageHas(aRequestId, NS_ERROR_ILLEGAL_DURING_SHUTDOWN,
@@ -1359,7 +1359,7 @@ void
 Manager::StorageOpen(Listener* aListener, RequestId aRequestId,
                      Namespace aNamespace, const nsAString& aKey)
 {
-  NS_ASSERT_OWNINGTHREAD(Manager);
+  NS_ASSERT_OWNINGTHREAD(Context::Listener);
   MOZ_ASSERT(aListener);
   if (mShuttingDown) {
     aListener->OnStorageOpen(aRequestId, NS_ERROR_ILLEGAL_DURING_SHUTDOWN, 0);
@@ -1375,7 +1375,7 @@ void
 Manager::StorageDelete(Listener* aListener, RequestId aRequestId,
                        Namespace aNamespace, const nsAString& aKey)
 {
-  NS_ASSERT_OWNINGTHREAD(Manager);
+  NS_ASSERT_OWNINGTHREAD(Context::Listener);
   MOZ_ASSERT(aListener);
   if (mShuttingDown) {
     aListener->OnStorageDelete(aRequestId, NS_ERROR_ILLEGAL_DURING_SHUTDOWN,
@@ -1392,7 +1392,7 @@ void
 Manager::StorageKeys(Listener* aListener, RequestId aRequestId,
                      Namespace aNamespace)
 {
-  NS_ASSERT_OWNINGTHREAD(Manager);
+  NS_ASSERT_OWNINGTHREAD(Context::Listener);
   MOZ_ASSERT(aListener);
   if (mShuttingDown) {
     aListener->OnStorageKeys(aRequestId, NS_ERROR_ILLEGAL_DURING_SHUTDOWN,
@@ -1408,7 +1408,7 @@ Manager::StorageKeys(Listener* aListener, RequestId aRequestId,
 void
 Manager::RemoveContext(Context* aContext)
 {
-  NS_ASSERT_OWNINGTHREAD(Manager);
+  NS_ASSERT_OWNINGTHREAD(Context::Listener);
   MOZ_ASSERT(mContext);
   MOZ_ASSERT(mContext == aContext);
   mContext = nullptr;
@@ -1443,19 +1443,16 @@ Manager::Manager(const nsACString& aOrigin, const nsACString& aBaseDomain)
 
 Manager::~Manager()
 {
-  NS_ASSERT_OWNINGTHREAD(Manager);
+  NS_ASSERT_OWNINGTHREAD(Context::Listener);
   Shutdown();
   Factory::Instance().Remove(this);
-  if (mContext) {
-    mContext->ClearListener();
-  }
   mIOThread->Shutdown();
 }
 
 Context*
 Manager::CurrentContext()
 {
-  NS_ASSERT_OWNINGTHREAD(Manager);
+  NS_ASSERT_OWNINGTHREAD(Context::Listener);
   if (!mContext) {
     MOZ_ASSERT(!mShuttingDown);
     nsRefPtr<Action> setupAction = new SetupAction(mOrigin, mBaseDomain);
@@ -1467,7 +1464,7 @@ Manager::CurrentContext()
 Manager::ListenerId
 Manager::SaveListener(Listener* aListener)
 {
-  NS_ASSERT_OWNINGTHREAD(Manager);
+  NS_ASSERT_OWNINGTHREAD(Context::Listener);
   for (uint32_t i = 0; i < mListeners.Length(); ++i) {
     if (mListeners[i] == aListener) {
       return reinterpret_cast<ListenerId>(aListener);
@@ -1480,7 +1477,7 @@ Manager::SaveListener(Listener* aListener)
 Manager::Listener*
 Manager::GetListener(ListenerId aListenerId) const
 {
-  NS_ASSERT_OWNINGTHREAD(Manager);
+  NS_ASSERT_OWNINGTHREAD(Context::Listener);
   for (uint32_t i = 0; i < mListeners.Length(); ++i) {
     if (reinterpret_cast<ListenerId>(mListeners[i]) == aListenerId) {
       return mListeners[i];
@@ -1492,7 +1489,7 @@ Manager::GetListener(ListenerId aListenerId) const
 void
 Manager::AddStreamList(StreamList* aStreamList)
 {
-  NS_ASSERT_OWNINGTHREAD(Manager);
+  NS_ASSERT_OWNINGTHREAD(Context::Listener);
   MOZ_ASSERT(aStreamList);
   mStreamLists.AppendElement(aStreamList);
 }
@@ -1500,7 +1497,7 @@ Manager::AddStreamList(StreamList* aStreamList)
 void
 Manager::RemoveStreamList(StreamList* aStreamList)
 {
-  NS_ASSERT_OWNINGTHREAD(Manager);
+  NS_ASSERT_OWNINGTHREAD(Context::Listener);
   MOZ_ASSERT(aStreamList);
   mStreamLists.RemoveElement(aStreamList);
 }

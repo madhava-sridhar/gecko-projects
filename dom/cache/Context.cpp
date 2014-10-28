@@ -416,14 +416,6 @@ Context::Context(Listener* aListener, const nsACString& aOrigin,
 }
 
 void
-Context::ClearListener()
-{
-  NS_ASSERT_OWNINGTHREAD(Context);
-  MOZ_ASSERT(mListener);
-  mListener = nullptr;
-}
-
-void
 Context::Dispatch(nsIEventTarget* aTarget, Action* aAction)
 {
   NS_ASSERT_OWNINGTHREAD(Context);
@@ -473,6 +465,7 @@ Context::CancelForCacheId(CacheId aCacheId)
 Context::~Context()
 {
   NS_ASSERT_OWNINGTHREAD(Context);
+  MOZ_ASSERT(mListener);
 
   // Unlock the quota dir as we go out of scope.
   nsCOMPtr<nsIRunnable> runnable =
@@ -482,9 +475,7 @@ Context::~Context()
     MOZ_CRASH("Failed to dispatch QuotaReleaseRunnable to main thread.");
   }
 
-  if (mListener) {
-    mListener->RemoveContext(this);
-  }
+  mListener->RemoveContext(this);
 }
 
 void
