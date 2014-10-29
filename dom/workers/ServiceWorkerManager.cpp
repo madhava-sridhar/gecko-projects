@@ -509,7 +509,6 @@ public:
       mRegistration->mInstallingWorker->UpdateState(ServiceWorkerState::Redundant);
     }
 
-    nsRefPtr<ServiceWorkerManager> swm = ServiceWorkerManager::GetInstance();
     swm->InvalidateServiceWorkerRegistrationWorker(mRegistration,
                                                    WhichServiceWorker::INSTALLING_WORKER);
     mRegistration->mInstallingWorker = new ServiceWorkerInfo(mRegistration->mScriptSpec);
