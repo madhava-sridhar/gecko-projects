@@ -2195,7 +2195,7 @@ XMLHttpRequest::Send(File& aBody, ErrorResult& aRv)
   WorkerStructuredCloneClosure closure;
 
   JSAutoStructuredCloneBuffer buffer;
-  if (!buffer.write(cx, value, callbacks, &closure.mClonedObjects)) {
+  if (!buffer.write(cx, value, callbacks, &closure)) {
     aRv.Throw(NS_ERROR_DOM_DATA_CLONE_ERR);
     return;
   }
