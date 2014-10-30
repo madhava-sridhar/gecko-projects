@@ -41,6 +41,12 @@ public:
   }
 
   void
+  SetState(ServiceWorkerState aState)
+  {
+    mState = aState;
+  }
+
+  void
   GetScope(nsString& aScope) const
   {
     aScope = mScope;
@@ -50,6 +56,12 @@ public:
   GetScriptURL(nsString& aURL) const
   {
     aURL = mURL;
+  }
+
+  void
+  DispatchStateChange()
+  {
+    DOMEventTargetHelper::DispatchTrustedEvent(NS_LITERAL_STRING("statechange"));
   }
 
 // undo windows.h brain damage

@@ -511,7 +511,7 @@ public:
 
     swm->InvalidateServiceWorkerRegistrationWorker(mRegistration,
                                                    WhichServiceWorker::INSTALLING_WORKER);
-    mRegistration->mInstallingWorker = new ServiceWorkerInfo(mRegistration->mScriptSpec);
+    mRegistration->mInstallingWorker = new ServiceWorkerInfo(mRegistration, mRegistration->mScriptSpec);
     mRegistration->mInstallingWorker->UpdateState(ServiceWorkerState::Installing);
 
     Succeed();
@@ -1584,6 +1584,48 @@ ServiceWorkerRegistrationInfo::FinishActivate(bool aSuccess)
   } else {
     mActiveWorker->UpdateState(ServiceWorkerState::Redundant);
     mActiveWorker = nullptr;
+  }
+}
+
+void
+ServiceWorkerRegistrationInfo::QueueStateChangeEvent(ServiceWorkerInfo* aInfo,
+                                                     ServiceWorkerState aState) const
+{
+  AssertIsOnMainThread();
+  MOZ_ASSERT(aInfo);
+  MOZ_ASSERT(aInfo == mInstallingWorker ||
+             aInfo == mWaitingWorker ||
+             aInfo == mActiveWorker);
+
+  nsRefPtr<ServiceWorkerManager> swm = ServiceWorkerManager::GetInstance();
+  nsRefPtr<ServiceWorkerManager::ServiceWorkerDomainInfo> domainInfo =
+    swm->GetDomainInfo(mScope);
+
+  if (domainInfo) {
+    WhichServiceWorker whichOne;
+    if (aInfo == mInstallingWorker) {
+      whichOne = WhichServiceWorker::INSTALLING_WORKER;
+    } else if (aInfo == mWaitingWorker) {
+      whichOne = WhichServiceWorker::WAITING_WORKER;
+    } else if (aInfo == mActiveWorker) {
+      whichOne = WhichServiceWorker::ACTIVE_WORKER;
+    } else {
+      MOZ_CRASH("Hit unexpected case");
+    }
+
+    // Refactor this iteration pattern across this and 2 other call-sites.
+    nsTObserverArray<ServiceWorkerRegistration*>::ForwardIterator it(domainInfo->mServiceWorkerRegistrations);
+    while (it.HasMore()) {
+      nsRefPtr<ServiceWorkerRegistration> target = it.GetNext();
+      nsString regScope;
+      target->GetScope(regScope);
+      MOZ_ASSERT(!regScope.IsEmpty());
+
+      nsCString utf8Scope = NS_ConvertUTF16toUTF8(regScope);
+      if (utf8Scope.Equals(mScope)) {
+        target->QueueStateChangeEvent(whichOne, aState);
+      }
+    }
   }
 }
 
