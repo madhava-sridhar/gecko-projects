@@ -101,6 +101,10 @@ public:
     MOZ_ASSERT(NS_FAILED(aArg));
     MaybeSomething(aArg, &Promise::MaybeReject);
   }
+  inline void MaybeReject(ErrorResult& aArg) {
+    MOZ_ASSERT(aArg.Failed());
+    MaybeSomething(aArg, &Promise::MaybeReject);
+  }
   // DO NOT USE MaybeRejectBrokenly with in new code.  Promises should be
   // rejected with Error instances.
   // Note: MaybeRejectBrokenly is a template so we can use it with DOMError
