@@ -34,7 +34,27 @@
     }, function(e) {
       ok(false, "Unexpected Error in nextRegister! " + e);
     });
+  }
 
+  function installError() {
+    // Silence worker errors so they don't cause the test to fail.
+    window.onerror = function() { }
+    return navigator.serviceWorker.register("install_event_error_worker.js", { scope: "./install_event" })
+      .then(function(swr) {
+        ok(swr.installing.state == "installing", "Installing worker's state should be 'installing'");
+        return new Promise(function(resolve, reject) {
+          swr.installing.onstatechange = function(e) {
+            ok(e.target.state == "redundant", "Installation of worker with error should fail.");
+            resolve();
+          }
+        });
+      }).then(function() {
+        return navigator.serviceWorker.getRegistration("./install_event").then(function(swr) {
+          var newest = swr.waiting || swr.active;
+          ok(newest, "Waiting or active worker should still exist");
+          ok(newest.scriptURL.match(/install_event_worker.js$/), "Previous worker should remain the newest worker");
+        });
+      });
   }
 
   function unregister() {
@@ -46,6 +66,7 @@
   function runTest() {
     simpleRegister()
       .then(nextRegister)
+      .then(installError)
       .then(unregister)
       .then(function() {
         SimpleTest.finish();

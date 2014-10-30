@@ -907,21 +907,30 @@ InstallEventRunnable::DispatchInstallEvent(JSContext* aCx, WorkerPrivate* aWorke
   nsresult rv = target->DispatchDOMEvent(nullptr, event, nullptr, nullptr);
 
   nsCOMPtr<nsIGlobalObject> sgo = aWorkerPrivate->GlobalScope();
-  if (NS_SUCCEEDED(rv)) {
+  WidgetEvent* internalEvent = event->GetInternalNSEvent();
+  if (NS_SUCCEEDED(rv) && !internalEvent->mFlags.mExceptionHasBeenRisen) {
     waitUntilPromise = event->GetPromise();
     if (!waitUntilPromise) {
-      ErrorResult rv;
+      ErrorResult result;
       waitUntilPromise =
         Promise::Resolve(sgo,
-                         aCx, JS::UndefinedHandleValue, rv);
+                         aCx, JS::UndefinedHandleValue, result);
+      if (NS_WARN_IF(result.Failed())) {
+        return true;
+      }
     }
   } else {
-    ErrorResult rv;
+    ErrorResult result;
     // Continue with a canceled install.
+    // Although the spec has different routines to deal with popping stuff
+    // off it's internal queues, we can reuse the ContinueAfterInstallEvent()
+    // logic.
     waitUntilPromise = Promise::Reject(sgo, aCx,
-                                       JS::UndefinedHandleValue, rv);
+                                       JS::UndefinedHandleValue, result);
+    if (NS_WARN_IF(result.Failed())) {
+      return true;
+    }
   }
-  // FIXME(nsm): handle script errors.
 
   nsRefPtr<FinishInstallHandler> handler =
     new FinishInstallHandler(mJob, event->ActivateImmediately());
