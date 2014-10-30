@@ -1027,8 +1027,16 @@ void
 Manager::StreamList::SetStreamControl(StreamControl* aStreamControl)
 {
   NS_ASSERT_OWNINGTHREAD(Manager::StreamList);
-  MOZ_ASSERT(!mStreamControl);
   MOZ_ASSERT(aStreamControl);
+
+  // For cases where multiple streams are serialized for a single list
+  // then the control will get passed multiple times.  This ok, but
+  // it should be the same control each time.
+  if (mStreamControl) {
+    MOZ_ASSERT(aStreamControl == mStreamControl);
+    return;
+  }
+
   mStreamControl = aStreamControl;
   mStreamControl->SetStreamList(this);
 }
