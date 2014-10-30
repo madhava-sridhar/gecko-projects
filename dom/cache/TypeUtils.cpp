@@ -71,11 +71,16 @@ GetURLWithoutQuery(const nsAString& aUrl, nsAString& aUrlWithoutQueryOut,
     return;
   }
 
+  if (queryLen < 0) {
+    aUrlWithoutQueryOut = aUrl;
+    return;
+  }
+
   // ParsePath gives us query position relative to the start of the path
   queryPos += pathPos;
 
   // We want everything before and after the query
-  aUrlWithoutQueryOut = Substring(aUrl, 0, queryPos);
+  aUrlWithoutQueryOut = Substring(aUrl, 0, queryPos - 1);
   aUrlWithoutQueryOut.Append(Substring(aUrl, queryPos + queryLen,
                                        aUrl.Length() - queryPos - queryLen));
 }
