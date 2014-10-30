@@ -666,7 +666,7 @@ DBSchema::QueryCache(mozIStorageConnection* aConn, CacheId aCacheId,
       bool matchedByVary;
       rv = MatchByVaryHeader(aConn, aRequest, entryId, &matchedByVary);
       if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
-      if (matchedByVary) {
+      if (!matchedByVary) {
         continue;
       }
     }
