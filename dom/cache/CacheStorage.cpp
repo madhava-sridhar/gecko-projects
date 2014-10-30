@@ -108,7 +108,11 @@ CacheStorage::Match(const RequestOrScalarValueString& aRequest,
   }
 
   PCacheRequest request;
-  ToPCacheRequest(request, aRequest);
+  ToPCacheRequest(request, aRequest, false, aRv);
+  if (NS_WARN_IF(aRv.Failed())) {
+    nsRefPtr<Promise> unused = RemoveRequestPromise(requestId);
+    return nullptr;
+  }
 
   PCacheQueryParams params;
   TypeUtils::ToPCacheQueryParams(params, aParams);
@@ -291,7 +295,15 @@ CacheStorage::ActorCreated(PBackgroundChild* aActor)
       case OP_MATCH:
       {
         PCacheRequest request;
-        ToPCacheRequest(request, entry.mRequest);
+        ErrorResult rv;
+        ToPCacheRequest(request, entry.mRequest, false, rv);
+        if (NS_WARN_IF(rv.Failed())) {
+          nsRefPtr<Promise> promise = RemoveRequestPromise(requestId);
+          if (promise) {
+            promise->MaybeReject(rv);
+          }
+          return;
+        }
 
         PCacheQueryParams params;
         TypeUtils::ToPCacheQueryParams(params, entry.mParams);
@@ -503,8 +515,11 @@ CacheStorage::RemoveRequestPromise(RequestId aRequestId)
   return nullptr;
 }
 
-nsresult
-CacheStorage::ToPCacheRequest(PCacheRequest& aOut, const RequestOrScalarValueString& aIn)
+// TODO: factor this out to TypeUtils
+void
+CacheStorage::ToPCacheRequest(PCacheRequest& aOut,
+                              const RequestOrScalarValueString& aIn,
+                              bool aReadBody, ErrorResult& aRv)
 {
   AutoJSAPI jsapi;
   jsapi.Init(mGlobal);
@@ -514,7 +529,7 @@ CacheStorage::ToPCacheRequest(PCacheRequest& aOut, const RequestOrScalarValueStr
 
   GlobalObject global(cx, jsGlobal);
 
-  return TypeUtils::ToPCacheRequest(global, aOut, aIn);
+  TypeUtils::ToPCacheRequest(global, aOut, aIn, aReadBody, aRv);
 }
 
 } // namespace cache

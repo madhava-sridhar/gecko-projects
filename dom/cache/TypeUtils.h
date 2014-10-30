@@ -37,23 +37,28 @@ class PCacheStreamControlChild;
 class TypeUtils
 {
 public:
-  static nsresult
-  ToPCacheRequest(PCacheRequest& aOut, const Request& aIn);
+  static void
+  ToPCacheRequest(PCacheRequest& aOut, const Request& aIn, bool aReadBody,
+                  ErrorResult& aRv);
 
-  static nsresult
-  ToPCacheRequest(const GlobalObject& aGlobal, PCacheRequest& aOut, const RequestOrScalarValueString& aIn);
+  static void
+  ToPCacheRequest(const GlobalObject& aGlobal, PCacheRequest& aOut,
+                  const RequestOrScalarValueString& aIn, bool aReadBody,
+                  ErrorResult& aRv);
 
-  static nsresult
+  static void
   ToPCacheRequestOrVoid(const GlobalObject& aGlobal,
                         PCacheRequestOrVoid& aOut,
-                        const Optional<RequestOrScalarValueString>& aIn);
+                        const Optional<RequestOrScalarValueString>& aIn,
+                        bool aReadBody, ErrorResult& aRv);
 
-  static nsresult
+  static void
   ToPCacheRequest(const GlobalObject& aGlobal, PCacheRequest& aOut,
-                  const OwningRequestOrScalarValueString& aIn);
+                  const OwningRequestOrScalarValueString& aIn,
+                  bool aReadBody, ErrorResult& aRv);
 
-  static nsresult
-  ToPCacheResponse(PCacheResponse& aOut, const Response& aIn);
+  static void
+  ToPCacheResponse(PCacheResponse& aOut, const Response& aIn, ErrorResult& aRv);
 
   static void
   ToPCacheQueryParams(PCacheQueryParams& aOut, const QueryParams& aIn);

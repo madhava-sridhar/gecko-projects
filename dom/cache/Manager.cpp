@@ -435,7 +435,6 @@ public:
       DoResolve(rv);
       return;
     }
-    MOZ_ASSERT(mRequestBodyCopyContext);
 
     rv = StartStreamCopy(mResponseBodyStream, &mResponseBodyId,
                          getter_AddRefs(mResponseBodyCopyContext));

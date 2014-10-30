@@ -87,8 +87,9 @@ private:
   RequestId AddRequestPromise(Promise* aPromise, ErrorResult& aRv);
   already_AddRefed<Promise> RemoveRequestPromise(RequestId aRequestId);
 
-  nsresult
-  ToPCacheRequest(PCacheRequest& aOut, const RequestOrScalarValueString& aIn);
+  void
+  ToPCacheRequest(PCacheRequest& aOut, const RequestOrScalarValueString& aIn,
+                  bool aReadyBody, ErrorResult& aRv);
 
   const Namespace mNamespace;
   nsCOMPtr<nsISupports> mOwner;

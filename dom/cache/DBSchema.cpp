@@ -711,7 +711,7 @@ DBSchema::MatchByVaryHeader(mozIStorageConnection* aConn,
   state->Reset();
   rv = aConn->CreateStatement(NS_LITERAL_CSTRING(
     "SELECT name, value FROM request_headers "
-    "WHERE AND entry_id=?1;"
+    "WHERE entry_id=?1;"
   ), getter_AddRefs(state));
   if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 

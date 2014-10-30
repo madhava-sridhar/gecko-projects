@@ -27,8 +27,9 @@
 
 namespace {
 
-using mozilla::void_t;
+using mozilla::ErrorResult;
 using mozilla::unused;
+using mozilla::void_t;
 using mozilla::dom::cache::PCacheReadStream;
 using mozilla::dom::cache::PCacheReadStreamOrVoid;
 using mozilla::ipc::BackgroundChild;
@@ -38,23 +39,25 @@ using mozilla::ipc::PBackgroundChild;
 
 // Utility function to remove the query from a URL.  We're not using nsIURL
 // or URL to do this because they require going to the main thread.
-static nsresult
-GetURLWithoutQuery(const nsAString& aUrl, nsAString& aUrlWithoutQueryOut)
+static void
+GetURLWithoutQuery(const nsAString& aUrl, nsAString& aUrlWithoutQueryOut,
+                   ErrorResult& aRv)
 {
   NS_ConvertUTF16toUTF8 flatURL(aUrl);
   const char* url = flatURL.get();
 
   nsCOMPtr<nsIURLParser> urlParser = new nsStdURLParser();
-  NS_ENSURE_TRUE(urlParser, NS_ERROR_OUT_OF_MEMORY);
 
   uint32_t pathPos;
   int32_t pathLen;
-
   nsresult rv = urlParser->ParseURL(url, flatURL.Length(),
                                     nullptr, nullptr,       // ignore scheme
                                     nullptr, nullptr,       // ignore authority
                                     &pathPos, &pathLen);
-  NS_ENSURE_SUCCESS(rv, rv);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    aRv.Throw(rv);
+    return;
+  }
 
   uint32_t queryPos;
   int32_t queryLen;
@@ -63,7 +66,10 @@ GetURLWithoutQuery(const nsAString& aUrl, nsAString& aUrlWithoutQueryOut)
                             nullptr, nullptr,               // ignore filepath
                             &queryPos, &queryLen,
                             nullptr, nullptr);              // ignore ref
-  NS_ENSURE_SUCCESS(rv, rv);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    aRv.Throw(rv);
+    return;
+  }
 
   // ParsePath gives us query position relative to the start of the path
   queryPos += pathPos;
@@ -72,8 +78,6 @@ GetURLWithoutQuery(const nsAString& aUrl, nsAString& aUrlWithoutQueryOut)
   aUrlWithoutQueryOut = Substring(aUrl, 0, queryPos);
   aUrlWithoutQueryOut.Append(Substring(aUrl, queryPos + queryLen,
                                        aUrl.Length() - queryPos - queryLen));
-
-  return NS_OK;
 }
 
 void
@@ -126,14 +130,15 @@ using mozilla::ipc::PFileDescriptorSetChild;
 using mozilla::ipc::PBackgroundChild;
 
 // static
-nsresult
-TypeUtils::ToPCacheRequest(PCacheRequest& aOut, const Request& aIn)
+void
+TypeUtils::ToPCacheRequest(PCacheRequest& aOut, const Request& aIn,
+                           bool aReadBody, ErrorResult& aRv)
 {
   aIn.GetMethod(aOut.method());
   aIn.GetUrl(aOut.url());
-  nsresult rv = GetURLWithoutQuery(aOut.url(), aOut.urlWithoutQuery());
-  if(NS_FAILED(rv)) {
-    return rv;
+  GetURLWithoutQuery(aOut.url(), aOut.urlWithoutQuery(), aRv);
+  if (aRv.Failed()) {
+    return;
   }
   aIn.GetReferrer(aOut.referrer());
   nsRefPtr<InternalHeaders> headers = aIn.GetInternalHeaders();
@@ -143,86 +148,94 @@ TypeUtils::ToPCacheRequest(PCacheRequest& aOut, const Request& aIn)
   aOut.mode() = aIn.Mode();
   aOut.credentials() = aIn.Credentials();
 
+  if (!aReadBody) {
+    aOut.body() = void_t();
+    return;
+  }
+
   if (aIn.BodyUsed()) {
-    return NS_ERROR_TYPE_ERR;
+    aRv.ThrowTypeError(MSG_REQUEST_BODY_CONSUMED_ERROR);
+    return;
   }
 
   nsRefPtr<InternalRequest> internalRequest = aIn.GetInternalRequest();
   MOZ_ASSERT(internalRequest);
   nsCOMPtr<nsIInputStream> stream;
 
-  // TODO: internalRequest->GetBody(getter_AddRefs(stream));
+  internalRequest->GetBody(getter_AddRefs(stream));
   // TODO: set Request body used
-
-  // TODO: remove stream testing code
-  rv = NS_NewCStringInputStream(getter_AddRefs(stream),
-                NS_LITERAL_CSTRING("request body stream beep beep boop!"));
-  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 
   // TODO: Provide way to send PCacheRequest without serializing body for
   //       read-only operations that do not use body.
   SerializeCacheStream(stream, &aOut.body());
-
-  return NS_OK;
 }
 
 // static
-nsresult
+void
 TypeUtils::ToPCacheRequest(const GlobalObject& aGlobal,
                            PCacheRequest& aOut,
-                           const RequestOrScalarValueString& aIn)
+                           const RequestOrScalarValueString& aIn,
+                           bool aReadBody, ErrorResult& aRv)
 {
-  RequestInit init;
-  ErrorResult result;
-  nsRefPtr<Request> request = Request::Constructor(aGlobal, aIn, init, result);
-  if (NS_WARN_IF(result.Failed())) {
-    return result.ErrorCode();
+  if (aIn.IsRequest()) {
+    ToPCacheRequest(aOut, aIn.GetAsRequest(), aReadBody, aRv);
+    return;
   }
-  return ToPCacheRequest(aOut, *request);
+
+  RequestInit init;
+  nsRefPtr<Request> request = Request::Constructor(aGlobal, aIn, init, aRv);
+  if (NS_WARN_IF(aRv.Failed())) {
+    return;
+  }
+  ToPCacheRequest(aOut, *request, aReadBody, aRv);
 }
 
 // static
-nsresult
+void
 TypeUtils::ToPCacheRequestOrVoid(const GlobalObject& aGlobal, PCacheRequestOrVoid& aOut,
-                                 const Optional<RequestOrScalarValueString>& aIn)
+                                 const Optional<RequestOrScalarValueString>& aIn,
+                                 bool aReadBody, ErrorResult& aRv)
 {
   if (!aIn.WasPassed()) {
     aOut = void_t();
-    return NS_OK;
+    return;
   }
   PCacheRequest request;
-  nsresult rv = ToPCacheRequest(aGlobal, request, aIn.Value());
+  ToPCacheRequest(aGlobal, request, aIn.Value(), aReadBody, aRv);
+  if (aRv.Failed()) {
+    return;
+  }
   aOut = request;
-  return rv;
 }
 
 // static
-nsresult
+void
 TypeUtils::ToPCacheRequest(const GlobalObject& aGlobal, PCacheRequest& aOut,
-                           const OwningRequestOrScalarValueString& aIn)
+                           const OwningRequestOrScalarValueString& aIn,
+                           bool aReadBody, ErrorResult& aRv)
 {
+  if (aIn.IsRequest()) {
+    ToPCacheRequest(aOut, aIn.GetAsRequest(), aReadBody, aRv);
+    return;
+  }
+
   RequestOrScalarValueString input;
   RequestInit init;
-  ErrorResult result;
+  nsString str;
+  str.Assign(aIn.GetAsScalarValueString());
+  input.SetAsScalarValueString().Rebind(str.Data(), str.Length());
 
-  if (aIn.IsRequest()) {
-    input.SetAsRequest() = aIn.GetAsRequest();
-  } else {
-    nsString str;
-    str.Assign(aIn.GetAsScalarValueString());
-    input.SetAsScalarValueString().Rebind(str.Data(), str.Length());
+  nsRefPtr<Request> request = Request::Constructor(aGlobal, input, init, aRv);
+  if (NS_WARN_IF(aRv.Failed())) {
+    return;
   }
-
-  nsRefPtr<Request> request = Request::Constructor(aGlobal, input, init, result);
-  if (NS_WARN_IF(result.Failed())) {
-    return result.ErrorCode();
-  }
-  return ToPCacheRequest(aOut, *request);
+  ToPCacheRequest(aOut, *request, aReadBody, aRv);
 }
 
 // static
-nsresult
-TypeUtils::ToPCacheResponse(PCacheResponse& aOut, const Response& aIn)
+void
+TypeUtils::ToPCacheResponse(PCacheResponse& aOut, const Response& aIn,
+                            ErrorResult& aRv)
 {
   aOut.type() = aIn.Type();
   aIn.GetUrl(aOut.url());
@@ -234,7 +247,8 @@ TypeUtils::ToPCacheResponse(PCacheResponse& aOut, const Response& aIn)
   aOut.headersGuard() = headers->Guard();
 
   if (aIn.BodyUsed()) {
-    return NS_ERROR_TYPE_ERR;
+    aRv.ThrowTypeError(MSG_REQUEST_BODY_CONSUMED_ERROR);
+    return;
   }
 
   nsCOMPtr<nsIInputStream> stream;
@@ -242,8 +256,6 @@ TypeUtils::ToPCacheResponse(PCacheResponse& aOut, const Response& aIn)
   // TODO: set body stream used in Response
 
   SerializeCacheStream(stream, &aOut.body());
-
-  return NS_OK;
 }
 
 // static

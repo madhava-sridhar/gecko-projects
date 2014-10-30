@@ -102,12 +102,15 @@ private:
 
   RequestId AddRequestPromise(Promise* aPromise, ErrorResult& aRv);
   already_AddRefed<Promise> RemoveRequestPromise(RequestId aRequestId);
-  nsresult ToPCacheRequest(PCacheRequest& aOut,
-                           const RequestOrScalarValueString& aIn);
-  nsresult ToPCacheRequest(PCacheRequest& aOut,
-                           const OwningRequestOrScalarValueString& aIn);
-  nsresult ToPCacheRequestOrVoid(PCacheRequestOrVoid& aOut,
-                                 const Optional<RequestOrScalarValueString>& aIn);
+  void ToPCacheRequest(PCacheRequest& aOut,
+                       const RequestOrScalarValueString& aIn, bool aReadBody,
+                       ErrorResult& aRv);
+  void ToPCacheRequest(PCacheRequest& aOut,
+                       const OwningRequestOrScalarValueString& aIn,
+                       bool aReadBody, ErrorResult& aRv);
+  void ToPCacheRequestOrVoid(PCacheRequestOrVoid& aOut,
+                             const Optional<RequestOrScalarValueString>& aIn,
+                             bool aReadBody, ErrorResult& aRv);
 
 private:
   nsCOMPtr<nsISupports> mOwner;
