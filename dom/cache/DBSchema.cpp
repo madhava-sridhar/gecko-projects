@@ -625,9 +625,7 @@ DBSchema::QueryCache(mozIStorageConnection* aConn, CacheId aCacheId,
     query.Append(NS_LITERAL_CSTRING("request_url"));
   }
 
-  nsAutoCString urlComparison;
   if (aParams.prefixMatch()) {
-    urlToMatch.AppendLiteral("%");
     query.Append(NS_LITERAL_CSTRING(" LIKE ?2 ESCAPE '\\'"));
   } else {
     query.Append(NS_LITERAL_CSTRING("=?2"));
@@ -647,6 +645,7 @@ DBSchema::QueryCache(mozIStorageConnection* aConn, CacheId aCacheId,
     rv = state->EscapeStringForLIKE(urlToMatch, '\\', escapedUrlToMatch);
     if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
     urlToMatch = escapedUrlToMatch;
+    urlToMatch.AppendLiteral("%");
   }
 
   rv = state->BindStringParameter(1, urlToMatch);
