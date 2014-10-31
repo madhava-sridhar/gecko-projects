@@ -37,11 +37,12 @@ using mozilla::ipc::FileDescriptor;
 using mozilla::ipc::PFileDescriptorSetChild;
 using mozilla::ipc::PBackgroundChild;
 
-// Utility function to remove the query from a URL.  We're not using nsIURL
-// or URL to do this because they require going to the main thread.
+// Utility function to remove the fragment from a URL, check its scheme, and optionally
+// provide a URL without the query.  We're not using nsIURL or URL to do this because
+// they require going to the main thread.
 static void
-GetURLWithoutQuery(const nsAString& aUrl, nsAString& aUrlWithoutQueryOut,
-                   ErrorResult& aRv)
+ProcessURL(nsAString& aUrl, bool* aSchemeValidOut,
+           nsAString* aUrlWithoutQueryOut, ErrorResult& aRv)
 {
   NS_ConvertUTF16toUTF8 flatURL(aUrl);
   const char* url = flatURL.get();
@@ -50,8 +51,10 @@ GetURLWithoutQuery(const nsAString& aUrl, nsAString& aUrlWithoutQueryOut,
 
   uint32_t pathPos;
   int32_t pathLen;
+  uint32_t schemePos;
+  int32_t schemeLen;
   nsresult rv = urlParser->ParseURL(url, flatURL.Length(),
-                                    nullptr, nullptr,       // ignore scheme
+                                    &schemePos, &schemeLen,
                                     nullptr, nullptr,       // ignore authority
                                     &pathPos, &pathLen);
   if (NS_WARN_IF(NS_FAILED(rv))) {
@@ -59,30 +62,49 @@ GetURLWithoutQuery(const nsAString& aUrl, nsAString& aUrlWithoutQueryOut,
     return;
   }
 
+  if (aSchemeValidOut) {
+    nsAutoCString scheme(Substring(flatURL, schemePos, schemeLen));
+    *aSchemeValidOut = scheme.LowerCaseEqualsLiteral("http") ||
+                       scheme.LowerCaseEqualsLiteral("https");
+  }
+
   uint32_t queryPos;
   int32_t queryLen;
+  uint32_t refPos;
+  int32_t refLen;
 
   rv = urlParser->ParsePath(url + pathPos, flatURL.Length() - pathPos,
                             nullptr, nullptr,               // ignore filepath
                             &queryPos, &queryLen,
-                            nullptr, nullptr);              // ignore ref
+                            &refPos, &refLen);
   if (NS_WARN_IF(NS_FAILED(rv))) {
     aRv.Throw(rv);
     return;
   }
 
+  // TODO: Remove this once Request/Response properly strip the fragment
+  if (refLen >= 0) {
+    // ParsePath gives us ref position relative to the start of the path
+    refPos += pathPos;
+
+    aUrl = Substring(aUrl, 0, refPos - 1);
+  }
+
+  if (!aUrlWithoutQueryOut) {
+    return;
+  }
+
   if (queryLen < 0) {
-    aUrlWithoutQueryOut = aUrl;
+    *aUrlWithoutQueryOut = aUrl;
     return;
   }
 
   // ParsePath gives us query position relative to the start of the path
   queryPos += pathPos;
 
-  // We want everything before and after the query
-  aUrlWithoutQueryOut = Substring(aUrl, 0, queryPos - 1);
-  aUrlWithoutQueryOut.Append(Substring(aUrl, queryPos + queryLen,
-                                       aUrl.Length() - queryPos - queryLen));
+  // We want everything before the query sine we already removed the trailing
+  // fragment
+  *aUrlWithoutQueryOut = Substring(aUrl, 0, queryPos - 1);
 }
 
 void
@@ -141,10 +163,18 @@ TypeUtils::ToPCacheRequest(PCacheRequest& aOut, const Request& aIn,
 {
   aIn.GetMethod(aOut.method());
   aIn.GetUrl(aOut.url());
-  GetURLWithoutQuery(aOut.url(), aOut.urlWithoutQuery(), aRv);
+
+  bool schemeValid;
+  ProcessURL(aOut.url(), &schemeValid, &aOut.urlWithoutQuery(), aRv);
   if (aRv.Failed()) {
     return;
   }
+  if (!schemeValid) {
+    NS_NAMED_LITERAL_STRING(label, "Request");
+    aRv.ThrowTypeError(MSG_INVALID_URL_SCHEME, &label, &aOut.url());
+    return;
+  }
+
   aIn.GetReferrer(aOut.referrer());
   nsRefPtr<InternalHeaders> headers = aIn.GetInternalHeaders();
   MOZ_ASSERT(headers);
@@ -244,6 +274,20 @@ TypeUtils::ToPCacheResponse(PCacheResponse& aOut, const Response& aIn,
 {
   aOut.type() = aIn.Type();
   aIn.GetUrl(aOut.url());
+
+  if (aOut.url() != EmptyString()) {
+    bool schemeValid;
+    ProcessURL(aOut.url(), &schemeValid, nullptr, aRv);
+    if (aRv.Failed()) {
+      return;
+    }
+    if (!schemeValid) {
+      NS_NAMED_LITERAL_STRING(label, "Response");
+      aRv.ThrowTypeError(MSG_INVALID_URL_SCHEME, &label, &aOut.url());
+      return;
+    }
+  }
+
   aOut.status() = aIn.Status();
   aIn.GetStatusText(aOut.statusText());
   nsRefPtr<InternalHeaders> headers = aIn.GetInternalHeaders();
