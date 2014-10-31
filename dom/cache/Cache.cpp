@@ -158,6 +158,16 @@ Cache::Add(const RequestOrScalarValueString& aRequest, ErrorResult& aRv)
 {
   MOZ_ASSERT(mActor);
 
+  if (aRequest.IsRequest()) {
+    nsAutoCString method;
+    aRequest.GetAsRequest().GetMethod(method);
+    if (!method.LowerCaseEqualsLiteral("get")) {
+      NS_ConvertUTF8toUTF16 label(method);
+      aRv.ThrowTypeError(MSG_INVALID_REQUEST_METHOD, &label);
+      return nullptr;
+    }
+  }
+
   nsRefPtr<Promise> promise = Promise::Create(mGlobal, aRv);
   if (!promise) {
     return nullptr;
@@ -189,6 +199,16 @@ Cache::AddAll(const Sequence<OwningRequestOrScalarValueString>& aRequests,
 
   nsTArray<PCacheRequest> requests;
   for(uint32_t i = 0; i < aRequests.Length(); ++i) {
+    if (aRequests[i].IsRequest()) {
+      nsAutoCString method;
+      aRequests[i].GetAsRequest().get()->GetMethod(method);
+      if (!method.LowerCaseEqualsLiteral("get")) {
+        NS_ConvertUTF8toUTF16 label(method);
+        aRv.ThrowTypeError(MSG_INVALID_REQUEST_METHOD, &label);
+        return nullptr;
+      }
+    }
+
     PCacheRequest* request = requests.AppendElement();
     ToPCacheRequest(*request, aRequests[i], true, aRv);
     if (aRv.Failed()) {
@@ -208,6 +228,16 @@ Cache::Put(const RequestOrScalarValueString& aRequest, const Response& aResponse
            ErrorResult& aRv)
 {
   MOZ_ASSERT(mActor);
+
+  if (aRequest.IsRequest()) {
+    nsAutoCString method;
+    aRequest.GetAsRequest().GetMethod(method);
+    if (!method.LowerCaseEqualsLiteral("get")) {
+      NS_ConvertUTF8toUTF16 label(method);
+      aRv.ThrowTypeError(MSG_INVALID_REQUEST_METHOD, &label);
+      return nullptr;
+    }
+  }
 
   nsRefPtr<Promise> promise = Promise::Create(mGlobal, aRv);
   if (!promise) {
