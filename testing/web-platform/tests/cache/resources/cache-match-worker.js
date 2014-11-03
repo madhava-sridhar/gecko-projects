@@ -248,7 +248,6 @@ prepopulated_cache_test(vary_entries, function(cache) {
           assert_array_equivalent(
             result,
             [
-              vary_entries.no_vary_header.response,
               vary_entries.vary_wildcard.response,
               vary_entries.vary_cookie_absent.response
             ],
@@ -266,7 +265,6 @@ prepopulated_cache_test(vary_entries, function(cache) {
           assert_array_equivalent(
             result,
             [
-              vary_entries.no_vary_header.response,
               vary_entries.vary_wildcard.response
             ],
             'Cache.matchAll should exclude matches if a vary header is ' +
@@ -282,7 +280,10 @@ prepopulated_cache_test(vary_entries, function(cache) {
       .then(function(result) {
           assert_array_equivalent(
             result,
-            [vary_entries.vary_cookie_is_cookie.response],
+            [
+              vary_entries.vary_wildcard.response,
+              vary_entries.vary_cookie_is_cookie.response
+            ],
             'Cache.matchAll should match the entire header if a vary header ' +
             'is present in both the query and cached requests.');
         });
@@ -294,7 +295,6 @@ prepopulated_cache_test(vary_entries, function(cache) {
           assert_object_in_array(
             result,
             [
-              vary_entries.no_vary_header.response,
               vary_entries.vary_wildcard.response,
               vary_entries.vary_cookie_absent.response
             ],
@@ -309,7 +309,6 @@ prepopulated_cache_test(vary_entries, function(cache) {
           assert_array_equivalent(
             result,
             [
-              vary_entries.no_vary_header.response,
               vary_entries.vary_cookie_is_cookie.response,
               vary_entries.vary_cookie_is_good.response,
               vary_entries.vary_cookie_absent.response,
