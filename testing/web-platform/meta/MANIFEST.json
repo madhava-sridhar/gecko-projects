@@ -2,6 +2,30 @@
   "items": {
     "helper": [
       {
+        "path": "cache/resources/cache-add-worker.js",
+        "url": "/cache/resources/cache-add-worker.js"
+      },
+      {
+        "path": "cache/resources/cache-put-worker.js",
+        "url": "/cache/resources/cache-put-worker.js"
+      },
+      {
+        "path": "cache/resources/cache-delete-worker.js",
+        "url": "/cache/resources/cache-delete-worker.js"
+      },
+      {
+        "path": "cache/resources/cache-storage-keys-worker.js",
+        "url": "/cache/resources/cache-storage-keys-worker.js"
+      },
+      {
+        "path": "cache/resources/cache-match-worker.js",
+        "url": "/cache/resources/cache-match-worker.js"
+      },
+      {
+        "path": "cache/resources/cache-storage-worker.js",
+        "url": "/cache/resources/cache-storage-worker.js"
+      },
+      {
         "path": "2dcontext/building-paths/canvas_complexshapes_arcto_001-ref.htm",
         "url": "2dcontext/building-paths/canvas_complexshapes_arcto_001-ref.htm"
       },
@@ -9003,6 +9027,30 @@
       }
     ],
     "testharness": [
+      {
+        "path": "cache/cache-add.html",
+        "url": "/cache/cache-add.html"
+      },
+      {
+        "path": "cache/cache-delete.html",
+        "url": "/cache/cache-delete.html"
+      },
+      {
+        "path": "cache/cache-match.html",
+        "url": "/cache/cache-match.html"
+      },
+      {
+        "path": "cache/cache-put.html",
+        "url": "/cache/cache-put.html"
+      },
+      {
+        "path": "cache/cache-storage.html",
+        "url": "/cache/cache-storage.html"
+      },
+      {
+        "path": "cache/cache-storage-keys.html",
+        "url": "/cache/cache-storage-keys.html"
+      },
       {
         "path": "2dcontext/compositing/2d.composite.canvas.copy.html",
         "url": "/2dcontext/compositing/2d.composite.canvas.copy.html"
@@ -23133,6 +23181,7 @@
       }
     ]
   },
-  "local_changes": [],
+  "local_changes": [
+  ],
   "rev": "1b45197f111e5bb65607d89f7d385883849d005d"
 }

@@ -708,7 +708,7 @@ ServiceWorkerManager::Register(nsIDOMWindow* aWindow,
 
   bool authenticatedOrigin = false;
   // FIXME(nsm): Bug 1003991. Disable check when devtools are open.
-  if (Preferences::GetBool("dom.serviceWorkers.testing.enabled")) {
+  if (true || Preferences::GetBool("dom.serviceWorkers.testing.enabled")) {
     authenticatedOrigin = true;
   }
 
