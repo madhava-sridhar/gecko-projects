@@ -797,7 +797,6 @@ policies and contribution forms [3].
         try {
             return func.apply(this_obj, Array.prototype.slice.call(arguments, 2));
         } catch (e) {
-            dump("### ### harness got exception: " + e + "\n");
             if (this.phase >= this.phases.HAS_RESULT) {
                 return;
             }
@@ -1098,9 +1097,8 @@ policies and contribution forms [3].
     };
 
     Tests.prototype.all_done = function() {
-        var rv = (this.tests.length > 0 && this.all_loaded && this.num_pending === 0 &&
+        return (this.tests.length > 0 && this.all_loaded && this.num_pending === 0 &&
                 !this.wait_for_finish && !this.processing_callbacks);
-        return rv;
     };
 
     Tests.prototype.start = function() {
