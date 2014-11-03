@@ -60,6 +60,12 @@ public:
   bool
   BodyUsed() const { return mBodyUsed; }
 
+  void
+  SetBodyUsed()
+  {
+    mBodyUsed = true;
+  }
+
   already_AddRefed<Promise>
   ArrayBuffer(ErrorResult& aRv)
   {
@@ -88,12 +94,6 @@ protected:
   FetchBody()
     : mBodyUsed(false)
   {
-  }
-
-  void
-  SetBodyUsed()
-  {
-    mBodyUsed = true;
   }
 
   void
