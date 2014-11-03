@@ -1027,15 +1027,15 @@ DBSchema::ReadResponse(mozIStorageConnection* aConn, EntryId aEntryId,
   if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
   aSavedResponseOut->mValue.type() = static_cast<ResponseType>(type);
 
+  rv = state->GetString(1, aSavedResponseOut->mValue.url());
+  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
+
   int32_t status;
-  rv = state->GetInt32(1, &status);
+  rv = state->GetInt32(2, &status);
   if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
   aSavedResponseOut->mValue.status() = status;
 
-  rv = state->GetUTF8String(2, aSavedResponseOut->mValue.statusText());
-  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
-
-  rv = state->GetString(3, aSavedResponseOut->mValue.url());
+  rv = state->GetUTF8String(3, aSavedResponseOut->mValue.statusText());
   if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 
   int32_t guard;
