@@ -43,6 +43,11 @@ var simple_entries = {
     response: new Response('')
   },
 
+  cat_num_lives: {
+    request: new Request('http://example.com/cat?lives=9'),
+    response: new Response('')
+  },
+
   cat_in_the_hat: {
     request: new Request('http://example.com/cat/in/the/hat'),
     response: new Response('')
@@ -201,7 +206,6 @@ prepopulated_cache_test(simple_entries, function(cache) {
             result,
             [
               simple_entries.cat.response,
-              simple_entries.cat_with_fragment.response
             ],
             'Cache.matchAll should ignore URL hash.');
         });
@@ -225,7 +229,7 @@ prepopulated_cache_test(simple_entries, function(cache) {
             result,
             [
               simple_entries.cat.response,
-              simple_entries.cat_with_fragment.response,
+              simple_entries.cat_num_lives.response,
               simple_entries.cat_in_the_hat.response
             ],
             'Cache.matchAll should honor prefixMatch.');
