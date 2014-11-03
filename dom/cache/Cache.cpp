@@ -224,7 +224,7 @@ Cache::AddAll(const Sequence<OwningRequestOrScalarValueString>& aRequests,
 }
 
 already_AddRefed<Promise>
-Cache::Put(const RequestOrScalarValueString& aRequest, const Response& aResponse,
+Cache::Put(const RequestOrScalarValueString& aRequest, Response& aResponse,
            ErrorResult& aRv)
 {
   MOZ_ASSERT(mActor);

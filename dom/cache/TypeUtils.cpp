@@ -21,10 +21,6 @@
 #include "nsString.h"
 #include "nsURLParsers.h"
 
-// TODO: remove stream testing code
-#include "nsStreamUtils.h"
-#include "nsStringStream.h"
-
 namespace {
 
 using mozilla::ErrorResult;
@@ -158,7 +154,7 @@ using mozilla::ipc::PBackgroundChild;
 
 // static
 void
-TypeUtils::ToPCacheRequest(PCacheRequest& aOut, const Request& aIn,
+TypeUtils::ToPCacheRequest(PCacheRequest& aOut, Request& aIn,
                            bool aReadBody, ErrorResult& aRv)
 {
   aIn.GetMethod(aOut.method());
@@ -198,10 +194,8 @@ TypeUtils::ToPCacheRequest(PCacheRequest& aOut, const Request& aIn,
   nsCOMPtr<nsIInputStream> stream;
 
   internalRequest->GetBody(getter_AddRefs(stream));
-  // TODO: set Request body used
+  aIn.SetBodyUsed();
 
-  // TODO: Provide way to send PCacheRequest without serializing body for
-  //       read-only operations that do not use body.
   SerializeCacheStream(stream, &aOut.body());
 }
 
@@ -269,7 +263,7 @@ TypeUtils::ToPCacheRequest(const GlobalObject& aGlobal, PCacheRequest& aOut,
 
 // static
 void
-TypeUtils::ToPCacheResponse(PCacheResponse& aOut, const Response& aIn,
+TypeUtils::ToPCacheResponse(PCacheResponse& aOut, Response& aIn,
                             ErrorResult& aRv)
 {
   aOut.type() = aIn.Type();
@@ -302,7 +296,7 @@ TypeUtils::ToPCacheResponse(PCacheResponse& aOut, const Response& aIn,
 
   nsCOMPtr<nsIInputStream> stream;
   aIn.GetBody(getter_AddRefs(stream));
-  // TODO: set body stream used in Response
+  aIn.SetBodyUsed();
 
   SerializeCacheStream(stream, &aOut.body());
 }
@@ -404,8 +398,6 @@ TypeUtils::ToRequest(nsIGlobalObject* aGlobal, const PCacheRequest& aIn,
                                                        aIn.body());
 
   internalRequest->SetBody(stream);
-  // TODO: clear request bodyRead flag
-  NS_WARNING("Not clearing bodyRead flag for Request returned from Cache.");
 
   nsRefPtr<Request> request = new Request(aGlobal, internalRequest);
   return request.forget();

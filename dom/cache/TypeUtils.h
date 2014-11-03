@@ -38,7 +38,7 @@ class TypeUtils
 {
 public:
   static void
-  ToPCacheRequest(PCacheRequest& aOut, const Request& aIn, bool aReadBody,
+  ToPCacheRequest(PCacheRequest& aOut, Request& aIn, bool aReadBody,
                   ErrorResult& aRv);
 
   static void
@@ -58,7 +58,7 @@ public:
                   bool aReadBody, ErrorResult& aRv);
 
   static void
-  ToPCacheResponse(PCacheResponse& aOut, const Response& aIn, ErrorResult& aRv);
+  ToPCacheResponse(PCacheResponse& aOut, Response& aIn, ErrorResult& aRv);
 
   static void
   ToPCacheQueryParams(PCacheQueryParams& aOut, const QueryParams& aIn);

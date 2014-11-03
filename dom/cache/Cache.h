@@ -57,7 +57,7 @@ public:
   AddAll(const Sequence<OwningRequestOrScalarValueString>& aRequests,
          ErrorResult& aRv);
   already_AddRefed<Promise>
-  Put(const RequestOrScalarValueString& aRequest, const Response& aResponse,
+  Put(const RequestOrScalarValueString& aRequest, Response& aResponse,
       ErrorResult& aRv);
   already_AddRefed<Promise>
   Delete(const RequestOrScalarValueString& aRequest, const QueryParams& aParams,
