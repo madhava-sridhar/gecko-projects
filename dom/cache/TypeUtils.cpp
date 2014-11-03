@@ -332,7 +332,45 @@ already_AddRefed<Response>
 TypeUtils::ToResponse(nsIGlobalObject* aGlobal, const PCacheResponse& aIn,
                       PCacheStreamControlChild* aStreamControl)
 {
-  nsRefPtr<InternalResponse> ir = new InternalResponse(200, NS_LITERAL_CSTRING("OK"));
+  nsRefPtr<InternalResponse> ir;
+  switch (aIn.type())
+  {
+    case ResponseType::Error:
+      ir = InternalResponse::NetworkError();
+      break;
+    case ResponseType::Opaque:
+      ir = InternalResponse::OpaqueResponse();
+      break;
+    case ResponseType::Default:
+      ir = new InternalResponse(aIn.status(), aIn.statusText());
+      break;
+    case ResponseType::Basic:
+    {
+      nsRefPtr<InternalResponse> inner = new InternalResponse(aIn.status(),
+                                                              aIn.statusText());
+      ir = InternalResponse::BasicResponse(inner);
+      break;
+    }
+    case ResponseType::Cors:
+    {
+      nsRefPtr<InternalResponse> inner = new InternalResponse(aIn.status(),
+                                                              aIn.statusText());
+      ir = InternalResponse::CORSResponse(inner);
+      break;
+    }
+    default:
+      MOZ_CRASH("Unexpected ResponseType!");
+  }
+  MOZ_ASSERT(ir);
+
+  ir->SetUrl(NS_ConvertUTF16toUTF8(aIn.url()));
+
+  nsRefPtr<InternalHeaders> internalHeaders =
+    new InternalHeaders(aIn.headers(), aIn.headersGuard());
+  ErrorResult result;
+  ir->Headers()->SetGuard(aIn.headersGuard(), result);
+  ir->Headers()->Fill(*internalHeaders, result);
+  MOZ_ASSERT(!result.Failed());
 
   nsCOMPtr<nsIInputStream> stream = ReadStream::Create(aStreamControl,
                                                        aIn.body());
