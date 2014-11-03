@@ -21,7 +21,7 @@
     var response = new Response();
     success = success && !!caches;
     caches.open("foobar").then(function(openCache) {
-      success = success && !!openCache;
+      success = success && (openCache instanceof Cache);
       c = openCache;
       return c.put(request, response);
     }).then(function(putResponse) {

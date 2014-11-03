@@ -1,6 +1,6 @@
 ok(!!caches, 'caches object should be available on global');
 caches.open('snafu').then(function(openCache) {
-  ok(!!openCache, 'cache object should be resolved from caches.open');
+  ok(openCache instanceof Cache, 'cache object should be resolved from caches.open');
   return caches.has('snafu');
 }).then(function(hasResult) {
   ok(hasResult, 'caches.has() should resolve true');
