@@ -65,8 +65,8 @@ cache_test(function(cache) {
                  'Request.bodyUsed should be initially false.');
     return cache.put(request, response)
       .then(function() {
-          assert_false(request.bodyUsed,
-                       'Cache.put should not consume Request body.');
+          assert_true(request.bodyUsed,
+                       'Cache.put should consume Request body.');
         })
       .then(function() {
           return cache.match(request);
