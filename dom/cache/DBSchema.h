@@ -39,6 +39,7 @@ public:
   // TODO: improve naming (confusing with CacheDelete)
   static nsresult DeleteCache(mozIStorageConnection* aConn, CacheId aCacheId);
 
+  // TODO: Consider removing unused IsCacheOrphaned after writing cleanup code.
   static nsresult IsCacheOrphaned(mozIStorageConnection* aConn,
                                   CacheId aCacheId, bool* aOrphanedOut);
 

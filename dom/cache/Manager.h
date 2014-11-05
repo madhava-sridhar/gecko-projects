@@ -120,7 +120,7 @@ public:
   void RemoveListener(Listener* aListener);
   void AddRefCacheId(CacheId aCacheId);
   void ReleaseCacheId(CacheId aCacheId);
-  uint32_t GetCacheIdRefCount(CacheId aCacheId);
+  bool SetCacheIdOrphanedIfRefed(CacheId aCacheId);
   void Shutdown();
 
   // TODO: consider moving CacheId up in the argument lists below
@@ -163,7 +163,6 @@ public:
 private:
   class Factory;
   class BaseAction;
-  class CheckCacheOrphanedAction;
   class DeleteOrphanedCacheAction;
 
   class CacheMatchAction;
@@ -200,6 +199,7 @@ private:
   {
     CacheId mCacheId;
     uint32_t mCount;
+    bool mOrphaned;
   };
   nsTArray<CacheIdRefCounter> mCacheIdRefs;
 
