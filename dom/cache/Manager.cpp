@@ -167,6 +167,48 @@ protected:
   const RequestId mRequestId;
 };
 
+class Manager::DeleteOrphanedBodyAction MOZ_FINAL : public Action
+{
+public:
+  DeleteOrphanedBodyAction(CacheId aCacheId,
+                           const nsTArray<nsID>& aDeletedBodyIdList)
+    : mCacheId(aCacheId)
+    , mDeletedBodyIdList(aDeletedBodyIdList)
+  { }
+
+  DeleteOrphanedBodyAction(CacheId aCacheId, const nsID& aBodyId)
+    : mCacheId(aCacheId)
+  {
+    mDeletedBodyIdList.AppendElement(aBodyId);
+  }
+
+  virtual void
+  RunOnTarget(Resolver* aResolver, nsIFile* aQuotaDir) MOZ_OVERRIDE
+  {
+    MOZ_ASSERT(aResolver);
+    MOZ_ASSERT(aQuotaDir);
+
+    nsresult rv = aQuotaDir->Append(NS_LITERAL_STRING("cache"));
+    if (NS_WARN_IF(NS_FAILED(rv))) {
+      aResolver->Resolve(rv);
+      return;
+    }
+
+    rv = FileUtils::BodyDeleteFiles(aQuotaDir, mCacheId, mDeletedBodyIdList);
+    if (NS_WARN_IF(NS_FAILED(rv))) {
+      aResolver->Resolve(rv);
+      return;
+    }
+
+    aResolver->Resolve(rv);
+  }
+
+private:
+  virtual ~DeleteOrphanedBodyAction() { }
+  const CacheId mCacheId;
+  nsTArray<nsID> mDeletedBodyIdList;
+};
+
 class Manager::DeleteOrphanedCacheAction MOZ_FINAL : public SyncDBAction
 {
 public:
@@ -184,7 +226,7 @@ public:
     mozStorageTransaction trans(aConn, false,
                                 mozIStorageConnection::TRANSACTION_IMMEDIATE);
 
-    nsresult rv =  DBSchema::DeleteCache(aConn, mCacheId);
+    nsresult rv = DBSchema::DeleteCache(aConn, mCacheId, mDeletedBodyIdList);
     if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 
     rv = FileUtils::BodyDeleteCacheDir(aDBDir, mCacheId);
@@ -199,6 +241,7 @@ public:
   virtual void
   CompleteOnInitiatingThread(nsresult aRv) MOZ_OVERRIDE
   {
+    mManager->NoteOrphanedBodyIdList(mCacheId, mDeletedBodyIdList);
     mManager = nullptr;
   }
 
@@ -206,6 +249,7 @@ private:
   virtual ~DeleteOrphanedCacheAction() { }
   nsRefPtr<Manager> mManager;
   const CacheId mCacheId;
+  nsTArray<nsID> mDeletedBodyIdList;
 };
 
 class Manager::CacheMatchAction MOZ_FINAL : public Manager::BaseAction
@@ -346,8 +390,7 @@ public:
                  const PCacheRequest& aRequest,
                  nsIInputStream* aRequestBodyStream,
                  const PCacheResponse& aResponse,
-                 nsIInputStream* aResponseBodyStream,
-                 StreamList* aStreamList)
+                 nsIInputStream* aResponseBodyStream)
     : DBAction(DBAction::Existing, aManager->Origin(), aManager->BaseDomain())
     , mManager(aManager)
     , mListenerId(aListenerId)
@@ -357,7 +400,6 @@ public:
     , mRequestBodyStream(aRequestBodyStream)
     , mResponse(aResponse)
     , mResponseBodyStream(aResponseBodyStream)
-    , mStreamList(aStreamList)
     , mExpectedAsyncCopyCompletions(0)
   { }
 
@@ -449,18 +491,11 @@ public:
     mozStorageTransaction trans(mConn, false,
                                 mozIStorageConnection::TRANSACTION_IMMEDIATE);
 
-    nsTArray<nsID> deletedBodyIdList;
     rv = DBSchema::CachePut(mConn, mCacheId, mRequest,
                             mRequestBodyStream ? &mRequestBodyId : nullptr,
                             mResponse,
                             mResponseBodyStream ? &mResponseBodyId : nullptr,
-                            deletedBodyIdList);
-    if (NS_WARN_IF(NS_FAILED(rv))) {
-      DoResolve(rv);
-      return;
-    }
-
-    rv = FileUtils::BodyDeleteFiles(mDBDir, mCacheId, deletedBodyIdList);
+                            mDeletedBodyIdList);
     if (NS_WARN_IF(NS_FAILED(rv))) {
       DoResolve(rv);
       return;
@@ -479,6 +514,9 @@ public:
   CompleteOnInitiatingThread(nsresult aRv) MOZ_OVERRIDE
   {
     NS_ASSERT_OWNINGTHREAD(Action);
+
+    mManager->NoteOrphanedBodyIdList(mCacheId, mDeletedBodyIdList);
+
     Listener* listener = mManager->GetListener(mListenerId);
     mManager = nullptr;
     if (!listener) {
@@ -487,10 +525,8 @@ public:
     if (NS_FAILED(aRv)) {
       listener->OnCachePut(mRequestId, aRv);
     } else {
-      mStreamList->Activate(mCacheId);
       listener->OnCachePut(mRequestId, aRv);
     }
-    mStreamList = nullptr;
   }
 
   virtual void
@@ -590,7 +626,6 @@ private:
   nsCOMPtr<nsIInputStream> mRequestBodyStream;
   const PCacheResponse mResponse;
   nsCOMPtr<nsIInputStream> mResponseBodyStream;
-  nsRefPtr<StreamList> mStreamList;
   nsRefPtr<Resolver> mResolver;
   nsCOMPtr<nsIFile> mDBDir;
   nsCOMPtr<mozIStorageConnection> mConn;
@@ -599,6 +634,7 @@ private:
   nsCOMPtr<nsISupports> mRequestBodyCopyContext;
   nsID mResponseBodyId;
   nsCOMPtr<nsISupports> mResponseBodyCopyContext;
+  nsTArray<nsID> mDeletedBodyIdList;
 };
 
 class Manager::CacheDeleteAction MOZ_FINAL : public Manager::BaseAction
@@ -622,12 +658,8 @@ public:
     mozStorageTransaction trans(aConn, false,
                                 mozIStorageConnection::TRANSACTION_IMMEDIATE);
 
-    nsTArray<nsID> deletedBodyIdList;
     nsresult rv = DBSchema::CacheDelete(aConn, mCacheId, mRequest, mParams,
-                                        deletedBodyIdList, &mSuccess);
-    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
-
-    rv = FileUtils::BodyDeleteFiles(aDBDir, mCacheId, deletedBodyIdList);
+                                        mDeletedBodyIdList, &mSuccess);
     if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 
     rv = trans.Commit();
@@ -642,6 +674,7 @@ public:
   virtual void
   Complete(Listener* aListener, nsresult aRv) MOZ_OVERRIDE
   {
+    mManager->NoteOrphanedBodyIdList(mCacheId, mDeletedBodyIdList);
     aListener->OnCacheDelete(mRequestId, aRv, mSuccess);
   }
 
@@ -656,6 +689,7 @@ protected:
   const PCacheRequest mRequest;
   const PCacheQueryParams mParams;
   bool mSuccess;
+  nsTArray<nsID> mDeletedBodyIdList;
 };
 
 class Manager::CacheKeysAction MOZ_FINAL : public Manager::BaseAction
@@ -1016,6 +1050,10 @@ Manager::StreamList::Activate(CacheId aCacheId)
   mCacheId = aCacheId;
   mManager->AddRefCacheId(mCacheId);
   mManager->AddStreamList(this);
+
+  for (uint32_t i = 0; i < mList.Length(); ++i) {
+    mManager->AddRefBodyId(mList[i].mId);
+  }
 }
 
 void
@@ -1049,6 +1087,7 @@ Manager::StreamList::NoteClosed(const nsID& aId)
   for (uint32_t i = 0; i < mList.Length(); ++i) {
     if (mList[i].mId == aId) {
       mList.RemoveElementAt(i);
+      mManager->ReleaseBodyId(mCacheId, aId);
       break;
     }
   }
@@ -1082,6 +1121,9 @@ Manager::StreamList::~StreamList()
   MOZ_ASSERT(!mStreamControl);
   if (mActivated) {
     mManager->RemoveStreamList(this);
+    for (uint32_t i = 0; i < mList.Length(); ++i) {
+      mManager->ReleaseBodyId(mCacheId, mList[i].mId);
+    }
     mManager->ReleaseCacheId(mCacheId);
   }
 }
@@ -1241,13 +1283,11 @@ Manager::CachePut(Listener* aListener, RequestId aRequestId, CacheId aCacheId,
     aListener->OnCachePut(aRequestId, NS_ERROR_ILLEGAL_DURING_SHUTDOWN);
     return;
   }
-  nsRefPtr<StreamList> streamList = new StreamList(this, CurrentContext());
   ListenerId listenerId = SaveListener(aListener);
   nsRefPtr<Action> action = new CachePutAction(this, listenerId, aRequestId,
                                                aCacheId,
                                                aRequest, aRequestBodyStream,
-                                               aResponse, aResponseBodyStream,
-                                               streamList);
+                                               aResponse, aResponseBodyStream);
   CurrentContext()->Dispatch(mIOThread, action);
 }
 
@@ -1470,6 +1510,84 @@ Manager::RemoveStreamList(StreamList* aStreamList)
   NS_ASSERT_OWNINGTHREAD(Context::Listener);
   MOZ_ASSERT(aStreamList);
   mStreamLists.RemoveElement(aStreamList);
+}
+
+void
+Manager::AddRefBodyId(const nsID& aBodyId)
+{
+  NS_ASSERT_OWNINGTHREAD(Context::Listener);
+  for (uint32_t i = 0; i < mBodyIdRefs.Length(); ++i) {
+    if (mBodyIdRefs[i].mBodyId == aBodyId) {
+      mBodyIdRefs[i].mCount += 1;
+      return;
+    }
+  }
+  BodyIdRefCounter* entry = mBodyIdRefs.AppendElement();
+  entry->mBodyId = aBodyId;
+  entry->mCount = 1;
+  entry->mOrphaned = false;
+}
+
+void
+Manager::ReleaseBodyId(CacheId aCacheId, const nsID& aBodyId)
+{
+  NS_ASSERT_OWNINGTHREAD(Context::Listener);
+  for (uint32_t i = 0; i < mBodyIdRefs.Length(); ++i) {
+    if (mBodyIdRefs[i].mBodyId == aBodyId) {
+      DebugOnly<uint32_t> oldRef = mBodyIdRefs[i].mCount;
+      mBodyIdRefs[i].mCount -= 1;
+      MOZ_ASSERT(mBodyIdRefs[i].mCount < oldRef);
+      if (mBodyIdRefs[i].mCount < 1) {
+        bool orphaned = mBodyIdRefs[i].mOrphaned;
+        mBodyIdRefs.RemoveElementAt(i);
+        // TODO: note that we need to check this body for staleness on startup
+        if (orphaned && !mShuttingDown) {
+          nsRefPtr<Action> action = new DeleteOrphanedBodyAction(aCacheId,
+                                                                 aBodyId);
+          CurrentContext()->Dispatch(mIOThread, action);
+        }
+      }
+      return;
+    }
+  }
+  MOZ_ASSERT_UNREACHABLE("Attempt to release BodyId that is not referenced!");
+}
+
+// TODO: provide way to set body non-orphaned if its added back to a cache
+//       once same-origin de-duplication is implemented
+
+bool
+Manager::SetBodyIdOrphanedIfRefed(const nsID& aBodyId)
+{
+  NS_ASSERT_OWNINGTHREAD(Context::Listener);
+  for (uint32_t i = 0; i < mBodyIdRefs.Length(); ++i) {
+    if (mBodyIdRefs[i].mBodyId == aBodyId) {
+      MOZ_ASSERT(mBodyIdRefs[i].mCount > 0);
+      MOZ_ASSERT(!mBodyIdRefs[i].mOrphaned);
+      mBodyIdRefs[i].mOrphaned = true;
+      return true;
+    }
+  }
+  return false;
+}
+
+void
+Manager::NoteOrphanedBodyIdList(CacheId aCacheId,
+                                const nsTArray<nsID>& aDeletedBodyIdList)
+{
+  NS_ASSERT_OWNINGTHREAD(Context::Listener);
+  nsTArray<nsID> deleteNowList;
+  for (uint32_t i = 0; i < aDeletedBodyIdList.Length(); ++i) {
+    if (!SetBodyIdOrphanedIfRefed(aDeletedBodyIdList[i])) {
+      deleteNowList.AppendElement(aDeletedBodyIdList[i]);
+    }
+  }
+
+  if (!deleteNowList.IsEmpty()) {
+    nsRefPtr<Action> action = new DeleteOrphanedBodyAction(aCacheId,
+                                                           deleteNowList);
+    CurrentContext()->Dispatch(mIOThread, action);
+  }
 }
 
 } // namespace cache

@@ -163,6 +163,7 @@ public:
 private:
   class Factory;
   class BaseAction;
+  class DeleteOrphanedBodyAction;
   class DeleteOrphanedCacheAction;
 
   class CacheMatchAction;
@@ -189,6 +190,12 @@ private:
   void AddStreamList(StreamList* aStreamList);
   void RemoveStreamList(StreamList* aStreamList);
 
+  void AddRefBodyId(const nsID& aBodyId);
+  void ReleaseBodyId(CacheId aCacheId, const nsID& aBodyId);
+  bool SetBodyIdOrphanedIfRefed(const nsID& aBodyId);
+  void NoteOrphanedBodyIdList(CacheId aCacheId,
+                              const nsTArray<nsID>& aDeletedBodyIdList);
+
   const nsCString mOrigin;
   const nsCString mBaseDomain;
   nsCOMPtr<nsIThread> mIOThread;
@@ -202,6 +209,14 @@ private:
     bool mOrphaned;
   };
   nsTArray<CacheIdRefCounter> mCacheIdRefs;
+
+  struct BodyIdRefCounter
+  {
+    nsID mBodyId;
+    uint32_t mCount;
+    bool mOrphaned;
+  };
+  nsTArray<BodyIdRefCounter> mBodyIdRefs;
 
   // weak ref as Context destructor clears this pointer
   Context* mContext;

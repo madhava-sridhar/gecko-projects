@@ -175,15 +175,24 @@ DBSchema::CreateCache(mozIStorageConnection* aConn, CacheId* aCacheIdOut)
 
 // static
 nsresult
-DBSchema::DeleteCache(mozIStorageConnection* aConn, CacheId aCacheId)
+DBSchema::DeleteCache(mozIStorageConnection* aConn, CacheId aCacheId,
+                      nsTArray<nsID>& aDeletedBodyIdListOut)
 {
   MOZ_ASSERT(aConn);
 
-  // Dependent data removed via ON DELETE CASCADE. Associated body files
-  // should be removed in bulk for the cache.
+  // Delete the bodies explicitly as we need to read out the body IDs
+  // anyway.  These body IDs must be deleted one-by-one as content may
+  // still be referencing them invidivually.
+  nsTArray<EntryId> matches;
+  nsresult rv = QueryAll(aConn, aCacheId, matches);
+  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 
+  rv = DeleteEntries(aConn, matches, aDeletedBodyIdListOut);
+  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
+
+  // Delete the remainder of the cache using cascade semantics.
   nsCOMPtr<mozIStorageStatement> state;
-  nsresult rv = aConn->CreateStatement(NS_LITERAL_CSTRING(
+  rv = aConn->CreateStatement(NS_LITERAL_CSTRING(
     "DELETE FROM caches WHERE id=?1;"
   ), getter_AddRefs(state));
   if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }

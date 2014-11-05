@@ -253,6 +253,7 @@ public:
     , mQuotaDir(aQuotaDir)
     , mInitiatingThread(NS_GetCurrentThread())
     , mState(STATE_INIT)
+    , mCanceled(false)
     , mResult(NS_OK)
   {
     MOZ_ASSERT(mContext);
@@ -266,6 +267,12 @@ public:
   {
     NS_ASSERT_OWNINGTHREAD(Action::Resolver);
     MOZ_ASSERT(mState == STATE_INIT);
+
+    if (mCanceled) {
+      mState = STATE_COMPLETE;
+      Clear();
+      return NS_OK;
+    }
 
     mState = STATE_RUN_ON_TARGET;
     nsresult rv = mTarget->Dispatch(this, nsIEventTarget::DISPATCH_NORMAL);
@@ -284,21 +291,19 @@ public:
   void Cancel()
   {
     NS_ASSERT_OWNINGTHREAD(Action::Resolver);
+    mCanceled = true;
+    mResult = NS_ERROR_FAILURE;
     nsresult rv;
     switch(mState) {
-      case STATE_INIT:
-        mState = STATE_COMPLETE;
-        break;
-      case STATE_RUN_ON_TARGET:
-        mState = STATE_CANCELING;
-        break;
       case STATE_RUNNING:
-        mState = STATE_CANCELING;
+        // Re-dispatch if we are currently running
         rv = mTarget->Dispatch(this, nsIEventTarget::DISPATCH_NORMAL);
         if (NS_WARN_IF(NS_FAILED(rv))) {
           MOZ_CRASH("Failed to dispatch ActionRunnable to target thread.");
         }
-      case STATE_CANCELING:
+        break;
+      case STATE_INIT:
+      case STATE_RUN_ON_TARGET:
       case STATE_COMPLETING:
       case STATE_COMPLETE:
         break;
@@ -341,7 +346,6 @@ private:
   {
     STATE_INIT,
     STATE_RUN_ON_TARGET,
-    STATE_CANCELING,
     STATE_RUNNING,
     STATE_COMPLETING,
     STATE_COMPLETE
@@ -353,6 +357,7 @@ private:
   nsCOMPtr<nsIFile> mQuotaDir;
   nsCOMPtr<nsIThread> mInitiatingThread;
   State mState;
+  bool mCanceled;
   nsresult mResult;
 
 public:
@@ -370,11 +375,22 @@ Context::ActionRunnable::Run()
   switch(mState) {
     case STATE_RUN_ON_TARGET:
       MOZ_ASSERT(NS_GetCurrentThread() == mTarget);
+      if (mCanceled) {
+        mState = STATE_COMPLETING;
+        rv = mInitiatingThread->Dispatch(this, nsIThread::DISPATCH_NORMAL);
+        if (NS_FAILED(rv)) {
+          MOZ_CRASH("Failed to dispatch ActionRunnable to initiating thread.");
+        }
+        break;
+      }
       mState = STATE_RUNNING;
       mAction->RunOnTarget(this, mQuotaDir);
       break;
-    case STATE_CANCELING:
+    case STATE_RUNNING:
       MOZ_ASSERT(NS_GetCurrentThread() == mTarget);
+      // We only re-enter the RUNNING state if we are canceling.  Normally we
+      // should transition out of RUNNING via Resolve() instead.
+      MOZ_ASSERT(mCanceled);
       mState = STATE_COMPLETING;
       mAction->CancelOnTarget();
       mResult = NS_FAILED(mResult) ? mResult : NS_ERROR_FAILURE;
@@ -390,6 +406,12 @@ Context::ActionRunnable::Run()
       // Explicitly cleanup here as the destructor could fire on any of
       // the threads we have bounced through.
       Clear();
+      break;
+    case STATE_COMPLETE:
+      // We can end up running in the complete state if we cancel on the origin
+      // thread while simultaneously starting to run the action on the target
+      // thread.
+      MOZ_ASSERT(mCanceled);
       break;
     default:
       MOZ_CRASH("unexpected state in ActionRunnable");

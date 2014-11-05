@@ -18,7 +18,7 @@
     // consume it's 'body'. See
     // https://github.com/slightlyoff/ServiceWorker/issues/510.
     var request = "http://example.com/hmm?q=foobar";
-    var response = new Response();
+    var response = new Response("This is some Response!");
     success = success && !!caches;
     caches.open("foobar").then(function(openCache) {
       success = success && (openCache instanceof Cache);

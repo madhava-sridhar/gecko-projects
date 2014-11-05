@@ -401,12 +401,8 @@ FileUtils::BodyDeleteFiles(nsIFile* aBaseDir, CacheId aCacheId,
       continue;
     }
 
-    // TODO: figure out why files cannot be removed on windows mochitest
     rv = finalFile->Remove(false /* recursive */);
-    if (NS_FAILED(rv)) {
-      NS_WARNING("Failed to remove Cache body file!");
-      rv = NS_OK;
-    }
+    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
   }
 
   return rv;

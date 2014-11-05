@@ -37,7 +37,8 @@ public:
   static nsresult CreateCache(mozIStorageConnection* aConn,
                               CacheId* aCacheIdOut);
   // TODO: improve naming (confusing with CacheDelete)
-  static nsresult DeleteCache(mozIStorageConnection* aConn, CacheId aCacheId);
+  static nsresult DeleteCache(mozIStorageConnection* aConn, CacheId aCacheId,
+                              nsTArray<nsID>& aDeletedBodyIdListOut);
 
   // TODO: Consider removing unused IsCacheOrphaned after writing cleanup code.
   static nsresult IsCacheOrphaned(mozIStorageConnection* aConn,
