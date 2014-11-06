@@ -922,7 +922,6 @@ InstallEventRunnable::DispatchInstallEvent(JSContext* aCx, WorkerPrivate* aWorke
 
   // FIXME(nsm): Bug 982787 pass previous active worker.
 
-  // FIXME(nsm): Set error handler so we can grab handler errors.
   nsRefPtr<EventTarget> target = aWorkerPrivate->GlobalScope();
   nsRefPtr<InstallEvent> event =
     InstallEvent::Constructor(target, NS_LITERAL_STRING("install"), init);
@@ -1047,7 +1046,6 @@ private:
     MOZ_ASSERT(aWorkerPrivate->IsServiceWorker());
     nsRefPtr<EventTarget> target = do_QueryObject(aWorkerPrivate->GlobalScope());
 
-    // FIXME(nsm): Set activeWorker to the correct thing.
     EventInit init;
     init.mBubbles = false;
     init.mCancelable = true;
@@ -1058,7 +1056,6 @@ private:
 
     nsRefPtr<Promise> waitUntilPromise;
 
-    // FIXME(nsm): Install error handler for any listener errors.
     nsresult rv = target->DispatchDOMEvent(nullptr, event, nullptr, nullptr);
     WidgetEvent* internalEvent = event->GetInternalNSEvent();
     if (NS_SUCCEEDED(rv) && !internalEvent->mFlags.mExceptionHasBeenRisen) {
