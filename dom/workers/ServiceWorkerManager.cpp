@@ -2079,6 +2079,7 @@ ServiceWorkerManager::GetServiceWorkerForScope(nsIDOMWindow* aWindow,
     return rv;
   }
 
+  serviceWorker->SetState(info->GetState());
   serviceWorker.forget(aServiceWorker);
   return NS_OK;
 }

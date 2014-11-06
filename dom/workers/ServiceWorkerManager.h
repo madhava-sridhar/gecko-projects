@@ -221,6 +221,12 @@ public:
     MOZ_ASSERT(mRegistration);
   }
 
+  ServiceWorkerState
+  GetState() const
+  {
+    return mState;
+  }
+
   void
   UpdateState(ServiceWorkerState aState)
   {
