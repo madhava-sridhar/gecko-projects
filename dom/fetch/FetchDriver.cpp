@@ -269,7 +269,7 @@ FetchDriver::HttpFetch(bool aCORSFlag, bool aPreflightCORSFlag, bool aAuthentica
   return ContinueHttpFetchAfterServiceWorker();
 }
 
-NS_IMETHODIMP
+nsresult
 FetchDriver::ContinueHttpFetchAfterServiceWorker()
 {
   if (!mResponse) {
@@ -283,7 +283,7 @@ FetchDriver::ContinueHttpFetchAfterServiceWorker()
   return ContinueHttpFetchAfterNetworkFetch();
 }
 
-NS_IMETHODIMP
+nsresult
 FetchDriver::ContinueHttpFetchAfterCORSPreflight()
 {
   // mResponse is currently the CORS response.
@@ -295,7 +295,7 @@ FetchDriver::ContinueHttpFetchAfterCORSPreflight()
   return HttpNetworkFetch();
 }
 
-NS_IMETHODIMP
+nsresult
 FetchDriver::HttpNetworkFetch()
 {
   // We don't create a HTTPRequest copy since Necko sets the information on the
@@ -396,7 +396,7 @@ FetchDriver::HttpNetworkFetch()
   return chan->AsyncOpen(this, nullptr);
 }
 
-NS_IMETHODIMP
+nsresult
 FetchDriver::ContinueHttpFetchAfterNetworkFetch()
 {
   workers::AssertIsOnMainThread();
@@ -530,7 +530,7 @@ FetchDriver::OnStartRequest(nsIRequest* aRequest,
   return NS_OK;
 }
 
-/* static */ NS_IMETHODIMP
+/* static */ NS_METHOD
 FetchDriver::StreamReaderFunc(nsIInputStream* aInputStream,
                               void* aClosure,
                               const char* aFragment,

@@ -287,7 +287,7 @@ MainThreadFetchResolver::OnResponseAvailable(InternalResponse* aResponse)
 void
 MainThreadFetchResolver::OnResponseEnd()
 {
-  NS_ASSERT_OWNINGTHREAD(MainThreadFetchResolver)
+  NS_ASSERT_OWNINGTHREAD(MainThreadFetchResolver);
   AssertIsOnMainThread();
   MOZ_ASSERT(mResponse);
   mResponse->TryFinishConsumeBody();
