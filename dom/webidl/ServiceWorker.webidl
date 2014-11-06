@@ -8,11 +8,8 @@
  *
  */
 
-[Pref="dom.serviceWorkers.enabled",
- // XXXbz I have no idea where this should be exposed.  The spec makes
- // no sense.  But since it's got a pref, let's say window.
- // FIXME(nsm): Should also be exposed on ServiceWorker once we allow access to registrations from ServiceWorkers.
- Exposed=Window]
+[Func="mozilla::dom::workers::ServiceWorkerVisible",
+ Exposed=(ServiceWorker,Window)]
 interface ServiceWorker : EventTarget {
   readonly attribute ScalarValueString scriptURL;
   readonly attribute ServiceWorkerState state;

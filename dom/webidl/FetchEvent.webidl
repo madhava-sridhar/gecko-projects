@@ -8,8 +8,7 @@
  */
 
 [Constructor(DOMString type, optional FetchEventInit eventInitDict),
- Func="mozilla::dom::workers::ServiceWorkerEventsVisible",
- Exposed=(ServiceWorker)]
+ Exposed=ServiceWorker]
 interface FetchEvent : Event {
   readonly attribute Request request;
   readonly attribute ServiceWorkerClient client; // The window issuing the request.
