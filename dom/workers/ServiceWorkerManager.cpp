@@ -680,9 +680,14 @@ private:
       mRegistration->mWaitingWorker->UpdateState(ServiceWorkerState::Redundant);
     }
 
+    // Although the spec first sets waiting worker and then updates its state,
+    // our ServiceWorkerInfo does not hold a list of associated ServiceWorker
+    // objects in content JS. This means if we want to fire an event on
+    // ServiceWorkerRegistration.installing, we need to do it first, before
+    // swapping it with waiting worker.
+    mRegistration->mInstallingWorker->UpdateState(ServiceWorkerState::Installed);
     mRegistration->mWaitingWorker = mRegistration->mInstallingWorker.forget();
     mRegistration->mWaitingToActivate = false;
-    mRegistration->mWaitingWorker->UpdateState(ServiceWorkerState::Installed);
     swm->InvalidateServiceWorkerRegistrationWorker(mRegistration,
                                                    WhichServiceWorker::INSTALLING_WORKER | WhichServiceWorker::WAITING_WORKER);
 
@@ -1055,7 +1060,8 @@ private:
 
     // FIXME(nsm): Install error handler for any listener errors.
     nsresult rv = target->DispatchDOMEvent(nullptr, event, nullptr, nullptr);
-    if (NS_SUCCEEDED(rv)) {
+    WidgetEvent* internalEvent = event->GetInternalNSEvent();
+    if (NS_SUCCEEDED(rv) && !internalEvent->mFlags.mExceptionHasBeenRisen) {
       waitUntilPromise = event->GetPromise();
       if (!waitUntilPromise) {
         ErrorResult rv;

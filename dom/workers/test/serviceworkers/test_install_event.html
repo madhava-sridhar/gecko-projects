@@ -57,6 +57,27 @@
       });
   }
 
+  function activateError() {
+    // Silence worker errors so they don't cause the test to fail.
+    window.onerror = function() { }
+    return navigator.serviceWorker.register("activate_event_error_worker.js", { scope: "./activate_error" })
+      .then(function(swr) {
+        return new Promise(function(resolve, reject) {
+          ok(swr.installing.state == "installing", "activateError(): Installing worker's state should be 'installing'");
+          swr.installing.onstatechange = function(e) {
+            ok(swr.active, "transition to active successfully");
+            is(swr.active.state, "activating", "should be activating");
+            swr.active.onstatechange = function(e) {
+              is(e.target.state, "redundant", "Activation of worker with error in activate event handler should fail.");
+              resolve(swr);
+            }
+          }
+        });
+      }).then(function(swr) {
+        return swr.unregister();
+      });
+  }
+
   function unregister() {
     return navigator.serviceWorker.getRegistration("./install_event").then(function(reg) {
       return reg.unregister();
@@ -67,6 +88,7 @@
     simpleRegister()
       .then(nextRegister)
       .then(installError)
+      .then(activateError)
       .then(unregister)
       .then(function() {
         SimpleTest.finish();
