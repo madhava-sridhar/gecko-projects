@@ -702,7 +702,17 @@ FetchBody<Derived>::FinishConsumeBody()
   nsCOMPtr<nsIInputStream> stream;
   DerivedClass()->GetBody(getter_AddRefs(stream));
   MOZ_ASSERT(stream);
-  MOZ_ASSERT(NS_InputStreamIsBuffered(stream));
+
+  if (!NS_InputStreamIsBuffered(stream)) {
+    nsCOMPtr<nsIInputStream> buffered;
+    nsresult rv = NS_NewBufferedInputStream(getter_AddRefs(buffered),
+                                            stream, 4096);
+    if (NS_WARN_IF(NS_FAILED(rv))) {
+      return mDelayedConsumePromise->MaybeReject(rv);
+    }
+
+    stream = buffered.forget();
+  }
 
   uint64_t len;
   nsresult rv = stream->Available(&len);
