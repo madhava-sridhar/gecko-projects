@@ -194,7 +194,9 @@ TypeUtils::ToPCacheRequest(PCacheRequest& aOut, Request& aIn,
   nsCOMPtr<nsIInputStream> stream;
 
   internalRequest->GetBody(getter_AddRefs(stream));
-  aIn.SetBodyUsed();
+  if (stream) {
+    aIn.SetBodyUsed();
+  }
 
   SerializeCacheStream(stream, &aOut.body());
 }
@@ -296,7 +298,9 @@ TypeUtils::ToPCacheResponse(PCacheResponse& aOut, Response& aIn,
 
   nsCOMPtr<nsIInputStream> stream;
   aIn.GetBody(getter_AddRefs(stream));
-  aIn.SetBodyUsed();
+  if (stream) {
+    aIn.SetBodyUsed();
+  }
 
   SerializeCacheStream(stream, &aOut.body());
 }
