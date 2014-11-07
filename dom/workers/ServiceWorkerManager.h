@@ -460,6 +460,13 @@ private:
                                         const nsAString& aName);
 
   void
+  FireUpdateFound(ServiceWorkerRegistrationInfo* aRegistration)
+  {
+    FireEventOnServiceWorkerRegistrations(aRegistration,
+                                          NS_LITERAL_STRING("updatefound"));
+  }
+
+  void
   FireControllerChange(ServiceWorkerRegistrationInfo* aRegistration);
 
   void

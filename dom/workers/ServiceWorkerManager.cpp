@@ -105,24 +105,6 @@ ServiceWorkerRegistrationInfo::~ServiceWorkerRegistrationInfo()
   }
 }
 
-class QueueFireUpdateFoundRunnable MOZ_FINAL : public nsRunnable
-{
-  nsRefPtr<ServiceWorkerRegistrationInfo> mRegistration;
-public:
-  QueueFireUpdateFoundRunnable(ServiceWorkerRegistrationInfo* aReg)
-    : mRegistration(aReg)
-  { }
-
-  NS_IMETHOD
-  Run()
-  {
-    nsRefPtr<ServiceWorkerManager> swm = ServiceWorkerManager::GetInstance();
-    swm->FireEventOnServiceWorkerRegistrations(mRegistration,
-                                               NS_LITERAL_STRING("updatefound"));
-    return NS_OK;
-  }
-};
-
 //////////////////////////
 // ServiceWorkerManager //
 //////////////////////////
@@ -565,8 +547,10 @@ public:
 
     Succeed();
 
-    nsRefPtr<QueueFireUpdateFoundRunnable> upr =
-      new QueueFireUpdateFoundRunnable(mRegistration);
+    nsCOMPtr<nsIRunnable> upr =
+      NS_NewRunnableMethodWithArg<ServiceWorkerRegistrationInfo*>(swm,
+                                                                  &ServiceWorkerManager::FireUpdateFound,
+                                                                  mRegistration);
     NS_DispatchToMainThread(upr);
 
     nsMainThreadPtrHandle<ContinueLifecycleTask> handle(
