@@ -191,10 +191,9 @@ private:
   void RemoveStreamList(StreamList* aStreamList);
 
   void AddRefBodyId(const nsID& aBodyId);
-  void ReleaseBodyId(CacheId aCacheId, const nsID& aBodyId);
+  void ReleaseBodyId(const nsID& aBodyId);
   bool SetBodyIdOrphanedIfRefed(const nsID& aBodyId);
-  void NoteOrphanedBodyIdList(CacheId aCacheId,
-                              const nsTArray<nsID>& aDeletedBodyIdList);
+  void NoteOrphanedBodyIdList(const nsTArray<nsID>& aDeletedBodyIdList);
 
   const nsCString mOrigin;
   const nsCString mBaseDomain;

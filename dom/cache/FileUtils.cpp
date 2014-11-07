@@ -54,7 +54,7 @@ FileUtils::BodyCreateDir(nsIFile* aBaseDir)
 
 // static
 nsresult
-FileUtils::BodyGetCacheDir(nsIFile* aBaseDir, CacheId aCacheId,
+FileUtils::BodyGetCacheDir(nsIFile* aBaseDir, const nsID& aId,
                            nsIFile** aCacheDirOut)
 {
   MOZ_ASSERT(aBaseDir);
@@ -76,9 +76,9 @@ FileUtils::BodyGetCacheDir(nsIFile* aBaseDir, CacheId aCacheId,
   if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
   if (NS_WARN_IF(!isDir)) { return NS_ERROR_FILE_NOT_DIRECTORY; }
 
-  nsAutoString cacheDirName;
-  cacheDirName.AppendInt(aCacheId);
-  rv = (*aCacheDirOut)->Append(cacheDirName);
+  nsAutoString subDirName;
+  subDirName.AppendInt(aId.m3[7]);
+  rv = (*aCacheDirOut)->Append(subDirName);
   if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 
   rv = (*aCacheDirOut)->Exists(&exists);
@@ -98,55 +98,13 @@ FileUtils::BodyGetCacheDir(nsIFile* aBaseDir, CacheId aCacheId,
 
 // static
 nsresult
-FileUtils::BodyDeleteCacheDir(nsIFile* aBaseDir, CacheId aCacheId)
-{
-  MOZ_ASSERT(aBaseDir);
-
-  nsCOMPtr<nsIFile> cacheDir;
-  nsresult rv = aBaseDir->Clone(getter_AddRefs(cacheDir));
-  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
-
-  rv = cacheDir->Append(NS_LITERAL_STRING("morgue"));
-  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
-
-  bool exists;
-  rv = cacheDir->Exists(&exists);
-  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
-  if (NS_WARN_IF(!exists)) { return NS_ERROR_FILE_NOT_DIRECTORY; }
-
-  nsAutoString cacheDirName;
-  cacheDirName.AppendInt(aCacheId);
-  rv = cacheDir->Append(cacheDirName);
-  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
-
-  rv = cacheDir->Exists(&exists);
-  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
-
-  // Already in desired state where cache dir does not exist.
-  if (!exists) {
-    return rv;
-  }
-
-  bool isDir;
-  rv = cacheDir->IsDirectory(&isDir);
-  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
-  if (NS_WARN_IF(!isDir)) { return NS_ERROR_FILE_NOT_DIRECTORY; }
-
-  rv = cacheDir->Remove(true /* recursive */);
-  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
-
-  return rv;
-}
-
-// static
-nsresult
-FileUtils::BodyIdToFile(nsIFile* aBaseDir, CacheId aCacheId, const nsID& aId,
+FileUtils::BodyIdToFile(nsIFile* aBaseDir, const nsID& aId,
                         BodyFileType aType, nsIFile** aBodyFileOut)
 {
   MOZ_ASSERT(aBaseDir);
   MOZ_ASSERT(aBodyFileOut);
 
-  nsresult rv = BodyGetCacheDir(aBaseDir, aCacheId, aBodyFileOut);
+  nsresult rv = BodyGetCacheDir(aBaseDir, aId, aBodyFileOut);
   if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 
   bool exists;
@@ -180,10 +138,10 @@ FileUtils::BodyIdToFile(nsIFile* aBaseDir, CacheId aCacheId, const nsID& aId,
 nsresult
 FileUtils::BodyStartWriteStream(const nsACString& aOrigin,
                                 const nsACString& aBaseDomain,
-                                nsIFile* aBaseDir, CacheId aCacheId,
-                                nsIInputStream* aSource, void* aClosure,
-                                nsAsyncCopyCallbackFun aCallback,
-                                nsID* aIdOut, nsISupports** aCopyContextOut)
+                                nsIFile* aBaseDir, nsIInputStream* aSource,
+                                void* aClosure,
+                                nsAsyncCopyCallbackFun aCallback, nsID* aIdOut,
+                                nsISupports** aCopyContextOut)
 {
   MOZ_ASSERT(aBaseDir);
   MOZ_ASSERT(aSource);
@@ -201,7 +159,7 @@ FileUtils::BodyStartWriteStream(const nsACString& aOrigin,
   if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 
   nsCOMPtr<nsIFile> finalFile;
-  rv = BodyIdToFile(aBaseDir, aCacheId, *aIdOut, BODY_FILE_FINAL,
+  rv = BodyIdToFile(aBaseDir, *aIdOut, BODY_FILE_FINAL,
                     getter_AddRefs(finalFile));
   if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 
@@ -211,8 +169,7 @@ FileUtils::BodyStartWriteStream(const nsACString& aOrigin,
   if (NS_WARN_IF(exists)) { return NS_ERROR_FILE_ALREADY_EXISTS; }
 
   nsCOMPtr<nsIFile> tmpFile;
-  rv = BodyIdToFile(aBaseDir, aCacheId, *aIdOut, BODY_FILE_TMP,
-                    getter_AddRefs(tmpFile));
+  rv = BodyIdToFile(aBaseDir, *aIdOut, BODY_FILE_TMP, getter_AddRefs(tmpFile));
   if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 
   rv = tmpFile->Exists(&exists);
@@ -240,7 +197,7 @@ FileUtils::BodyStartWriteStream(const nsACString& aOrigin,
 
 // static
 void
-FileUtils::BodyCancelWrite(nsIFile* aBaseDir, CacheId aCacheId, const nsID& aId,
+FileUtils::BodyCancelWrite(nsIFile* aBaseDir, const nsID& aId,
                            nsISupports* aCopyContext)
 {
   MOZ_ASSERT(aBaseDir);
@@ -250,8 +207,7 @@ FileUtils::BodyCancelWrite(nsIFile* aBaseDir, CacheId aCacheId, const nsID& aId,
   unused << NS_WARN_IF(NS_FAILED(rv));
 
   nsCOMPtr<nsIFile> tmpFile;
-  rv = BodyIdToFile(aBaseDir, aCacheId, aId, BODY_FILE_TMP,
-                    getter_AddRefs(tmpFile));
+  rv = BodyIdToFile(aBaseDir, aId, BODY_FILE_TMP, getter_AddRefs(tmpFile));
   if (NS_WARN_IF(NS_FAILED(rv))) { return; }
 
   rv = tmpFile->Remove(false /* recursive */);
@@ -260,13 +216,12 @@ FileUtils::BodyCancelWrite(nsIFile* aBaseDir, CacheId aCacheId, const nsID& aId,
 
 // static
 nsresult
-FileUtils::BodyFinalizeWrite(nsIFile* aBaseDir, CacheId aCacheId, const nsID& aId)
+FileUtils::BodyFinalizeWrite(nsIFile* aBaseDir, const nsID& aId)
 {
   MOZ_ASSERT(aBaseDir);
 
   nsCOMPtr<nsIFile> tmpFile;
-  nsresult rv = BodyIdToFile(aBaseDir, aCacheId, aId, BODY_FILE_TMP,
-                             getter_AddRefs(tmpFile));
+  nsresult rv = BodyIdToFile(aBaseDir, aId, BODY_FILE_TMP, getter_AddRefs(tmpFile));
   if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 
   bool exists;
@@ -275,8 +230,7 @@ FileUtils::BodyFinalizeWrite(nsIFile* aBaseDir, CacheId aCacheId, const nsID& aI
   if (NS_WARN_IF(!exists)) { return NS_ERROR_FILE_NOT_FOUND; }
 
   nsCOMPtr<nsIFile> finalFile;
-  rv = BodyIdToFile(aBaseDir, aCacheId, aId, BODY_FILE_FINAL,
-                    getter_AddRefs(finalFile));
+  rv = BodyIdToFile(aBaseDir, aId, BODY_FILE_FINAL, getter_AddRefs(finalFile));
   if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 
   rv = finalFile->Exists(&exists);
@@ -300,15 +254,15 @@ FileUtils::BodyFinalizeWrite(nsIFile* aBaseDir, CacheId aCacheId, const nsID& aI
 // static
 nsresult
 FileUtils::BodyOpen(const nsACString& aOrigin, const nsACString& aBaseDomain,
-                    nsIFile* aBaseDir, CacheId aCacheId, const nsID& aId,
+                    nsIFile* aBaseDir, const nsID& aId,
                     nsIInputStream** aStreamOut)
 {
   MOZ_ASSERT(aBaseDir);
   MOZ_ASSERT(aStreamOut);
 
   nsCOMPtr<nsIFile> finalFile;
-  nsresult rv = BodyIdToFile(aBaseDir, aCacheId, aId, BODY_FILE_FINAL,
-                    getter_AddRefs(finalFile));
+  nsresult rv = BodyIdToFile(aBaseDir, aId, BODY_FILE_FINAL,
+                             getter_AddRefs(finalFile));
   if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 
   bool exists;
@@ -330,7 +284,7 @@ FileUtils::BodyOpen(const nsACString& aOrigin, const nsACString& aBaseDomain,
 nsresult
 FileUtils::BodyStartReadStream(const nsACString& aOrigin,
                                const nsACString& aBaseDomain,
-                               nsIFile* aBaseDir, CacheId aCacheId,
+                               nsIFile* aBaseDir,
                                const nsID& aId, nsIOutputStream* aDest,
                                void* aClosure,
                                nsAsyncCopyCallbackFun aCallback,
@@ -343,8 +297,8 @@ FileUtils::BodyStartReadStream(const nsACString& aOrigin,
   MOZ_ASSERT(aCopyContextOut);
 
   nsCOMPtr<nsIFile> finalFile;
-  nsresult rv = BodyIdToFile(aBaseDir, aCacheId, aId, BODY_FILE_FINAL,
-                    getter_AddRefs(finalFile));
+  nsresult rv = BodyIdToFile(aBaseDir, aId, BODY_FILE_FINAL,
+                             getter_AddRefs(finalFile));
   if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 
   bool exists;
@@ -382,14 +336,13 @@ FileUtils::BodyCancelRead(nsISupports* aCopyContext)
 
 // static
 nsresult
-FileUtils::BodyDeleteFiles(nsIFile* aBaseDir, CacheId aCacheId,
-                           const nsTArray<nsID>& aIdList)
+FileUtils::BodyDeleteFiles(nsIFile* aBaseDir, const nsTArray<nsID>& aIdList)
 {
   nsresult rv = NS_OK;
 
   for (uint32_t i = 0; i < aIdList.Length(); ++i) {
     nsCOMPtr<nsIFile> finalFile;
-    rv = BodyIdToFile(aBaseDir, aCacheId, aIdList[i], BODY_FILE_FINAL,
+    rv = BodyIdToFile(aBaseDir, aIdList[i], BODY_FILE_FINAL,
                       getter_AddRefs(finalFile));
     if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 

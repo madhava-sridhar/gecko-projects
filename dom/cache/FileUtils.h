@@ -29,36 +29,34 @@ public:
   };
 
   static nsresult BodyCreateDir(nsIFile* aBaseDir);
-  static nsresult BodyGetCacheDir(nsIFile* aBaseDir, CacheId aCacheId,
+  static nsresult BodyGetCacheDir(nsIFile* aBaseDir, const nsID& aId,
                                   nsIFile** aCacheDirOut);
-  static nsresult BodyDeleteCacheDir(nsIFile* aBaseDir, CacheId aCacheId);
 
   static nsresult
-  BodyIdToFile(nsIFile* aBaseDir, CacheId aCacheId, const nsID& aId,
-               BodyFileType aType, nsIFile** aBodyFileOut);
+  BodyIdToFile(nsIFile* aBaseDir, const nsID& aId, BodyFileType aType,
+               nsIFile** aBodyFileOut);
 
   static nsresult
   BodyStartWriteStream(const nsACString& aOrigin, const nsACString& aBaseDomain,
-                       nsIFile* aBaseDir, CacheId aCacheId,
+                       nsIFile* aBaseDir,
                        nsIInputStream* aSource, void* aClosure,
                        nsAsyncCopyCallbackFun aCallback, nsID* aIdOut,
                        nsISupports** aCopyContextOut);
 
   static void
-  BodyCancelWrite(nsIFile* aBaseDir, CacheId aCacheId, const nsID& aId,
+  BodyCancelWrite(nsIFile* aBaseDir, const nsID& aId,
                   nsISupports* aCopyContext);
 
   static nsresult
-  BodyFinalizeWrite(nsIFile* aBaseDir, CacheId aCacheId, const nsID& aId);
+  BodyFinalizeWrite(nsIFile* aBaseDir, const nsID& aId);
 
   static nsresult
   BodyOpen(const nsACString& aOrigin, const nsACString& aBaseDomain,
-           nsIFile* aBaseDir, CacheId aCacheId, const nsID& aId,
-           nsIInputStream** aStreamOut);
+           nsIFile* aBaseDir, const nsID& aId, nsIInputStream** aStreamOut);
 
   static nsresult
   BodyStartReadStream(const nsACString& aOrigin, const nsACString& aBaseDomain,
-                      nsIFile* aBaseDir, CacheId aCacheId, const nsID& aId,
+                      nsIFile* aBaseDir, const nsID& aId,
                       nsIOutputStream* aDest, void* aClosure,
                       nsAsyncCopyCallbackFun aCallback,
                       nsISupports** aCopyContextOut);
@@ -66,8 +64,7 @@ public:
   static void BodyCancelRead(nsISupports* aCopyContext);
 
   static nsresult
-  BodyDeleteFiles(nsIFile* aBaseDir, CacheId aCacheId,
-                  const nsTArray<nsID>& aIdList);
+  BodyDeleteFiles(nsIFile* aBaseDir, const nsTArray<nsID>& aIdList);
 
 private:
   FileUtils() MOZ_DELETE;

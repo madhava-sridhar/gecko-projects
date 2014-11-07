@@ -170,14 +170,11 @@ protected:
 class Manager::DeleteOrphanedBodyAction MOZ_FINAL : public Action
 {
 public:
-  DeleteOrphanedBodyAction(CacheId aCacheId,
-                           const nsTArray<nsID>& aDeletedBodyIdList)
-    : mCacheId(aCacheId)
-    , mDeletedBodyIdList(aDeletedBodyIdList)
+  DeleteOrphanedBodyAction(const nsTArray<nsID>& aDeletedBodyIdList)
+    : mDeletedBodyIdList(aDeletedBodyIdList)
   { }
 
-  DeleteOrphanedBodyAction(CacheId aCacheId, const nsID& aBodyId)
-    : mCacheId(aCacheId)
+  DeleteOrphanedBodyAction(const nsID& aBodyId)
   {
     mDeletedBodyIdList.AppendElement(aBodyId);
   }
@@ -194,7 +191,7 @@ public:
       return;
     }
 
-    rv = FileUtils::BodyDeleteFiles(aQuotaDir, mCacheId, mDeletedBodyIdList);
+    rv = FileUtils::BodyDeleteFiles(aQuotaDir, mDeletedBodyIdList);
     if (NS_WARN_IF(NS_FAILED(rv))) {
       aResolver->Resolve(rv);
       return;
@@ -205,7 +202,6 @@ public:
 
 private:
   virtual ~DeleteOrphanedBodyAction() { }
-  const CacheId mCacheId;
   nsTArray<nsID> mDeletedBodyIdList;
 };
 
@@ -229,9 +225,6 @@ public:
     nsresult rv = DBSchema::DeleteCache(aConn, mCacheId, mDeletedBodyIdList);
     if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 
-    rv = FileUtils::BodyDeleteCacheDir(aDBDir, mCacheId);
-    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
-
     rv = trans.Commit();
     if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 
@@ -241,7 +234,7 @@ public:
   virtual void
   CompleteOnInitiatingThread(nsresult aRv) MOZ_OVERRIDE
   {
-    mManager->NoteOrphanedBodyIdList(mCacheId, mDeletedBodyIdList);
+    mManager->NoteOrphanedBodyIdList(mDeletedBodyIdList);
     mManager = nullptr;
   }
 
@@ -282,7 +275,7 @@ public:
 
     nsCOMPtr<nsIInputStream> stream;
     rv = FileUtils::BodyOpen(mManager->Origin(), mManager->BaseDomain(),
-                             aDBDir, mCacheId, mResponse.mBodyId,
+                             aDBDir, mResponse.mBodyId,
                              getter_AddRefs(stream));
     if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
     if (NS_WARN_IF(!stream)) { return NS_ERROR_FILE_NOT_FOUND; }
@@ -349,7 +342,7 @@ public:
 
       nsCOMPtr<nsIInputStream> stream;
       rv = FileUtils::BodyOpen(mManager->Origin(), mManager->BaseDomain(),
-                               aDBDir, mCacheId, mSavedResponses[i].mBodyId,
+                               aDBDir, mSavedResponses[i].mBodyId,
                                getter_AddRefs(stream));
       if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
       if (NS_WARN_IF(!stream)) { return NS_ERROR_FILE_NOT_FOUND; }
@@ -473,7 +466,7 @@ public:
     nsresult rv = NS_OK;
 
     if (mRequestBodyStream) {
-      rv = FileUtils::BodyFinalizeWrite(mDBDir, mCacheId, mRequestBodyId);
+      rv = FileUtils::BodyFinalizeWrite(mDBDir, mRequestBodyId);
       if (NS_WARN_IF(NS_FAILED(rv))) {
         DoResolve(rv);
         return;
@@ -481,7 +474,7 @@ public:
     }
 
     if (mResponseBodyStream) {
-      rv = FileUtils::BodyFinalizeWrite(mDBDir, mCacheId, mResponseBodyId);
+      rv = FileUtils::BodyFinalizeWrite(mDBDir, mResponseBodyId);
       if (NS_WARN_IF(NS_FAILED(rv))) {
         DoResolve(rv);
         return;
@@ -515,7 +508,7 @@ public:
   {
     NS_ASSERT_OWNINGTHREAD(Action);
 
-    mManager->NoteOrphanedBodyIdList(mCacheId, mDeletedBodyIdList);
+    mManager->NoteOrphanedBodyIdList(mDeletedBodyIdList);
 
     Listener* listener = mManager->GetListener(mListenerId);
     mManager = nullptr;
@@ -565,7 +558,6 @@ private:
     nsresult rv = FileUtils::BodyStartWriteStream(mManager->Origin(),
                                                   mManager->BaseDomain(),
                                                   mDBDir,
-                                                  mCacheId,
                                                   aSource,
                                                   this,
                                                   AsyncCopyCompleteFunc,
@@ -583,7 +575,7 @@ private:
     if (!aSource || !aCopyContext) {
       return;
     }
-    FileUtils::BodyCancelWrite(mDBDir, mCacheId, aId, aCopyContext);
+    FileUtils::BodyCancelWrite(mDBDir, aId, aCopyContext);
   }
 
   static void
@@ -674,7 +666,7 @@ public:
   virtual void
   Complete(Listener* aListener, nsresult aRv) MOZ_OVERRIDE
   {
-    mManager->NoteOrphanedBodyIdList(mCacheId, mDeletedBodyIdList);
+    mManager->NoteOrphanedBodyIdList(mDeletedBodyIdList);
     aListener->OnCacheDelete(mRequestId, aRv, mSuccess);
   }
 
@@ -722,7 +714,7 @@ public:
 
       nsCOMPtr<nsIInputStream> stream;
       rv = FileUtils::BodyOpen(mManager->Origin(), mManager->BaseDomain(),
-                               aDBDir, mCacheId, mSavedRequests[i].mBodyId,
+                               aDBDir, mSavedRequests[i].mBodyId,
                                getter_AddRefs(stream));
       if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
       if (NS_WARN_IF(!stream)) { return NS_ERROR_FILE_NOT_FOUND; }
@@ -785,8 +777,8 @@ public:
 
     nsCOMPtr<nsIInputStream> stream;
     rv = FileUtils::BodyOpen(mManager->Origin(), mManager->BaseDomain(),
-                             aDBDir, mSavedResponse.mCacheId,
-                             mSavedResponse.mBodyId, getter_AddRefs(stream));
+                             aDBDir, mSavedResponse.mBodyId,
+                             getter_AddRefs(stream));
     if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
     if (NS_WARN_IF(!stream)) { return NS_ERROR_FILE_NOT_FOUND; }
 
@@ -1087,7 +1079,7 @@ Manager::StreamList::NoteClosed(const nsID& aId)
   for (uint32_t i = 0; i < mList.Length(); ++i) {
     if (mList[i].mId == aId) {
       mList.RemoveElementAt(i);
-      mManager->ReleaseBodyId(mCacheId, aId);
+      mManager->ReleaseBodyId(aId);
       break;
     }
   }
@@ -1122,7 +1114,7 @@ Manager::StreamList::~StreamList()
   if (mActivated) {
     mManager->RemoveStreamList(this);
     for (uint32_t i = 0; i < mList.Length(); ++i) {
-      mManager->ReleaseBodyId(mCacheId, mList[i].mId);
+      mManager->ReleaseBodyId(mList[i].mId);
     }
     mManager->ReleaseCacheId(mCacheId);
   }
@@ -1529,7 +1521,7 @@ Manager::AddRefBodyId(const nsID& aBodyId)
 }
 
 void
-Manager::ReleaseBodyId(CacheId aCacheId, const nsID& aBodyId)
+Manager::ReleaseBodyId(const nsID& aBodyId)
 {
   NS_ASSERT_OWNINGTHREAD(Context::Listener);
   for (uint32_t i = 0; i < mBodyIdRefs.Length(); ++i) {
@@ -1542,8 +1534,7 @@ Manager::ReleaseBodyId(CacheId aCacheId, const nsID& aBodyId)
         mBodyIdRefs.RemoveElementAt(i);
         // TODO: note that we need to check this body for staleness on startup
         if (orphaned && !mShuttingDown) {
-          nsRefPtr<Action> action = new DeleteOrphanedBodyAction(aCacheId,
-                                                                 aBodyId);
+          nsRefPtr<Action> action = new DeleteOrphanedBodyAction(aBodyId);
           CurrentContext()->Dispatch(mIOThread, action);
         }
       }
@@ -1572,8 +1563,7 @@ Manager::SetBodyIdOrphanedIfRefed(const nsID& aBodyId)
 }
 
 void
-Manager::NoteOrphanedBodyIdList(CacheId aCacheId,
-                                const nsTArray<nsID>& aDeletedBodyIdList)
+Manager::NoteOrphanedBodyIdList(const nsTArray<nsID>& aDeletedBodyIdList)
 {
   NS_ASSERT_OWNINGTHREAD(Context::Listener);
   nsTArray<nsID> deleteNowList;
@@ -1584,8 +1574,7 @@ Manager::NoteOrphanedBodyIdList(CacheId aCacheId,
   }
 
   if (!deleteNowList.IsEmpty()) {
-    nsRefPtr<Action> action = new DeleteOrphanedBodyAction(aCacheId,
-                                                           deleteNowList);
+    nsRefPtr<Action> action = new DeleteOrphanedBodyAction(deleteNowList);
     CurrentContext()->Dispatch(mIOThread, action);
   }
 }
