@@ -29,6 +29,7 @@ template<typename T> class Optional;
 namespace cache {
 
 class PCacheQueryParams;
+class PCacheReadStreamOrVoid;
 class PCacheRequest;
 class PCacheRequestOrVoid;
 class PCacheResponse;
@@ -36,44 +37,72 @@ class PCacheStreamControlChild;
 
 class TypeUtils
 {
-public:
-  static void
+protected:
+  virtual ~TypeUtils() { }
+  virtual nsIGlobalObject* GetGlobalObject() const=0;
+#ifdef DEBUG
+  virtual void AssertOwningThread() const=0;
+#else
+  inline void AssertOwningThread() { }
+#endif
+
+  void
+  ToPCacheRequest(PCacheRequest& aOut,
+                  const RequestOrScalarValueString& aIn, bool aReadBody,
+                  ErrorResult& aRv);
+
+  void
+  ToPCacheRequest(PCacheRequest& aOut,
+                  const OwningRequestOrScalarValueString& aIn,
+                  bool aReadBody, ErrorResult& aRv);
+
+  void
+  ToPCacheRequestOrVoid(PCacheRequestOrVoid& aOut,
+                        const Optional<RequestOrScalarValueString>& aIn,
+                        bool aReadBody, ErrorResult& aRv);
+
+  void
   ToPCacheRequest(PCacheRequest& aOut, Request& aIn, bool aReadBody,
                   ErrorResult& aRv);
 
-  static void
+  void
+  ToPCacheResponse(PCacheResponse& aOut, Response& aIn, ErrorResult& aRv);
+
+  void
+  ToPCacheQueryParams(PCacheQueryParams& aOut, const QueryParams& aIn);
+
+  already_AddRefed<Response>
+  ToResponse(const PCacheResponse& aIn,
+             PCacheStreamControlChild* aStreamControl);
+
+  already_AddRefed<Request>
+  ToRequest(const PCacheRequest& aIn,
+            PCacheStreamControlChild* aStreamControl);
+
+private:
+  void
   ToPCacheRequest(const GlobalObject& aGlobal, PCacheRequest& aOut,
                   const RequestOrScalarValueString& aIn, bool aReadBody,
                   ErrorResult& aRv);
 
-  static void
+  void
   ToPCacheRequestOrVoid(const GlobalObject& aGlobal,
                         PCacheRequestOrVoid& aOut,
                         const Optional<RequestOrScalarValueString>& aIn,
                         bool aReadBody, ErrorResult& aRv);
 
-  static void
+  void
   ToPCacheRequest(const GlobalObject& aGlobal, PCacheRequest& aOut,
                   const OwningRequestOrScalarValueString& aIn,
                   bool aReadBody, ErrorResult& aRv);
 
-  static void
-  ToPCacheResponse(PCacheResponse& aOut, Response& aIn, ErrorResult& aRv);
+  void
+  SerializeCacheStream(nsIInputStream* aStream, PCacheReadStreamOrVoid* aStreamOut,
+                       ErrorResult& aRv);
 
-  static void
-  ToPCacheQueryParams(PCacheQueryParams& aOut, const QueryParams& aIn);
+  nsIThread* GetStreamThread();
 
-  static already_AddRefed<Response>
-  ToResponse(nsIGlobalObject* aOwner, const PCacheResponse& aIn,
-             PCacheStreamControlChild* aStreamControl);
-
-  static already_AddRefed<Request>
-  ToRequest(nsIGlobalObject* aGlobal, const PCacheRequest& aIn,
-            PCacheStreamControlChild* aStreamControl);
-
-private:
-  TypeUtils() MOZ_DELETE;
-  ~TypeUtils() MOZ_DELETE;
+  nsCOMPtr<nsIThread> mStreamThread;
 };
 
 } // namespace cache

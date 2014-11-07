@@ -50,55 +50,6 @@ Cache::Cache(nsISupports* aOwner, nsIGlobalObject* aGlobal,
   mActor->SetListener(*this);
 }
 
-// TODO: factor this out to TypeUtils
-void
-Cache::ToPCacheRequest(PCacheRequest& aOut, const RequestOrScalarValueString& aIn,
-                       bool aReadBody, ErrorResult& aRv)
-{
-  AutoJSAPI jsapi;
-  jsapi.Init(mGlobal);
-  JSContext* cx = jsapi.cx();
-  JS::Rooted<JSObject*> jsGlobal(cx, mGlobal->GetGlobalJSObject());
-  JSAutoCompartment ac(cx, jsGlobal);
-
-  GlobalObject global(cx, jsGlobal);
-
-  TypeUtils::ToPCacheRequest(global, aOut, aIn, aReadBody, aRv);
-}
-
-// TODO: factor this out to TypeUtils
-void
-Cache::ToPCacheRequest(PCacheRequest& aOut, const OwningRequestOrScalarValueString& aIn,
-                       bool aReadBody, ErrorResult& aRv)
-{
-  AutoJSAPI jsapi;
-  jsapi.Init(mGlobal);
-  JSContext* cx = jsapi.cx();
-  JS::Rooted<JSObject*> jsGlobal(cx, mGlobal->GetGlobalJSObject());
-  JSAutoCompartment ac(cx, jsGlobal);
-
-  GlobalObject global(cx, jsGlobal);
-
-  return TypeUtils::ToPCacheRequest(global, aOut, aIn, aReadBody, aRv);
-}
-
-// TODO: factor this out to TypeUtils
-void
-Cache::ToPCacheRequestOrVoid(PCacheRequestOrVoid& aOut,
-                             const Optional<RequestOrScalarValueString>& aIn,
-                             bool aReadBody, ErrorResult& aRv)
-{
-  AutoJSAPI jsapi;
-  jsapi.Init(mGlobal);
-  JSContext* cx = jsapi.cx();
-  JS::Rooted<JSObject*> jsGlobal(cx, mGlobal->GetGlobalJSObject());
-  JSAutoCompartment ac(cx, jsGlobal);
-
-  GlobalObject global(cx, jsGlobal);
-
-  return TypeUtils::ToPCacheRequestOrVoid(global, aOut, aIn, aReadBody, aRv);
-}
-
 already_AddRefed<Promise>
 Cache::Match(const RequestOrScalarValueString& aRequest,
              const QueryParams& aParams, ErrorResult& aRv)
@@ -117,7 +68,7 @@ Cache::Match(const RequestOrScalarValueString& aRequest,
   }
 
   PCacheQueryParams params;
-  TypeUtils::ToPCacheQueryParams(params, aParams);
+  ToPCacheQueryParams(params, aParams);
 
   RequestId requestId = AddRequestPromise(promise, aRv);
 
@@ -144,7 +95,7 @@ Cache::MatchAll(const Optional<RequestOrScalarValueString>& aRequest,
   }
 
   PCacheQueryParams params;
-  TypeUtils::ToPCacheQueryParams(params, aParams);
+  ToPCacheQueryParams(params, aParams);
 
   RequestId requestId = AddRequestPromise(promise, aRv);
 
@@ -251,7 +202,7 @@ Cache::Put(const RequestOrScalarValueString& aRequest, Response& aResponse,
   }
 
   PCacheResponse response;
-  TypeUtils::ToPCacheResponse(response, aResponse, aRv);
+  ToPCacheResponse(response, aResponse, aRv);
   if (aRv.Failed()) {
     return nullptr;
   }
@@ -281,7 +232,7 @@ Cache::Delete(const RequestOrScalarValueString& aRequest,
   }
 
   PCacheQueryParams params;
-  TypeUtils::ToPCacheQueryParams(params, aParams);
+  ToPCacheQueryParams(params, aParams);
 
   RequestId requestId = AddRequestPromise(promise, aRv);
 
@@ -308,7 +259,7 @@ Cache::Keys(const Optional<RequestOrScalarValueString>& aRequest,
   }
 
   PCacheQueryParams params;
-  TypeUtils::ToPCacheQueryParams(params, aParams);
+  ToPCacheQueryParams(params, aParams);
 
   RequestId requestId = AddRequestPromise(promise, aRv);
 
@@ -386,8 +337,7 @@ Cache::RecvMatchResponse(RequestId aRequestId, nsresult aRv,
     return;
   }
 
-  nsRefPtr<Response> response = TypeUtils::ToResponse(mGlobal, aResponse,
-                                                      aStreamControl);
+  nsRefPtr<Response> response = ToResponse(aResponse, aStreamControl);
   promise->MaybeResolve(response);
 }
 
@@ -408,8 +358,7 @@ Cache::RecvMatchAllResponse(RequestId aRequestId, nsresult aRv,
 
   nsTArray<nsRefPtr<Response>> responses;
   for (uint32_t i = 0; i < aResponses.Length(); ++i) {
-    nsRefPtr<Response> response = TypeUtils::ToResponse(mGlobal, aResponses[i],
-                                                        aStreamControl);
+    nsRefPtr<Response> response = ToResponse(aResponses[i], aStreamControl);
     responses.AppendElement(response.forget());
   }
   promise->MaybeResolve(responses);
@@ -496,15 +445,25 @@ Cache::RecvKeysResponse(RequestId aRequestId, nsresult aRv,
 
   nsTArray<nsRefPtr<Request>> requests;
   for (uint32_t i = 0; i < aRequests.Length(); ++i) {
-    // TODO: Should mOwner and mGlobal be just one field? Right now mOwner can
-    //       be null (when on a worker), but mGlobal is always provided.
-    nsRefPtr<Request> request = TypeUtils::ToRequest(mGlobal, aRequests[i],
-                                                     aStreamControl);
+    nsRefPtr<Request> request = ToRequest(aRequests[i], aStreamControl);
     requests.AppendElement(request.forget());
   }
   promise->MaybeResolve(requests);
 }
 
+nsIGlobalObject*
+Cache::GetGlobalObject() const
+{
+  return mGlobal;
+}
+
+#ifdef DEBUG
+void
+Cache::AssertOwningThread() const
+{
+  NS_ASSERT_OWNINGTHREAD(Cache);
+}
+#endif
 
 Cache::~Cache()
 {

@@ -18,20 +18,15 @@
 #include "mozilla/ipc/PFileDescriptorSetChild.h"
 #include "mozilla/ipc/InputStreamUtils.h"
 #include "nsCOMPtr.h"
+#include "nsIAsyncInputStream.h"
+#include "nsIAsyncOutputStream.h"
+#include "nsStreamUtils.h"
 #include "nsString.h"
 #include "nsURLParsers.h"
 
 namespace {
 
 using mozilla::ErrorResult;
-using mozilla::unused;
-using mozilla::void_t;
-using mozilla::dom::cache::PCacheReadStream;
-using mozilla::dom::cache::PCacheReadStreamOrVoid;
-using mozilla::ipc::BackgroundChild;
-using mozilla::ipc::FileDescriptor;
-using mozilla::ipc::PFileDescriptorSetChild;
-using mozilla::ipc::PBackgroundChild;
 
 // Utility function to remove the fragment from a URL, check its scheme, and optionally
 // provide a URL without the query.  We're not using nsIURL or URL to do this because
@@ -103,56 +98,67 @@ ProcessURL(nsAString& aUrl, bool* aSchemeValidOut,
   *aUrlWithoutQueryOut = Substring(aUrl, 0, queryPos - 1);
 }
 
-void
-SerializeCacheStream(nsIInputStream* aStream, PCacheReadStreamOrVoid* aStreamOut)
-{
-  MOZ_ASSERT(aStreamOut);
-  if (!aStream) {
-    *aStreamOut = void_t();
-    return;
-  }
-
-  // TODO: Integrate khuey's nsFancyPipe here if aStream does not provide
-  //       efficient serialization.  (Or always use pipe.)
-
-  PCacheReadStream readStream;
-  nsTArray<FileDescriptor> fds;
-  SerializeInputStream(aStream, readStream.params(), fds);
-
-  PFileDescriptorSetChild* fdSet = nullptr;
-  if (!fds.IsEmpty()) {
-    // We should not be serializing until we have an actor ready
-    PBackgroundChild* manager = BackgroundChild::GetForCurrentThread();
-    MOZ_ASSERT(manager);
-
-    fdSet = manager->SendPFileDescriptorSetConstructor(fds[0]);
-    for (uint32_t i = 1; i < fds.Length(); ++i) {
-      unused << fdSet->SendAddFileDescriptor(fds[i]);
-    }
-  }
-
-  if (fdSet) {
-    readStream.fds() = fdSet;
-  } else {
-    readStream.fds() = void_t();
-  }
-
-  *aStreamOut = readStream;
-}
-
 } // anonymous namespace
 
 namespace mozilla {
 namespace dom {
 namespace cache {
 
+using mozilla::unused;
 using mozilla::void_t;
 using mozilla::ipc::BackgroundChild;
 using mozilla::ipc::FileDescriptor;
 using mozilla::ipc::PFileDescriptorSetChild;
 using mozilla::ipc::PBackgroundChild;
 
-// static
+void
+TypeUtils::ToPCacheRequest(PCacheRequest& aOut,
+                           const RequestOrScalarValueString& aIn, bool aReadBody,
+                           ErrorResult& aRv)
+{
+  AutoJSAPI jsapi;
+  jsapi.Init(GetGlobalObject());
+  JSContext* cx = jsapi.cx();
+  JS::Rooted<JSObject*> jsGlobal(cx, GetGlobalObject()->GetGlobalJSObject());
+  JSAutoCompartment ac(cx, jsGlobal);
+
+  GlobalObject global(cx, jsGlobal);
+
+  ToPCacheRequest(global, aOut, aIn, aReadBody, aRv);
+}
+
+void
+TypeUtils::ToPCacheRequest(PCacheRequest& aOut,
+                           const OwningRequestOrScalarValueString& aIn,
+                           bool aReadBody, ErrorResult& aRv)
+{
+  AutoJSAPI jsapi;
+  jsapi.Init(GetGlobalObject());
+  JSContext* cx = jsapi.cx();
+  JS::Rooted<JSObject*> jsGlobal(cx, GetGlobalObject()->GetGlobalJSObject());
+  JSAutoCompartment ac(cx, jsGlobal);
+
+  GlobalObject global(cx, jsGlobal);
+
+  return ToPCacheRequest(global, aOut, aIn, aReadBody, aRv);
+}
+
+void
+TypeUtils::ToPCacheRequestOrVoid(PCacheRequestOrVoid& aOut,
+                                 const Optional<RequestOrScalarValueString>& aIn,
+                                 bool aReadBody, ErrorResult& aRv)
+{
+  AutoJSAPI jsapi;
+  jsapi.Init(GetGlobalObject());
+  JSContext* cx = jsapi.cx();
+  JS::Rooted<JSObject*> jsGlobal(cx, GetGlobalObject()->GetGlobalJSObject());
+  JSAutoCompartment ac(cx, jsGlobal);
+
+  GlobalObject global(cx, jsGlobal);
+
+  return ToPCacheRequestOrVoid(global, aOut, aIn, aReadBody, aRv);
+}
+
 void
 TypeUtils::ToPCacheRequest(PCacheRequest& aOut, Request& aIn,
                            bool aReadBody, ErrorResult& aRv)
@@ -198,7 +204,10 @@ TypeUtils::ToPCacheRequest(PCacheRequest& aOut, Request& aIn,
     aIn.SetBodyUsed();
   }
 
-  SerializeCacheStream(stream, &aOut.body());
+  SerializeCacheStream(stream, &aOut.body(), aRv);
+  if (NS_WARN_IF(aRv.Failed())) {
+    return;
+  }
 }
 
 // static
@@ -221,7 +230,6 @@ TypeUtils::ToPCacheRequest(const GlobalObject& aGlobal,
   ToPCacheRequest(aOut, *request, aReadBody, aRv);
 }
 
-// static
 void
 TypeUtils::ToPCacheRequestOrVoid(const GlobalObject& aGlobal, PCacheRequestOrVoid& aOut,
                                  const Optional<RequestOrScalarValueString>& aIn,
@@ -239,7 +247,6 @@ TypeUtils::ToPCacheRequestOrVoid(const GlobalObject& aGlobal, PCacheRequestOrVoi
   aOut = request;
 }
 
-// static
 void
 TypeUtils::ToPCacheRequest(const GlobalObject& aGlobal, PCacheRequest& aOut,
                            const OwningRequestOrScalarValueString& aIn,
@@ -263,7 +270,6 @@ TypeUtils::ToPCacheRequest(const GlobalObject& aGlobal, PCacheRequest& aOut,
   ToPCacheRequest(aOut, *request, aReadBody, aRv);
 }
 
-// static
 void
 TypeUtils::ToPCacheResponse(PCacheResponse& aOut, Response& aIn,
                             ErrorResult& aRv)
@@ -302,7 +308,10 @@ TypeUtils::ToPCacheResponse(PCacheResponse& aOut, Response& aIn,
     aIn.SetBodyUsed();
   }
 
-  SerializeCacheStream(stream, &aOut.body());
+  SerializeCacheStream(stream, &aOut.body(), aRv);
+  if (NS_WARN_IF(aRv.Failed())) {
+    return;
+  }
 }
 
 // static
@@ -325,9 +334,8 @@ TypeUtils::ToPCacheQueryParams(PCacheQueryParams& aOut, const QueryParams& aIn)
   }
 }
 
-// static
 already_AddRefed<Response>
-TypeUtils::ToResponse(nsIGlobalObject* aGlobal, const PCacheResponse& aIn,
+TypeUtils::ToResponse(const PCacheResponse& aIn,
                       PCacheStreamControlChild* aStreamControl)
 {
   nsRefPtr<InternalResponse> ir;
@@ -374,13 +382,12 @@ TypeUtils::ToResponse(nsIGlobalObject* aGlobal, const PCacheResponse& aIn,
                                                        aIn.body());
   ir->SetBody(stream);
 
-  nsRefPtr<Response> ref = new Response(aGlobal, ir);
+  nsRefPtr<Response> ref = new Response(GetGlobalObject(), ir);
   return ref.forget();
 }
 
-// static
 already_AddRefed<Request>
-TypeUtils::ToRequest(nsIGlobalObject* aGlobal, const PCacheRequest& aIn,
+TypeUtils::ToRequest(const PCacheRequest& aIn,
                      PCacheStreamControlChild* aStreamControl)
 {
   nsRefPtr<InternalRequest> internalRequest = new InternalRequest();
@@ -403,8 +410,60 @@ TypeUtils::ToRequest(nsIGlobalObject* aGlobal, const PCacheRequest& aIn,
 
   internalRequest->SetBody(stream);
 
-  nsRefPtr<Request> request = new Request(aGlobal, internalRequest);
+  nsRefPtr<Request> request = new Request(GetGlobalObject(), internalRequest);
   return request.forget();
+}
+
+void
+TypeUtils::SerializeCacheStream(nsIInputStream* aStream,
+                                PCacheReadStreamOrVoid* aStreamOut,
+                                ErrorResult& aRv)
+{
+  MOZ_ASSERT(aStreamOut);
+  if (!aStream) {
+    *aStreamOut = void_t();
+    return;
+  }
+
+  PCacheReadStream readStream;
+  nsTArray<FileDescriptor> fds;
+  SerializeInputStream(aStream, readStream.params(), fds);
+
+  PFileDescriptorSetChild* fdSet = nullptr;
+  if (!fds.IsEmpty()) {
+    // We should not be serializing until we have an actor ready
+    PBackgroundChild* manager = BackgroundChild::GetForCurrentThread();
+    MOZ_ASSERT(manager);
+
+    fdSet = manager->SendPFileDescriptorSetConstructor(fds[0]);
+    for (uint32_t i = 1; i < fds.Length(); ++i) {
+      unused << fdSet->SendAddFileDescriptor(fds[i]);
+    }
+  }
+
+  if (fdSet) {
+    readStream.fds() = fdSet;
+  } else {
+    readStream.fds() = void_t();
+  }
+
+  *aStreamOut = readStream;
+}
+
+nsIThread*
+TypeUtils::GetStreamThread()
+{
+  AssertOwningThread();
+
+  if (!mStreamThread) {
+    nsresult rv = NS_NewNamedThread("DOMCacheTypeU",
+                                    getter_AddRefs(mStreamThread));
+    if (NS_FAILED(rv) || !mStreamThread) {
+      MOZ_CRASH("Failed to create DOM Cache serialization thread.");
+    }
+  }
+
+  return mStreamThread;
 }
 
 } // namespace cache

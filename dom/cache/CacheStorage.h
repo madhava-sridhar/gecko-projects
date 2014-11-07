@@ -10,6 +10,7 @@
 #include "mozilla/dom/CacheBinding.h"
 #include "mozilla/dom/cache/CacheStorageChildListener.h"
 #include "mozilla/dom/cache/Types.h"
+#include "mozilla/dom/cache/TypeUtils.h"
 #include "nsAutoPtr.h"
 #include "nsCOMPtr.h"
 #include "nsISupportsImpl.h"
@@ -41,6 +42,7 @@ class PCacheRequest;
 class CacheStorage MOZ_FINAL : public nsIIPCBackgroundChildCreateCallback
                              , public nsWrapperCache
                              , public CacheStorageChildListener
+                             , public TypeUtils
 {
   typedef mozilla::ipc::PBackgroundChild PBackgroundChild;
 
@@ -81,17 +83,20 @@ public:
   virtual void RecvKeysResponse(RequestId aRequestId, nsresult aRv,
                                 const nsTArray<nsString>& aKeys) MOZ_OVERRIDE;
 
+  // TypeUtils method
+  virtual nsIGlobalObject* GetGlobalObject() const MOZ_OVERRIDE;
+#ifdef DEBUG
+  virtual void AssertOwningThread() const MOZ_OVERRIDE;
+#endif
+
 private:
   virtual ~CacheStorage();
 
   RequestId AddRequestPromise(Promise* aPromise, ErrorResult& aRv);
   already_AddRefed<Promise> RemoveRequestPromise(RequestId aRequestId);
 
-  void
-  ToPCacheRequest(PCacheRequest& aOut, const RequestOrScalarValueString& aIn,
-                  bool aReadyBody, ErrorResult& aRv);
-
   const Namespace mNamespace;
+  // TODO: remove separate mOwner
   nsCOMPtr<nsISupports> mOwner;
   nsCOMPtr<nsIGlobalObject> mGlobal;
   const nsCString mOrigin;

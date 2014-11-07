@@ -115,7 +115,7 @@ CacheStorage::Match(const RequestOrScalarValueString& aRequest,
   }
 
   PCacheQueryParams params;
-  TypeUtils::ToPCacheQueryParams(params, aParams);
+  ToPCacheQueryParams(params, aParams);
 
   unused << mActor->SendMatch(requestId, request, params);
 
@@ -306,7 +306,7 @@ CacheStorage::ActorCreated(PBackgroundChild* aActor)
         }
 
         PCacheQueryParams params;
-        TypeUtils::ToPCacheQueryParams(params, entry.mParams);
+        ToPCacheQueryParams(params, entry.mParams);
 
         unused << mActor->SendMatch(requestId, request, params);
         break;
@@ -379,8 +379,7 @@ CacheStorage::RecvMatchResponse(RequestId aRequestId, nsresult aRv,
     return;
   }
 
-  nsRefPtr<Response> response = TypeUtils::ToResponse(mGlobal, aResponse,
-                                                      aStreamControl);
+  nsRefPtr<Response> response = ToResponse(aResponse, aStreamControl);
   promise->MaybeResolve(response);
 }
 
@@ -470,6 +469,20 @@ CacheStorage::RecvKeysResponse(RequestId aRequestId, nsresult aRv,
   promise->MaybeResolve(aKeys);
 }
 
+nsIGlobalObject*
+CacheStorage::GetGlobalObject() const
+{
+  return mGlobal;
+}
+
+#ifdef DEBUG
+void
+CacheStorage::AssertOwningThread() const
+{
+  NS_ASSERT_OWNINGTHREAD(CacheStorage);
+}
+#endif
+
 CacheStorage::~CacheStorage()
 {
   NS_ASSERT_OWNINGTHREAD(CacheStorage);
@@ -513,23 +526,6 @@ CacheStorage::RemoveRequestPromise(RequestId aRequestId)
     }
   }
   return nullptr;
-}
-
-// TODO: factor this out to TypeUtils
-void
-CacheStorage::ToPCacheRequest(PCacheRequest& aOut,
-                              const RequestOrScalarValueString& aIn,
-                              bool aReadBody, ErrorResult& aRv)
-{
-  AutoJSAPI jsapi;
-  jsapi.Init(mGlobal);
-  JSContext* cx = jsapi.cx();
-  JS::Rooted<JSObject*> jsGlobal(cx, mGlobal->GetGlobalJSObject());
-  JSAutoCompartment ac(cx, jsGlobal);
-
-  GlobalObject global(cx, jsGlobal);
-
-  TypeUtils::ToPCacheRequest(global, aOut, aIn, aReadBody, aRv);
 }
 
 } // namespace cache

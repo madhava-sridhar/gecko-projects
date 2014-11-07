@@ -8,6 +8,7 @@
 #define mozilla_dom_cache_Cache_h
 
 #include "mozilla/dom/cache/CacheChildListener.h"
+#include "mozilla/dom/cache/TypeUtils.h"
 #include "nsCOMPtr.h"
 #include "nsISupportsImpl.h"
 #include "nsString.h"
@@ -39,6 +40,7 @@ class PCacheRequestOrVoid;
 class Cache MOZ_FINAL : public nsISupports
                       , public nsWrapperCache
                       , public CacheChildListener
+                      , public TypeUtils
 {
 public:
   Cache(nsISupports* aOwner, nsIGlobalObject* aGlobal, const nsACString& aOrigin,
@@ -97,22 +99,20 @@ public:
                    const nsTArray<PCacheRequest>& aRequests,
                    PCacheStreamControlChild* aStreamControl) MOZ_OVERRIDE;
 
+  // TypeUtils methods
+  virtual nsIGlobalObject* GetGlobalObject() const MOZ_OVERRIDE;
+#ifdef DEBUG
+  virtual void AssertOwningThread() const MOZ_OVERRIDE;
+#endif
+
 private:
   virtual ~Cache();
 
   RequestId AddRequestPromise(Promise* aPromise, ErrorResult& aRv);
   already_AddRefed<Promise> RemoveRequestPromise(RequestId aRequestId);
-  void ToPCacheRequest(PCacheRequest& aOut,
-                       const RequestOrScalarValueString& aIn, bool aReadBody,
-                       ErrorResult& aRv);
-  void ToPCacheRequest(PCacheRequest& aOut,
-                       const OwningRequestOrScalarValueString& aIn,
-                       bool aReadBody, ErrorResult& aRv);
-  void ToPCacheRequestOrVoid(PCacheRequestOrVoid& aOut,
-                             const Optional<RequestOrScalarValueString>& aIn,
-                             bool aReadBody, ErrorResult& aRv);
 
 private:
+  // TODO: remove separate mOwner
   nsCOMPtr<nsISupports> mOwner;
   nsCOMPtr<nsIGlobalObject> mGlobal;
   const nsCString mOrigin;
