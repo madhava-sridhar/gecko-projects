@@ -7,6 +7,10 @@
 #ifndef mozilla_ArrayBufferBuilder_h
 #define mozilla_ArrayBufferBuilder_h
 
+#include "mozilla/Types.h"
+
+class JSObject;
+
 namespace mozilla {
 // A helper for building up an ArrayBuffer object's data
 // before creating the ArrayBuffer itself.  Will do doubling

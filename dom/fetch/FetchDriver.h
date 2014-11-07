@@ -74,7 +74,7 @@ private:
   nsresult FailWithNetworkError();
   nsresult SucceedWithResponse();
 
-  static nsresult
+  static NS_METHOD
   StreamReaderFunc(nsIInputStream* aInputStream,
                               void* aClosure,
                               const char* aFragment,
