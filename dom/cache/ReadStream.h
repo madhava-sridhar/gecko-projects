@@ -7,11 +7,11 @@
 #ifndef mozilla_dom_cache_ReadStream_h
 #define mozilla_dom_cache_ReadStream_h
 
-#include "mozilla/dom/cache/CacheStreamControlChild.h"
+#include "mozilla/dom/cache/CacheStreamControlListener.h"
+#include "mozilla/ipc/FileDescriptor.h"
 #include "nsCOMPtr.h"
 #include "nsID.h"
 #include "nsIInputStream.h"
-#include "nsIIPCSerializableInputStream.h"
 #include "nsISupportsImpl.h"
 
 template<class T> class nsTArray;
@@ -22,42 +22,58 @@ namespace cache {
 
 class PCacheReadStream;
 class PCacheReadStreamOrVoid;
+class PCacheStreamControlParent;
+
+// IID for the dom::cache::ReadStream interface
+#define NS_DOM_CACHE_IID \
+{0x8e5da7c9, 0x0940, 0x4f1d, \
+  {0x97, 0x25, 0x5c, 0x59, 0x38, 0xdd, 0xb9, 0x9f}}
 
 class ReadStream : public nsIInputStream
-                 , public nsIIPCSerializableInputStream
-                 , public CacheStreamControlChild::Listener
+                 , public CacheStreamControlListener
 {
 public:
   static already_AddRefed<ReadStream>
-  Create(PCacheStreamControlChild* aControl,
-         const PCacheReadStreamOrVoid& aReadStreamOrVoid);
+  Create(const PCacheReadStreamOrVoid& aReadStreamOrVoid);
 
   static already_AddRefed<ReadStream>
-  Create(PCacheStreamControlChild* aControl,
-         const PCacheReadStream& aReadStream);
+  Create(const PCacheReadStream& aReadStream);
 
-  // CacheStreamControlChild::Listener methods
+  static already_AddRefed<ReadStream>
+  Create(PCacheStreamControlParent* aControl, const nsID& aId,
+         nsIInputStream* aStream);
+
+  void Serialize(PCacheReadStreamOrVoid* aReadStreamOut);
+  void Serialize(PCacheReadStream* aReadStreamOut);
+
+  // CacheStreamControlListener methods
   virtual void CloseStream() MOZ_OVERRIDE;
   virtual bool MatchId(const nsID& aId) MOZ_OVERRIDE;
 
-private:
-  ReadStream(PCacheStreamControlChild* aControl, const nsID& aId,
-             nsIInputStream* aStream);
+protected:
+  ReadStream(const nsID& aId, nsIInputStream* aStream);
   virtual ~ReadStream();
 
-  void NoteClosed();
+  virtual void NoteClosed()=0;
+  virtual void Forget()=0;
+  virtual void SerializeControl(PCacheReadStream* aReadStreamOut)=0;
 
-  CacheStreamControlChild* mControl;
+  virtual void
+  SerializeFds(PCacheReadStream* aReadStreamOut,
+               const nsTArray<mozilla::ipc::FileDescriptor>& fds)=0;
+
   const nsID mId;
   nsCOMPtr<nsIInputStream> mStream;
-  nsCOMPtr<nsIIPCSerializableInputStream> mSerializable;
   bool mClosed;
 
 public:
+  NS_DECLARE_STATIC_IID_ACCESSOR(NS_DOM_CACHE_IID);
+
   NS_DECL_THREADSAFE_ISUPPORTS
   NS_DECL_NSIINPUTSTREAM
-  NS_DECL_NSIIPCSERIALIZABLEINPUTSTREAM
 };
+
+NS_DEFINE_STATIC_IID_ACCESSOR(ReadStream, NS_DOM_CACHE_IID);
 
 } // namespace cache
 } // namespace dom

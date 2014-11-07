@@ -72,8 +72,7 @@ public:
   // CacheStorageChildListener methods
   virtual void ActorDestroy(mozilla::ipc::IProtocol& aActor) MOZ_OVERRIDE;
   virtual void RecvMatchResponse(RequestId aRequestId, nsresult aRv,
-                           const PCacheResponseOrVoid& aResponse,
-                           PCacheStreamControlChild* aStreamControl) MOZ_OVERRIDE;
+                           const PCacheResponseOrVoid& aResponse) MOZ_OVERRIDE;
   virtual void RecvHasResponse(RequestId aRequestId, nsresult aRv,
                                bool aSuccess) MOZ_OVERRIDE;
   virtual void RecvOpenResponse(RequestId aRequestId, nsresult aRv,

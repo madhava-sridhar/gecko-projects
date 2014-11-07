@@ -29,6 +29,7 @@ template<typename T> class Optional;
 namespace cache {
 
 class PCacheQueryParams;
+class PCacheReadStream;
 class PCacheReadStreamOrVoid;
 class PCacheRequest;
 class PCacheRequestOrVoid;
@@ -72,12 +73,13 @@ protected:
   ToPCacheQueryParams(PCacheQueryParams& aOut, const QueryParams& aIn);
 
   already_AddRefed<Response>
-  ToResponse(const PCacheResponse& aIn,
-             PCacheStreamControlChild* aStreamControl);
+  ToResponse(const PCacheResponse& aIn);
 
   already_AddRefed<Request>
-  ToRequest(const PCacheRequest& aIn,
-            PCacheStreamControlChild* aStreamControl);
+  ToRequest(const PCacheRequest& aIn);
+
+  void CleanupChildFds(PCacheReadStreamOrVoid& aRequest);
+  void CleanupChildFds(PCacheReadStream& aReadStream);
 
 private:
   void

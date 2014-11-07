@@ -9,6 +9,7 @@
 #include "mozilla/dom/cache/CacheParent.h"
 #include "mozilla/dom/cache/CacheStreamControlParent.h"
 #include "mozilla/dom/cache/Manager.h"
+#include "mozilla/dom/cache/ReadStream.h"
 #include "mozilla/dom/cache/SavedTypes.h"
 #include "mozilla/ipc/InputStreamUtils.h"
 #include "mozilla/ipc/PBackgroundParent.h"
@@ -98,26 +99,25 @@ CacheStorageParent::OnStorageMatch(RequestId aRequestId, nsresult aRv,
   // no match
   if (NS_FAILED(aRv) || !aSavedResponse) {
     responseOrVoid = void_t();
-    unused << SendMatchResponse(aRequestId, aRv, responseOrVoid, nullptr);
+    unused << SendMatchResponse(aRequestId, aRv, responseOrVoid);
     return;
   }
 
   // match without body data to stream
   if (!aSavedResponse->mHasBodyId) {
     responseOrVoid = aSavedResponse->mValue;
-    unused << SendMatchResponse(aRequestId, aRv, responseOrVoid, nullptr);
+    unused << SendMatchResponse(aRequestId, aRv, responseOrVoid);
     return;
   }
 
   PCacheReadStream readStream;
-  Manager::StreamControl* streamControl =
-    SerializeReadStream(nullptr, aSavedResponse->mBodyId, aStreamList,
-                        &readStream);
+  SerializeReadStream(nullptr, aSavedResponse->mBodyId, aStreamList,
+                      &readStream);
 
   responseOrVoid = aSavedResponse->mValue;
   responseOrVoid.get_PCacheResponse().body() = readStream;
 
-  unused << SendMatchResponse(aRequestId, aRv, responseOrVoid, streamControl);
+  unused << SendMatchResponse(aRequestId, aRv, responseOrVoid);
 }
 
 void
@@ -165,26 +165,8 @@ CacheStorageParent::SerializeReadStream(Manager::StreamControl *aStreamControl,
   MOZ_ASSERT(aStreamList);
   MOZ_ASSERT(aReadStreamOut);
 
-  aReadStreamOut->id() = aId;
   nsCOMPtr<nsIInputStream> stream = aStreamList->Extract(aId);
   MOZ_ASSERT(stream);
-
-  nsTArray<FileDescriptor> fds;
-  SerializeInputStream(stream, aReadStreamOut->params(), fds);
-
-  PFileDescriptorSetParent* fdSet = nullptr;
-  if (!fds.IsEmpty()) {
-    fdSet = Manager()->SendPFileDescriptorSetConstructor(fds[0]);
-    for (uint32_t i = 1; i < fds.Length(); ++i) {
-      unused << fdSet->SendAddFileDescriptor(fds[i]);
-    }
-  }
-
-  if (fdSet) {
-    aReadStreamOut->fds() = fdSet;
-  } else {
-    aReadStreamOut->fds() = void_t();
-  }
 
   if (!aStreamControl) {
     aStreamControl = new CacheStreamControlParent();
@@ -194,6 +176,10 @@ CacheStorageParent::SerializeReadStream(Manager::StreamControl *aStreamControl,
   }
 
   aStreamList->SetStreamControl(aStreamControl);
+
+  nsRefPtr<ReadStream> readStream = ReadStream::Create(aStreamControl,
+                                                       aId, stream);
+  readStream->Serialize(aReadStreamOut);
 
   return aStreamControl;
 }

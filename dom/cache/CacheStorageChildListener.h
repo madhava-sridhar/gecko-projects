@@ -24,7 +24,6 @@ namespace cache {
 
 class PCacheChild;
 class PCacheResponseOrVoid;
-class PCacheStreamControlChild;
 
 class CacheStorageChildListener
 {
@@ -32,8 +31,7 @@ public:
   virtual ~CacheStorageChildListener() { }
   virtual void ActorDestroy(mozilla::ipc::IProtocol& aActor)=0;
   virtual void RecvMatchResponse(RequestId aRequestId, nsresult aRv,
-                                 const PCacheResponseOrVoid& aResponse,
-                                 PCacheStreamControlChild* aStreamControl)=0;
+                                 const PCacheResponseOrVoid& aResponse)=0;
   virtual void RecvHasResponse(cache::RequestId aRequestId, nsresult aRv,
                                bool aSuccess)=0;
   virtual void RecvOpenResponse(cache::RequestId aRequestId, nsresult aRv,

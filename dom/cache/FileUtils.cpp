@@ -9,6 +9,7 @@
 #include "mozilla/unused.h"
 #include "nsIFile.h"
 #include "nsIUUIDGenerator.h"
+#include "nsNetUtil.h"
 #include "nsServiceManagerUtils.h"
 #include "nsString.h"
 #include "nsThreadUtils.h"
@@ -181,16 +182,30 @@ FileUtils::BodyStartWriteStream(const nsACString& aOrigin,
                              aBaseDomain, aOrigin, tmpFile);
   if (NS_WARN_IF(!fileStream)) { return NS_ERROR_UNEXPECTED; }
 
-  rv = NS_AsyncCopy(aSource, fileStream, NS_GetCurrentThread(),
-                    NS_ASYNCCOPY_VIA_READSEGMENTS,
+  // By default we would prefer to just use ReadSegments to copy buffers.
+  nsAsyncCopyMode mode = NS_ASYNCCOPY_VIA_READSEGMENTS;
+
+  // But first we must check to see if the source stream provides ReadSegments.
+  // If it does not, use a buffered output stream to write to the file.  We don't
+  // wrap the input because because that can lead to it being closed on the wrong
+  // thread.
+  if (!NS_InputStreamIsBuffered(aSource)) {
+    nsCOMPtr<nsIOutputStream> buffered;
+    rv = NS_NewBufferedOutputStream(getter_AddRefs(buffered), fileStream, 4096);
+    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
+
+    fileStream = buffered.forget();
+    mode = NS_ASYNCCOPY_VIA_WRITESEGMENTS;
+  }
+
+  // Note, we cannot auto-close the source stream here because some of
+  // our source streams must be closed on the PBackground worker thread.
+  rv = NS_AsyncCopy(aSource, fileStream, NS_GetCurrentThread(), mode,
                     4096, // chunk size
                     aCallback, aClosure,
-                    true, true, // close streams
+                    false, true, // close streams
                     aCopyContextOut);
-  if (NS_WARN_IF(NS_FAILED(rv))) {
-    fileStream->Close();
-    return rv;
-  }
+  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 
   return rv;
 }

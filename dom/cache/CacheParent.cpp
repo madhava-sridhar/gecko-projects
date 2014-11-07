@@ -9,6 +9,7 @@
 #include "mozilla/DebugOnly.h"
 #include "mozilla/unused.h"
 #include "mozilla/dom/cache/CacheStreamControlParent.h"
+#include "mozilla/dom/cache/ReadStream.h"
 #include "mozilla/dom/cache/SavedTypes.h"
 #include "mozilla/ipc/InputStreamUtils.h"
 #include "mozilla/ipc/PBackgroundParent.h"
@@ -132,7 +133,7 @@ CacheParent::OnCacheMatch(RequestId aRequestId, nsresult aRv,
   // no match
   if (NS_FAILED(aRv) || !aSavedResponse || !aStreamList) {
     responseOrVoid = void_t();
-    unused << SendMatchResponse(aRequestId, aRv, responseOrVoid, nullptr);
+    unused << SendMatchResponse(aRequestId, aRv, responseOrVoid);
     return;
   }
 
@@ -140,19 +141,18 @@ CacheParent::OnCacheMatch(RequestId aRequestId, nsresult aRv,
   if (!aSavedResponse->mHasBodyId) {
     responseOrVoid = aSavedResponse->mValue;
     responseOrVoid.get_PCacheResponse().body() = void_t();
-    unused << SendMatchResponse(aRequestId, aRv, responseOrVoid, nullptr);
+    unused << SendMatchResponse(aRequestId, aRv, responseOrVoid);
     return;
   }
 
   PCacheReadStream readStream;
-  Manager::StreamControl* streamControl =
-    SerializeReadStream(nullptr, aSavedResponse->mBodyId, aStreamList,
-                        &readStream);
+  SerializeReadStream(nullptr, aSavedResponse->mBodyId, aStreamList,
+                      &readStream);
 
   responseOrVoid = aSavedResponse->mValue;
   responseOrVoid.get_PCacheResponse().body() = readStream;
 
-  unused << SendMatchResponse(aRequestId, aRv, responseOrVoid, streamControl);
+  unused << SendMatchResponse(aRequestId, aRv, responseOrVoid);
 }
 
 void
@@ -179,7 +179,7 @@ CacheParent::OnCacheMatchAll(RequestId aRequestId, nsresult aRv,
     res->body() = readStream;
   }
 
-  unused << SendMatchAllResponse(aRequestId, aRv, responses, streamControl);
+  unused << SendMatchAllResponse(aRequestId, aRv, responses);
 }
 
 void
@@ -219,7 +219,7 @@ CacheParent::OnCacheKeys(RequestId aRequestId, nsresult aRv,
     req->body() = readStream;
   }
 
-  unused << SendKeysResponse(aRequestId, aRv, requests, streamControl);
+  unused << SendKeysResponse(aRequestId, aRv, requests);
 }
 
 Manager::StreamControl*
@@ -231,26 +231,8 @@ CacheParent::SerializeReadStream(Manager::StreamControl *aStreamControl,
   MOZ_ASSERT(aStreamList);
   MOZ_ASSERT(aReadStreamOut);
 
-  aReadStreamOut->id() = aId;
   nsCOMPtr<nsIInputStream> stream = aStreamList->Extract(aId);
   MOZ_ASSERT(stream);
-
-  nsTArray<FileDescriptor> fds;
-  SerializeInputStream(stream, aReadStreamOut->params(), fds);
-
-  PFileDescriptorSetParent* fdSet = nullptr;
-  if (!fds.IsEmpty()) {
-    fdSet = Manager()->SendPFileDescriptorSetConstructor(fds[0]);
-    for (uint32_t i = 1; i < fds.Length(); ++i) {
-      unused << fdSet->SendAddFileDescriptor(fds[i]);
-    }
-  }
-
-  if (fdSet) {
-    aReadStreamOut->fds() = fdSet;
-  } else {
-    aReadStreamOut->fds() = void_t();
-  }
 
   if (!aStreamControl) {
     aStreamControl = new CacheStreamControlParent();
@@ -260,6 +242,10 @@ CacheParent::SerializeReadStream(Manager::StreamControl *aStreamControl,
   }
 
   aStreamList->SetStreamControl(aStreamControl);
+
+  nsRefPtr<ReadStream> readStream = ReadStream::Create(aStreamControl,
+                                                       aId, stream);
+  readStream->Serialize(aReadStreamOut);
 
   return aStreamControl;
 }
@@ -272,6 +258,11 @@ CacheParent::DeserializeCacheStream(const PCacheReadStreamOrVoid& aStreamOrVoid)
   }
 
   const PCacheReadStream& readStream = aStreamOrVoid.get_PCacheReadStream();
+
+  nsCOMPtr<nsIInputStream> stream = ReadStream::Create(readStream);
+  if (stream) {
+    return stream.forget();
+  }
 
   nsTArray<FileDescriptor> fds;
   if (readStream.fds().type() ==

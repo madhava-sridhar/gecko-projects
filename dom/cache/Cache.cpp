@@ -134,6 +134,8 @@ Cache::Add(const RequestOrScalarValueString& aRequest, ErrorResult& aRv)
 
   unused << mActor->SendAdd(requestId, request);
 
+  CleanupChildFds(request.body());
+
   return promise.forget();
 }
 
@@ -170,6 +172,10 @@ Cache::AddAll(const Sequence<OwningRequestOrScalarValueString>& aRequests,
   RequestId requestId = AddRequestPromise(promise, aRv);
 
   unused << mActor->SendAddAll(requestId, requests);
+
+  for (uint32_t i = 0; i < requests.Length(); ++i) {
+    CleanupChildFds(requests[i].body());
+  }
 
   return promise.forget();
 }
@@ -210,6 +216,9 @@ Cache::Put(const RequestOrScalarValueString& aRequest, Response& aResponse,
   RequestId requestId = AddRequestPromise(promise, aRv);
 
   unused << mActor->SendPut(requestId, request, response);
+
+  CleanupChildFds(request.body());
+  CleanupChildFds(response.body());
 
   return promise.forget();
 }
@@ -319,8 +328,7 @@ Cache::ActorDestroy(mozilla::ipc::IProtocol& aActor)
 
 void
 Cache::RecvMatchResponse(RequestId aRequestId, nsresult aRv,
-                         const PCacheResponseOrVoid& aResponse,
-                         PCacheStreamControlChild* aStreamControl)
+                         const PCacheResponseOrVoid& aResponse)
 {
   nsRefPtr<Promise> promise = RemoveRequestPromise(aRequestId);
   if (NS_WARN_IF(!promise)) {
@@ -337,14 +345,13 @@ Cache::RecvMatchResponse(RequestId aRequestId, nsresult aRv,
     return;
   }
 
-  nsRefPtr<Response> response = ToResponse(aResponse, aStreamControl);
+  nsRefPtr<Response> response = ToResponse(aResponse);
   promise->MaybeResolve(response);
 }
 
 void
 Cache::RecvMatchAllResponse(RequestId aRequestId, nsresult aRv,
-                            const nsTArray<PCacheResponse>& aResponses,
-                            PCacheStreamControlChild* aStreamControl)
+                            const nsTArray<PCacheResponse>& aResponses)
 {
   nsRefPtr<Promise> promise = RemoveRequestPromise(aRequestId);
   if (NS_WARN_IF(!promise)) {
@@ -358,7 +365,7 @@ Cache::RecvMatchAllResponse(RequestId aRequestId, nsresult aRv,
 
   nsTArray<nsRefPtr<Response>> responses;
   for (uint32_t i = 0; i < aResponses.Length(); ++i) {
-    nsRefPtr<Response> response = ToResponse(aResponses[i], aStreamControl);
+    nsRefPtr<Response> response = ToResponse(aResponses[i]);
     responses.AppendElement(response.forget());
   }
   promise->MaybeResolve(responses);
@@ -430,8 +437,7 @@ Cache::RecvDeleteResponse(RequestId aRequestId, nsresult aRv, bool aSuccess)
 
 void
 Cache::RecvKeysResponse(RequestId aRequestId, nsresult aRv,
-                        const nsTArray<PCacheRequest>& aRequests,
-                        PCacheStreamControlChild* aStreamControl)
+                        const nsTArray<PCacheRequest>& aRequests)
 {
   nsRefPtr<Promise> promise = RemoveRequestPromise(aRequestId);
   if (NS_WARN_IF(!promise)) {
@@ -445,7 +451,7 @@ Cache::RecvKeysResponse(RequestId aRequestId, nsresult aRv,
 
   nsTArray<nsRefPtr<Request>> requests;
   for (uint32_t i = 0; i < aRequests.Length(); ++i) {
-    nsRefPtr<Request> request = ToRequest(aRequests[i], aStreamControl);
+    nsRefPtr<Request> request = ToRequest(aRequests[i]);
     requests.AppendElement(request.forget());
   }
   promise->MaybeResolve(requests);

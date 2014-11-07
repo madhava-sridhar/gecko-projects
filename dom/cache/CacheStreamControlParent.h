@@ -13,11 +13,16 @@ namespace mozilla {
 namespace dom {
 namespace cache {
 
+class CacheStreamControlListener;
+
 class CacheStreamControlParent : public Manager::StreamControl
 {
 public:
   CacheStreamControlParent();
   ~CacheStreamControlParent();
+
+  void AddListener(CacheStreamControlListener* aListener);
+  void RemoveListener(CacheStreamControlListener* aListener);
 
   // PCacheStreamControlParent methods
   virtual void ActorDestroy(ActorDestroyReason aReason) MOZ_OVERRIDE;
@@ -30,7 +35,11 @@ public:
   virtual void Shutdown() MOZ_OVERRIDE;
 
 private:
+  void NotifyClose(const nsID& aId);
+  void NotifyCloseAll();
+
   nsRefPtr<Manager::StreamList> mStreamList;
+  nsTArray<CacheStreamControlListener*> mListeners;
 };
 
 } // namespace cache

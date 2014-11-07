@@ -508,6 +508,9 @@ public:
   {
     NS_ASSERT_OWNINGTHREAD(Action);
 
+    mRequestBodyStream = nullptr;
+    mResponseBodyStream = nullptr;
+
     mManager->NoteOrphanedBodyIdList(mDeletedBodyIdList);
 
     Listener* listener = mManager->GetListener(mListenerId);

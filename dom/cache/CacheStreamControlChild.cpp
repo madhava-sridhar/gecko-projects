@@ -7,6 +7,7 @@
 #include "mozilla/dom/cache/CacheStreamControlChild.h"
 
 #include "mozilla/unused.h"
+#include "mozilla/dom/cache/CacheStreamControlListener.h"
 
 namespace mozilla {
 namespace dom {
@@ -14,15 +15,23 @@ namespace cache {
 
 using mozilla::unused;
 
+CacheStreamControlChild::CacheStreamControlChild()
+{
+}
+
+CacheStreamControlChild::~CacheStreamControlChild()
+{
+}
+
 void
-CacheStreamControlChild::AddListener(Listener* aListener)
+CacheStreamControlChild::AddListener(CacheStreamControlListener* aListener)
 {
   MOZ_ASSERT(aListener);
   mListeners.AppendElement(aListener);
 }
 
 void
-CacheStreamControlChild::RemoveListener(Listener* aListener)
+CacheStreamControlChild::RemoveListener(CacheStreamControlListener* aListener)
 {
   MOZ_ASSERT(aListener);
   mListeners.RemoveElement(aListener);
@@ -44,7 +53,7 @@ bool
 CacheStreamControlChild::RecvClose(const nsID& aId)
 {
   // defensive copy of list since may be modified as we close streams
-  nsTArray<Listener*> listeners(mListeners);
+  nsTArray<CacheStreamControlListener*> listeners(mListeners);
   for (uint32_t i = 0; i < listeners.Length(); ++i) {
     // note, multiple streams may exist for same ID
     if (listeners[i]->MatchId(aId)) {
@@ -58,7 +67,7 @@ bool
 CacheStreamControlChild::RecvCloseAll()
 {
   // defensive copy of list since may be modified as we close streams
-  nsTArray<Listener*> listeners(mListeners);
+  nsTArray<CacheStreamControlListener*> listeners(mListeners);
   for (uint32_t i = 0; i < listeners.Length(); ++i) {
     listeners[i]->CloseStream();
   }

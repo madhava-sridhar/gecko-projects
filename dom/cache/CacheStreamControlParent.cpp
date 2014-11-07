@@ -7,6 +7,7 @@
 #include "mozilla/dom/cache/CacheStreamControlParent.h"
 
 #include "mozilla/unused.h"
+#include "mozilla/dom/cache/CacheStreamControlListener.h"
 
 namespace mozilla {
 namespace dom {
@@ -21,6 +22,20 @@ CacheStreamControlParent::CacheStreamControlParent()
 CacheStreamControlParent::~CacheStreamControlParent()
 {
   MOZ_ASSERT(!mStreamList);
+}
+
+void
+CacheStreamControlParent::AddListener(CacheStreamControlListener* aListener)
+{
+  MOZ_ASSERT(aListener);
+  mListeners.AppendElement(aListener);
+}
+
+void
+CacheStreamControlParent::RemoveListener(CacheStreamControlListener* aListener)
+{
+  MOZ_ASSERT(aListener);
+  mListeners.RemoveElement(aListener);
 }
 
 void
@@ -49,12 +64,14 @@ CacheStreamControlParent::SetStreamList(Manager::StreamList* aStreamList)
 void
 CacheStreamControlParent::Close(const nsID& aId)
 {
+  NotifyClose(aId);
   unused << SendClose(aId);
 }
 
 void
 CacheStreamControlParent::CloseAll()
 {
+  NotifyCloseAll();
   unused << SendCloseAll();
 }
 
@@ -62,6 +79,29 @@ void
 CacheStreamControlParent::Shutdown()
 {
   unused << Send__delete__(this);
+}
+
+void
+CacheStreamControlParent::NotifyClose(const nsID& aId)
+{
+  // defensive copy of list since may be modified as we close streams
+  nsTArray<CacheStreamControlListener*> listeners(mListeners);
+  for (uint32_t i = 0; i < listeners.Length(); ++i) {
+    // note, multiple streams may exist for same ID
+    if (listeners[i]->MatchId(aId)) {
+      listeners[i]->CloseStream();
+    }
+  }
+}
+
+void
+CacheStreamControlParent::NotifyCloseAll()
+{
+  // defensive copy of list since may be modified as we close streams
+  nsTArray<CacheStreamControlListener*> listeners(mListeners);
+  for (uint32_t i = 0; i < listeners.Length(); ++i) {
+    listeners[i]->CloseStream();
+  }
 }
 
 } // namespace cache

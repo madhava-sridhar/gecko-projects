@@ -359,8 +359,7 @@ CacheStorage::ActorDestroy(IProtocol& aActor)
 
 void
 CacheStorage::RecvMatchResponse(RequestId aRequestId, nsresult aRv,
-                                const PCacheResponseOrVoid& aResponse,
-                                PCacheStreamControlChild* aStreamControl)
+                                const PCacheResponseOrVoid& aResponse)
 {
   NS_ASSERT_OWNINGTHREAD(CacheStorage);
 
@@ -379,7 +378,7 @@ CacheStorage::RecvMatchResponse(RequestId aRequestId, nsresult aRv,
     return;
   }
 
-  nsRefPtr<Response> response = ToResponse(aResponse, aStreamControl);
+  nsRefPtr<Response> response = ToResponse(aResponse);
   promise->MaybeResolve(response);
 }
 

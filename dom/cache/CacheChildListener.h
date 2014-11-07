@@ -32,12 +32,10 @@ public:
 
   virtual void
   RecvMatchResponse(RequestId aRequestId, nsresult aRv,
-                    const PCacheResponseOrVoid& aResponse,
-                    PCacheStreamControlChild* aStreamControl)=0;
+                    const PCacheResponseOrVoid& aResponse)=0;
   virtual void
   RecvMatchAllResponse(RequestId aRequestId, nsresult aRv,
-                       const nsTArray<PCacheResponse>& aResponses,
-                       PCacheStreamControlChild* aStreamControl)=0;
+                       const nsTArray<PCacheResponse>& aResponses)=0;
   virtual void
   RecvAddResponse(RequestId aRequestId, nsresult aRv)=0;
 
@@ -52,8 +50,7 @@ public:
                      bool aSuccess)=0;
   virtual void
   RecvKeysResponse(RequestId aRequestId, nsresult aRv,
-                   const nsTArray<PCacheRequest>& aRequests,
-                   PCacheStreamControlChild* aStreamControl)=0;
+                   const nsTArray<PCacheRequest>& aRequests)=0;
 };
 
 } // namespace cache

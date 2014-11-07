@@ -78,12 +78,10 @@ public:
   virtual void ActorDestroy(mozilla::ipc::IProtocol& aActor) MOZ_OVERRIDE;
   virtual void
   RecvMatchResponse(RequestId aRequestId, nsresult aRv,
-                    const PCacheResponseOrVoid& aResponse,
-                    PCacheStreamControlChild* aStreamControl) MOZ_OVERRIDE;
+                    const PCacheResponseOrVoid& aResponse) MOZ_OVERRIDE;
   virtual void
   RecvMatchAllResponse(RequestId aRequestId, nsresult aRv,
-                       const nsTArray<PCacheResponse>& aResponses,
-                       PCacheStreamControlChild* aStreamControl) MOZ_OVERRIDE;
+                       const nsTArray<PCacheResponse>& aResponses) MOZ_OVERRIDE;
   virtual void
   RecvAddResponse(RequestId aRequestId, nsresult aRv) MOZ_OVERRIDE;
   virtual void
@@ -96,8 +94,7 @@ public:
                      bool aSuccess) MOZ_OVERRIDE;
   virtual void
   RecvKeysResponse(RequestId aRequestId, nsresult aRv,
-                   const nsTArray<PCacheRequest>& aRequests,
-                   PCacheStreamControlChild* aStreamControl) MOZ_OVERRIDE;
+                   const nsTArray<PCacheRequest>& aRequests) MOZ_OVERRIDE;
 
   // TypeUtils methods
   virtual nsIGlobalObject* GetGlobalObject() const MOZ_OVERRIDE;

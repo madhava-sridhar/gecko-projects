@@ -14,6 +14,7 @@
 #include "mozilla/dom/cache/PCacheTypes.h"
 #include "mozilla/dom/cache/ReadStream.h"
 #include "mozilla/ipc/BackgroundChild.h"
+#include "mozilla/ipc/FileDescriptorSetChild.h"
 #include "mozilla/ipc/PBackgroundChild.h"
 #include "mozilla/ipc/PFileDescriptorSetChild.h"
 #include "mozilla/ipc/InputStreamUtils.h"
@@ -108,8 +109,10 @@ using mozilla::unused;
 using mozilla::void_t;
 using mozilla::ipc::BackgroundChild;
 using mozilla::ipc::FileDescriptor;
+using mozilla::ipc::FileDescriptorSetChild;
 using mozilla::ipc::PFileDescriptorSetChild;
 using mozilla::ipc::PBackgroundChild;
+using mozilla::ipc::OptionalFileDescriptorSet;
 
 void
 TypeUtils::ToPCacheRequest(PCacheRequest& aOut,
@@ -335,8 +338,7 @@ TypeUtils::ToPCacheQueryParams(PCacheQueryParams& aOut, const QueryParams& aIn)
 }
 
 already_AddRefed<Response>
-TypeUtils::ToResponse(const PCacheResponse& aIn,
-                      PCacheStreamControlChild* aStreamControl)
+TypeUtils::ToResponse(const PCacheResponse& aIn)
 {
   nsRefPtr<InternalResponse> ir;
   switch (aIn.type())
@@ -378,8 +380,7 @@ TypeUtils::ToResponse(const PCacheResponse& aIn,
   ir->Headers()->Fill(*internalHeaders, result);
   MOZ_ASSERT(!result.Failed());
 
-  nsCOMPtr<nsIInputStream> stream = ReadStream::Create(aStreamControl,
-                                                       aIn.body());
+  nsCOMPtr<nsIInputStream> stream = ReadStream::Create(aIn.body());
   ir->SetBody(stream);
 
   nsRefPtr<Response> ref = new Response(GetGlobalObject(), ir);
@@ -387,8 +388,7 @@ TypeUtils::ToResponse(const PCacheResponse& aIn,
 }
 
 already_AddRefed<Request>
-TypeUtils::ToRequest(const PCacheRequest& aIn,
-                     PCacheStreamControlChild* aStreamControl)
+TypeUtils::ToRequest(const PCacheRequest& aIn)
 {
   nsRefPtr<InternalRequest> internalRequest = new InternalRequest();
 
@@ -405,13 +405,39 @@ TypeUtils::ToRequest(const PCacheRequest& aIn,
   internalRequest->Headers()->Fill(*internalHeaders, result);
   MOZ_ASSERT(!result.Failed());
 
-  nsCOMPtr<nsIInputStream> stream = ReadStream::Create(aStreamControl,
-                                                       aIn.body());
+  nsCOMPtr<nsIInputStream> stream = ReadStream::Create(aIn.body());
 
   internalRequest->SetBody(stream);
 
   nsRefPtr<Request> request = new Request(GetGlobalObject(), internalRequest);
   return request.forget();
+}
+
+void
+TypeUtils::CleanupChildFds(PCacheReadStreamOrVoid& aReadStreamOrVoid)
+{
+  if (aReadStreamOrVoid.type() == PCacheReadStreamOrVoid::Tvoid_t) {
+    return;
+  }
+
+  CleanupChildFds(aReadStreamOrVoid.get_PCacheReadStream());
+}
+
+void
+TypeUtils::CleanupChildFds(PCacheReadStream& aReadStream)
+{
+  if (aReadStream.fds().type() !=
+      OptionalFileDescriptorSet::TPFileDescriptorSetChild) {
+    return;
+  }
+
+  nsTArray<FileDescriptor> fds;
+
+  FileDescriptorSetChild* fdSetActor =
+    static_cast<FileDescriptorSetChild*>(aReadStream.fds().get_PFileDescriptorSetChild());
+  MOZ_ASSERT(fdSetActor);
+
+  fdSetActor->ForgetFileDescriptors(fds);
 }
 
 void
@@ -425,7 +451,16 @@ TypeUtils::SerializeCacheStream(nsIInputStream* aStream,
     return;
   }
 
+  nsRefPtr<ReadStream> controlled = do_QueryObject(aStream);
+  if (controlled) {
+    controlled->Serialize(aStreamOut);
+    return;
+  }
+
   PCacheReadStream readStream;
+  readStream.controlChild() = nullptr;
+  readStream.controlParent() = nullptr;
+
   nsTArray<FileDescriptor> fds;
   SerializeInputStream(aStream, readStream.params(), fds);
 

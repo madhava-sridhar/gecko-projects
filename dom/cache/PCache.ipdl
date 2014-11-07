@@ -3,11 +3,11 @@
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 include protocol PBackground;
-include protocol PCacheStreamControl;
 include PCacheTypes;
 include protocol PFileDescriptorSet;
 
 include protocol PBlob; // FIXME: bug 792908
+include protocol PCacheStreamControl;
 
 using mozilla::dom::cache::RequestId from "mozilla/dom/cache/IPCUtils.h";
 
@@ -29,16 +29,13 @@ parent:
   Keys(RequestId requestId, PCacheRequestOrVoid request, PCacheQueryParams params);
 
 child:
-  MatchResponse(RequestId requestId, nsresult aRv, PCacheResponseOrVoid aResponse,
-                nullable PCacheStreamControl aStreamControl);
-  MatchAllResponse(RequestId requestId, nsresult aRv, PCacheResponse[] responses,
-                   nullable PCacheStreamControl aStreamControl);
+  MatchResponse(RequestId requestId, nsresult aRv, PCacheResponseOrVoid aResponse);
+  MatchAllResponse(RequestId requestId, nsresult aRv, PCacheResponse[] responses);
   AddResponse(RequestId requestId, nsresult aRv);
   AddAllResponse(RequestId requestId, nsresult aRv);
   PutResponse(RequestId requestId, nsresult aRv);
   DeleteResponse(RequestId requestId, nsresult aRv, bool success);
-  KeysResponse(RequestId requestId, nsresult aRv, PCacheRequest[] requests,
-               nullable PCacheStreamControl aStreamControl);
+  KeysResponse(RequestId requestId, nsresult aRv, PCacheRequest[] requests);
 
 both:
   __delete__();

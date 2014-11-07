@@ -15,6 +15,7 @@ EXPORTS.mozilla.dom.cache += [
     'CacheStorageChildListener.h',
     'CacheStorageParent.h',
     'CacheStreamControlChild.h',
+    'CacheStreamControlListener.h',
     'CacheStreamControlParent.h',
     'Context.h',
     'DBAction.h',

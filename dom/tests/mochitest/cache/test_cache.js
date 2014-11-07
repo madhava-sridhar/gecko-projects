@@ -37,10 +37,20 @@ caches.open('snafu').then(function(openCache) {
   is(1, keys.length, 'cache.keys() should resolve to an array of length 1');
   ok(keys[0] instanceof Request, 'key should be a Request');
   ok(keys[0].url.match(/cachekey$/), 'Request URL should match original');
-  return snafu.match(keys[0]);
-}).then(function(response) {
+  return Promise.all([snafu, snafu.match(keys[0])]);
+}).then(function(args) {
+  var snafu = args[0];
+  var response = args[1];
   ok(response instanceof Response, 'value should be a Response');
   is(response.status, 200, 'Response status should be 200');
+  dump("### ### got first match, start second put\n");
+  return Promise.all([snafu, snafu.put('./cachekey2', response)]);
+}).then(function(args) {
+  var snafu = args[0]
+  dump("### ### second put done, start second match\n");
+  return snafu.match('./cachekey2');
+}).then(function(response) {
+  dump("### ### got second match\n");
   return response.text().then(function(v) {
     is(v, "Hello world", "Response body should match original");
   });

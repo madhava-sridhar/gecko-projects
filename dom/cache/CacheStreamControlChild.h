@@ -14,18 +14,16 @@ namespace mozilla {
 namespace dom {
 namespace cache {
 
+class CacheStreamControlListener;
+
 class CacheStreamControlChild : public PCacheStreamControlChild
 {
 public:
-  class Listener
-  {
-  public:
-    virtual void CloseStream()=0;
-    virtual bool MatchId(const nsID& aId)=0;
-  };
+  CacheStreamControlChild();
+  virtual ~CacheStreamControlChild();
 
-  void AddListener(Listener* aListener);
-  void RemoveListener(Listener* aListener);
+  void AddListener(CacheStreamControlListener* aListener);
+  void RemoveListener(CacheStreamControlListener* aListener);
 
   void NoteClosed(const nsID& aId);
 
@@ -35,7 +33,7 @@ public:
   virtual bool RecvCloseAll() MOZ_OVERRIDE;
 
 private:
-  nsTArray<Listener*> mListeners;
+  nsTArray<CacheStreamControlListener*> mListeners;
 };
 
 } // namespace cache
