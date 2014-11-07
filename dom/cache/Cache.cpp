@@ -382,7 +382,7 @@ Cache::RecvMatchResponse(RequestId aRequestId, nsresult aRv,
   }
 
   if (aResponse.type() == PCacheResponseOrVoid::Tvoid_t) {
-    promise->MaybeReject(NS_ERROR_DOM_NOT_FOUND_ERR);
+    promise->MaybeResolve(JS::UndefinedHandleValue);
     return;
   }
 
