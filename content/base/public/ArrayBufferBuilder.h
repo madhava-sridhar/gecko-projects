@@ -8,10 +8,12 @@
 #define mozilla_ArrayBufferBuilder_h
 
 #include "mozilla/Types.h"
+#include "nsError.h"
 
 struct JSContext;
 class JSObject;
 class nsCString;
+class nsIFile;
 
 namespace mozilla {
 // A helper for building up an ArrayBuffer object's data
