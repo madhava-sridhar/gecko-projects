@@ -9,7 +9,9 @@
 
 #include "mozilla/Types.h"
 
+class JSContext;
 class JSObject;
+class nsCString;
 
 namespace mozilla {
 // A helper for building up an ArrayBuffer object's data
