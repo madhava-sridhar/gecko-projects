@@ -9,7 +9,7 @@
 
 #include "mozilla/Types.h"
 
-class JSContext;
+struct JSContext;
 class JSObject;
 class nsCString;
 
