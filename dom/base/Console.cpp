@@ -899,11 +899,11 @@ Console::Method(JSContext* aCx, MethodName aMethodName,
                 const nsAString& aMethodString,
                 const Sequence<JS::Value>& aData)
 {
-  ConsoleCallData callData;
+  nsAutoPtr<ConsoleCallData> callData(new ConsoleCallData());
 
   ClearException ce(aCx);
 
-  callData.Initialize(aCx, aMethodName, aMethodString, aData);
+  callData->Initialize(aCx, aMethodName, aMethodString, aData);
 
   if (mWindow) {
     nsCOMPtr<nsIWebNavigation> webNav = do_GetInterface(mWindow);
@@ -914,7 +914,7 @@ Console::Method(JSContext* aCx, MethodName aMethodName,
     nsCOMPtr<nsILoadContext> loadContext = do_QueryInterface(webNav);
     MOZ_ASSERT(loadContext);
 
-    loadContext->GetUsePrivateBrowsing(&callData.mPrivate);
+    loadContext->GetUsePrivateBrowsing(&callData->mPrivate);
   }
 
   uint32_t maxDepth = ShouldIncludeStackTrace(aMethodName) ?
@@ -935,9 +935,9 @@ Console::Method(JSContext* aCx, MethodName aMethodName,
 
     if (language == nsIProgrammingLanguage::JAVASCRIPT ||
         language == nsIProgrammingLanguage::JAVASCRIPT2) {
-      callData.mTopStackFrame.emplace();
+      callData->mTopStackFrame.emplace();
       nsresult rv = StackFrameToStackEntry(stack,
-                                           *callData.mTopStackFrame,
+                                           *callData->mTopStackFrame,
                                            language);
       if (NS_FAILED(rv)) {
         return;
@@ -956,12 +956,12 @@ Console::Method(JSContext* aCx, MethodName aMethodName,
   } while (stack);
 
   if (NS_IsMainThread()) {
-    callData.mStack = stack;
+    callData->mStack = stack;
   } else {
     // nsIStackFrame is not threadsafe, so we need to snapshot it now,
     // before we post our runnable to the main thread.
-    callData.mReifiedStack.emplace();
-    nsresult rv = ReifyStack(stack, *callData.mReifiedStack);
+    callData->mReifiedStack.emplace();
+    nsresult rv = ReifyStack(stack, *callData->mReifiedStack);
     if (NS_WARN_IF(NS_FAILED(rv))) {
       return;
     }
@@ -978,7 +978,7 @@ Console::Method(JSContext* aCx, MethodName aMethodName,
         return;
       }
 
-      callData.mMonotonicTimer = performance->Now();
+      callData->mMonotonicTimer = performance->Now();
     } else {
       WorkerPrivate* workerPrivate = GetCurrentThreadWorkerPrivate();
       MOZ_ASSERT(workerPrivate);
@@ -986,20 +986,20 @@ Console::Method(JSContext* aCx, MethodName aMethodName,
       TimeDuration duration =
         mozilla::TimeStamp::Now() - workerPrivate->CreationTimeStamp();
 
-      callData.mMonotonicTimer = duration.ToMilliseconds();
+      callData->mMonotonicTimer = duration.ToMilliseconds();
     }
   }
 
   if (NS_IsMainThread()) {
-    callData.SetIDs(mOuterID, mInnerID);
-    ProcessCallData(&callData);
+    callData->SetIDs(mOuterID, mInnerID);
+    ProcessCallData(callData);
     return;
   }
 
   // Note: we can pass the reference of callData because this runnable calls
   // ProcessCallData() synchronously.
   nsRefPtr<ConsoleCallDataRunnable> runnable =
-    new ConsoleCallDataRunnable(this, &callData);
+    new ConsoleCallDataRunnable(this, callData);
   runnable->Dispatch();
 }
 
