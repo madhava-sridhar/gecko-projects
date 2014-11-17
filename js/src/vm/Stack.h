@@ -68,11 +68,6 @@ enum MaybeCheckLexical { CheckLexical = true, DontCheckLexical = false };
 
 /*****************************************************************************/
 
-#ifdef DEBUG
-extern void
-CheckLocalUnaliased(MaybeCheckAliasing checkAliasing, JSScript *script, uint32_t i);
-#endif
-
 namespace jit {
     class BaselineFrame;
     class RematerializedFrame;
@@ -186,11 +181,10 @@ class AbstractFramePtr
     inline JSCompartment *compartment() const;
 
     inline bool hasCallObj() const;
-    inline bool isGeneratorFrame() const;
     inline bool isFunctionFrame() const;
     inline bool isGlobalFrame() const;
     inline bool isEvalFrame() const;
-    inline bool isDebuggerFrame() const;
+    inline bool isDebuggerEvalFrame() const;
 
     inline JSScript *script() const;
     inline JSFunction *fun() const;
@@ -216,14 +210,17 @@ class AbstractFramePtr
 
     inline bool copyRawFrameSlots(AutoValueVector *vec) const;
 
-    inline Value &unaliasedVar(uint32_t i, MaybeCheckAliasing checkAliasing = CHECK_ALIASING);
-    inline Value &unaliasedLocal(uint32_t i, MaybeCheckAliasing checkAliasing = CHECK_ALIASING);
+    inline Value &unaliasedLocal(uint32_t i);
     inline Value &unaliasedFormal(unsigned i, MaybeCheckAliasing checkAliasing = CHECK_ALIASING);
     inline Value &unaliasedActual(unsigned i, MaybeCheckAliasing checkAliasing = CHECK_ALIASING);
     template <class Op> inline void unaliasedForEachActual(JSContext *cx, Op op);
 
     inline bool prevUpToDate() const;
     inline void setPrevUpToDate() const;
+
+    inline bool isDebuggee() const;
+    inline void setIsDebuggee();
+    inline void unsetIsDebuggee();
 
     JSObject *evalPrevScopeChain(JSContext *cx) const;
 
@@ -249,7 +246,7 @@ class NullFramePtr : public AbstractFramePtr
 /* Flags specified for a frame as it is constructed. */
 enum InitialFrameFlags {
     INITIAL_NONE           =          0,
-    INITIAL_CONSTRUCT      =       0x20, /* == InterpreterFrame::CONSTRUCTING, asserted below */
+    INITIAL_CONSTRUCT      =       0x10, /* == InterpreterFrame::CONSTRUCTING, asserted below */
 };
 
 enum ExecuteType {
@@ -286,12 +283,11 @@ class InterpreterFrame
          *   previous frame in memory. Iteration should treat
          *   evalInFramePrev_ as this frame's previous frame.
          */
-        DEBUGGER           =        0x8,
+        DEBUGGER_EVAL      =        0x8,
 
-        GENERATOR          =       0x10,  /* frame is associated with a generator */
-        CONSTRUCTING       =       0x20,  /* frame is for a constructor invocation */
+        CONSTRUCTING       =       0x10,  /* frame is for a constructor invocation */
 
-        /* (0x40 and 0x80 are unused) */
+        /* (0x20, 0x40 and 0x80 are unused) */
 
         /* Function prologue state */
         HAS_CALL_OBJ       =      0x100,  /* CallObject created for heavyweight fun */
@@ -304,17 +300,23 @@ class InterpreterFrame
         /* Debugger state */
         PREV_UP_TO_DATE    =     0x4000,  /* see DebugScopes::updateLiveScopes */
 
+        /*
+         * See comment above 'debugMode' in jscompartment.h for explanation of
+         * invariants of debuggee compartments, scripts, and frames.
+         */
+        DEBUGGEE           =     0x8000,  /* Execution is being observed by Debugger */
+
         /* Used in tracking calls and profiling (see vm/SPSProfiler.cpp) */
-        HAS_PUSHED_SPS_FRAME =   0x8000,  /* SPS was notified of enty */
+        HAS_PUSHED_SPS_FRAME =   0x10000, /* SPS was notified of enty */
 
         /*
          * If set, we entered one of the JITs and ScriptFrameIter should skip
          * this frame.
          */
-        RUNNING_IN_JIT     =    0x10000,
+        RUNNING_IN_JIT     =    0x20000,
 
         /* Miscellaneous state. */
-        USE_NEW_TYPE       =    0x20000   /* Use new type for constructed |this| object. */
+        USE_NEW_TYPE       =    0x40000   /* Use new type for constructed |this| object. */
     };
 
   private:
@@ -343,8 +345,8 @@ class InterpreterFrame
     void                *unused;
 
     /*
-     * For an eval-in-frame DEBUGGER frame, the frame in whose scope we're
-     * evaluating code. Iteration treats this as our previous frame.
+     * For an eval-in-frame DEBUGGER_EVAL frame, the frame in whose scope
+     * we're evaluating code. Iteration treats this as our previous frame.
      */
     AbstractFramePtr    evalInFramePrev_;
 
@@ -509,15 +511,14 @@ class InterpreterFrame
      * When a local/formal variable is "aliased" (accessed by nested closures,
      * dynamic scope operations, or 'arguments), the canonical location for
      * that value is the slot of an activation object (scope or arguments).
-     * Currently, all variables are given slots in *both* the stack frame and
-     * heap objects, even though, as just described, only one should ever be
-     * accessed. Thus, it is up to the code performing an access to access the
-     * correct value. These functions assert that accesses to stack values are
-     * unaliased. For more about canonical values locations.
+     * Currently, aliased locals don't have stack slots assigned to them, but
+     * all formals are given slots in *both* the stack frame and heap objects,
+     * even though, as just described, only one should ever be accessed. Thus,
+     * it is up to the code performing an access to access the correct value.
+     * These functions assert that accesses to stack values are unaliased.
      */
 
-    inline Value &unaliasedVar(uint32_t i, MaybeCheckAliasing = CHECK_ALIASING);
-    inline Value &unaliasedLocal(uint32_t i, MaybeCheckAliasing = CHECK_ALIASING);
+    inline Value &unaliasedLocal(uint32_t i);
 
     bool hasArgs() const { return isNonEvalFunctionFrame(); }
     inline Value &unaliasedFormal(unsigned i, MaybeCheckAliasing = CHECK_ALIASING);
@@ -765,34 +766,10 @@ class InterpreterFrame
         markReturnValue();
     }
 
-    /*
-     * A "generator" frame is a function frame associated with a generator.
-     * Since generators are not executed LIFO, the VM copies a single abstract
-     * generator frame back and forth between the LIFO VM stack (when the
-     * generator is active) and a snapshot stored in JSGenerator (when the
-     * generator is inactive). A generator frame is comprised of an
-     * InterpreterFrame structure and the values that make up the arguments,
-     * locals, and expression stack. The layout in the JSGenerator snapshot
-     * matches the layout on the stack (see the "VM stack layout" comment
-     * above).
-     */
-
-    bool isGeneratorFrame() const {
-        bool ret = flags_ & GENERATOR;
-        MOZ_ASSERT_IF(ret, isNonEvalFunctionFrame());
-        return ret;
-    }
-
-    void initGeneratorFrame() const {
-        MOZ_ASSERT(!isGeneratorFrame());
+    void resumeGeneratorFrame(JSObject *scopeChain) {
+        MOZ_ASSERT(script()->isGenerator());
         MOZ_ASSERT(isNonEvalFunctionFrame());
-        flags_ |= GENERATOR;
-    }
-
-    void resumeGeneratorFrame(HandleObject scopeChain) {
-        MOZ_ASSERT(!isGeneratorFrame());
-        MOZ_ASSERT(isNonEvalFunctionFrame());
-        flags_ |= GENERATOR | HAS_CALL_OBJ | HAS_SCOPECHAIN;
+        flags_ |= HAS_CALL_OBJ | HAS_SCOPECHAIN;
         scopeChain_ = scopeChain;
     }
 
@@ -844,8 +821,8 @@ class InterpreterFrame
         return flags_ & USE_NEW_TYPE;
     }
 
-    bool isDebuggerFrame() const {
-        return !!(flags_ & DEBUGGER);
+    bool isDebuggerEvalFrame() const {
+        return !!(flags_ & DEBUGGER_EVAL);
     }
 
     bool prevUpToDate() const {
@@ -855,6 +832,16 @@ class InterpreterFrame
     void setPrevUpToDate() {
         flags_ |= PREV_UP_TO_DATE;
     }
+
+    bool isDebuggee() const {
+        return !!(flags_ & DEBUGGEE);
+    }
+
+    void setIsDebuggee() {
+        flags_ |= DEBUGGEE;
+    }
+
+    inline void unsetIsDebuggee();
 
   public:
     void mark(JSTracer *trc);
@@ -1168,7 +1155,6 @@ class InterpreterActivation : public Activation
 {
     friend class js::InterpreterFrameIterator;
 
-    RunState &state_;
     InterpreterRegs regs_;
     InterpreterFrame *entryFrame_;
     size_t opMask_; // For debugger interrupts, see js::Interpret.
@@ -1367,10 +1353,9 @@ class JitActivation : public Activation
     // Return the pointer to the Ion frame recovery, if it is already registered.
     RInstructionResults *maybeIonFrameRecovery(IonJSFrameLayout *fp);
 
-    // If an Ion frame recovery exists for the |fp| frame exists on the
-    // activation, then move its content to the |results| argument, and remove
-    // it from the activation.
-    void maybeTakeIonFrameRecovery(IonJSFrameLayout *fp, RInstructionResults *results);
+    // If an Ion frame recovery exists for the |fp| frame exists, then remove it
+    // from the activation.
+    void removeIonFrameRecovery(IonJSFrameLayout *fp);
 
     void markIonRecovery(JSTracer *trc);
 
@@ -1593,7 +1578,6 @@ class FrameIter
     bool isGlobalFrame() const;
     bool isEvalFrame() const;
     bool isNonEvalFunctionFrame() const;
-    bool isGeneratorFrame() const;
     bool hasArgs() const { return isNonEvalFunctionFrame(); }
 
     ScriptSource *scriptSource() const;

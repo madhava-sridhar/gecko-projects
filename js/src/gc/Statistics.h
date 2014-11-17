@@ -12,6 +12,7 @@
 #include "mozilla/UniquePtr.h"
 
 #include "jsalloc.h"
+#include "jsgc.h"
 #include "jspubtd.h"
 
 #include "js/GCAPI.h"
@@ -54,10 +55,9 @@ enum Phase {
     PHASE_SWEEP_BREAKPOINT,
     PHASE_SWEEP_REGEXP,
     PHASE_SWEEP_MISC,
-    PHASE_DISCARD_ANALYSIS,
-    PHASE_DISCARD_TI,
-    PHASE_FREE_TI_ARENA,
     PHASE_SWEEP_TYPES,
+    PHASE_SWEEP_TYPES_BEGIN,
+    PHASE_SWEEP_TYPES_END,
     PHASE_SWEEP_OBJECT,
     PHASE_SWEEP_STRING,
     PHASE_SWEEP_SCRIPT,
@@ -114,7 +114,8 @@ struct Statistics
     void endPhase(Phase phase);
     void endParallelPhase(Phase phase, const GCParallelTask *task);
 
-    void beginSlice(const ZoneGCStats &zoneStats, JS::gcreason::Reason reason);
+    void beginSlice(const ZoneGCStats &zoneStats, JSGCInvocationKind gckind,
+                    JS::gcreason::Reason reason);
     void endSlice();
 
     void reset(const char *reason) { slices.back().resetReason = reason; }
@@ -152,6 +153,8 @@ struct Statistics
     int gcDepth;
 
     ZoneGCStats zoneStats;
+
+    JSGCInvocationKind gckind;
 
     const char *nonincrementalReason;
 
@@ -203,7 +206,7 @@ struct Statistics
 
     JS::GCSliceCallback sliceCallback;
 
-    void beginGC();
+    void beginGC(JSGCInvocationKind kind);
     void endGC();
 
     void gcDuration(int64_t *total, int64_t *maxPause);
@@ -221,12 +224,13 @@ struct Statistics
 
 struct AutoGCSlice
 {
-    AutoGCSlice(Statistics &stats, const ZoneGCStats &zoneStats, JS::gcreason::Reason reason
+    AutoGCSlice(Statistics &stats, const ZoneGCStats &zoneStats, JSGCInvocationKind gckind,
+                JS::gcreason::Reason reason
                 MOZ_GUARD_OBJECT_NOTIFIER_PARAM)
       : stats(stats)
     {
         MOZ_GUARD_OBJECT_NOTIFIER_INIT;
-        stats.beginSlice(zoneStats, reason);
+        stats.beginSlice(zoneStats, gckind, reason);
     }
     ~AutoGCSlice() { stats.endSlice(); }
 
@@ -297,6 +301,7 @@ struct AutoSCC
     MOZ_DECL_USE_GUARD_OBJECT_NOTIFIER
 };
 
+const char *ExplainInvocationKind(JSGCInvocationKind gckind);
 const char *ExplainReason(JS::gcreason::Reason reason);
 
 } /* namespace gcstats */

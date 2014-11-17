@@ -16,18 +16,16 @@ using namespace js;
 using namespace js::types;
 
 JSObject *
-GeneratorObject::create(JSContext *cx, const InterpreterRegs &regs)
+GeneratorObject::create(JSContext *cx, AbstractFramePtr frame)
 {
-    MOZ_ASSERT(regs.stackDepth() == 0);
-    InterpreterFrame *fp = regs.fp();
+    MOZ_ASSERT(frame.script()->isGenerator());
+    MOZ_ASSERT(frame.script()->nfixed() == 0);
 
-    MOZ_ASSERT(fp->script()->isGenerator());
-
-    Rooted<GlobalObject*> global(cx, &fp->global());
+    Rooted<GlobalObject*> global(cx, cx->global());
     RootedNativeObject obj(cx);
-    if (fp->script()->isStarGenerator()) {
+    if (frame.script()->isStarGenerator()) {
         RootedValue pval(cx);
-        RootedObject fun(cx, fp->fun());
+        RootedObject fun(cx, frame.fun());
         // FIXME: This would be faster if we could avoid doing a lookup to get
         // the prototype for the instance.  Bug 906600.
         if (!JSObject::getProperty(cx, fun, fun, cx->names().prototype, &pval))
@@ -40,7 +38,7 @@ GeneratorObject::create(JSContext *cx, const InterpreterRegs &regs)
         }
         obj = NewNativeObjectWithGivenProto(cx, &StarGeneratorObject::class_, proto, global);
     } else {
-        MOZ_ASSERT(fp->script()->isLegacyGenerator());
+        MOZ_ASSERT(frame.script()->isLegacyGenerator());
         JSObject *proto = GlobalObject::getOrCreateLegacyGeneratorObjectPrototype(cx, global);
         if (!proto)
             return nullptr;
@@ -49,34 +47,36 @@ GeneratorObject::create(JSContext *cx, const InterpreterRegs &regs)
     if (!obj)
         return nullptr;
 
-    Rooted<GeneratorObject *> genObj(cx, &obj->as<GeneratorObject>());
-
-    genObj->setCallee(fp->callee());
-    genObj->setThisValue(fp->thisValue());
-    genObj->setScopeChain(*fp->scopeChain());
-    if (fp->script()->needsArgsObj())
-        genObj->setArgsObj(fp->argsObj());
+    GeneratorObject *genObj = &obj->as<GeneratorObject>();
+    genObj->setCallee(*frame.callee());
+    genObj->setThisValue(frame.thisValue());
+    genObj->setScopeChain(*frame.scopeChain());
+    if (frame.script()->needsArgsObj())
+        genObj->setArgsObj(frame.argsObj());
     genObj->clearExpressionStack();
 
     return obj;
 }
 
 bool
-GeneratorObject::suspend(JSContext *cx, HandleObject obj, InterpreterFrame *fp, jsbytecode *pc,
-                         Value *vp, unsigned nvalues, GeneratorObject::SuspendKind suspendKind)
+GeneratorObject::suspend(JSContext *cx, HandleObject obj, AbstractFramePtr frame, jsbytecode *pc,
+                         Value *vp, unsigned nvalues)
 {
+    MOZ_ASSERT(*pc == JSOP_INITIALYIELD || *pc == JSOP_YIELD);
+
     Rooted<GeneratorObject*> genObj(cx, &obj->as<GeneratorObject>());
     MOZ_ASSERT(!genObj->hasExpressionStack());
 
-    if (suspendKind == NORMAL && genObj->isClosing()) {
+    if (*pc == JSOP_YIELD && genObj->isClosing()) {
         MOZ_ASSERT(genObj->is<LegacyGeneratorObject>());
-        RootedValue val(cx, ObjectValue(fp->callee()));
-        js_ReportValueError(cx, JSMSG_BAD_GENERATOR_YIELD, JSDVG_SEARCH_STACK, val, js::NullPtr());
+        RootedValue val(cx, ObjectValue(*frame.callee()));
+        js_ReportValueError(cx, JSMSG_BAD_GENERATOR_YIELD, JSDVG_IGNORE_STACK, val, NullPtr());
         return false;
     }
 
-    genObj->setSuspendedBytecodeOffset(pc - fp->script()->code(), suspendKind == INITIAL);
-    genObj->setScopeChain(*fp->scopeChain());
+    uint32_t yieldIndex = GET_UINT24(pc);
+    genObj->setYieldIndex(yieldIndex);
+    genObj->setScopeChain(*frame.scopeChain());
 
     if (nvalues) {
         ArrayObject *stack = NewDenseCopiedArray(cx, nvalues, vp);
@@ -105,6 +105,22 @@ GeneratorObject::finalSuspend(JSContext *cx, HandleObject obj)
 }
 
 bool
+js::GeneratorThrowOrClose(JSContext *cx, HandleObject obj, HandleValue arg, uint32_t resumeKind)
+{
+    GeneratorObject *genObj = &obj->as<GeneratorObject>();
+    if (resumeKind == GeneratorObject::THROW) {
+        cx->setPendingException(arg);
+        genObj->setRunning();
+    } else {
+        MOZ_ASSERT(resumeKind == GeneratorObject::CLOSE);
+        MOZ_ASSERT(genObj->is<LegacyGeneratorObject>());
+        cx->setPendingException(MagicValue(JS_GENERATOR_CLOSING));
+        genObj->setClosing();
+    }
+    return false;
+}
+
+bool
 GeneratorObject::resume(JSContext *cx, InterpreterActivation &activation,
                         HandleObject obj, HandleValue arg, GeneratorObject::ResumeKind resumeKind)
 {
@@ -129,17 +145,16 @@ GeneratorObject::resume(JSContext *cx, InterpreterActivation &activation,
         genObj->clearExpressionStack();
     }
 
-    activation.regs().pc = callee->nonLazyScript()->code() + genObj->suspendedBytecodeOffset();
+    JSScript *script = callee->nonLazyScript();
+    uint32_t offset = script->yieldOffsets()[genObj->yieldIndex()];
+    activation.regs().pc = script->offsetToPC(offset);
 
-    // If we are resuming a JSOP_YIELD, always push on a value, even if we are
-    // raising an exception.  In the exception case, the stack needs to have
-    // something on it so that exception handling doesn't skip the catch
-    // blocks.  See TryNoteIter::settle.
-    if (!genObj->isNewborn()) {
-        activation.regs().sp++;
-        MOZ_ASSERT(activation.regs().spForStackDepth(activation.regs().stackDepth()));
-        activation.regs().sp[-1] = arg;
-    }
+    // Always push on a value, even if we are raising an exception. In the
+    // exception case, the stack needs to have something on it so that exception
+    // handling doesn't skip the catch blocks. See TryNoteIter::settle.
+    activation.regs().sp++;
+    MOZ_ASSERT(activation.regs().spForStackDepth(activation.regs().stackDepth()));
+    activation.regs().sp[-1] = arg;
 
     switch (resumeKind) {
       case NEXT:
@@ -147,18 +162,8 @@ GeneratorObject::resume(JSContext *cx, InterpreterActivation &activation,
         return true;
 
       case THROW:
-        cx->setPendingException(arg);
-        if (genObj->isNewborn())
-            genObj->setClosed();
-        else
-            genObj->setRunning();
-        return false;
-
       case CLOSE:
-        MOZ_ASSERT(genObj->is<LegacyGeneratorObject>());
-        cx->setPendingException(MagicValue(JS_GENERATOR_CLOSING));
-        genObj->setClosing();
-        return false;
+        return GeneratorThrowOrClose(cx, genObj, arg, resumeKind);
 
       default:
         MOZ_CRASH("bad resumeKind");
@@ -173,11 +178,6 @@ LegacyGeneratorObject::close(JSContext *cx, HandleObject obj)
     // Avoid calling back into JS unless it is necessary.
      if (genObj->isClosed())
         return true;
-
-    if (genObj->isNewborn()) {
-        genObj->setClosed();
-        return true;
-    }
 
     RootedValue rval(cx);
 
@@ -200,12 +200,6 @@ LegacyGeneratorObject::close(JSContext *cx, HandleObject obj)
     return Invoke(cx, args);
 }
 
-static JSObject *
-iterator_iteratorObject(JSContext *cx, HandleObject obj, bool keysonly)
-{
-    return obj;
-}
-
 const Class LegacyGeneratorObject::class_ = {
     "Generator",
     JSCLASS_HAS_RESERVED_SLOTS(GeneratorObject::RESERVED_SLOTS),
@@ -221,12 +215,6 @@ const Class LegacyGeneratorObject::class_ = {
     nullptr,                 /* hasInstance */
     nullptr,                 /* construct   */
     nullptr,                 /* trace       */
-    JS_NULL_CLASS_SPEC,
-    {
-        nullptr,             /* outerObject    */
-        nullptr,             /* innerObject    */
-        iterator_iteratorObject,
-    }
 };
 
 const Class StarGeneratorObject::class_ = {
@@ -247,7 +235,7 @@ const Class StarGeneratorObject::class_ = {
 };
 
 static const JSFunctionSpec star_generator_methods[] = {
-    JS_SELF_HOSTED_FN("@@iterator", "IteratorIdentity", 0, 0),
+    JS_SELF_HOSTED_SYM_FN(iterator, "IteratorIdentity", 0, 0),
     JS_SELF_HOSTED_FN("next", "StarGeneratorNext", 1, 0),
     JS_SELF_HOSTED_FN("throw", "StarGeneratorThrow", 1, 0),
     JS_FS_END
@@ -256,7 +244,7 @@ static const JSFunctionSpec star_generator_methods[] = {
 #define JSPROP_ROPERM   (JSPROP_READONLY | JSPROP_PERMANENT)
 
 static const JSFunctionSpec legacy_generator_methods[] = {
-    JS_SELF_HOSTED_FN("@@iterator", "LegacyGeneratorIteratorShim", 0, 0),
+    JS_SELF_HOSTED_SYM_FN(iterator, "LegacyGeneratorIteratorShim", 0, 0),
     // "send" is an alias for "next".
     JS_SELF_HOSTED_FN("next", "LegacyGeneratorNext", 1, JSPROP_ROPERM),
     JS_SELF_HOSTED_FN("send", "LegacyGeneratorNext", 1, JSPROP_ROPERM),

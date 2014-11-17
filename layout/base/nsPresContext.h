@@ -705,10 +705,11 @@ public:
   }
 
   /**
-   * Getter and setter for OMTA time counters
+   * Getter and setters for OMTA time counters
    */
-  bool StyleUpdateForAllAnimationsIsUpToDate();
+  bool StyleUpdateForAllAnimationsIsUpToDate() const;
   void TickLastStyleUpdateForAllAnimations();
+  void ClearLastStyleUpdateForAllAnimations();
 
   /**
    *  Check if bidi enabled (set depending on the presence of RTL
@@ -1172,6 +1173,9 @@ public:
 #endif
 
 protected:
+  // May be called multiple times (unlink, destructor)
+  void Destroy();
+
   void InvalidatePaintedLayers();
   void AppUnitsPerDevPixelChanged();
 

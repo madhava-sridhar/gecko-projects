@@ -12,6 +12,7 @@
 #include "jsweakmap.h"
 
 #include "gc/Barrier.h"
+#include "vm/ArgumentsObject.h"
 #include "vm/ProxyObject.h"
 
 namespace js {
@@ -237,7 +238,8 @@ class CallObject : public ScopeObject
     static CallObject *
     create(JSContext *cx, HandleScript script, HandleObject enclosing, HandleFunction callee);
 
-    inline void setAliasedLexicalsToThrowOnTouch(JSScript *script);
+    inline void initRemainingSlotsToUninitializedLexicals(uint32_t begin);
+    inline void initAliasedLexicalsToThrowOnTouch(JSScript *script);
 
   public:
     static const Class class_;
@@ -249,14 +251,14 @@ class CallObject : public ScopeObject
      * type.  The call object must be further initialized to be usable.
      */
     static CallObject *
-    create(JSContext *cx, HandleShape shape, HandleTypeObject type);
+    create(JSContext *cx, HandleShape shape, HandleTypeObject type, uint32_t lexicalBegin);
 
     /*
      * Construct a bare-bones call object given a shape and make it have
      * singleton type.  The call object must be initialized to be usable.
      */
     static CallObject *
-    createSingleton(JSContext *cx, HandleShape shape);
+    createSingleton(JSContext *cx, HandleShape shape, uint32_t lexicalBegin);
 
     static CallObject *
     createTemplateObject(JSContext *cx, HandleScript script, gc::InitialHeap heap);
@@ -300,7 +302,7 @@ class CallObject : public ScopeObject
      * CallObject to access.
      */
     const Value &aliasedVarFromArguments(const Value &argsValue) {
-        return getSlot(argsValue.magicUint32());
+        return getSlot(ArgumentsObject::SlotFromMagicScopeSlotValue(argsValue));
     }
     inline void setAliasedVarFromArguments(JSContext *cx, const Value &argsValue, jsid id,
                                            const Value &v);
@@ -397,15 +399,22 @@ class DynamicWithObject : public NestedScopeObject
 {
     static const unsigned OBJECT_SLOT = 1;
     static const unsigned THIS_SLOT = 2;
+    static const unsigned KIND_SLOT = 3;
 
   public:
-    static const unsigned RESERVED_SLOTS = 3;
+    static const unsigned RESERVED_SLOTS = 4;
     static const gc::AllocKind FINALIZE_KIND = gc::FINALIZE_OBJECT4_BACKGROUND;
 
     static const Class class_;
 
+    enum WithKind {
+        SyntacticWith,
+        NonSyntacticWith
+    };
+
     static DynamicWithObject *
-    create(JSContext *cx, HandleObject object, HandleObject enclosing, HandleObject staticWith);
+    create(JSContext *cx, HandleObject object, HandleObject enclosing, HandleObject staticWith,
+           WithKind kind = SyntacticWith);
 
     StaticWithObject& staticWith() const {
         return getProto()->as<StaticWithObject>();
@@ -419,6 +428,16 @@ class DynamicWithObject : public NestedScopeObject
     /* Return object for the 'this' class hook. */
     JSObject &withThis() const {
         return getReservedSlot(THIS_SLOT).toObject();
+    }
+
+    /*
+     * Return whether this object is a syntactic with object.  If not, this is a
+     * With object we inserted between the outermost syntactic scope and the
+     * global object to wrap the scope chain someone explicitly passed via JSAPI
+     * to CompileFunction or script evaluation.
+     */
+    bool isSyntactic() const {
+        return getReservedSlot(KIND_SLOT).toInt32() == SyntacticWith;
     }
 
     static inline size_t objectSlot() {
@@ -568,7 +587,7 @@ class StaticBlockObject : public BlockObject
     static const unsigned LOCAL_INDEX_LIMIT = JS_BIT(16);
 
     static Shape *addVar(ExclusiveContext *cx, Handle<StaticBlockObject*> block, HandleId id,
-                         unsigned index, bool *redeclared);
+                         bool constant, unsigned index, bool *redeclared);
 };
 
 class ClonedBlockObject : public BlockObject
@@ -921,7 +940,7 @@ class DebugScopes
     static void onPopBlock(JSContext *cx, AbstractFramePtr frame, jsbytecode *pc);
     static void onPopWith(AbstractFramePtr frame);
     static void onPopStrictEvalScope(AbstractFramePtr frame);
-    static void onCompartmentLeaveDebugMode(JSCompartment *c);
+    static void onCompartmentUnsetIsDebuggee(JSCompartment *c);
 };
 
 }  /* namespace js */

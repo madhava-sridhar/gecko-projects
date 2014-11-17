@@ -200,10 +200,12 @@ Context::QuotaInitRunnable::Run()
       // TODO: MOZ_ASSERT(NS_GetCurrentThread() == QuotaManager::Get()->IOThread());
       qm = QuotaManager::Get();
       MOZ_ASSERT(qm);
+      // TODO: get real app and unlimited storage permission flags
       rv = qm->EnsureOriginIsInitialized(PERSISTENCE_TYPE_PERSISTENT,
                                          mBaseDomain,
                                          mOrigin,
-                                         true, // aTrackQuota
+                                         false, // aIsApp
+                                         false, // aUnlimStoragePerm
                                          getter_AddRefs(mQuotaDir));
       if (NS_FAILED(rv)) {
         Resolve(rv);

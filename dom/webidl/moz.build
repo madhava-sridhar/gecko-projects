@@ -27,6 +27,7 @@ WEBIDL_FILES = [
     'AnimationEvent.webidl',
     'AnimationPlayer.webidl',
     'AnimationTimeline.webidl',
+    'AnonymousContent.webidl',
     'AppInfo.webidl',
     'AppNotificationServiceOptions.webidl',
     'Apps.webidl',
@@ -49,10 +50,12 @@ WEBIDL_FILES = [
     'AutocompleteInfo.webidl',
     'BarProp.webidl',
     'BatteryManager.webidl',
+    'BeforeAfterKeyboardEvent.webidl',
     'BeforeUnloadEvent.webidl',
     'BiquadFilterNode.webidl',
     'Blob.webidl',
     'BoxObject.webidl',
+    'BrowserElement.webidl',
     'BrowserElementDictionaries.webidl',
     'Cache.webidl',
     'CacheStorage.webidl',
@@ -257,6 +260,7 @@ WEBIDL_FILES = [
     'ListBoxObject.webidl',
     'LocalMediaStream.webidl',
     'Location.webidl',
+    'MediaDevices.webidl',
     'MediaElementAudioSourceNode.webidl',
     'MediaError.webidl',
     'MediaList.webidl',
@@ -266,6 +270,7 @@ WEBIDL_FILES = [
     'MediaStream.webidl',
     'MediaStreamAudioDestinationNode.webidl',
     'MediaStreamAudioSourceNode.webidl',
+    'MediaStreamError.webidl',
     'MediaStreamTrack.webidl',
     'MediaTrackConstraintSet.webidl',
     'MenuBoxObject.webidl',
@@ -275,6 +280,7 @@ WEBIDL_FILES = [
     'MessagePortList.webidl',
     'MimeType.webidl',
     'MimeTypeArray.webidl',
+    'MMICall.webidl',
     'MouseEvent.webidl',
     'MouseScrollEvent.webidl',
     'MozActivity.webidl',
@@ -506,6 +512,11 @@ WEBIDL_FILES = [
     'TreeColumn.webidl',
     'TreeColumns.webidl',
     'TreeWalker.webidl',
+    'TVChannel.webidl',
+    'TVManager.webidl',
+    'TVProgram.webidl',
+    'TVSource.webidl',
+    'TVTuner.webidl',
     'UDPMessageEvent.webidl',
     'UDPSocket.webidl',
     'UIEvent.webidl',
@@ -542,6 +553,7 @@ WEBIDL_FILES = [
     'XMLStylesheetProcessingInstruction.webidl',
     'XPathEvaluator.webidl',
     'XPathExpression.webidl',
+    'XPathNSResolver.webidl',
     'XPathResult.webidl',
     'XSLTProcessor.webidl',
     'XULCommandEvent.webidl',
@@ -720,6 +732,10 @@ GENERATED_EVENTS_WEBIDL_FILES = [
     'StyleSheetApplicableStateChangeEvent.webidl',
     'StyleSheetChangeEvent.webidl',
     'TrackEvent.webidl',
+    'TVCurrentChannelChangedEvent.webidl',
+    'TVCurrentSourceChangedEvent.webidl',
+    'TVEITBroadcastedEvent.webidl',
+    'TVScanningStateChangedEvent.webidl',
     'UDPMessageEvent.webidl',
     'UserProximityEvent.webidl',
     'USSDReceivedEvent.webidl',
@@ -766,9 +782,10 @@ if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'gonk':
 if CONFIG['MOZ_NFC']:
     GENERATED_EVENTS_WEBIDL_FILES += [
         'MozNFCPeerEvent.webidl',
+        'MozNFCTagEvent.webidl',
     ]
 
-if CONFIG['MOZ_BUILD_APP'] in ['browser', 'xulrunner']:
+if CONFIG['MOZ_BUILD_APP'] in ['browser', 'xulrunner'] or CONFIG['MOZ_SUITE']:
     WEBIDL_FILES += [
         'BrowserFeedWriter.webidl',
     ]

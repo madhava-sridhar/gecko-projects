@@ -43,6 +43,15 @@ void Init();
 void Accumulate(ID id, uint32_t sample);
 
 /**
+ * Adds sample to a keyed histogram defined in TelemetryHistograms.h
+ *
+ * @param id - keyed histogram id
+ * @param key - the string key
+ * @param sample - (optional) value to record, defaults to 1.
+ */
+void Accumulate(ID id, const nsCString& key, uint32_t sample = 1);
+
+/**
  * Adds a sample to a histogram defined in TelemetryHistograms.h.
  * This function is here to support telemetry measurements from Java,
  * where we have only names and not numeric IDs.  You should almost
@@ -66,6 +75,11 @@ void AccumulateTimeDelta(ID id, TimeStamp start, TimeStamp end = TimeStamp::Now(
  * Return a raw Histogram for direct manipulation for users who can not use Accumulate().
  */
 base::Histogram* GetHistogramById(ID id);
+
+/**
+ * Return a raw histogram for keyed histograms.
+ */
+base::Histogram* GetKeyedHistogramById(ID id, const nsAString&);
 
 /**
  * Those wrappers are needed because the VS versions we use do not support free

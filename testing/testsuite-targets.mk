@@ -169,7 +169,7 @@ endif
 	$(CHECK_TEST_ERROR)
 
 ifeq ($(OS_ARCH),Darwin)
-webapprt_stub_path = $(TARGET_DIST)/$(MOZ_MACBUNDLE_NAME)/Contents/MacOS/webapprt-stub$(BIN_SUFFIX)
+webapprt_stub_path = $(TARGET_DIST)/$(MOZ_MACBUNDLE_NAME)/Contents/Resources/webapprt-stub$(BIN_SUFFIX)
 endif
 ifeq ($(OS_ARCH),WINNT)
 webapprt_stub_path = $(TARGET_DIST)/bin/webapprt-stub$(BIN_SUFFIX)
@@ -311,8 +311,6 @@ xpcshell-tests:
 	  --test-plugin-path='$(DIST)/plugins' \
 	  --tests-root-dir=$(abspath _tests/xpcshell) \
 	  --testing-modules-dir=$(abspath _tests/modules) \
-	  --xunit-file=$(abspath _tests/xpcshell/results.xml) \
-	  --xunit-suite-name=xpcshell \
           $(SYMBOLS_PATH) \
 	  $(TEST_PATH_ARG) $(EXTRA_TEST_ARGS) \
 	  $(xpcshell_path)

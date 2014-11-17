@@ -192,6 +192,16 @@ this.SessionStore = {
     SessionStoreInternal.setTabState(aTab, aState);
   },
 
+  // This should not be used by external code, the intention is to remove it
+  // once a better fix is in place for process switching in e10s.
+  // See bug 1075658 for context.
+  _restoreTabAndLoad: function ss_restoreTabAndLoad(aTab, aState, aLoadArguments) {
+    SessionStoreInternal.setTabState(aTab, aState, {
+      restoreImmediately: true,
+      loadArguments: aLoadArguments
+    });
+  },
+
   duplicateTab: function ss_duplicateTab(aWindow, aTab, aDelta = 0) {
     return SessionStoreInternal.duplicateTab(aWindow, aTab, aDelta);
   },
@@ -523,6 +533,9 @@ let SessionStoreInternal = {
       throw new Error("SessionStore is not initialized.");
     }
 
+    // Prepare to close the session file and write the last state.
+    RunState.setClosing();
+
     // save all data for session resuming
     if (this._sessionInitialized) {
       SessionSaver.run();
@@ -591,7 +604,7 @@ let SessionStoreInternal = {
     // manager message, so the target will be a <xul:browser>.
     var browser = aMessage.target;
     var win = browser.ownerDocument.defaultView;
-    let tab = this._getTabForBrowser(browser);
+    let tab = win.gBrowser.getTabForBrowser(browser);
     if (!tab) {
       // Ignore messages from <browser> elements that are not tabs.
       return;
@@ -622,21 +635,8 @@ let SessionStoreInternal = {
           let uri = activePageData ? activePageData.url || null : null;
           browser.userTypedValue = uri;
 
-          // If the page has a title, set it.
-          if (activePageData) {
-            if (activePageData.title) {
-              tab.label = activePageData.title;
-              tab.crop = "end";
-            } else if (activePageData.url != "about:blank") {
-              tab.label = activePageData.url;
-              tab.crop = "center";
-            }
-          }
-
-          // Restore the tab icon.
-          if ("image" in tabData) {
-            win.gBrowser.setIcon(tab, tabData.image);
-          }
+          // Update tab label and icon again after the tab history was updated.
+          this.updateTabLabelAndIcon(tab, tabData);
 
           let event = win.document.createEvent("Events");
           event.initEvent("SSTabRestoring", true, false);
@@ -1569,7 +1569,7 @@ let SessionStoreInternal = {
     return this._toJSONString(tabState);
   },
 
-  setTabState: function ssi_setTabState(aTab, aState) {
+  setTabState: function ssi_setTabState(aTab, aState, aOptions) {
     // Remove the tab state from the cache.
     // Note that we cannot simply replace the contents of the cache
     // as |aState| can be an incomplete state that will be completed
@@ -1594,7 +1594,7 @@ let SessionStoreInternal = {
       this._resetTabRestoringState(aTab);
     }
 
-    this.restoreTab(aTab, tabState);
+    this.restoreTab(aTab, tabState, aOptions);
   },
 
   duplicateTab: function ssi_duplicateTab(aWindow, aTab, aDelta = 0) {
@@ -1620,7 +1620,9 @@ let SessionStoreInternal = {
       aWindow.gBrowser.addTab(null, {relatedToCurrent: true, ownerTab: aTab}) :
       aWindow.gBrowser.addTab();
 
-    this.restoreTab(newTab, tabState, true /* Load this tab right away. */);
+    this.restoreTab(newTab, tabState, {
+      restoreImmediately: true /* Load this tab right away. */
+    });
     return newTab;
   },
 
@@ -1842,6 +1844,26 @@ let SessionStoreInternal = {
   persistTabAttribute: function ssi_persistTabAttribute(aName) {
     if (TabAttributes.persist(aName)) {
       this.saveStateDelayed();
+    }
+  },
+
+  updateTabLabelAndIcon(tab, tabData) {
+    let activePageData = tabData.entries[tabData.index - 1] || null;
+
+    // If the page has a title, set it.
+    if (activePageData) {
+      if (activePageData.title) {
+        tab.label = activePageData.title;
+        tab.crop = "end";
+      } else if (activePageData.url != "about:blank") {
+        tab.label = activePageData.url;
+        tab.crop = "center";
+      }
+    }
+
+    // Restore the tab icon.
+    if ("image" in tabData) {
+      tab.ownerDocument.defaultView.gBrowser.setIcon(tab, tabData.image);
     }
   },
 
@@ -2517,14 +2539,24 @@ let SessionStoreInternal = {
       this._windows[aWindow.__SSi].selected = aSelectTab;
     }
 
+    // If we restore the selected tab, make sure it goes first.
+    let selectedIndex = aTabs.indexOf(tabbrowser.selectedTab);
+    if (selectedIndex > -1) {
+      this.restoreTab(tabbrowser.selectedTab, aTabData[selectedIndex]);
+    }
+
     // Restore all tabs.
     for (let t = 0; t < aTabs.length; t++) {
-      this.restoreTab(aTabs[t], aTabData[t]);
+      if (t != selectedIndex) {
+        this.restoreTab(aTabs[t], aTabData[t]);
+      }
     }
   },
 
   // Restores the given tab state for a given tab.
-  restoreTab(tab, tabData, restoreImmediately = false) {
+  restoreTab(tab, tabData, options = {}) {
+    let restoreImmediately = options.restoreImmediately;
+    let loadArguments = options.loadArguments;
     let browser = tab.linkedBrowser;
     let window = tab.ownerDocument.defaultView;
     let tabbrowser = window.gBrowser;
@@ -2592,6 +2624,9 @@ let SessionStoreInternal = {
     // attribute so that it runs in a content process.
     let activePageData = tabData.entries[activeIndex] || null;
     let uri = activePageData ? activePageData.url || null : null;
+    if (loadArguments) {
+      uri = loadArguments.uri;
+    }
     tabbrowser.updateBrowserRemotenessByURL(browser, uri);
 
     // Start a new epoch and include the epoch in the restoreHistory
@@ -2620,6 +2655,10 @@ let SessionStoreInternal = {
     browser.messageManager.sendAsyncMessage("SessionStore:restoreHistory",
                                             {tabData: tabData, epoch: epoch});
 
+    // Update tab label and icon to show something
+    // while we wait for the messages to be processed.
+    this.updateTabLabelAndIcon(tab, tabData);
+
     // Restore tab attributes.
     if ("attributes" in tabData) {
       TabAttributes.set(tab, tabData.attributes);
@@ -2627,8 +2666,8 @@ let SessionStoreInternal = {
 
     // This could cause us to ignore MAX_CONCURRENT_TAB_RESTORES a bit, but
     // it ensures each window will have its selected tab loaded.
-    if (restoreImmediately || tabbrowser.selectedBrowser == browser) {
-      this.restoreTabContent(tab);
+    if (restoreImmediately || tabbrowser.selectedBrowser == browser || loadArguments) {
+      this.restoreTabContent(tab, loadArguments);
     } else {
       TabRestoreQueue.add(tab);
       this.restoreNextTab();
@@ -2655,7 +2694,7 @@ let SessionStoreInternal = {
    *
    * @returns true/false indicating whether or not a load actually happened
    */
-  restoreTabContent: function (aTab) {
+  restoreTabContent: function (aTab, aLoadArguments = null) {
     let window = aTab.ownerDocument.defaultView;
     let browser = aTab.linkedBrowser;
     let tabData = browser.__SS_data;
@@ -2684,7 +2723,8 @@ let SessionStoreInternal = {
 
     browser.__SS_restore_tab = aTab;
 
-    browser.messageManager.sendAsyncMessage("SessionStore:restoreTabContent");
+    browser.messageManager.sendAsyncMessage("SessionStore:restoreTabContent",
+      {loadArguments: aLoadArguments});
   },
 
   /**
@@ -2966,24 +3006,6 @@ let SessionStoreInternal = {
     this._statesToRestore[(window.__SS_restoreID = ID)] = aState;
 
     return window;
-  },
-
-  /**
-   * Gets the tab for the given browser. This should be marginally better
-   * than using tabbrowser's getTabForContentWindow. This assumes the browser
-   * is the linkedBrowser of a tab, not a dangling browser.
-   *
-   * @param aBrowser
-   *        The browser from which to get the tab.
-   */
-  _getTabForBrowser: function ssi_getTabForBrowser(aBrowser) {
-    let window = aBrowser.ownerDocument.defaultView;
-    for (let i = 0; i < window.gBrowser.tabs.length; i++) {
-      let tab = window.gBrowser.tabs[i];
-      if (tab.linkedBrowser == aBrowser)
-        return tab;
-    }
-    return undefined;
   },
 
   /**

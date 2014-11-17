@@ -111,6 +111,14 @@ class MacroAssemblerX64 : public MacroAssemblerX86Shared
     void call(ImmPtr target) {
         call(ImmWord(uintptr_t(target.value)));
     }
+    void writeDataRelocation(const Value &val) {
+        if (val.isMarkable()) {
+            gc::Cell *cell = reinterpret_cast<gc::Cell *>(val.toGCThing());
+            if (cell && gc::IsInsideNursery(cell))
+                embedsNurseryPointers_ = true;
+            dataRelocations_.writeUnsigned(masm.currentOffset());
+        }
+    }
 
     // Refers to the upper 32 bits of a 64-bit Value operand.
     // On x86_64, the upper 32 bits do not necessarily only contain the type.
@@ -494,6 +502,9 @@ class MacroAssemblerX64 : public MacroAssemblerX86Shared
         movq(rhs, ScratchReg);
         cmpq(lhs, ScratchReg);
     }
+    void cmpPtr(const Operand &lhs, const ImmMaybeNurseryPtr rhs) {
+        cmpPtr(lhs, noteMaybeNurseryPtr(rhs));
+    }
     void cmpPtr(const Operand &lhs, const ImmWord rhs) {
         if ((intptr_t)rhs.value <= INT32_MAX && (intptr_t)rhs.value >= INT32_MIN) {
             cmpq(lhs, Imm32((int32_t)rhs.value));
@@ -723,6 +734,9 @@ class MacroAssemblerX64 : public MacroAssemblerX86Shared
     void movePtr(ImmGCPtr imm, Register dest) {
         movq(imm, dest);
     }
+    void movePtr(ImmMaybeNurseryPtr imm, Register dest) {
+        movePtr(noteMaybeNurseryPtr(imm), dest);
+    }
     void loadPtr(AbsoluteAddress address, Register dest) {
         if (X86Assembler::isAddressImmediate(address.addr)) {
             movq(Operand(address), dest);
@@ -752,7 +766,8 @@ class MacroAssemblerX64 : public MacroAssemblerX86Shared
             load32(Address(ScratchReg, 0x0), dest);
         }
     }
-    void storePtr(ImmWord imm, const Address &address) {
+    template <typename T>
+    void storePtr(ImmWord imm, T address) {
         if ((intptr_t)imm.value <= INT32_MAX && (intptr_t)imm.value >= INT32_MIN) {
             movq(Imm32((int32_t)imm.value), Operand(address));
         } else {
@@ -760,10 +775,12 @@ class MacroAssemblerX64 : public MacroAssemblerX86Shared
             movq(ScratchReg, Operand(address));
         }
     }
-    void storePtr(ImmPtr imm, const Address &address) {
+    template <typename T>
+    void storePtr(ImmPtr imm, T address) {
         storePtr(ImmWord(uintptr_t(imm.value)), address);
     }
-    void storePtr(ImmGCPtr imm, const Address &address) {
+    template <typename T>
+    void storePtr(ImmGCPtr imm, T address) {
         movq(imm, ScratchReg);
         movq(ScratchReg, Operand(address));
     }
@@ -925,6 +942,10 @@ class MacroAssemblerX64 : public MacroAssemblerX86Shared
         MOZ_ASSERT(cond == Equal || cond == NotEqual);
         cmpl(ToUpper32(operand), Imm32(Upper32Of(GetShiftedTag(JSVAL_TYPE_NULL))));
         j(cond, label);
+    }
+    void branchTestNull(Condition cond, const Address &address, Label *label) {
+        MOZ_ASSERT(cond == Equal || cond == NotEqual);
+        branchTestNull(cond, Operand(address), label);
     }
 
     // Perform a type-test on a full Value loaded into a register.

@@ -395,19 +395,18 @@ GetObjectAllocKindForCopy(const Nursery &nursery, JSObject *obj)
 
     // Inlined opaque typed objects are followed by their data, so make sure we
     // copy it all over to the new object.
-    if (obj->is<InlineOpaqueTypedObject>()) {
+    if (obj->is<InlineTypedObject>()) {
         // Figure out the size of this object, from the prototype's TypeDescr.
         // The objects we are traversing here are all tenured, so we don't need
         // to check forwarding pointers.
-        TypeDescr *descr = &obj->as<InlineOpaqueTypedObject>().typeDescr();
-        return InlineOpaqueTypedObject::allocKindForTypeDescriptor(descr);
+        TypeDescr *descr = &obj->as<InlineTypedObject>().typeDescr();
+        MOZ_ASSERT(!IsInsideNursery(descr));
+        return InlineTypedObject::allocKindForTypeDescriptor(descr);
     }
 
-    // Outline typed objects have special requirements for their allocation kind.
-    if (obj->is<OutlineTypedObject>()) {
-        TypeDescr *descr = &obj->as<OutlineTypedObject>().typeDescr();
-        return OutlineTypedObject::allocKindForTypeDescriptor(descr);
-    }
+    // Outline typed objects use the minimum allocation kind.
+    if (obj->is<OutlineTypedObject>())
+        return FINALIZE_OBJECT0;
 
     // The only non-native objects in existence are proxies and typed objects.
     MOZ_ASSERT(obj->isNative());

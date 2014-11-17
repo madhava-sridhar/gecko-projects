@@ -535,6 +535,22 @@ jit::EliminateDeadResumePointOperands(MIRGenerator *mir, MIRGraph &graph)
     return true;
 }
 
+// Test whether |def| would be needed if it had no uses.
+bool
+js::jit::DeadIfUnused(const MDefinition *def)
+{
+    return !def->isEffectful() && !def->isGuard() && !def->isControlInstruction() &&
+           (!def->isInstruction() || !def->toInstruction()->resumePoint());
+}
+
+// Test whether |def| may be safely discarded, due to being dead or due to being
+// located in a basic block which has itself been marked for discarding.
+bool
+js::jit::IsDiscardable(const MDefinition *def)
+{
+    return !def->hasUses() && (DeadIfUnused(def) || def->block()->isMarked());
+}
+
 // Instructions are useless if they are unused and have no side effects.
 // This pass eliminates useless instructions.
 // The graph itself is unchanged.
@@ -550,9 +566,7 @@ jit::EliminateDeadCode(MIRGenerator *mir, MIRGraph &graph)
         // Remove unused instructions.
         for (MInstructionReverseIterator iter = block->rbegin(); iter != block->rend(); ) {
             MInstruction *inst = *iter++;
-            if (!inst->isEffectful() && !inst->resumePoint() &&
-                !inst->hasUses() && !inst->isGuard() &&
-                !inst->isControlInstruction())
+            if (js::jit::IsDiscardable(inst))
             {
                 block->discard(inst);
             } else if (!inst->isRecoveredOnBailout() && !inst->isGuard() &&
@@ -1977,10 +1991,10 @@ jit::AssertGraphCoherency(MIRGraph &graph)
 #endif
 }
 
+#ifdef DEBUG
 static void
 AssertResumePointDominatedByOperands(MResumePoint *resume)
 {
-#ifdef DEBUG
     for (size_t i = 0, e = resume->numOperands(); i < e; ++i) {
         MDefinition *op = resume->getOperand(i);
         if (op->type() == MIRType_MagicOptimizedArguments)
@@ -1988,8 +2002,8 @@ AssertResumePointDominatedByOperands(MResumePoint *resume)
         MOZ_ASSERT(op->block()->dominates(resume->block()),
                    "Resume point is not dominated by its operands");
     }
-#endif
 }
+#endif // DEBUG
 
 void
 jit::AssertExtendedGraphCoherency(MIRGraph &graph)
@@ -2850,7 +2864,7 @@ jit::AnalyzeNewScriptDefiniteProperties(JSContext *cx, JSFunction *fun,
                                         types::TypeObject *type, HandleNativeObject baseobj,
                                         Vector<types::TypeNewScript::Initializer> *initializerList)
 {
-    MOZ_ASSERT(cx->compartment()->activeAnalysis);
+    MOZ_ASSERT(cx->zone()->types.activeAnalysis);
 
     // When invoking 'new' on the specified script, try to find some properties
     // which will definitely be added to the created object before it has a
@@ -2869,8 +2883,7 @@ jit::AnalyzeNewScriptDefiniteProperties(JSContext *cx, JSFunction *fun,
 
     Vector<PropertyName *> accessedProperties(cx);
 
-    LifoAlloc alloc(types::TypeZone::TYPE_LIFO_ALLOC_PRIMARY_CHUNK_SIZE);
-
+    LifoAlloc alloc(TempAllocator::PreferredLifoChunkSize);
     TempAllocator temp(&alloc);
     IonContext ictx(cx, &temp);
 
@@ -3083,7 +3096,7 @@ jit::AnalyzeArgumentsUsage(JSContext *cx, JSScript *scriptArg)
     // scripts (generators can be suspended when speculation fails).
     //
     // FIXME: Don't build arguments for ES6 generator expressions.
-    if (cx->compartment()->debugMode() || script->isGenerator())
+    if (scriptArg->isDebuggee() || script->isGenerator())
         return true;
 
     // If the script has dynamic name accesses which could reach 'arguments',
@@ -3109,8 +3122,7 @@ jit::AnalyzeArgumentsUsage(JSContext *cx, JSScript *scriptArg)
     if (!script->ensureHasTypes(cx))
         return false;
 
-    LifoAlloc alloc(types::TypeZone::TYPE_LIFO_ALLOC_PRIMARY_CHUNK_SIZE);
-
+    LifoAlloc alloc(TempAllocator::PreferredLifoChunkSize);
     TempAllocator temp(&alloc);
     IonContext ictx(cx, &temp);
 

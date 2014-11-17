@@ -10,8 +10,7 @@
         android:layout_width="match_parent"
         android:layout_height="match_parent"
         android:layout_weight="1"
-        android:paddingTop="8dp"
-        android:paddingLeft="2dp"/>
+        android:paddingTop="4dp"/>
 
     <ImageButton
         android:id="@+id/add_tab"
@@ -19,6 +18,7 @@
         android:layout_width="@dimen/new_tablet_tab_strip_height"
         android:src="@drawable/tab_new_level"
         android:contentDescription="@string/new_tab"
-        android:background="@drawable/action_bar_button_inverse"/>
+        android:layout_marginRight="9dp"
+        android:background="@drawable/new_tablet_tab_strip_button"/>
 
 </merge>

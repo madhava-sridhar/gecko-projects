@@ -43,10 +43,12 @@ DocAccessibleParent::RecvShowEvent(const ShowEventData& aData)
 
   uint32_t consumed = AddSubtree(parent, aData.NewTree(), 0, newChildIdx);
   MOZ_ASSERT(consumed == aData.NewTree().Length());
+#ifdef DEBUG
   for (uint32_t i = 0; i < consumed; i++) {
     uint64_t id = aData.NewTree()[i].ID();
     MOZ_ASSERT(mAccessibles.GetEntry(id));
   }
+#endif
 
   return consumed;
 }
@@ -69,7 +71,7 @@ DocAccessibleParent::AddSubtree(ProxyAccessible* aParent,
 
   auto role = static_cast<a11y::role>(newChild.Role());
   ProxyAccessible* newProxy =
-    new ProxyAccessible(newChild.ID(), aParent, this, role, newChild.Name());
+    new ProxyAccessible(newChild.ID(), aParent, this, role);
   aParent->AddChildAt(aIdxInParent, newProxy);
   mAccessibles.PutEntry(newChild.ID())->mProxy = newProxy;
   ProxyCreated(newProxy);
@@ -108,6 +110,24 @@ DocAccessibleParent::RecvHideEvent(const uint64_t& aRootID)
   parent->RemoveChild(root);
   root->Shutdown();
 
+  return true;
+}
+
+bool
+DocAccessibleParent::RecvEvent(const uint64_t& aID, const uint32_t& aEventType)
+{
+  if (!aID) {
+    ProxyEvent(this, aEventType);
+    return true;
+  }
+
+  ProxyEntry* e = mAccessibles.GetEntry(aID);
+  if (!e) {
+    NS_ERROR("no proxy for event!");
+    return true;
+  }
+
+  ProxyEvent(e->mProxy, aEventType);
   return true;
 }
 }

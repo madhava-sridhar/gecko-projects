@@ -100,6 +100,7 @@ class CodeGenerator : public CodeGeneratorSpecific
     bool visitIntToString(LIntToString *lir);
     bool visitDoubleToString(LDoubleToString *lir);
     bool visitValueToString(LValueToString *lir);
+    bool visitValueToObjectOrNull(LValueToObjectOrNull *lir);
     bool visitInteger(LInteger *lir);
     bool visitRegExp(LRegExp *lir);
     bool visitRegExpExec(LRegExpExec *lir);
@@ -155,6 +156,7 @@ class CodeGenerator : public CodeGeneratorSpecific
     bool visitNewObjectVMCall(LNewObject *lir);
     bool visitNewObject(LNewObject *lir);
     bool visitOutOfLineNewObject(OutOfLineNewObject *ool);
+    bool visitNewTypedObject(LNewTypedObject *lir);
     bool visitNewDeclEnvObject(LNewDeclEnvObject *lir);
     bool visitNewCallObject(LNewCallObject *lir);
     bool visitNewSingletonCallObject(LNewSingletonCallObject *lir);
@@ -181,11 +183,9 @@ class CodeGenerator : public CodeGeneratorSpecific
     bool visitSetArrayLength(LSetArrayLength *lir);
     bool visitTypedArrayLength(LTypedArrayLength *lir);
     bool visitTypedArrayElements(LTypedArrayElements *lir);
-    bool visitNeuterCheck(LNeuterCheck *lir);
     bool visitTypedObjectElements(LTypedObjectElements *lir);
     bool visitSetTypedObjectOffset(LSetTypedObjectOffset *lir);
     bool visitTypedObjectProto(LTypedObjectProto *ins);
-    bool visitTypedObjectUnsizedLength(LTypedObjectUnsizedLength *ins);
     bool visitStringLength(LStringLength *lir);
     bool visitInitializedLength(LInitializedLength *lir);
     bool visitSetInitializedLength(LSetInitializedLength *lir);
@@ -247,10 +247,13 @@ class CodeGenerator : public CodeGeneratorSpecific
     bool visitLoadElementT(LLoadElementT *lir);
     bool visitLoadElementV(LLoadElementV *load);
     bool visitLoadElementHole(LLoadElementHole *lir);
+    bool visitLoadUnboxedPointerV(LLoadUnboxedPointerV *lir);
+    bool visitLoadUnboxedPointerT(LLoadUnboxedPointerT *lir);
     bool visitStoreElementT(LStoreElementT *lir);
     bool visitStoreElementV(LStoreElementV *lir);
     bool visitStoreElementHoleT(LStoreElementHoleT *lir);
     bool visitStoreElementHoleV(LStoreElementHoleV *lir);
+    bool visitStoreUnboxedPointer(LStoreUnboxedPointer *lir);
     bool emitArrayPopShift(LInstruction *lir, const MArrayPopShift *mir, Register obj,
                            Register elementsTemp, Register lengthTemp, TypedOrValueRegister out);
     bool visitArrayPopShiftV(LArrayPopShiftV *lir);
@@ -265,6 +268,8 @@ class CodeGenerator : public CodeGeneratorSpecific
     bool visitLoadTypedArrayElementHole(LLoadTypedArrayElementHole *lir);
     bool visitStoreTypedArrayElement(LStoreTypedArrayElement *lir);
     bool visitStoreTypedArrayElementHole(LStoreTypedArrayElementHole *lir);
+    bool visitCompareExchangeTypedArrayElement(LCompareExchangeTypedArrayElement *lir);
+    bool visitAtomicTypedArrayElementBinop(LAtomicTypedArrayElementBinop *lir);
     bool visitClampIToUint8(LClampIToUint8 *lir);
     bool visitClampDToUint8(LClampDToUint8 *lir);
     bool visitClampVToUint8(LClampVToUint8 *lir);
@@ -304,6 +309,7 @@ class CodeGenerator : public CodeGeneratorSpecific
     bool visitIsCallable(LIsCallable *lir);
     bool visitOutOfLineIsCallable(OutOfLineIsCallable *ool);
     bool visitIsObject(LIsObject *lir);
+    bool visitIsObjectAndBranch(LIsObjectAndBranch *lir);
     bool visitHaveSameClass(LHaveSameClass *lir);
     bool visitHasClass(LHasClass *lir);
     bool visitAsmJSParameter(LAsmJSParameter *lir);

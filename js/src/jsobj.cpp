@@ -1229,8 +1229,13 @@ JSObject::sealOrFreeze(JSContext *cx, HandleObject obj, ImmutabilityType it)
     assertSameCompartment(cx, obj);
     MOZ_ASSERT(it == SEAL || it == FREEZE);
 
-    if (!JSObject::preventExtensions(cx, obj))
+    bool succeeded;
+    if (!JSObject::preventExtensions(cx, obj, &succeeded))
         return false;
+    if (!succeeded) {
+        JS_ReportErrorNumber(cx, js_GetErrorMessage, nullptr, JSMSG_CANT_CHANGE_EXTENSIBILITY);
+        return false;
+    }
 
     AutoIdVector props(cx);
     if (!GetPropertyKeys(cx, obj, JSITER_HIDDEN | JSITER_OWNONLY | JSITER_SYMBOLS, &props))
@@ -1835,7 +1840,7 @@ js::CreateThisForFunction(JSContext *cx, HandleObject callee, NewObjectKind newK
 }
 
 /* static */ bool
-JSObject::nonNativeSetProperty(JSContext *cx, HandleObject obj,
+JSObject::nonNativeSetProperty(JSContext *cx, HandleObject obj, HandleObject receiver,
                                HandleId id, MutableHandleValue vp, bool strict)
 {
     if (MOZ_UNLIKELY(obj->watched())) {
@@ -1843,11 +1848,13 @@ JSObject::nonNativeSetProperty(JSContext *cx, HandleObject obj,
         if (wpmap && !wpmap->triggerWatchpoint(cx, obj, id, vp))
             return false;
     }
+    if (obj->is<ProxyObject>())
+        return Proxy::set(cx, obj, receiver, id, strict, vp);
     return obj->getOps()->setGeneric(cx, obj, id, vp, strict);
 }
 
 /* static */ bool
-JSObject::nonNativeSetElement(JSContext *cx, HandleObject obj,
+JSObject::nonNativeSetElement(JSContext *cx, HandleObject obj, HandleObject receiver,
                               uint32_t index, MutableHandleValue vp, bool strict)
 {
     if (MOZ_UNLIKELY(obj->watched())) {
@@ -1858,6 +1865,11 @@ JSObject::nonNativeSetElement(JSContext *cx, HandleObject obj,
         WatchpointMap *wpmap = cx->compartment()->watchpointMap;
         if (wpmap && !wpmap->triggerWatchpoint(cx, obj, id, vp))
             return false;
+    }
+    if (obj->is<ProxyObject>()) {
+        RootedId id(cx);
+        return IndexToId(cx, index, &id) &&
+               Proxy::set(cx, obj, receiver, id, strict, vp);
     }
     return obj->getOps()->setElement(cx, obj, index, vp, strict);
 }
@@ -2382,6 +2394,15 @@ NativeObject::fillInAfterSwap(JSContext *cx, const Vector<Value> &values, void *
     initSlotRange(0, values.begin(), values.length());
 }
 
+void
+JSObject::fixDictionaryShapeAfterSwap()
+{
+    // Dictionary shapes can point back to their containing objects, so after
+    // swapping the guts of those objects fix the pointers up.
+    if (isNative() && as<NativeObject>().inDictionaryMode())
+        shape_->listp = &shape_;
+}
+
 /* Use this method with extreme caution. It trades the guts of two objects. */
 bool
 JSObject::swap(JSContext *cx, HandleObject a, HandleObject b)
@@ -2436,6 +2457,9 @@ JSObject::swap(JSContext *cx, HandleObject a, HandleObject b)
         js_memcpy(tmp, a, size);
         js_memcpy(a, b, size);
         js_memcpy(b, tmp, size);
+
+        a->fixDictionaryShapeAfterSwap();
+        b->fixDictionaryShapeAfterSwap();
     } else {
         // Avoid GC in here to avoid confusing the tracing code with our
         // intermediate state.
@@ -2473,18 +2497,14 @@ JSObject::swap(JSContext *cx, HandleObject a, HandleObject b)
         js_memcpy(a, b, sizeof tmp);
         js_memcpy(b, &tmp, sizeof tmp);
 
+        a->fixDictionaryShapeAfterSwap();
+        b->fixDictionaryShapeAfterSwap();
+
         if (na)
             b->as<NativeObject>().fillInAfterSwap(cx, avals, apriv);
         if (nb)
             a->as<NativeObject>().fillInAfterSwap(cx, bvals, bpriv);
     }
-
-    // Dictionary shapes can point back to their containing objects, so fix
-    // those pointers up.
-    if (a->isNative() && a->as<NativeObject>().inDictionaryMode())
-        a->lastProperty()->listp = &a->shape_;
-    if (b->isNative() && b->as<NativeObject>().inDictionaryMode())
-        b->lastProperty()->listp = &b->shape_;
 
     // Swapping the contents of two objects invalidates type sets which contain
     // either of the objects, so mark all such sets as unknown.
@@ -3004,7 +3024,7 @@ JSObject::defineGeneric(ExclusiveContext *cx, HandleObject obj,
                         HandleId id, HandleValue value,
                         JSPropertyOp getter, JSStrictPropertyOp setter, unsigned attrs)
 {
-    MOZ_ASSERT(!(attrs & JSPROP_NATIVE_ACCESSORS));
+    MOZ_ASSERT(!(attrs & JSPROP_PROPOP_ACCESSORS));
     js::DefineGenericOp op = obj->getOps()->defineGeneric;
     if (op) {
         if (!cx->shouldBeJSContext())
@@ -4113,12 +4133,10 @@ js_DumpInterpreterFrame(JSContext *cx, InterpreterFrame *start)
         fprintf(stderr, "  flags:");
         if (i.isConstructing())
             fprintf(stderr, " constructing");
-        if (!i.isJit() && i.interpFrame()->isDebuggerFrame())
-            fprintf(stderr, " debugger");
+        if (!i.isJit() && i.interpFrame()->isDebuggerEvalFrame())
+            fprintf(stderr, " debugger eval");
         if (i.isEvalFrame())
             fprintf(stderr, " eval");
-        if (!i.isJit() && i.interpFrame()->isGeneratorFrame())
-            fprintf(stderr, " generator");
         fputc('\n', stderr);
 
         fprintf(stderr, "  scopeChain: (JSObject *) %p\n", (void *) i.scopeChain());
@@ -4209,7 +4227,7 @@ JSObject::hasIdempotentProtoChain() const
             return false;
 
         JSResolveOp resolve = obj->getClass()->resolve;
-        if (resolve != JS_ResolveStub && resolve != (JSResolveOp) js::fun_resolve)
+        if (resolve != JS_ResolveStub && resolve != js::fun_resolve)
             return false;
 
         if (obj->getOps()->lookupProperty || obj->getOps()->lookupGeneric || obj->getOps()->lookupElement)

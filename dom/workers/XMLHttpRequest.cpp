@@ -1284,6 +1284,10 @@ EventRunnable::WorkerRun(JSContext* aCx, WorkerPrivate* aWorkerPrivate)
       mProxy->mSeenUploadLoadStart = false;
     }
     else {
+      if (!mProxy->mSeenLoadStart) {
+        // We've already dispatched premature abort events.
+        return true;
+      }
       mProxy->mSeenLoadStart = false;
     }
   }
@@ -1772,10 +1776,6 @@ XMLHttpRequest::MaybeDispatchPrematureAbortEvents(ErrorResult& aRv)
     }
 
     mProxy->mSeenLoadStart = false;
-  }
-
-  if (mRooted) {
-    Unpin();
   }
 }
 
@@ -2320,8 +2320,10 @@ XMLHttpRequest::OverrideMimeType(const nsAString& aMimeType, ErrorResult& aRv)
   // can detect OPENED really easily but we can't detect HEADERS_RECEIVED in a
   // non-racy way until the XHR state machine actually runs on this thread
   // (bug 671047). For now we're going to let this work only if the Send()
-  // method has not been called.
-  if (!mProxy || SendInProgress()) {
+  // method has not been called, unless the send has been aborted.
+  if (!mProxy || (SendInProgress() &&
+                  (mProxy->mSeenLoadStart ||
+                   mStateData.mReadyState > nsIXMLHttpRequest::OPENED))) {
     aRv.Throw(NS_ERROR_DOM_INVALID_STATE_ERR);
     return;
   }
@@ -2345,7 +2347,9 @@ XMLHttpRequest::SetResponseType(XMLHttpRequestResponseType aResponseType,
     return;
   }
 
-  if (!mProxy || SendInProgress()) {
+  if (!mProxy || (SendInProgress() &&
+                  (mProxy->mSeenLoadStart ||
+                   mStateData.mReadyState > nsIXMLHttpRequest::OPENED))) {
     aRv.Throw(NS_ERROR_DOM_INVALID_STATE_ERR);
     return;
   }
@@ -2411,7 +2415,9 @@ XMLHttpRequest::UpdateState(const StateData& aStateData,
                             bool aUseCachedArrayBufferResponse)
 {
   if (aUseCachedArrayBufferResponse) {
-    MOZ_ASSERT(JS_IsArrayBufferObject(mStateData.mResponse.toObjectOrNull()));
+    MOZ_ASSERT(mStateData.mResponse.isObject() &&
+               JS_IsArrayBufferObject(&mStateData.mResponse.toObject()));
+
     JS::Rooted<JS::Value> response(mWorkerPrivate->GetJSContext(),
                                    mStateData.mResponse);
     mStateData = aStateData;

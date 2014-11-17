@@ -10,6 +10,7 @@
 
 #include "frontend/BytecodeEmitter.h"
 
+#include "mozilla/ArrayUtils.h"
 #include "mozilla/DebugOnly.h"
 #include "mozilla/FloatingPoint.h"
 #include "mozilla/PodOperations.h"
@@ -130,12 +131,14 @@ BytecodeEmitter::BytecodeEmitter(BytecodeEmitter *parent,
     staticScope(sc->context),
     atomIndices(sc->context),
     firstLine(lineNum),
+    localsToFrameSlots_(sc->context),
     stackDepth(0), maxStackDepth(0),
     arrayCompDepth(0),
     emitLevel(0),
     constList(sc->context),
     tryNoteList(sc->context),
     blockScopeList(sc->context),
+    yieldOffsetList(sc->context),
     typesetCount(0),
     hasSingletons(false),
     emittingForInit(false),
@@ -154,12 +157,48 @@ BytecodeEmitter::init()
     return atomIndices.ensureMap(sc->context);
 }
 
+bool
+BytecodeEmitter::updateLocalsToFrameSlots()
+{
+    // Assign stack slots to unaliased locals (aliased locals are stored in the
+    // call object and don't need their own stack slots). We do this by filling
+    // a Vector that can be used to map a local to its stack slot.
+
+    if (localsToFrameSlots_.length() == script->bindings.numLocals()) {
+        // CompileScript calls updateNumBlockScoped to update the block scope
+        // depth. Do nothing if the depth didn't change.
+        return true;
+    }
+
+    localsToFrameSlots_.clear();
+
+    if (!localsToFrameSlots_.reserve(script->bindings.numLocals()))
+        return false;
+
+    uint32_t slot = 0;
+    for (BindingIter bi(script); !bi.done(); bi++) {
+        if (bi->kind() == Binding::ARGUMENT)
+            continue;
+
+        if (bi->aliased())
+            localsToFrameSlots_.infallibleAppend(UINT32_MAX);
+        else
+            localsToFrameSlots_.infallibleAppend(slot++);
+    }
+
+    for (size_t i = 0; i < script->bindings.numBlockScoped(); i++)
+        localsToFrameSlots_.infallibleAppend(slot++);
+
+    return true;
+}
+
 static ptrdiff_t
 EmitCheck(ExclusiveContext *cx, BytecodeEmitter *bce, ptrdiff_t delta)
 {
     ptrdiff_t offset = bce->code().length();
 
     // Start it off moderately large to avoid repeated resizings early on.
+    // ~98% of cases fit within 1024 bytes.
     if (bce->code().capacity() == 0 && !bce->code().reserve(1024))
         return -1;
 
@@ -343,7 +382,8 @@ static const char * const statementName[] = {
     "spread",                /* SPREAD */
 };
 
-JS_STATIC_ASSERT(JS_ARRAY_LENGTH(statementName) == STMT_LIMIT);
+static_assert(MOZ_ARRAY_LENGTH(statementName) == STMT_LIMIT,
+              "statementName array and StmtType enum must be consistent");
 
 static const char *
 StatementName(StmtInfoBCE *topStmt)
@@ -426,17 +466,14 @@ UpdateSourceCoordNotes(ExclusiveContext *cx, BytecodeEmitter *bce, uint32_t offs
     uint32_t columnIndex = bce->parser->tokenStream.srcCoords.columnIndex(offset);
     ptrdiff_t colspan = ptrdiff_t(columnIndex) - ptrdiff_t(bce->current->lastColumn);
     if (colspan != 0) {
-        if (colspan < 0) {
-            colspan += SN_COLSPAN_DOMAIN;
-        } else if (colspan >= SN_COLSPAN_DOMAIN / 2) {
-            // If the column span is so large that we can't store it, then just
-            // discard this information because column information would most
-            // likely be useless anyway once the column numbers are ~4000000.
-            // This has been known to happen with scripts that have been
-            // minimized and put into all one line.
+        // If the column span is so large that we can't store it, then just
+        // discard this information. This can happen with minimized or otherwise
+        // machine-generated code. Even gigantic column numbers are still
+        // valuable if you have a source map to relate them to something real;
+        // but it's better to fail soft here.
+        if (!SN_REPRESENTABLE_COLSPAN(colspan))
             return true;
-        }
-        if (NewSrcNote2(cx, bce, SRC_COLSPAN, colspan) < 0)
+        if (NewSrcNote2(cx, bce, SRC_COLSPAN, SN_COLSPAN_TO_OFFSET(colspan)) < 0)
             return false;
         bce->current->lastColumn = columnIndex;
     }
@@ -768,12 +805,18 @@ AllLocalsAliased(StaticBlockObject &obj)
 static bool
 ComputeAliasedSlots(ExclusiveContext *cx, BytecodeEmitter *bce, Handle<StaticBlockObject *> blockObj)
 {
+    uint32_t numAliased = bce->script->bindings.numAliasedBodyLevelLocals();
+
     for (unsigned i = 0; i < blockObj->numVariables(); i++) {
         Definition *dn = blockObj->definitionParseNode(i);
 
         MOZ_ASSERT(dn->isDefn());
+
+        // blockIndexToLocalIndex returns the frame slot following the unaliased
+        // locals. We add numAliased so that the cookie's slot value comes after
+        // all (aliased and unaliased) body level locals.
         if (!dn->pn_cookie.set(bce->parser->tokenStream, dn->pn_cookie.level(),
-                               blockObj->blockIndexToLocalIndex(dn->frameSlot())))
+                               numAliased + blockObj->blockIndexToLocalIndex(dn->frameSlot())))
         {
             return false;
         }
@@ -804,7 +847,9 @@ EmitInternedObjectOp(ExclusiveContext *cx, uint32_t index, JSOp op, BytecodeEmit
 static void
 ComputeLocalOffset(ExclusiveContext *cx, BytecodeEmitter *bce, Handle<StaticBlockObject *> blockObj)
 {
-    unsigned nbodyfixed = bce->sc->isFunctionBox() ? bce->script->bindings.numBodyLevelLocals() : 0;
+    unsigned nbodyfixed = bce->sc->isFunctionBox()
+                          ? bce->script->bindings.numUnaliasedBodyLevelLocals()
+                          : 0;
     unsigned localOffset = nbodyfixed;
 
     if (bce->staticScope) {
@@ -1010,6 +1055,10 @@ EmitAtomOp(ExclusiveContext *cx, JSAtom *atom, JSOp op, BytecodeEmitter *bce)
 {
     MOZ_ASSERT(JOF_OPTYPE(op) == JOF_ATOM);
 
+    // .generator lookups should be emitted as JSOP_GETALIASEDVAR instead of
+    // JSOP_NAME etc, to bypass |with| objects on the scope chain.
+    MOZ_ASSERT_IF(op == JSOP_NAME || op == JSOP_GETGNAME, atom != cx->names().dotGenerator);
+
     if (op == JSOP_GETPROP && atom == cx->names().length) {
         /* Specialize length accesses for the interpreter. */
         op = JSOP_LENGTH;
@@ -1086,6 +1135,12 @@ EmitUnaliasedVarOp(ExclusiveContext *cx, JSOp op, uint32_t slot, MaybeCheckLexic
     MOZ_ASSERT(JOF_OPTYPE(op) != JOF_SCOPECOORD);
 
     if (IsLocalOp(op)) {
+        // Only unaliased locals have stack slots assigned to them. Convert the
+        // var index (which includes unaliased and aliased locals) to the stack
+        // slot index.
+        MOZ_ASSERT(bce->localsToFrameSlots_[slot] <= slot);
+        slot = bce->localsToFrameSlots_[slot];
+
         if (checkLexical) {
             MOZ_ASSERT(op != JSOP_INITLEXICAL);
             if (!EmitLocalOp(cx, bce, JSOP_CHECKLEXICAL, slot))
@@ -1183,7 +1238,7 @@ LookupAliasedName(BytecodeEmitter *bce, HandleScript script, PropertyName *name,
                             if (freeVariables[i].isHoistedUse() && bindingIndex >= lexicalBegin) {
                                 MOZ_ASSERT(pn);
                                 MOZ_ASSERT(pn->isUsed());
-                                pn->pn_dflags |= PND_LET;
+                                pn->pn_dflags |= PND_LEXICAL;
                             }
 
                             break;
@@ -1232,7 +1287,7 @@ AssignHops(BytecodeEmitter *bce, ParseNode *pn, unsigned src, ScopeCoordinate *d
 static inline MaybeCheckLexical
 NodeNeedsCheckLexical(ParseNode *pn)
 {
-    return pn->isHoistedLetUse() ? CheckLexical : DontCheckLexical;
+    return pn->isHoistedLexicalUse() ? CheckLexical : DontCheckLexical;
 }
 
 static bool
@@ -1293,6 +1348,7 @@ EmitAliasedVarOp(ExclusiveContext *cx, JSOp op, ParseNode *pn, BytecodeEmitter *
             MOZ_ASSERT_IF(bce->sc->isFunctionBox(), local <= bceOfDef->script->bindings.numLocals());
             MOZ_ASSERT(bceOfDef->staticScope->is<StaticBlockObject>());
             Rooted<StaticBlockObject*> b(cx, &bceOfDef->staticScope->as<StaticBlockObject>());
+            local = bceOfDef->localsToFrameSlots_[local];
             while (local < b->localOffset()) {
                 if (b->needsClone())
                     skippedScopes++;
@@ -1403,6 +1459,7 @@ BytecodeEmitter::isAliasedName(ParseNode *pn)
 
     switch (dn->kind()) {
       case Definition::LET:
+      case Definition::CONST:
         /*
          * There are two ways to alias a let variable: nested functions and
          * dynamic scope operations. (This is overly conservative since the
@@ -1427,7 +1484,7 @@ BytecodeEmitter::isAliasedName(ParseNode *pn)
          */
         return script->formalIsAliased(pn->pn_cookie.slot());
       case Definition::VAR:
-      case Definition::CONST:
+      case Definition::GLOBALCONST:
         MOZ_ASSERT_IF(sc->allLocalsAliased(), script->varIsAliased(pn->pn_cookie.slot()));
         return script->varIsAliased(pn->pn_cookie.slot());
       case Definition::PLACEHOLDER:
@@ -1719,6 +1776,7 @@ BindNameToSlotHelper(ExclusiveContext *cx, BytecodeEmitter *bce, ParseNode *pn)
         break;
 
       case Definition::VAR:
+      case Definition::GLOBALCONST:
       case Definition::CONST:
       case Definition::LET:
         switch (op) {
@@ -2019,7 +2077,7 @@ CheckSideEffects(ExclusiveContext *cx, BytecodeEmitter *bce, ParseNode *pn, bool
             }
         }
 
-        if (pn->isHoistedLetUse()) {
+        if (pn->isHoistedLexicalUse()) {
             // Hoisted uses of lexical bindings throw on access.
             *answer = true;
         }
@@ -2220,8 +2278,6 @@ EmitFinishIteratorResult(ExclusiveContext *cx, BytecodeEmitter *bce, bool done)
     if (Emit1(cx, bce, done ? JSOP_TRUE : JSOP_FALSE) < 0)
         return false;
     if (!EmitIndex32(cx, JSOP_INITPROP, done_id, bce))
-        return false;
-    if (Emit1(cx, bce, JSOP_ENDINIT) < 0)
         return false;
     return true;
 }
@@ -2432,11 +2488,6 @@ EmitElemOpBase(ExclusiveContext *cx, BytecodeEmitter *bce, JSOp op)
     if (Emit1(cx, bce, op) < 0)
         return false;
     CheckTypeSet(cx, bce, op);
-
-    if (op == JSOP_CALLELEM) {
-        if (Emit1(cx, bce, JSOP_SWAP) < 0)
-            return false;
-    }
     return true;
 }
 
@@ -2564,7 +2615,12 @@ InitializeBlockScopedLocalsFromStack(ExclusiveContext *cx, BytecodeEmitter *bce,
             if (!EmitAliasedVarOp(cx, JSOP_INITALIASEDLEXICAL, sc, DontCheckLexical, bce))
                 return false;
         } else {
-            unsigned local = blockObj->blockIndexToLocalIndex(i - 1);
+            // blockIndexToLocalIndex returns the slot index after the unaliased
+            // locals stored in the frame. EmitUnaliasedVarOp expects the slot index
+            // to include both unaliased and aliased locals, so we have to add the
+            // number of aliased locals.
+            uint32_t numAliased = bce->script->bindings.numAliasedBodyLevelLocals();
+            unsigned local = blockObj->blockIndexToLocalIndex(i - 1) + numAliased;
             if (!EmitUnaliasedVarOp(cx, JSOP_INITLEXICAL, local, DontCheckLexical, bce))
                 return false;
         }
@@ -2941,9 +2997,38 @@ BytecodeEmitter::isRunOnceLambda()
            !funbox->function()->name();
 }
 
+static bool
+EmitYieldOp(ExclusiveContext *cx, BytecodeEmitter *bce, JSOp op)
+{
+    if (op == JSOP_FINALYIELDRVAL)
+        return Emit1(cx, bce, JSOP_FINALYIELDRVAL) >= 0;
+
+    MOZ_ASSERT(op == JSOP_INITIALYIELD || op == JSOP_YIELD);
+
+    ptrdiff_t off = EmitN(cx, bce, op, 3);
+    if (off < 0)
+        return false;
+
+    uint32_t yieldIndex = bce->yieldOffsetList.length();
+    if (yieldIndex >= JS_BIT(24)) {
+        bce->reportError(nullptr, JSMSG_TOO_MANY_YIELDS);
+        return false;
+    }
+
+    SET_UINT24(bce->code(off), yieldIndex);
+
+    if (!bce->yieldOffsetList.append(bce->offset()))
+        return false;
+
+    return Emit1(cx, bce, JSOP_DEBUGAFTERYIELD) >= 0;
+}
+
 bool
 frontend::EmitFunctionScript(ExclusiveContext *cx, BytecodeEmitter *bce, ParseNode *body)
 {
+    if (!bce->updateLocalsToFrameSlots())
+        return false;
+
     /*
      * IonBuilder has assumptions about what may occur immediately after
      * script->main (e.g., in the case of destructuring params). Thus, put the
@@ -3001,6 +3086,9 @@ frontend::EmitFunctionScript(ExclusiveContext *cx, BytecodeEmitter *bce, ParseNo
         if (bce->sc->asFunctionBox()->isStarGenerator() && !EmitFinishIteratorResult(cx, bce, true))
             return false;
 
+        if (Emit1(cx, bce, JSOP_SETRVAL) < 0)
+            return false;
+
         ScopeCoordinate sc;
         // We know that .generator is on the top scope chain node, as we are
         // at the function end.
@@ -3010,7 +3098,7 @@ frontend::EmitFunctionScript(ExclusiveContext *cx, BytecodeEmitter *bce, ParseNo
             return false;
 
         // No need to check for finally blocks, etc as in EmitReturn.
-        if (Emit1(cx, bce, JSOP_FINALYIELD) < 0)
+        if (!EmitYieldOp(cx, bce, JSOP_FINALYIELDRVAL))
             return false;
     }
 
@@ -3020,6 +3108,13 @@ frontend::EmitFunctionScript(ExclusiveContext *cx, BytecodeEmitter *bce, ParseNo
      */
     if (Emit1(cx, bce, JSOP_RETRVAL) < 0)
         return false;
+
+    // If all locals are aliased, the frame's block slots won't be used, so we
+    // can set numBlockScoped = 0. This is nice for generators as it ensures
+    // nfixed == 0, so we don't have to initialize any local slots when resuming
+    // a generator.
+    if (bce->sc->allLocalsAliased())
+        bce->script->bindings.setAllLocalsAliased();
 
     if (!JSScript::fullyInitFromEmitter(cx, bce->script, bce))
         return false;
@@ -3382,8 +3477,6 @@ EmitDestructuringOpsArrayHelper(ExclusiveContext *cx, BytecodeEmitter *bce, Pars
             if (!EmitSpread(cx, bce))                                  // ... OBJ? ARRAY INDEX
                 return false;
             if (Emit1(cx, bce, JSOP_POP) < 0)                          // ... OBJ? ARRAY
-                return false;
-            if (Emit1(cx, bce, JSOP_ENDINIT) < 0)
                 return false;
             needToPopIterator = false;
         } else {
@@ -4599,7 +4692,7 @@ EmitLet(ExclusiveContext *cx, BytecodeEmitter *bce, ParseNode *pnLet)
     ParseNode *varList = pnLet->pn_left;
     MOZ_ASSERT(varList->isArity(PN_LIST));
     ParseNode *letBody = pnLet->pn_right;
-    MOZ_ASSERT(letBody->isLet() && letBody->isKind(PNK_LEXICALSCOPE));
+    MOZ_ASSERT(letBody->isLexical() && letBody->isKind(PNK_LEXICALSCOPE));
 
     int letHeadDepth = bce->stackDepth;
 
@@ -4668,9 +4761,16 @@ EmitIterator(ExclusiveContext *cx, BytecodeEmitter *bce)
     // Convert iterable to iterator.
     if (Emit1(cx, bce, JSOP_DUP) < 0)                          // OBJ OBJ
         return false;
-    if (!EmitAtomOp(cx, cx->names().std_iterator, JSOP_CALLPROP, bce)) // OBJ @@ITERATOR
+#ifdef JS_HAS_SYMBOLS
+    if (Emit2(cx, bce, JSOP_SYMBOL, jsbytecode(JS::SymbolCode::iterator)) < 0) // OBJ OBJ @@ITERATOR
         return false;
-    if (Emit1(cx, bce, JSOP_SWAP) < 0)                         // @@ITERATOR OBJ
+    if (!EmitElemOpBase(cx, bce, JSOP_CALLELEM))               // OBJ ITERFN
+        return false;
+#else
+    if (!EmitAtomOp(cx, cx->names().std_iterator, JSOP_CALLPROP, bce))  // OBJ ITERFN
+        return false;
+#endif
+    if (Emit1(cx, bce, JSOP_SWAP) < 0)                         // ITERFN OBJ
         return false;
     if (EmitCall(cx, bce, JSOP_CALL, 0) < 0)                   // ITER
         return false;
@@ -4682,7 +4782,7 @@ static bool
 EmitForInOrOfVariables(ExclusiveContext *cx, BytecodeEmitter *bce, ParseNode *pn, bool *letDecl)
 {
     *letDecl = pn->isKind(PNK_LEXICALSCOPE);
-    MOZ_ASSERT_IF(*letDecl, pn->isLet());
+    MOZ_ASSERT_IF(*letDecl, pn->isLexical());
 
     // If the left part is 'var x', emit code to define x if necessary using a
     // prolog opcode, but do not emit a pop. If it is 'let x', EnterBlockScope
@@ -4728,6 +4828,7 @@ EmitForOf(ExclusiveContext *cx, BytecodeEmitter *bce, StmtType type, ParseNode *
     MOZ_ASSERT_IF(type == STMT_SPREAD, !pn);
 
     ParseNode *forHead = pn ? pn->pn_left : nullptr;
+    ParseNode *forHeadExpr = forHead ? forHead->pn_kid3 : nullptr;
     ParseNode *forBody = pn ? pn->pn_right : nullptr;
 
     ParseNode *pn1 = forHead ? forHead->pn_kid1 : nullptr;
@@ -4740,7 +4841,7 @@ EmitForOf(ExclusiveContext *cx, BytecodeEmitter *bce, StmtType type, ParseNode *
         // current result object.
 
         // Compile the object expression to the right of 'of'.
-        if (!EmitTree(cx, bce, forHead->pn_kid3))
+        if (!EmitTree(cx, bce, forHeadExpr))
             return false;
         if (!EmitIterator(cx, bce))
             return false;
@@ -4820,7 +4921,7 @@ EmitForOf(ExclusiveContext *cx, BytecodeEmitter *bce, StmtType type, ParseNode *
 
     // COME FROM the beginning of the loop to here.
     SetJumpOffsetAt(bce, jmp);
-    if (!EmitLoopEntry(cx, bce, nullptr))
+    if (!EmitLoopEntry(cx, bce, forHeadExpr))
         return false;
 
     if (type == STMT_FOR_OF_LOOP) {
@@ -5260,7 +5361,7 @@ EmitFunc(ExclusiveContext *cx, BytecodeEmitter *bce, ParseNode *pn)
             bi++;
         MOZ_ASSERT(bi->kind() == Binding::VARIABLE || bi->kind() == Binding::CONSTANT ||
                    bi->kind() == Binding::ARGUMENT);
-        MOZ_ASSERT(bi.frameIndex() < JS_BIT(20));
+        MOZ_ASSERT(bi.argOrLocalIndex() < JS_BIT(20));
 #endif
         pn->pn_index = index;
         if (!EmitIndexOp(cx, JSOP_LAMBDA, index, bce))
@@ -5483,7 +5584,7 @@ EmitReturn(ExclusiveContext *cx, BytecodeEmitter *bce, ParseNode *pn)
         MOZ_ALWAYS_TRUE(LookupAliasedNameSlot(bce, bce->script, cx->names().dotGenerator, &sc));
         if (!EmitAliasedVarOp(cx, JSOP_GETALIASEDVAR, sc, DontCheckLexical, bce))
             return false;
-        if (Emit1(cx, bce, JSOP_FINALYIELDRVAL) < 0)
+        if (!EmitYieldOp(cx, bce, JSOP_FINALYIELDRVAL))
             return false;
     } else if (top + static_cast<ptrdiff_t>(JSOP_RETURN_LENGTH) != bce->offset()) {
         bce->code()[top] = JSOP_SETRVAL;
@@ -5522,7 +5623,10 @@ EmitYield(ExclusiveContext *cx, BytecodeEmitter *bce, ParseNode *pn)
     if (!EmitTree(cx, bce, pn->pn_right))
         return false;
 
-    if (Emit1(cx, bce, pn->getOp()) < 0)
+    if (!EmitYieldOp(cx, bce, pn->getOp()))
+        return false;
+
+    if (pn->getOp() == JSOP_INITIALYIELD && Emit1(cx, bce, JSOP_POP) < 0)
         return false;
 
     return true;
@@ -5536,17 +5640,8 @@ EmitYieldStar(ExclusiveContext *cx, BytecodeEmitter *bce, ParseNode *iter, Parse
 
     if (!EmitTree(cx, bce, iter))                                // ITERABLE
         return false;
-
-    // Convert iterable to iterator.
-    if (Emit1(cx, bce, JSOP_DUP) < 0)                            // ITERABLE ITERABLE
+    if (!EmitIterator(cx, bce))                                  // ITER
         return false;
-    if (!EmitAtomOp(cx, cx->names().std_iterator, JSOP_CALLPROP, bce)) // ITERABLE @@ITERATOR
-        return false;
-    if (Emit1(cx, bce, JSOP_SWAP) < 0)                           // @@ITERATOR ITERABLE
-        return false;
-    if (EmitCall(cx, bce, JSOP_CALL, 0, iter) < 0)               // ITER
-        return false;
-    CheckTypeSet(cx, bce, JSOP_CALL);
 
     // Initial send value is undefined.
     if (Emit1(cx, bce, JSOP_UNDEFINED) < 0)                      // ITER RECEIVED
@@ -5573,7 +5668,7 @@ EmitYieldStar(ExclusiveContext *cx, BytecodeEmitter *bce, ParseNode *iter, Parse
         return false;
 
     // Yield RESULT as-is, without re-boxing.
-    if (Emit1(cx, bce, JSOP_YIELD) < 0)                          // ITER RECEIVED
+    if (!EmitYieldOp(cx, bce, JSOP_YIELD))                       // ITER RECEIVED
         return false;
 
     // Try epilogue.
@@ -5937,6 +6032,16 @@ EmitSelfHostedResumeGenerator(ExclusiveContext *cx, BytecodeEmitter *bce, ParseN
 }
 
 static bool
+EmitSelfHostedForceInterpreter(ExclusiveContext *cx, BytecodeEmitter *bce, ParseNode *pn)
+{
+    if (Emit1(cx, bce, JSOP_FORCEINTERPRETER) < 0)
+        return false;
+    if (Emit1(cx, bce, JSOP_UNDEFINED) < 0)
+        return false;
+    return true;
+}
+
+static bool
 EmitCallOrNew(ExclusiveContext *cx, BytecodeEmitter *bce, ParseNode *pn)
 {
     bool callop = pn->isKind(PNK_CALL) || pn->isKind(PNK_TAGGED_TEMPLATE);
@@ -5972,12 +6077,14 @@ EmitCallOrNew(ExclusiveContext *cx, BytecodeEmitter *bce, ParseNode *pn)
             // We shouldn't see foo(bar) = x in self-hosted code.
             MOZ_ASSERT(!(pn->pn_xflags & PNX_SETCALL));
 
-            // Calls to "callFunction" or "resumeGenerator" in self-hosted code
-            // generate inline bytecode.
+            // Calls to "forceInterpreter", "callFunction" or "resumeGenerator"
+            // in self-hosted code generate inline bytecode.
             if (pn2->name() == cx->names().callFunction)
                 return EmitSelfHostedCallFunction(cx, bce, pn);
             if (pn2->name() == cx->names().resumeGenerator)
                 return EmitSelfHostedResumeGenerator(cx, bce, pn);
+            if (pn2->name() == cx->names().forceInterpreter)
+                return EmitSelfHostedForceInterpreter(cx, bce, pn);
             // Fall through.
         }
         if (!EmitNameOp(cx, bce, pn2, callop))
@@ -5990,6 +6097,10 @@ EmitCallOrNew(ExclusiveContext *cx, BytecodeEmitter *bce, ParseNode *pn)
       case PNK_ELEM:
         if (!EmitElemOp(cx, pn2, callop ? JSOP_CALLELEM : JSOP_GETELEM, bce))
             return false;
+        if (callop) {
+            if (Emit1(cx, bce, JSOP_SWAP) < 0)
+                return false;
+        }
         break;
       case PNK_FUNCTION:
         /*
@@ -6417,9 +6528,6 @@ EmitObject(ExclusiveContext *cx, BytecodeEmitter *bce, ParseNode *pn)
         }
     }
 
-    if (Emit1(cx, bce, JSOP_ENDINIT) < 0)
-        return false;
-
     if (obj) {
         /*
          * The object survived and has a predictable shape: update the original
@@ -6462,8 +6570,7 @@ EmitArrayComp(ExclusiveContext *cx, BytecodeEmitter *bce, ParseNode *pn)
         return false;
     bce->arrayCompDepth = saveDepth;
 
-    /* Emit the usual op needed for decompilation. */
-    return Emit1(cx, bce, JSOP_ENDINIT) >= 0;
+    return true;
 }
 
 /**
@@ -6551,9 +6658,7 @@ EmitArray(ExclusiveContext *cx, BytecodeEmitter *bce, ParseNode *pn, uint32_t co
         if (Emit1(cx, bce, JSOP_POP) < 0)                                // ARRAY
             return false;
     }
-
-    /* Emit an op to finish the array and aid in decompilation. */
-    return Emit1(cx, bce, JSOP_ENDINIT) >= 0;
+    return true;
 }
 
 static bool
@@ -6646,7 +6751,7 @@ frontend::EmitTree(ExclusiveContext *cx, BytecodeEmitter *bce, ParseNode *pn)
             // Assign the destructuring arguments before defining any functions,
             // see bug 419662.
             MOZ_ASSERT(pnchild->isKind(PNK_SEMI));
-            MOZ_ASSERT(pnchild->pn_kid->isKind(PNK_VAR) || pnchild->pn_kid->isKind(PNK_CONST));
+            MOZ_ASSERT(pnchild->pn_kid->isKind(PNK_VAR) || pnchild->pn_kid->isKind(PNK_GLOBALCONST));
             if (!EmitTree(cx, bce, pnchild))
                 return false;
             pnchild = pnchild->pn_next;
@@ -6779,7 +6884,7 @@ frontend::EmitTree(ExclusiveContext *cx, BytecodeEmitter *bce, ParseNode *pn)
         break;
 
       case PNK_VAR:
-      case PNK_CONST:
+      case PNK_GLOBALCONST:
         if (!EmitVariables(cx, bce, pn, InitializeVars))
             return false;
         break;
@@ -6942,6 +7047,8 @@ frontend::EmitTree(ExclusiveContext *cx, BytecodeEmitter *bce, ParseNode *pn)
         break;
 
       case PNK_LET:
+      case PNK_CONST:
+        MOZ_ASSERT_IF(pn->isKind(PNK_CONST), !pn->isArity(PN_BINARY));
         ok = pn->isArity(PN_BINARY)
              ? EmitLet(cx, bce, pn)
              : EmitVariables(cx, bce, pn, InitializeVars);
@@ -7078,7 +7185,8 @@ static int
 AllocSrcNote(ExclusiveContext *cx, SrcNotesVector &notes)
 {
     // Start it off moderately large to avoid repeated resizings early on.
-    if (notes.capacity() == 0 && !notes.reserve(1024))
+    // ~99% of cases fit within 256 bytes.
+    if (notes.capacity() == 0 && !notes.reserve(256))
         return -1;
 
     jssrcnote dummy = 0;
@@ -7187,7 +7295,7 @@ static bool
 SetSrcNoteOffset(ExclusiveContext *cx, BytecodeEmitter *bce, unsigned index, unsigned which,
                  ptrdiff_t offset)
 {
-    if (size_t(offset) > SN_MAX_OFFSET) {
+    if (!SN_REPRESENTABLE_OFFSET(offset)) {
         ReportStatementTooLarge(bce->parser->tokenStream, bce->topStmt);
         return false;
     }
@@ -7204,14 +7312,14 @@ SetSrcNoteOffset(ExclusiveContext *cx, BytecodeEmitter *bce, unsigned index, uns
     }
 
     /*
-     * See if the new offset requires three bytes either by being too big or if
+     * See if the new offset requires four bytes either by being too big or if
      * the offset has already been inflated (in which case, we need to stay big
      * to not break the srcnote encoding if this isn't the last srcnote).
      */
     if (offset > (ptrdiff_t)SN_4BYTE_OFFSET_MASK || (*sn & SN_4BYTE_OFFSET_FLAG)) {
-        /* Maybe this offset was already set to a three-byte value. */
+        /* Maybe this offset was already set to a four-byte value. */
         if (!(*sn & SN_4BYTE_OFFSET_FLAG)) {
-            /* Insert two dummy bytes that will be overwritten shortly. */
+            /* Insert three dummy bytes that will be overwritten shortly. */
             jssrcnote dummy = 0;
             if (!(sn = notes.insert(sn, dummy)) ||
                 !(sn = notes.insert(sn, dummy)) ||
@@ -7469,6 +7577,15 @@ CGBlockScopeList::finish(BlockScopeArray *array)
 
     for (unsigned i = 0; i < length(); i++)
         array->vector[i] = list[i];
+}
+
+void
+CGYieldOffsetList::finish(YieldOffsetArray &array, uint32_t prologLength)
+{
+    MOZ_ASSERT(length() == array.length());
+
+    for (unsigned i = 0; i < length(); i++)
+        array[i] = prologLength + list[i];
 }
 
 /*

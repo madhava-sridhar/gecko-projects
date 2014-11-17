@@ -102,13 +102,15 @@ function registerSelf() {
 
   if (register[0]) {
     listenerId = register[0][0].id;
-    // check if we're the main process
-    if (register[0][1] == true) {
-      addMessageListener("MarionetteMainListener:emitTouchEvent", emitTouchEventForIFrame);
+    if (typeof listenerId != "undefined") {
+      // check if we're the main process
+      if (register[0][1] == true) {
+        addMessageListener("MarionetteMainListener:emitTouchEvent", emitTouchEventForIFrame);
+      }
+      importedScripts = FileUtils.getDir('TmpD', [], false);
+      importedScripts.append('marionetteContentScripts');
+      startListeners();
     }
-    importedScripts = FileUtils.getDir('TmpD', [], false);
-    importedScripts.append('marionetteContentScripts');
-    startListeners();
   }
 }
 
@@ -264,6 +266,7 @@ function deleteSession(msg) {
   removeMessageListenerId("Marionette:getActiveElement", getActiveElement);
   removeMessageListenerId("Marionette:clickElement", clickElement);
   removeMessageListenerId("Marionette:getElementAttribute", getElementAttribute);
+  removeMessageListenerId("Marionette:getElementText", getElementText);
   removeMessageListenerId("Marionette:getElementTagName", getElementTagName);
   removeMessageListenerId("Marionette:isElementDisplayed", isElementDisplayed);
   removeMessageListenerId("Marionette:getElementValueOfCssProperty", getElementValueOfCssProperty);
@@ -802,11 +805,15 @@ function elementInViewport(el, x, y) {
  *        If they are not specified, then the center of the target is used.
  */
 function checkVisible(el, x, y) {
-  //check if the element is visible
-  let visible = utils.isElementDisplayed(el);
-  if (!visible) {
-    return false;
+  // Bug 1094246 - Webdriver's isShown doesn't work with content xul
+  if (utils.getElementAttribute(el, "namespaceURI").indexOf("there.is.only.xul") == -1) {
+    //check if the element is visible
+    let visible = utils.isElementDisplayed(el);
+    if (!visible) {
+      return false;
+    }
   }
+
   if (el.tagName.toLowerCase() === 'body') {
     return true;
   }
@@ -1758,8 +1765,10 @@ function switchToFrame(msg) {
         // and we land up here. Let's not give up and check if there are
         // iframes and switch to the indexed frame there
         let iframes = curFrame.document.getElementsByTagName("iframe");
-        curFrame = iframes[msg.json.id];
-        foundFrame = msg.json.id
+        if (msg.json.id >= 0 && msg.json.id < iframes.length) {
+          curFrame = iframes[msg.json.id];
+          foundFrame = msg.json.id;
+        }
       }
     }
   }
@@ -1795,8 +1804,7 @@ function switchToFrame(msg) {
   * Add a cookie to the document
   */
 function addCookie(msg) {
-  cookie = msg.json.cookie;
-
+  let cookie = msg.json.cookie;
   if (!cookie.expiry) {
     var date = new Date();
     var thePresent = new Date(Date.now());
@@ -1827,10 +1835,12 @@ function addCookie(msg) {
   if (!document || !document.contentType.match(/html/i)) {
     sendError('You may only set cookies on html documents', 25, null, msg.json.command_id);
   }
-  var cookieManager = Cc['@mozilla.org/cookiemanager;1'].
-                        getService(Ci.nsICookieManager2);
-  cookieManager.add(cookie.domain, cookie.path, cookie.name, cookie.value,
-                   cookie.secure, false, false, cookie.expiry);
+
+  let added = sendSyncMessage("Marionette:addCookie", {value: cookie});
+  if (added[0] !== true) {
+    sendError("Error setting cookie", 13, null, msg.json.command_id);
+    return;
+  }
   sendOk(msg.json.command_id);
 }
 
@@ -1840,8 +1850,7 @@ function addCookie(msg) {
 function getCookies(msg) {
   var toReturn = [];
   var cookies = getVisibleCookies(curFrame.location);
-  for (var i = 0; i < cookies.length; i++) {
-    var cookie = cookies[i];
+  for (let cookie of cookies) {
     var expires = cookie.expires;
     if (expires == 0) {  // Session cookie, don't return an expiry.
       expires = null;
@@ -1857,7 +1866,6 @@ function getCookies(msg) {
       'expiry': expires
     });
   }
-
   sendResponse({value: toReturn}, msg.json.command_id);
 }
 
@@ -1865,15 +1873,15 @@ function getCookies(msg) {
  * Delete a cookie by name
  */
 function deleteCookie(msg) {
-  var toDelete = msg.json.name;
-  var cookieManager = Cc['@mozilla.org/cookiemanager;1'].
-                        getService(Ci.nsICookieManager);
-
-  var cookies = getVisibleCookies(curFrame.location);
-  for (var i = 0; i < cookies.length; i++) {
-    var cookie = cookies[i];
+  let toDelete = msg.json.name;
+  let cookies = getVisibleCookies(curFrame.location);
+  for (let cookie of cookies) {
     if (cookie.name == toDelete) {
-      cookieManager.remove(cookie.host, cookie.name, cookie.path, false);
+      let deleted = sendSyncMessage("Marionette:deleteCookie", {value: cookie});
+      if (deleted[0] !== true) {
+        sendError("Could not delete cookie: " + msg.json.name, 13, null, msg.json.command_id);
+        return;
+      }
     }
   }
 
@@ -1884,12 +1892,13 @@ function deleteCookie(msg) {
  * Delete all the visibile cookies on a page
  */
 function deleteAllCookies(msg) {
-  let cookieManager = Cc['@mozilla.org/cookiemanager;1'].
-                        getService(Ci.nsICookieManager);
   let cookies = getVisibleCookies(curFrame.location);
-  for (let i = 0; i < cookies.length; i++) {
-    let cookie = cookies[i];
-    cookieManager.remove(cookie.host, cookie.name, cookie.path, false);
+  for (let cookie of cookies) {
+    let deleted = sendSyncMessage("Marionette:deleteCookie", {value: cookie});
+    if (!deleted[0]) {
+      sendError("Could not delete cookie: " + JSON.stringify(cookie), 13, null, msg.json.command_id);
+      return;
+    }
   }
   sendOk(msg.json.command_id);
 }
@@ -1898,32 +1907,10 @@ function deleteAllCookies(msg) {
  * Get all the visible cookies from a location
  */
 function getVisibleCookies(location) {
-  let results = [];
-  let currentPath = location.pathname;
-  if (!currentPath) currentPath = '/';
-  let isForCurrentPath = function(aPath) {
-    return currentPath.indexOf(aPath) != -1;
-  }
-
-  let cookieManager = Cc['@mozilla.org/cookiemanager;1'].
-                        getService(Ci.nsICookieManager);
-  let enumerator = cookieManager.enumerator;
-  while (enumerator.hasMoreElements()) {
-    let cookie = enumerator.getNext().QueryInterface(Ci['nsICookie']);
-
-    // Take the hostname and progressively shorten
-    let hostname = location.hostname;
-    do {
-      if ((cookie.host == '.' + hostname || cookie.host == hostname)
-          && isForCurrentPath(cookie.path)) {
-          results.push(cookie);
-          break;
-      }
-      hostname = hostname.replace(/^.*?\./, '');
-    } while (hostname.indexOf('.') != -1);
-  }
-
-  return results;
+  let currentPath = location.pathname || '/';
+  let result = sendSyncMessage("Marionette:getVisibleCookies",
+                               {value: [currentPath, location.hostname]});
+  return result[0];
 }
 
 function getAppCacheStatus(msg) {

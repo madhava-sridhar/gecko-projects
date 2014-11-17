@@ -223,7 +223,7 @@ class MacroAssemblerX86 : public MacroAssemblerX86Shared
         jsval_layout jv = JSVAL_TO_IMPL(val);
         push(Imm32(jv.s.tag));
         if (val.isMarkable())
-            push(ImmGCPtr(reinterpret_cast<gc::Cell *>(val.toGCThing())));
+            push(ImmMaybeNurseryPtr(reinterpret_cast<gc::Cell *>(val.toGCThing())));
         else
             push(Imm32(jv.s.payload.i32));
     }
@@ -377,7 +377,14 @@ class MacroAssemblerX86 : public MacroAssemblerX86Shared
     Condition testUndefined(Condition cond, const Address &addr) {
         return testUndefined(cond, Operand(addr));
     }
-
+    Condition testNull(Condition cond, const Operand &operand) {
+        MOZ_ASSERT(cond == Equal || cond == NotEqual);
+        cmpl(ToType(operand), ImmTag(JSVAL_TAG_NULL));
+        return cond;
+    }
+    Condition testNull(Condition cond, const Address &addr) {
+        return testNull(cond, Operand(addr));
+    }
 
     Condition testUndefined(Condition cond, const ValueOperand &value) {
         return testUndefined(cond, value.typeReg());
@@ -704,6 +711,9 @@ class MacroAssemblerX86 : public MacroAssemblerX86Shared
     void movePtr(ImmGCPtr imm, Register dest) {
         movl(imm, dest);
     }
+    void movePtr(ImmMaybeNurseryPtr imm, Register dest) {
+        movePtr(noteMaybeNurseryPtr(imm), dest);
+    }
     void loadPtr(const Address &address, Register dest) {
         movl(Operand(address), dest);
     }
@@ -722,13 +732,16 @@ class MacroAssemblerX86 : public MacroAssemblerX86Shared
     void load32(AbsoluteAddress address, Register dest) {
         movl(Operand(address), dest);
     }
-    void storePtr(ImmWord imm, const Address &address) {
+    template <typename T>
+    void storePtr(ImmWord imm, T address) {
         movl(Imm32(imm.value), Operand(address));
     }
-    void storePtr(ImmPtr imm, const Address &address) {
+    template <typename T>
+    void storePtr(ImmPtr imm, T address) {
         storePtr(ImmWord(uintptr_t(imm.value)), address);
     }
-    void storePtr(ImmGCPtr imm, const Address &address) {
+    template <typename T>
+    void storePtr(ImmGCPtr imm, T address) {
         movl(imm, Operand(address));
     }
     void storePtr(Register src, const Address &address) {
@@ -822,9 +835,14 @@ class MacroAssemblerX86 : public MacroAssemblerX86Shared
 
     // Note: this function clobbers the source register.
     void boxDouble(FloatRegister src, const ValueOperand &dest) {
-        movd(src, dest.payloadReg());
-        psrldq(Imm32(4), src);
-        movd(src, dest.typeReg());
+        if (Assembler::HasSSE41()) {
+            movd(src, dest.payloadReg());
+            pextrd(1, src, dest.typeReg());
+        } else {
+            movd(src, dest.payloadReg());
+            psrldq(Imm32(4), src);
+            movd(src, dest.typeReg());
+        }
     }
     void boxNonDouble(JSValueType type, Register src, const ValueOperand &dest) {
         if (src != dest.payloadReg())

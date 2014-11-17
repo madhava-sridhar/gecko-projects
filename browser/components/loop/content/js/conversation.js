@@ -18,10 +18,10 @@ loop.conversation = (function(mozL10n) {
 
   var OutgoingConversationView = loop.conversationViews.OutgoingConversationView;
   var CallIdentifierView = loop.conversationViews.CallIdentifierView;
-  var EmptyRoomView = loop.roomViews.EmptyRoomView;
+  var DesktopRoomConversationView = loop.roomViews.DesktopRoomConversationView;
 
   var IncomingCallView = React.createClass({displayName: 'IncomingCallView',
-    mixins: [sharedMixins.DropdownMenuMixin],
+    mixins: [sharedMixins.DropdownMenuMixin, sharedMixins.AudioMixin],
 
     propTypes: {
       model: React.PropTypes.object.isRequired,
@@ -179,6 +179,41 @@ loop.conversation = (function(mozL10n) {
   });
 
   /**
+   * Something went wrong view. Displayed when there's a big problem.
+   *
+   * XXX Based on CallFailedView, but built specially until we flux-ify the
+   * incoming call views (bug 1088672).
+   */
+  var GenericFailureView = React.createClass({displayName: 'GenericFailureView',
+    mixins: [sharedMixins.AudioMixin],
+
+    propTypes: {
+      cancelCall: React.PropTypes.func.isRequired
+    },
+
+    componentDidMount: function() {
+      this.play("failure");
+    },
+
+    render: function() {
+      document.title = mozL10n.get("generic_failure_title");
+
+      return (
+        React.DOM.div({className: "call-window"}, 
+          React.DOM.h2(null, mozL10n.get("generic_failure_title")), 
+
+          React.DOM.div({className: "btn-group call-action-group"}, 
+            React.DOM.button({className: "btn btn-cancel", 
+                    onClick: this.props.cancelCall}, 
+              mozL10n.get("cancel_button")
+            )
+          )
+        )
+      );
+    }
+  });
+
+  /**
    * This view manages the incoming conversation views - from
    * call initiation through to the actual conversation and call end.
    *
@@ -189,7 +224,9 @@ loop.conversation = (function(mozL10n) {
       client: React.PropTypes.instanceOf(loop.Client).isRequired,
       conversation: React.PropTypes.instanceOf(sharedModels.ConversationModel)
                          .isRequired,
-      sdk: React.PropTypes.object.isRequired
+      sdk: React.PropTypes.object.isRequired,
+      conversationAppStore: React.PropTypes.instanceOf(
+        loop.store.ConversationAppStore).isRequired
     },
 
     getInitialState: function() {
@@ -254,10 +291,12 @@ loop.conversation = (function(mozL10n) {
         case "end": {
           // XXX To be handled with the "failed" view state when bug 1047410 lands
           if (this.state.callFailed) {
-            document.title = mozL10n.get("generic_failure_title");
-          } else {
-            document.title = mozL10n.get("conversation_has_ended");
+            return GenericFailureView({
+              cancelCall: this.closeWindow.bind(this)}
+            );
           }
+
+          document.title = mozL10n.get("conversation_has_ended");
 
           var feebackAPIBaseUrl = navigator.mozLoop.getLoopCharPref(
             "feedback.baseUrl");
@@ -321,13 +360,9 @@ loop.conversation = (function(mozL10n) {
     setupIncomingCall: function() {
       navigator.mozLoop.startAlerting();
 
-      var callData = navigator.mozLoop.getCallData(this.props.conversation.get("callId"));
-      if (!callData) {
-        // XXX Not the ideal response, but bug 1047410 will be replacing
-        // this by better "call failed" UI.
-        console.error("Failed to get the call data");
-        return;
-      }
+      // XXX This is a hack until we rework for the flux model in bug 1088672.
+      var callData = this.props.conversationAppStore.getStoreState().windowData;
+
       this.props.conversation.setIncomingSessionData(callData);
       this._setupWebSocket();
     },
@@ -343,7 +378,8 @@ loop.conversation = (function(mozL10n) {
      * Moves the call to the end state
      */
     endCall: function() {
-      navigator.mozLoop.releaseCallData(this.props.conversation.get("callId"));
+      navigator.mozLoop.calls.clearCallInProgress(
+        this.props.conversation.get("windowId"));
       this.setState({callStatus: "end"});
     },
 
@@ -394,19 +430,25 @@ loop.conversation = (function(mozL10n) {
       if (progressData.state !== "terminated")
         return;
 
-      if (progressData.reason === "cancel" ||
-          progressData.reason === "closed") {
+      // XXX This would be nicer in the _abortIncomingCall function, but we need to stop
+      // it here for now due to server-side issues that are being fixed in bug 1088351.
+      // This is before the abort call to ensure that it happens before the window is
+      // closed.
+      navigator.mozLoop.stopAlerting();
+
+      // If we hit any of the termination reasons, and the user hasn't accepted
+      // then it seems reasonable to close the window/abort the incoming call.
+      //
+      // If the user has accepted the call, and something's happened, display
+      // the call failed view.
+      //
+      // https://wiki.mozilla.org/Loop/Architecture/MVP#Termination_Reasons
+      if (previousState === "init" || previousState === "alerting") {
         this._abortIncomingCall();
-        return;
+      } else {
+        this.setState({callFailed: true, callStatus: "end"});
       }
 
-      if (progressData.reason === "timeout") {
-        if (previousState === "init" || previousState === "alerting") {
-          this._abortIncomingCall();
-        } else {
-          this.setState({callFailed: true, callStatus: "end"});
-        }
-      }
     },
 
     /**
@@ -414,7 +456,6 @@ loop.conversation = (function(mozL10n) {
      * closes the websocket.
      */
     _abortIncomingCall: function() {
-      navigator.mozLoop.stopAlerting();
       this._websocket.close();
       // Having a timeout here lets the logging for the websocket complete and be
       // displayed on the console if both are on.
@@ -439,7 +480,8 @@ loop.conversation = (function(mozL10n) {
      */
     _declineCall: function() {
       this._websocket.decline();
-      navigator.mozLoop.releaseCallData(this.props.conversation.get("callId"));
+      navigator.mozLoop.calls.clearCallInProgress(
+        this.props.conversation.get("windowId"));
       this._websocket.close();
       // Having a timeout here lets the logging for the websocket complete and be
       // displayed on the console if both are on.
@@ -463,12 +505,14 @@ loop.conversation = (function(mozL10n) {
     declineAndBlock: function() {
       navigator.mozLoop.stopAlerting();
       var token = this.props.conversation.get("callToken");
-      this.props.client.deleteCallUrl(token, function(error) {
-        // XXX The conversation window will be closed when this cb is triggered
-        // figure out if there is a better way to report the error to the user
-        // (bug 1048909).
-        console.log(error);
-      });
+      this.props.client.deleteCallUrl(token,
+        this.props.conversation.get("sessionType"),
+        function(error) {
+          // XXX The conversation window will be closed when this cb is triggered
+          // figure out if there is a better way to report the error to the user
+          // (bug 1048909).
+          console.log(error);
+        });
       this._declineCall();
     },
 
@@ -487,6 +531,8 @@ loop.conversation = (function(mozL10n) {
    * in progress, and hence, which view to display.
    */
   var AppControllerView = React.createClass({displayName: 'AppControllerView',
+    mixins: [Backbone.Events],
+
     propTypes: {
       // XXX Old types required for incoming call view.
       client: React.PropTypes.instanceOf(loop.Client).isRequired,
@@ -494,51 +540,67 @@ loop.conversation = (function(mozL10n) {
                          .isRequired,
       sdk: React.PropTypes.object.isRequired,
 
-      // XXX New types for OutgoingConversationView
-      store: React.PropTypes.instanceOf(loop.store.ConversationStore).isRequired,
+      // XXX New types for flux style
+      conversationAppStore: React.PropTypes.instanceOf(
+        loop.store.ConversationAppStore).isRequired,
+      conversationStore: React.PropTypes.instanceOf(loop.store.ConversationStore)
+                              .isRequired,
       dispatcher: React.PropTypes.instanceOf(loop.Dispatcher).isRequired,
-
-      // if not passed, this is not a room view
-      localRoomStore: React.PropTypes.instanceOf(loop.store.LocalRoomStore)
+      roomStore: React.PropTypes.instanceOf(loop.store.RoomStore)
     },
 
     getInitialState: function() {
-      return this.props.store.attributes;
+      return this.props.conversationAppStore.getStoreState();
     },
 
     componentWillMount: function() {
-      this.props.store.on("change:outgoing", function() {
-        this.setState(this.props.store.attributes);
+      this.listenTo(this.props.conversationAppStore, "change", function() {
+        this.setState(this.props.conversationAppStore.getStoreState());
       }, this);
     },
 
+    componentWillUnmount: function() {
+      this.stopListening(this.props.conversationAppStore);
+    },
+
+    closeWindow: function() {
+      window.close();
+    },
+
     render: function() {
-      if (this.props.localRoomStore) {
-        return (
-          EmptyRoomView({
-            mozLoop: navigator.mozLoop, 
-            localRoomStore: this.props.localRoomStore}
-          )
-        );
+      switch(this.state.windowType) {
+        case "incoming": {
+          return (IncomingConversationView({
+            client: this.props.client, 
+            conversation: this.props.conversation, 
+            sdk: this.props.sdk, 
+            conversationAppStore: this.props.conversationAppStore}
+          ));
+        }
+        case "outgoing": {
+          return (OutgoingConversationView({
+            store: this.props.conversationStore, 
+            dispatcher: this.props.dispatcher}
+          ));
+        }
+        case "room": {
+          return (DesktopRoomConversationView({
+            dispatcher: this.props.dispatcher, 
+            roomStore: this.props.roomStore, 
+            dispatcher: this.props.dispatcher}
+          ));
+        }
+        case "failed": {
+          return (GenericFailureView({
+            cancelCall: this.closeWindow}
+          ));
+        }
+        default: {
+          // If we don't have a windowType, we don't know what we are yet,
+          // so don't display anything.
+          return null;
+        }
       }
-
-      // Don't display anything, until we know what type of call we are.
-      if (this.state.outgoing === undefined) {
-        return null;
-      }
-
-      if (this.state.outgoing) {
-        return (OutgoingConversationView({
-          store: this.props.store, 
-          dispatcher: this.props.dispatcher}
-        ));
-      }
-
-      return (IncomingConversationView({
-        client: this.props.client, 
-        conversation: this.props.conversation, 
-        sdk: this.props.sdk}
-      ));
     }
   });
 
@@ -569,10 +631,25 @@ loop.conversation = (function(mozL10n) {
       sdk: OT
     });
 
+    // Create the stores.
+    var conversationAppStore = new loop.store.ConversationAppStore({
+      dispatcher: dispatcher,
+      mozLoop: navigator.mozLoop
+    });
     var conversationStore = new loop.store.ConversationStore({}, {
       client: client,
       dispatcher: dispatcher,
       sdkDriver: sdkDriver
+    });
+    var activeRoomStore = new loop.store.ActiveRoomStore({
+      dispatcher: dispatcher,
+      mozLoop: navigator.mozLoop,
+      sdkDriver: sdkDriver
+    });
+    var roomStore = new loop.store.RoomStore({
+      dispatcher: dispatcher,
+      mozLoop: navigator.mozLoop,
+      activeRoomStore: activeRoomStore
     });
 
     // XXX Old class creation for the incoming conversation view, whilst
@@ -582,63 +659,39 @@ loop.conversation = (function(mozL10n) {
       {sdk: window.OT}   // Model dependencies
     );
 
-    // Obtain the callId and pass it through
+    // Obtain the windowId and pass it through
     var helper = new loop.shared.utils.Helper();
-    var locationHash = helper.locationHash();
-    var callId;
-    var outgoing;
-    var localRoomStore;
+    var locationHash = helper.locationData().hash;
+    var windowId;
 
-    // XXX removeMe, along with noisy comment at the beginning of
-    // conversation_test.js "when locationHash begins with #room".
-    if (navigator.mozLoop.getLoopBoolPref("test.alwaysUseRooms")) {
-      locationHash = "#room/32";
-    }
-
-    var hash = locationHash.match(/#incoming\/(.*)/);
+    var hash = locationHash.match(/#(.*)/);
     if (hash) {
-      callId = hash[1];
-      outgoing = false;
-    } else if (hash = locationHash.match(/#room\/(.*)/)) {
-      localRoomStore = new loop.store.LocalRoomStore({
-        dispatcher: dispatcher,
-        mozLoop: navigator.mozLoop
-      });
-    } else {
-      hash = locationHash.match(/#outgoing\/(.*)/);
-      if (hash) {
-        callId = hash[1];
-        outgoing = true;
-      }
+      windowId = hash[1];
     }
 
-    conversation.set({callId: callId});
+    conversation.set({windowId: windowId});
 
     window.addEventListener("unload", function(event) {
       // Handle direct close of dialog box via [x] control.
-      navigator.mozLoop.releaseCallData(callId);
+      // XXX Move to the conversation models, when we transition
+      // incoming calls to flux (bug 1088672).
+      navigator.mozLoop.calls.clearCallInProgress(windowId);
+
+      dispatcher.dispatch(new sharedActions.WindowUnload());
     });
 
-    document.body.classList.add(loop.shared.utils.getTargetPlatform());
-
     React.renderComponent(AppControllerView({
-      localRoomStore: localRoomStore, 
-      store: conversationStore, 
+      conversationAppStore: conversationAppStore, 
+      roomStore: roomStore, 
+      conversationStore: conversationStore, 
       client: client, 
       conversation: conversation, 
       dispatcher: dispatcher, 
       sdk: window.OT}
     ), document.querySelector('#main'));
 
-   if (localRoomStore) {
-      dispatcher.dispatch(
-        new sharedActions.SetupEmptyRoom({localRoomId: hash[1]}));
-      return;
-    }
-
-    dispatcher.dispatch(new loop.shared.actions.GatherCallData({
-      callId: callId,
-      outgoing: outgoing
+    dispatcher.dispatch(new sharedActions.GetWindowData({
+      windowId: windowId
     }));
   }
 
@@ -646,6 +699,7 @@ loop.conversation = (function(mozL10n) {
     AppControllerView: AppControllerView,
     IncomingConversationView: IncomingConversationView,
     IncomingCallView: IncomingCallView,
+    GenericFailureView: GenericFailureView,
     init: init
   };
 })(document.mozL10n);

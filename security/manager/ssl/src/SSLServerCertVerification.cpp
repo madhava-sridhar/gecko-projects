@@ -96,7 +96,7 @@
 
 #include <cstring>
 
-#include "pkix/pkixtypes.h"
+#include "pkix/pkix.h"
 #include "pkix/pkixnss.h"
 #include "pkix/ScopedPtr.h"
 #include "CertVerifier.h"
@@ -306,6 +306,7 @@ MapCertErrorToProbeValue(PRErrorCode errorCode)
     case SEC_ERROR_EXPIRED_CERTIFICATE:                return 10;
     case mozilla::pkix::MOZILLA_PKIX_ERROR_CA_CERT_USED_AS_END_ENTITY: return 11;
     case mozilla::pkix::MOZILLA_PKIX_ERROR_V1_CERT_USED_AS_CA: return 12;
+    case mozilla::pkix::MOZILLA_PKIX_ERROR_INADEQUATE_KEY_SIZE: return 13;
   }
   NS_WARNING("Unknown certificate error code. Does MapCertErrorToProbeValue "
              "handle everything in DetermineCertOverrideErrors?");
@@ -328,13 +329,14 @@ DetermineCertOverrideErrors(CERTCertificate* cert, const char* hostName,
   MOZ_ASSERT(errorCodeExpired == 0);
 
   // Assumes the error prioritization described in mozilla::pkix's
-  // BuildForward function. Also assumes that CERT_VerifyCertName was only
+  // BuildForward function. Also assumes that CheckCertHostname was only
   // called if CertVerifier::VerifyCert succeeded.
   switch (defaultErrorCodeToReport) {
     case SEC_ERROR_CERT_SIGNATURE_ALGORITHM_DISABLED:
     case SEC_ERROR_EXPIRED_ISSUER_CERTIFICATE:
     case SEC_ERROR_UNKNOWN_ISSUER:
     case mozilla::pkix::MOZILLA_PKIX_ERROR_CA_CERT_USED_AS_END_ENTITY:
+    case mozilla::pkix::MOZILLA_PKIX_ERROR_INADEQUATE_KEY_SIZE:
     case mozilla::pkix::MOZILLA_PKIX_ERROR_V1_CERT_USED_AS_CA:
     {
       collectedErrors = nsICertOverrideService::ERROR_UNTRUSTED;
@@ -373,14 +375,25 @@ DetermineCertOverrideErrors(CERTCertificate* cert, const char* hostName,
   }
 
   if (defaultErrorCodeToReport != SSL_ERROR_BAD_CERT_DOMAIN) {
-    if (CERT_VerifyCertName(cert, hostName) != SECSuccess) {
-      if (PR_GetError() != SSL_ERROR_BAD_CERT_DOMAIN) {
-        PR_SetError(defaultErrorCodeToReport, 0);
-        return SECFailure;
-      }
-
+    Input certInput;
+    if (certInput.Init(cert->derCert.data, cert->derCert.len) != Success) {
+      PR_SetError(SEC_ERROR_BAD_DER, 0);
+      return SECFailure;
+    }
+    Input hostnameInput;
+    Result result = hostnameInput.Init(uint8_t_ptr_cast(hostName),
+                                       strlen(hostName));
+    if (result != Success) {
+      PR_SetError(SEC_ERROR_INVALID_ARGS, 0);
+      return SECFailure;
+    }
+    result = CheckCertHostname(certInput, hostnameInput);
+    if (result == Result::ERROR_BAD_CERT_DOMAIN) {
       collectedErrors |= nsICertOverrideService::ERROR_MISMATCH;
       errorCodeMismatch = SSL_ERROR_BAD_CERT_DOMAIN;
+    } else if (result != Success) {
+      PR_SetError(defaultErrorCodeToReport, 0);
+      return SECFailure;
     }
   }
 

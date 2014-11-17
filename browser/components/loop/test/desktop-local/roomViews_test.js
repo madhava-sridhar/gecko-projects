@@ -1,94 +1,281 @@
 var expect = chai.expect;
 
+/* jshint newcap:false */
+
 describe("loop.roomViews", function () {
   "use strict";
 
-  var store, fakeWindow, sandbox, fakeAddCallback, fakeMozLoop,
-    fakeRemoveCallback, fakeRoomId, fakeWindow;
+  var ROOM_STATES = loop.store.ROOM_STATES;
+
+  var sandbox, dispatcher, roomStore, activeRoomStore, fakeWindow;
 
   beforeEach(function() {
     sandbox = sinon.sandbox.create();
 
-    fakeRoomId = "fakeRoomId";
-    fakeAddCallback =
-      sandbox.stub().withArgs(fakeRoomId, "RoomCreationError");
-    fakeRemoveCallback =
-      sandbox.stub().withArgs(fakeRoomId, "RoomCreationError");
-    fakeMozLoop = { rooms: { addCallback: fakeAddCallback,
-                             removeCallback: fakeRemoveCallback } };
+    dispatcher = new loop.Dispatcher();
 
-    fakeWindow = { document: {} };
-    loop.roomViews.setRootObject(fakeWindow);
+    fakeWindow = {
+      document: {},
+      navigator: {
+        mozLoop: {
+          getAudioBlob: sinon.stub()
+        }
+      }
+    };
+    loop.shared.mixins.setRootObject(fakeWindow);
 
-    store = new loop.store.LocalRoomStore({
-      dispatcher: { register: function() {} },
-      mozLoop: fakeMozLoop
+    // XXX These stubs should be hoisted in a common file
+    // Bug 1040968
+    sandbox.stub(document.mozL10n, "get", function(x) {
+      return x;
     });
-    store.setStoreState({localRoomId: fakeRoomId});
+
+    activeRoomStore = new loop.store.ActiveRoomStore({
+      dispatcher: dispatcher,
+      mozLoop: {},
+      sdkDriver: {}
+    });
+    roomStore = new loop.store.RoomStore({
+      dispatcher: dispatcher,
+      mozLoop: {},
+      activeRoomStore: activeRoomStore
+    });
   });
 
   afterEach(function() {
-    sinon.sandbox.restore();
-    loop.roomViews.setRootObject(window);
+    sandbox.restore();
+    loop.shared.mixins.setRootObject(window);
   });
 
-  describe("EmptyRoomView", function() {
+  describe("ActiveRoomStoreMixin", function() {
+    it("should merge initial state", function() {
+      var TestView = React.createClass({
+        mixins: [loop.roomViews.ActiveRoomStoreMixin],
+        getInitialState: function() {
+          return {foo: "bar"};
+        },
+        render: function() { return React.DOM.div(); }
+      });
+
+      var testView = TestUtils.renderIntoDocument(TestView({
+        roomStore: roomStore
+      }));
+
+      expect(testView.state).eql({
+        roomState: ROOM_STATES.INIT,
+        audioMuted: false,
+        videoMuted: false,
+        failureReason: undefined,
+        foo: "bar"
+      });
+    });
+
+    it("should listen to store changes", function() {
+      var TestView = React.createClass({
+        mixins: [loop.roomViews.ActiveRoomStoreMixin],
+        render: function() { return React.DOM.div(); }
+      });
+      var testView = TestUtils.renderIntoDocument(TestView({
+        roomStore: roomStore
+      }));
+
+      activeRoomStore.setStoreState({roomState: ROOM_STATES.READY});
+
+      expect(testView.state.roomState).eql(ROOM_STATES.READY);
+    });
+  });
+
+  describe("DesktopRoomInvitationView", function() {
+    var view;
+
+    beforeEach(function() {
+      sandbox.stub(dispatcher, "dispatch");
+    });
+
+    afterEach(function() {
+      view = null;
+    });
+
     function mountTestComponent() {
       return TestUtils.renderIntoDocument(
-        new loop.roomViews.EmptyRoomView({
-          mozLoop: fakeMozLoop,
-          localRoomStore: store
+        new loop.roomViews.DesktopRoomInvitationView({
+          dispatcher: dispatcher,
+          roomStore: roomStore
         }));
     }
 
-    describe("#componentDidMount", function() {
-       it("should add #onCreationError using mozLoop.rooms.addCallback",
-         function() {
+    it("should dispatch an EmailRoomUrl action when the email button is " +
+      "pressed", function() {
+        view = mountTestComponent();
 
-           var testComponent = mountTestComponent();
+        view.setState({roomUrl: "http://invalid"});
 
-           sinon.assert.calledOnce(fakeMozLoop.rooms.addCallback);
-           sinon.assert.calledWithExactly(fakeMozLoop.rooms.addCallback,
-             fakeRoomId, "RoomCreationError", testComponent.onCreationError);
-         });
+        var emailBtn = view.getDOMNode().querySelector('.btn-email');
+
+        React.addons.TestUtils.Simulate.click(emailBtn);
+
+        sinon.assert.calledOnce(dispatcher.dispatch);
+        sinon.assert.calledWith(dispatcher.dispatch,
+          new sharedActions.EmailRoomUrl({roomUrl: "http://invalid"}));
+      });
+
+    describe("Copy Button", function() {
+      beforeEach(function() {
+        view = mountTestComponent();
+
+        view.setState({roomUrl: "http://invalid"});
+      });
+
+      it("should dispatch a CopyRoomUrl action when the copy button is " +
+        "pressed", function() {
+          var copyBtn = view.getDOMNode().querySelector('.btn-copy');
+
+          React.addons.TestUtils.Simulate.click(copyBtn);
+
+          sinon.assert.calledOnce(dispatcher.dispatch);
+          sinon.assert.calledWith(dispatcher.dispatch,
+            new sharedActions.CopyRoomUrl({roomUrl: "http://invalid"}));
+        });
+
+      it("should change the text when the url has been copied", function() {
+          var copyBtn = view.getDOMNode().querySelector('.btn-copy');
+
+          React.addons.TestUtils.Simulate.click(copyBtn);
+
+          // copied_url_button is the l10n string.
+          expect(copyBtn.textContent).eql("copied_url_button");
+      });
+    });
+  });
+
+  describe("DesktopRoomConversationView", function() {
+    var view;
+
+    beforeEach(function() {
+      sandbox.stub(dispatcher, "dispatch");
     });
 
-    describe("#componentWillUnmount", function () {
-      it("should remove #onCreationError using mozLoop.rooms.addCallback",
-        function () {
-          var testComponent = mountTestComponent();
+    function mountTestComponent() {
+      return TestUtils.renderIntoDocument(
+        new loop.roomViews.DesktopRoomConversationView({
+          dispatcher: dispatcher,
+          roomStore: roomStore
+        }));
+    }
 
-          testComponent.componentWillUnmount();
+    it("should dispatch a setupStreamElements action when the view is created",
+      function() {
+        view = mountTestComponent();
 
-          sinon.assert.calledOnce(fakeMozLoop.rooms.removeCallback);
-          sinon.assert.calledWithExactly(fakeMozLoop.rooms.removeCallback,
-            fakeRoomId, "RoomCreationError", testComponent.onCreationError);
-        });
+        sinon.assert.calledOnce(dispatcher.dispatch);
+        sinon.assert.calledWithMatch(dispatcher.dispatch,
+          sinon.match.hasOwn("name", "setupStreamElements"));
+    });
+
+    it("should dispatch a setMute action when the audio mute button is pressed",
+      function() {
+        view = mountTestComponent();
+
+        view.setState({audioMuted: true});
+
+        var muteBtn = view.getDOMNode().querySelector('.btn-mute-audio');
+
+        React.addons.TestUtils.Simulate.click(muteBtn);
+
+        sinon.assert.calledWithMatch(dispatcher.dispatch,
+          sinon.match.hasOwn("name", "setMute"));
+        sinon.assert.calledWithMatch(dispatcher.dispatch,
+          sinon.match.hasOwn("enabled", true));
+        sinon.assert.calledWithMatch(dispatcher.dispatch,
+          sinon.match.hasOwn("type", "audio"));
       });
 
-    describe("#onCreationError", function() {
-      it("should log an error using console.error", function() {
-        fakeWindow.console = { error: sandbox.stub() };
-        var testComponent = mountTestComponent();
+    it("should dispatch a setMute action when the video mute button is pressed",
+      function() {
+        view = mountTestComponent();
 
-        testComponent.onCreationError(new Error("fake error"));
+        view.setState({videoMuted: false});
 
-        sinon.assert.calledOnce(fakeWindow.console.error);
+        var muteBtn = view.getDOMNode().querySelector('.btn-mute-video');
+
+        React.addons.TestUtils.Simulate.click(muteBtn);
+
+        sinon.assert.calledWithMatch(dispatcher.dispatch,
+          sinon.match.hasOwn("name", "setMute"));
+        sinon.assert.calledWithMatch(dispatcher.dispatch,
+          sinon.match.hasOwn("enabled", false));
+        sinon.assert.calledWithMatch(dispatcher.dispatch,
+          sinon.match.hasOwn("type", "video"));
       });
+
+    it("should set the mute button as mute off", function() {
+      view = mountTestComponent();
+
+      view.setState({videoMuted: false});
+
+      var muteBtn = view.getDOMNode().querySelector('.btn-mute-video');
+
+      expect(muteBtn.classList.contains("muted")).eql(false);
+    });
+
+    it("should set the mute button as mute on", function() {
+      view = mountTestComponent();
+
+      view.setState({audioMuted: true});
+
+      var muteBtn = view.getDOMNode().querySelector('.btn-mute-audio');
+
+      expect(muteBtn.classList.contains("muted")).eql(true);
     });
 
     describe("#render", function() {
-      it("should set document.title to store.serverData.roomName",
+      it("should set document.title to store.serverData.roomName", function() {
+        mountTestComponent();
+
+        activeRoomStore.setStoreState({roomName: "fakeName"});
+
+        expect(fakeWindow.document.title).to.equal("fakeName");
+      });
+
+      it("should render the GenericFailureView if the roomState is `FAILED`",
         function() {
-          var fakeRoomName = "Monkey";
-          store.setStoreState({serverData: {roomName: fakeRoomName},
-                               localRoomId: fakeRoomId});
+          activeRoomStore.setStoreState({roomState: ROOM_STATES.FAILED});
 
-          mountTestComponent();
+          view = mountTestComponent();
 
-          expect(fakeWindow.document.title).to.equal(fakeRoomName);
-        })
+          TestUtils.findRenderedComponentWithType(view,
+            loop.conversation.GenericFailureView);
+        });
+
+      it("should render the GenericFailureView if the roomState is `FULL`",
+        function() {
+          activeRoomStore.setStoreState({roomState: ROOM_STATES.FULL});
+
+          view = mountTestComponent();
+
+          TestUtils.findRenderedComponentWithType(view,
+            loop.conversation.GenericFailureView);
+        });
+
+      it("should render the DesktopRoomInvitationView if roomState is `JOINED`",
+        function() {
+          activeRoomStore.setStoreState({roomState: ROOM_STATES.JOINED});
+
+          view = mountTestComponent();
+
+          TestUtils.findRenderedComponentWithType(view,
+            loop.roomViews.DesktopRoomInvitationView);
+        });
+
+      it("should render the DesktopRoomConversationView if roomState is `HAS_PARTICIPANTS`",
+        function() {
+          activeRoomStore.setStoreState({roomState: ROOM_STATES.HAS_PARTICIPANTS});
+
+          view = mountTestComponent();
+
+          TestUtils.findRenderedComponentWithType(view,
+            loop.roomViews.DesktopRoomConversationView);
+        });
     });
-
   });
 });

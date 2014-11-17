@@ -35,6 +35,7 @@ namespace jit {
     _(TableSwitch)                                                          \
     _(Goto)                                                                 \
     _(Test)                                                                 \
+    _(GotoWithFake)                                                         \
     _(TypeObjectDispatch)                                                   \
     _(FunctionDispatch)                                                     \
     _(Compare)                                                              \
@@ -106,9 +107,11 @@ namespace jit {
     _(ToInt32)                                                              \
     _(TruncateToInt32)                                                      \
     _(ToString)                                                             \
+    _(ToObjectOrNull)                                                       \
     _(NewArray)                                                             \
     _(NewArrayCopyOnWrite)                                                  \
     _(NewObject)                                                            \
+    _(NewTypedObject)                                                       \
     _(NewDeclEnvObject)                                                     \
     _(NewCallObject)                                                        \
     _(NewRunOnceCallObject)                                                 \
@@ -160,20 +163,22 @@ namespace jit {
     _(TypedArrayLength)                                                     \
     _(TypedArrayElements)                                                   \
     _(TypedObjectProto)                                                     \
-    _(TypedObjectUnsizedLength)                                             \
     _(TypedObjectElements)                                                  \
     _(SetTypedObjectOffset)                                                 \
     _(InitializedLength)                                                    \
     _(SetInitializedLength)                                                 \
     _(Not)                                                                  \
-    _(NeuterCheck)                                                          \
     _(BoundsCheck)                                                          \
     _(BoundsCheckLower)                                                     \
     _(InArray)                                                              \
     _(LoadElement)                                                          \
     _(LoadElementHole)                                                      \
+    _(LoadUnboxedObjectOrNull)                                              \
+    _(LoadUnboxedString)                                                    \
     _(StoreElement)                                                         \
     _(StoreElementHole)                                                     \
+    _(StoreUnboxedObjectOrNull)                                             \
+    _(StoreUnboxedString)                                                   \
     _(ArrayPopShift)                                                        \
     _(ArrayPush)                                                            \
     _(ArrayConcat)                                                          \
@@ -184,6 +189,8 @@ namespace jit {
     _(StoreTypedArrayElement)                                               \
     _(StoreTypedArrayElementHole)                                           \
     _(StoreTypedArrayElementStatic)                                         \
+    _(CompareExchangeTypedArrayElement)                                     \
+    _(AtomicTypedArrayElementBinop)                                         \
     _(EffectiveAddress)                                                     \
     _(ClampToUint8)                                                         \
     _(LoadFixedSlot)                                                        \
@@ -251,6 +258,7 @@ namespace jit {
     _(GuardThreadExclusive)                                                 \
     _(InterruptCheckPar)                                                    \
     _(RecompileCheck)                                                       \
+    _(MemoryBarrier)                                                        \
     _(UnknownValue)                                                         \
     _(LexicalCheck)                                                         \
     _(ThrowUninitializedLexical)

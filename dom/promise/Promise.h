@@ -29,6 +29,7 @@ namespace dom {
 
 class AnyCallback;
 class DOMError;
+class MediaStreamError;
 class PromiseCallback;
 class PromiseInit;
 class PromiseNativeHandler;
@@ -101,10 +102,14 @@ public:
     MOZ_ASSERT(NS_FAILED(aArg));
     MaybeSomething(aArg, &Promise::MaybeReject);
   }
+
   inline void MaybeReject(ErrorResult& aArg) {
     MOZ_ASSERT(aArg.Failed());
     MaybeSomething(aArg, &Promise::MaybeReject);
   }
+
+  void MaybeReject(const nsRefPtr<MediaStreamError>& aArg);
+
   // DO NOT USE MaybeRejectBrokenly with in new code.  Promises should be
   // rejected with Error instances.
   // Note: MaybeRejectBrokenly is a template so we can use it with DOMError
@@ -116,6 +121,10 @@ public:
   void MaybeRejectBrokenly(const T& aArg); // Not implemented by default; see
                                            // specializations in the .cpp for
                                            // the T values we support.
+
+  // Called by DOM to let us execute our callbacks.  May be called recursively.
+  // Returns true if at least one microtask was processed.
+  static bool PerformMicroTaskCheckpoint();
 
   // WebIDL
 
@@ -171,9 +180,9 @@ protected:
 
   virtual ~Promise();
 
-  // Queue an async task to current main or worker thread.
+  // Queue an async microtask to current main or worker thread.
   static void
-  DispatchToMainOrWorkerThread(nsIRunnable* aRunnable);
+  DispatchToMicroTask(nsIRunnable* aRunnable);
 
   // Do JS-wrapping after Promise creation.
   void CreateWrapper(ErrorResult& aRv);
@@ -200,11 +209,6 @@ private:
     Rejected
   };
 
-  enum PromiseTaskSync {
-    SyncTask,
-    AsyncTask
-  };
-
   void SetState(PromiseState aState)
   {
     MOZ_ASSERT(mState == Pending);
@@ -217,15 +221,14 @@ private:
     mResult = aValue;
   }
 
-  // This method processes promise's resolve/reject callbacks with promise's
+  // This method enqueues promise's resolve/reject callbacks with promise's
   // result. It's executed when the resolver.resolve() or resolver.reject() is
   // called or when the promise already has a result and new callbacks are
   // appended by then(), catch() or done().
-  void RunTask();
+  void EnqueueCallbackTasks();
 
-  void RunResolveTask(JS::Handle<JS::Value> aValue,
-                      Promise::PromiseState aState,
-                      PromiseTaskSync aAsynchronous);
+  void MaybeSettle(JS::Handle<JS::Value> aValue,
+                   Promise::PromiseState aState);
 
   void AppendCallbacks(PromiseCallback* aResolveCallback,
                        PromiseCallback* aRejectCallback);
@@ -242,19 +245,14 @@ private:
   }
 
   void MaybeResolveInternal(JSContext* aCx,
-                            JS::Handle<JS::Value> aValue,
-                            PromiseTaskSync aSync = AsyncTask);
+                            JS::Handle<JS::Value> aValue);
   void MaybeRejectInternal(JSContext* aCx,
-                           JS::Handle<JS::Value> aValue,
-                           PromiseTaskSync aSync = AsyncTask);
+                           JS::Handle<JS::Value> aValue);
 
   void ResolveInternal(JSContext* aCx,
-                       JS::Handle<JS::Value> aValue,
-                       PromiseTaskSync aSync = AsyncTask);
-
+                       JS::Handle<JS::Value> aValue);
   void RejectInternal(JSContext* aCx,
-                      JS::Handle<JS::Value> aValue,
-                      PromiseTaskSync aSync = AsyncTask);
+                      JS::Handle<JS::Value> aValue);
 
   template <typename T>
   void MaybeSomething(T& aArgument, MaybeFunc aFunc) {
@@ -319,7 +317,6 @@ private:
   // have a fulfillment stack.
   JS::Heap<JSObject*> mFullfillmentStack;
   PromiseState mState;
-  bool mTaskPending;
   bool mHadRejectCallback;
 
   bool mResolvePending;

@@ -25,7 +25,6 @@
 #include "nsXMLHttpRequest.h"
 #include "WrapperFactory.h"
 #include "xpcprivate.h"
-#include "XPCQuickStubs.h"
 #include "XPCWrapper.h"
 #include "XrayWrapper.h"
 #include "mozilla/dom/BindingUtils.h"
@@ -304,10 +303,9 @@ sandbox_enumerate(JSContext *cx, HandleObject obj)
 }
 
 static bool
-sandbox_resolve(JSContext *cx, HandleObject obj, HandleId id)
+sandbox_resolve(JSContext *cx, HandleObject obj, HandleId id, bool *resolvedp)
 {
-    bool resolved;
-    return JS_ResolveStandardClass(cx, obj, id, &resolved);
+    return JS_ResolveStandardClass(cx, obj, id, resolvedp);
 }
 
 static void
@@ -328,10 +326,13 @@ sandbox_finalize(js::FreeOp *fop, JSObject *obj)
 static void
 sandbox_moved(JSObject *obj, const JSObject *old)
 {
+    // Note that this hook can be called before the private pointer is set. In
+    // this case the SandboxPrivate will not exist yet, so there is nothing to
+    // do.
     nsIScriptObjectPrincipal *sop =
         static_cast<nsIScriptObjectPrincipal *>(xpc_GetJSPrivate(obj));
-    MOZ_ASSERT(sop);
-    static_cast<SandboxPrivate *>(sop)->ObjectMoved(obj, old);
+    if (sop)
+        static_cast<SandboxPrivate *>(sop)->ObjectMoved(obj, old);
 }
 
 static bool
@@ -444,8 +445,10 @@ sandbox_addProperty(JSContext *cx, HandleObject obj, HandleId id, MutableHandleV
     if (!JS_GetPropertyDescriptorById(cx, obj, id, &pd))
         return false;
     unsigned attrs = pd.attributes() & ~(JSPROP_GETTER | JSPROP_SETTER);
-    if (!JS_DefinePropertyById(cx, obj, id, vp, attrs,
-                               writeToProto_getProperty, writeToProto_setProperty))
+    if (!JS_DefinePropertyById(cx, obj, id, vp,
+                               attrs | JSPROP_PROPOP_ACCESSORS,
+                               JS_PROPERTYOP_GETTER(writeToProto_getProperty),
+                               JS_PROPERTYOP_SETTER(writeToProto_setProperty)))
         return false;
 
     return true;
@@ -463,7 +466,6 @@ static const js::Class SandboxClass = {
     {
       nullptr,      /* outerObject */
       nullptr,      /* innerObject */
-      nullptr,      /* iteratorObject */
       false,        /* isWrappedNative */
       nullptr,      /* weakmapKeyDelegateOp */
       sandbox_moved /* objectMovedOp */
@@ -483,7 +485,6 @@ static const js::Class SandboxWriteToProtoClass = {
     {
       nullptr,      /* outerObject */
       nullptr,      /* innerObject */
-      nullptr,      /* iteratorObject */
       false,        /* isWrappedNative */
       nullptr,      /* weakmapKeyDelegateOp */
       sandbox_moved /* objectMovedOp */

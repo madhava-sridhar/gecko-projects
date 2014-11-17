@@ -33,7 +33,6 @@
 #include "vm/ScopeObject-inl.h"
 
 using namespace js;
-using namespace JS;
 
 using mozilla::Move;
 using mozilla::PodArrayZero;
@@ -289,8 +288,9 @@ DefineHelpProperty(JSContext *cx, HandleObject obj, const char *prop, const char
     RootedAtom atom(cx, Atomize(cx, value, strlen(value)));
     if (!atom)
         return false;
-    return JS_DefineProperty(cx, obj, prop, atom, JSPROP_READONLY | JSPROP_PERMANENT,
-                             JS_PropertyStub, JS_StrictPropertyStub);
+    return JS_DefineProperty(cx, obj, prop, atom,
+                             JSPROP_READONLY | JSPROP_PERMANENT,
+                             JS_STUBGETTER, JS_STUBSETTER);
 }
 
 JS_FRIEND_API(bool)
@@ -1094,13 +1094,13 @@ JS::WasIncrementalGC(JSRuntime *rt)
 }
 
 char16_t *
-GCDescription::formatMessage(JSRuntime *rt) const
+JS::GCDescription::formatMessage(JSRuntime *rt) const
 {
     return rt->gc.stats.formatMessage();
 }
 
 char16_t *
-GCDescription::formatJSON(JSRuntime *rt, uint64_t timestamp) const
+JS::GCDescription::formatJSON(JSRuntime *rt, uint64_t timestamp) const
 {
     return rt->gc.stats.formatJSON(timestamp);
 }
@@ -1384,14 +1384,6 @@ JS_FRIEND_API(JSObject *)
 js::GetObjectMetadata(JSObject *obj)
 {
     return obj->getMetadata();
-}
-
-JS_FRIEND_API(void)
-js::UnsafeDefineElement(JSContext *cx, JS::HandleObject obj, uint32_t index, JS::HandleValue value)
-{
-    MOZ_ASSERT(obj->isNative());
-    MOZ_ASSERT(index < obj->as<NativeObject>().getDenseInitializedLength());
-    obj->as<NativeObject>().setDenseElementWithType(cx, index, value);
 }
 
 JS_FRIEND_API(bool)

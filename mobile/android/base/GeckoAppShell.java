@@ -25,27 +25,25 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.NoSuchElementException;
 import java.util.Queue;
-import java.util.Set;
 import java.util.StringTokenizer;
 import java.util.TreeMap;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
 
-import org.json.JSONException;
-import org.json.JSONObject;
 import org.mozilla.gecko.AppConstants.Versions;
+import org.mozilla.gecko.favicons.Favicons;
 import org.mozilla.gecko.favicons.OnFaviconLoadedListener;
 import org.mozilla.gecko.favicons.decoders.FaviconDecoder;
 import org.mozilla.gecko.gfx.BitmapUtils;
 import org.mozilla.gecko.gfx.LayerView;
 import org.mozilla.gecko.gfx.PanZoomController;
+import org.mozilla.gecko.mozglue.ContextUtils;
 import org.mozilla.gecko.mozglue.GeckoLoader;
 import org.mozilla.gecko.mozglue.JNITarget;
 import org.mozilla.gecko.mozglue.RobocopTarget;
 import org.mozilla.gecko.mozglue.generatorannotations.OptionalGeneratedParameter;
 import org.mozilla.gecko.mozglue.generatorannotations.WrapElementForJNI;
 import org.mozilla.gecko.prompts.PromptService;
-import org.mozilla.gecko.SmsManager;
 import org.mozilla.gecko.util.EventCallback;
 import org.mozilla.gecko.util.GeckoRequest;
 import org.mozilla.gecko.util.HardwareUtils;
@@ -53,7 +51,6 @@ import org.mozilla.gecko.util.NativeEventListener;
 import org.mozilla.gecko.util.NativeJSContainer;
 import org.mozilla.gecko.util.NativeJSObject;
 import org.mozilla.gecko.util.ProxySelector;
-import org.mozilla.gecko.util.StringUtils;
 import org.mozilla.gecko.util.ThreadUtils;
 
 import android.app.Activity;
@@ -137,10 +134,13 @@ public class GeckoAppShell
         }
 
         @Override
-        protected Bundle getCrashExtras(final Thread thread, final Throwable exc,
-                                        final Context appContext) {
-            final Bundle extras = super.getCrashExtras(
-                thread, exc, sContextGetter != null ? getContext() : null);
+        protected Context getAppContext() {
+            return sContextGetter != null ? getContext() : null;
+        }
+
+        @Override
+        protected Bundle getCrashExtras(final Thread thread, final Throwable exc) {
+            final Bundle extras = super.getCrashExtras(thread, exc);
 
             extras.putString("ProductName", AppConstants.MOZ_APP_BASENAME);
             extras.putString("ProductID", AppConstants.MOZ_APP_ID);
@@ -189,6 +189,11 @@ public class GeckoAppShell
             return false;
         }
     };
+
+    public static CrashHandler ensureCrashHandling() {
+        // Crash handling is automatically enabled when GeckoAppShell is loaded.
+        return CRASH_HANDLER;
+    }
 
     private static final Queue<GeckoEvent> PENDING_EVENTS = new ConcurrentLinkedQueue<GeckoEvent>();
     private static final Map<String, String> ALERT_COOKIES = new ConcurrentHashMap<String, String>();
@@ -522,7 +527,7 @@ public class GeckoAppShell
         }
     }
 
-    private static Runnable sCallbackRunnable = new Runnable() {
+    private static final Runnable sCallbackRunnable = new Runnable() {
         @Override
         public void run() {
             ThreadUtils.assertOnUiThread();
@@ -802,21 +807,24 @@ public class GeckoAppShell
     // This is the entry point from nsIShellService.
     @WrapElementForJNI
     static void createShortcut(final String aTitle, final String aURI, final String aIconData) {
-        ThreadUtils.postToBackgroundThread(new Runnable() {
-            @Override
-            public void run() {
-                // TODO: use the cache. Bug 961600.
-                Bitmap icon = FaviconDecoder.getMostSuitableBitmapFromDataURI(aIconData, getPreferredIconSize());
-                GeckoAppShell.doCreateShortcut(aTitle, aURI, icon);
+        // We have the favicon data (base64) decoded on the background thread, callback here, then
+        // call the other createShortcut method with the decoded favicon.
+        // This is slightly contrived, but makes the images available to the favicon cache.
+        Favicons.getSizedFavicon(getContext(), aURI, aIconData, Integer.MAX_VALUE, 0,
+            new OnFaviconLoadedListener() {
+                @Override
+                public void onFaviconLoaded(String url, String faviconURL, Bitmap favicon) {
+                    createShortcut(aTitle, url, favicon);
+                }
             }
-        });
+        );
     }
 
     public static void createShortcut(final String aTitle, final String aURI, final Bitmap aBitmap) {
         ThreadUtils.postToBackgroundThread(new Runnable() {
             @Override
             public void run() {
-                GeckoAppShell.doCreateShortcut(aTitle, aURI, aBitmap);
+                doCreateShortcut(aTitle, aURI, aBitmap);
             }
         });
     }
@@ -1407,6 +1415,13 @@ public class GeckoAppShell
         return (Vibrator) layerView.getContext().getSystemService(Context.VIBRATOR_SERVICE);
     }
 
+    // Vibrate only if haptic feedback is enabled.
+    public static void vibrateOnHapticFeedbackEnabled(long milliseconds) {
+        if (Settings.System.getInt(getContext().getContentResolver(), Settings.System.HAPTIC_FEEDBACK_ENABLED, 0) > 0) {
+            vibrate(milliseconds);
+        }
+    }
+
     @WrapElementForJNI(stubName = "Vibrate1")
     public static void vibrate(long milliseconds) {
         sVibrationEndTime = System.nanoTime() + milliseconds * 1000000;
@@ -1843,7 +1858,7 @@ public class GeckoAppShell
 
     private static final String PLUGIN_TYPE = "type";
     private static final String TYPE_NATIVE = "native";
-    static public ArrayList<PackageInfo> mPackageInfoCache = new ArrayList<PackageInfo>();
+    public static final ArrayList<PackageInfo> mPackageInfoCache = new ArrayList<>();
 
     // Returns null if plugins are blocked on the device.
     static String[] getPluginDirectories() {
@@ -2119,7 +2134,7 @@ public class GeckoAppShell
 
     static native void cameraCallbackBridge(byte[] data);
 
-    static int kPreferedFps = 25;
+    static final int kPreferredFPS = 25;
     static byte[] sCameraBuffer;
 
 
@@ -2158,13 +2173,13 @@ public class GeckoAppShell
                 Iterator<Integer> it = params.getSupportedPreviewFrameRates().iterator();
                 while (it.hasNext()) {
                     int nFps = it.next();
-                    if (Math.abs(nFps - kPreferedFps) < fpsDelta) {
-                        fpsDelta = Math.abs(nFps - kPreferedFps);
+                    if (Math.abs(nFps - kPreferredFPS) < fpsDelta) {
+                        fpsDelta = Math.abs(nFps - kPreferredFPS);
                         params.setPreviewFrameRate(nFps);
                     }
                 }
             } catch(Exception e) {
-                params.setPreviewFrameRate(kPreferedFps);
+                params.setPreviewFrameRate(kPreferredFPS);
             }
 
             // set up the closest preview size available
@@ -2189,9 +2204,7 @@ public class GeckoAppShell
                         sCamera.setPreviewTexture(((TextureView)cameraView).getSurfaceTexture());
                     }
                 }
-            } catch(IOException e) {
-                Log.w(LOGTAG, "Error setPreviewXXX:", e);
-            } catch(RuntimeException e) {
+            } catch (IOException | RuntimeException e) {
                 Log.w(LOGTAG, "Error setPreviewXXX:", e);
             }
 
@@ -2371,12 +2384,22 @@ public class GeckoAppShell
 
     @WrapElementForJNI
     public static void enableNetworkNotifications() {
-        GeckoNetworkManager.getInstance().enableNotifications();
+        ThreadUtils.postToUiThread(new Runnable() {
+            @Override
+            public void run() {
+                GeckoNetworkManager.getInstance().enableNotifications();
+            }
+        });
     }
 
     @WrapElementForJNI
     public static void disableNetworkNotifications() {
-        GeckoNetworkManager.getInstance().disableNotifications();
+        ThreadUtils.postToUiThread(new Runnable() {
+            @Override
+            public void run() {
+                GeckoNetworkManager.getInstance().disableNotifications();
+            }
+        });
     }
 
     /**
@@ -2501,7 +2524,7 @@ public class GeckoAppShell
     /* Downloads the URI pointed to by a share intent, and alters the intent to point to the locally stored file.
      */
     public static void downloadImageForIntent(final Intent intent) {
-        final String src = StringUtils.getStringExtra(intent, Intent.EXTRA_TEXT);
+        final String src = ContextUtils.getStringExtra(intent, Intent.EXTRA_TEXT);
         if (src == null) {
             showImageShareFailureToast();
             return;

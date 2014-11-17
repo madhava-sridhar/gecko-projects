@@ -181,10 +181,21 @@ JSObject::getProto(JSContext *cx, js::HandleObject obj, js::MutableHandleObject 
 /* static */ inline bool
 JSObject::setProto(JSContext *cx, JS::HandleObject obj, JS::HandleObject proto, bool *succeeded)
 {
-    /* Proxies live in their own little world. */
-    if (obj->getTaggedProto().isLazy()) {
+    /*
+     * If |obj| has a "lazy" [[Prototype]], it is 1) a proxy 2) whose handler's
+     * {get,set}PrototypeOf and setImmutablePrototype methods mediate access to
+     * |obj.[[Prototype]]|.  The Proxy subsystem is responsible for responding
+     * to such attempts.
+     */
+    if (obj->hasLazyPrototype()) {
         MOZ_ASSERT(obj->is<js::ProxyObject>());
         return js::Proxy::setPrototypeOf(cx, obj, proto, succeeded);
+    }
+
+    /* Disallow mutation of immutable [[Prototype]]s. */
+    if (obj->nonLazyPrototypeIsImmutable()) {
+        *succeeded = false;
+        return true;
     }
 
     /*
@@ -272,8 +283,10 @@ JSObject::isUnqualifiedVarObj()
     return lastProperty()->hasObjectFlag(js::BaseShape::UNQUALIFIED_VAROBJ);
 }
 
+namespace js {
+
 inline bool
-ClassCanHaveFixedData(const js::Class *clasp)
+ClassCanHaveFixedData(const Class *clasp)
 {
     // Normally, the number of fixed slots given an object is the maximum
     // permitted for its size class. For array buffers and non-shared typed
@@ -282,9 +295,10 @@ ClassCanHaveFixedData(const js::Class *clasp)
     // buffer's data.
     return !clasp->isNative()
         || clasp == &js::ArrayBufferObject::class_
-        || clasp == &js::InlineOpaqueTypedObject::class_
         || js::IsTypedArrayClass(clasp);
 }
+
+} // namespace js
 
 /* static */ inline JSObject *
 JSObject::create(js::ExclusiveContext *cx, js::gc::AllocKind kind, js::gc::InitialHeap heap,
@@ -293,7 +307,7 @@ JSObject::create(js::ExclusiveContext *cx, js::gc::AllocKind kind, js::gc::Initi
     MOZ_ASSERT(shape && type);
     MOZ_ASSERT(type->clasp() == shape->getObjectClass());
     MOZ_ASSERT(type->clasp() != &js::ArrayObject::class_);
-    MOZ_ASSERT_IF(!ClassCanHaveFixedData(type->clasp()),
+    MOZ_ASSERT_IF(!js::ClassCanHaveFixedData(type->clasp()),
                   js::gc::GetGCKindSlots(kind, type->clasp()) == shape->numFixedSlots());
     MOZ_ASSERT_IF(type->clasp()->flags & JSCLASS_BACKGROUND_FINALIZE, IsBackgroundFinalized(kind));
     MOZ_ASSERT_IF(type->clasp()->finalize, heap == js::gc::TenuredHeap);
@@ -790,6 +804,8 @@ Unbox(JSContext *cx, HandleObject obj, MutableHandleValue vp)
         vp.setNumber(obj->as<NumberObject>().unbox());
     else if (obj->is<StringObject>())
         vp.setString(obj->as<StringObject>().unbox());
+    else if (obj->is<DateObject>())
+        vp.set(obj->as<DateObject>().UTCTime());
     else
         vp.setUndefined();
 
@@ -804,7 +820,7 @@ NewObjectMetadata(ExclusiveContext *cxArg, JSObject **pmetadata)
     MOZ_ASSERT(!*pmetadata);
     if (JSContext *cx = cxArg->maybeJSContext()) {
         if (MOZ_UNLIKELY((size_t)cx->compartment()->hasObjectMetadataCallback()) &&
-            !cx->compartment()->activeAnalysis)
+            !cx->zone()->types.activeAnalysis)
         {
             // Use AutoEnterAnalysis to prohibit both any GC activity under the
             // callback, and any reentering of JS via Invoke() etc.

@@ -357,6 +357,11 @@ class Parser : private JS::AutoGCRooter, public StrictModeGetter
     const bool          foldConstants:1;
 
   private:
+#if DEBUG
+    /* Our fallible 'checkOptions' member function has been called. */
+    bool checkOptionsCalled:1;
+#endif
+
     /*
      * Not all language constructs can be handled during syntax parsing. If it
      * is not known whether the parse succeeds or fails, this bit is set and
@@ -394,6 +399,8 @@ class Parser : private JS::AutoGCRooter, public StrictModeGetter
            Parser<SyntaxParseHandler> *syntaxParser,
            LazyScript *lazyOuterFunction);
     ~Parser();
+
+    bool checkOptions();
 
     // A Parser::Mark is the extension of the LifoAlloc::Mark to the entire
     // Parser's state. Note: clients must still take care that any ParseContext
@@ -461,7 +468,7 @@ class Parser : private JS::AutoGCRooter, public StrictModeGetter
     Node templateLiteral();
     bool taggedTemplate(Node nodeList, TokenKind tt);
     bool appendToCallSiteObj(Node callSiteObj);
-    bool addExprAndGetNextTemplStrToken(Node nodeList, TokenKind &tt);
+    bool addExprAndGetNextTemplStrToken(Node nodeList, TokenKind *ttp);
 
     inline Node newName(PropertyName *name);
     inline Node newYieldExpression(uint32_t begin, Node expr, bool isYieldStar = false);
@@ -542,7 +549,7 @@ class Parser : private JS::AutoGCRooter, public StrictModeGetter
     Node tryStatement();
     Node debuggerStatement();
 
-    Node letDeclaration();
+    Node lexicalDeclaration(bool isConst);
     Node letStatement();
     Node importDeclaration();
     Node exportDeclaration();
@@ -622,7 +629,7 @@ class Parser : private JS::AutoGCRooter, public StrictModeGetter
     };
 
     bool checkAndMarkAsAssignmentLhs(Node pn, AssignmentFlavor flavor);
-    bool matchInOrOf(bool *isForOfp);
+    bool matchInOrOf(bool *isForInp, bool *isForOfp);
 
     bool checkFunctionArguments();
     bool makeDefIntoUse(Definition *dn, Node pn, JSAtom *atom, bool *pbodyLevelHoistedUse);
@@ -634,6 +641,7 @@ class Parser : private JS::AutoGCRooter, public StrictModeGetter
 
     bool isValidForStatementLHS(Node pn1, JSVersion version, bool forDecl, bool forEach,
                                 ParseNodeKind headKind);
+    bool checkForHeadConstInitializers(Node pn1);
     bool checkAndMarkAsIncOperand(Node kid, TokenKind tt, bool preorder);
     bool checkStrictAssignment(Node lhs);
     bool checkStrictBinding(PropertyName *name, Node pn);
@@ -667,16 +675,16 @@ class Parser : private JS::AutoGCRooter, public StrictModeGetter
                          HandlePropertyName name, Parser<ParseHandler> *parser);
 
     static bool
-    bindLet(BindData<ParseHandler> *data,
-            HandlePropertyName name, Parser<ParseHandler> *parser);
+    bindLexical(BindData<ParseHandler> *data,
+                HandlePropertyName name, Parser<ParseHandler> *parser);
 
     static bool
-    bindVarOrConst(BindData<ParseHandler> *data,
-                   HandlePropertyName name, Parser<ParseHandler> *parser);
+    bindVarOrGlobalConst(BindData<ParseHandler> *data,
+                         HandlePropertyName name, Parser<ParseHandler> *parser);
 
     static Node null() { return ParseHandler::null(); }
 
-    bool reportRedeclaration(Node pn, bool isConst, HandlePropertyName name);
+    bool reportRedeclaration(Node pn, Definition::Kind redeclKind, HandlePropertyName name);
     bool reportBadReturn(Node pn, ParseReportKind kind, unsigned errnum, unsigned anonerrnum);
     DefinitionNode getOrCreateLexicalDependency(ParseContext<ParseHandler> *pc, JSAtom *atom);
 

@@ -12,6 +12,7 @@
 #include "mozilla/PodOperations.h"
 
 #include "jscntxt.h"
+#include "jsscript.h"
 
 #include "jit/BaselineFrame.h"
 #include "jit/RematerializedFrame.h"
@@ -19,6 +20,7 @@
 #include "vm/ScopeObject.h"
 
 #include "jsobjinlines.h"
+#include "jsscriptinlines.h"
 
 #include "jit/BaselineFrame-inl.h"
 
@@ -89,6 +91,9 @@ InterpreterFrame::initCallFrame(JSContext *cx, InterpreterFrame *prev, jsbytecod
     prevpc_ = prevpc;
     prevsp_ = prevsp;
 
+    if (script->isDebuggee())
+        setIsDebuggee();
+
     initLocals();
 }
 
@@ -110,20 +115,9 @@ InterpreterFrame::initLocals()
 }
 
 inline Value &
-InterpreterFrame::unaliasedVar(uint32_t i, MaybeCheckAliasing checkAliasing)
-{
-    MOZ_ASSERT_IF(checkAliasing, !script()->varIsAliased(i));
-    MOZ_ASSERT(i < script()->nfixedvars());
-    return slots()[i];
-}
-
-inline Value &
-InterpreterFrame::unaliasedLocal(uint32_t i, MaybeCheckAliasing checkAliasing)
+InterpreterFrame::unaliasedLocal(uint32_t i)
 {
     MOZ_ASSERT(i < script()->nfixed());
-#ifdef DEBUG
-    CheckLocalUnaliased(checkAliasing, script(), i);
-#endif
     return slots()[i];
 }
 
@@ -231,12 +225,19 @@ InterpreterFrame::callObj() const
     return pobj->as<CallObject>();
 }
 
+inline void
+InterpreterFrame::unsetIsDebuggee()
+{
+    MOZ_ASSERT(!script()->isDebuggee());
+    flags_ &= ~DEBUGGEE;
+}
+
 /*****************************************************************************/
 
 inline void
 InterpreterStack::purge(JSRuntime *rt)
 {
-    rt->freeLifoAlloc.transferUnusedFrom(&allocator_);
+    rt->gc.freeUnusedLifoBlocksAfterSweeping(&allocator_);
 }
 
 uint8_t *
@@ -488,27 +489,17 @@ AbstractFramePtr::numFormalArgs() const
         return asInterpreterFrame()->numFormalArgs();
     if (isBaselineFrame())
         return asBaselineFrame()->numFormalArgs();
-    return asRematerializedFrame()->numActualArgs();
+    return asRematerializedFrame()->numFormalArgs();
 }
 
 inline Value &
-AbstractFramePtr::unaliasedVar(uint32_t i, MaybeCheckAliasing checkAliasing)
+AbstractFramePtr::unaliasedLocal(uint32_t i)
 {
     if (isInterpreterFrame())
-        return asInterpreterFrame()->unaliasedVar(i, checkAliasing);
+        return asInterpreterFrame()->unaliasedLocal(i);
     if (isBaselineFrame())
-        return asBaselineFrame()->unaliasedVar(i, checkAliasing);
-    return asRematerializedFrame()->unaliasedVar(i, checkAliasing);
-}
-
-inline Value &
-AbstractFramePtr::unaliasedLocal(uint32_t i, MaybeCheckAliasing checkAliasing)
-{
-    if (isInterpreterFrame())
-        return asInterpreterFrame()->unaliasedLocal(i, checkAliasing);
-    if (isBaselineFrame())
-        return asBaselineFrame()->unaliasedLocal(i, checkAliasing);
-    return asRematerializedFrame()->unaliasedLocal(i, checkAliasing);
+        return asBaselineFrame()->unaliasedLocal(i);
+    return asRematerializedFrame()->unaliasedLocal(i);
 }
 
 inline Value &
@@ -550,14 +541,6 @@ AbstractFramePtr::useNewType() const
 }
 
 inline bool
-AbstractFramePtr::isGeneratorFrame() const
-{
-    if (isInterpreterFrame())
-        return asInterpreterFrame()->isGeneratorFrame();
-    return false;
-}
-
-inline bool
 AbstractFramePtr::isFunctionFrame() const
 {
     if (isInterpreterFrame())
@@ -587,15 +570,48 @@ AbstractFramePtr::isEvalFrame() const
     MOZ_ASSERT(isRematerializedFrame());
     return false;
 }
+
 inline bool
-AbstractFramePtr::isDebuggerFrame() const
+AbstractFramePtr::isDebuggerEvalFrame() const
 {
     if (isInterpreterFrame())
-        return asInterpreterFrame()->isDebuggerFrame();
+        return asInterpreterFrame()->isDebuggerEvalFrame();
     if (isBaselineFrame())
-        return asBaselineFrame()->isDebuggerFrame();
+        return asBaselineFrame()->isDebuggerEvalFrame();
     MOZ_ASSERT(isRematerializedFrame());
     return false;
+}
+
+inline bool
+AbstractFramePtr::isDebuggee() const
+{
+    if (isInterpreterFrame())
+        return asInterpreterFrame()->isDebuggee();
+    if (isBaselineFrame())
+        return asBaselineFrame()->isDebuggee();
+    return asRematerializedFrame()->isDebuggee();
+}
+
+inline void
+AbstractFramePtr::setIsDebuggee()
+{
+    if (isInterpreterFrame())
+        asInterpreterFrame()->setIsDebuggee();
+    else if (isBaselineFrame())
+        asBaselineFrame()->setIsDebuggee();
+    else
+        asRematerializedFrame()->setIsDebuggee();
+}
+
+inline void
+AbstractFramePtr::unsetIsDebuggee()
+{
+    if (isInterpreterFrame())
+        asInterpreterFrame()->unsetIsDebuggee();
+    else if (isBaselineFrame())
+        asBaselineFrame()->unsetIsDebuggee();
+    else
+        asRematerializedFrame()->unsetIsDebuggee();
 }
 
 inline bool
@@ -834,7 +850,6 @@ Activation::mostRecentProfiling()
 InterpreterActivation::InterpreterActivation(RunState &state, JSContext *cx,
                                              InterpreterFrame *entryFrame)
   : Activation(cx, Interpreter),
-    state_(state),
     entryFrame_(entryFrame),
     opMask_(0)
 #ifdef DEBUG
@@ -843,7 +858,7 @@ InterpreterActivation::InterpreterActivation(RunState &state, JSContext *cx,
 {
     regs_.prepareToRun(*entryFrame, state.script());
     MOZ_ASSERT(regs_.pc == state.script()->code());
-    MOZ_ASSERT_IF(entryFrame_->isEvalFrame(), state_.script()->isActiveEval());
+    MOZ_ASSERT_IF(entryFrame_->isEvalFrame(), state.script()->isActiveEval());
 }
 
 InterpreterActivation::~InterpreterActivation()

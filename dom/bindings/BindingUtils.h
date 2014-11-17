@@ -39,10 +39,6 @@
 class nsIJSID;
 class nsPIDOMWindow;
 
-extern nsresult
-xpc_qsUnwrapArgImpl(JSContext* cx, JS::Handle<JS::Value> v, const nsIID& iid, void** ppArg,
-                    nsISupports** ppArgRef, JS::MutableHandle<JS::Value> vp);
-
 namespace mozilla {
 namespace dom {
 template<typename DataType> class MozMap;
@@ -56,18 +52,16 @@ struct SelfRef
   nsISupports* ptr;
 };
 
+nsresult
+UnwrapArgImpl(JS::Handle<JSObject*> src, const nsIID& iid, void** ppArg);
+
 /** Convert a jsval to an XPCOM pointer. */
-template <class Interface, class StrongRefType>
+template <class Interface>
 inline nsresult
-UnwrapArg(JSContext* cx, JS::Handle<JS::Value> v, Interface** ppArg,
-          StrongRefType** ppArgRef, JS::MutableHandle<JS::Value> vp)
+UnwrapArg(JS::Handle<JSObject*> src, Interface** ppArg)
 {
-  nsISupports* argRef = *ppArgRef;
-  nsresult rv = xpc_qsUnwrapArgImpl(cx, v, NS_GET_TEMPLATE_IID(Interface),
-                                    reinterpret_cast<void**>(ppArg), &argRef,
-                                    vp);
-  *ppArgRef = static_cast<StrongRefType*>(argRef);
-  return rv;
+  return UnwrapArgImpl(src, NS_GET_TEMPLATE_IID(Interface),
+                       reinterpret_cast<void**>(ppArg));
 }
 
 inline const ErrNum
@@ -177,6 +171,24 @@ UnwrapDOMObject(JSObject* obj)
              "Don't pass non-DOM objects to this function");
 
   JS::Value val = js::GetReservedOrProxyPrivateSlot(obj, DOM_OBJECT_SLOT);
+  return static_cast<T*>(val.toPrivate());
+}
+
+template <class T>
+inline T*
+UnwrapPossiblyNotInitializedDOMObject(JSObject* obj)
+{
+  // This is used by the OjectMoved JSClass hook which can be called before
+  // JS_NewObject has returned and so before we have a chance to set
+  // DOM_OBJECT_SLOT to anything useful.
+
+  MOZ_ASSERT(IsDOMClass(js::GetObjectClass(obj)),
+             "Don't pass non-DOM objects to this function");
+
+  JS::Value val = js::GetReservedOrProxyPrivateSlot(obj, DOM_OBJECT_SLOT);
+  if (val.isUndefined()) {
+    return nullptr;
+  }
   return static_cast<T*>(val.toPrivate());
 }
 
@@ -1492,22 +1504,6 @@ WrapNativeParent(JSContext* cx, const T& p)
   return WrapNativeParent(cx, GetParentPointer(p), GetWrapperCache(p), GetUseXBLScope(p));
 }
 
-// A way to differentiate between nodes, which use the parent object
-// returned by native->GetParentObject(), and all other objects, which
-// just use the parent's global.
-static inline JSObject*
-GetRealParentObject(void* aParent, JSObject* aParentObject)
-{
-  return aParentObject ?
-    js::GetGlobalForObjectCrossCompartment(aParentObject) : nullptr;
-}
-
-static inline JSObject*
-GetRealParentObject(Element* aParent, JSObject* aParentObject)
-{
-  return aParentObject;
-}
-
 HAS_MEMBER(GetParentObject)
 
 template<typename T, bool WrapperCached=HasGetParentObjectMember<T>::Value>
@@ -1517,9 +1513,8 @@ struct GetParentObject
   {
     MOZ_ASSERT(js::IsObjectInContextCompartment(obj, cx));
     T* native = UnwrapDOMObject<T>(obj);
-    return
-      GetRealParentObject(native,
-                          WrapNativeParent(cx, native->GetParentObject()));
+    JSObject* wrappedParent = WrapNativeParent(cx, native->GetParentObject());
+    return wrappedParent ? js::GetGlobalForObjectCrossCompartment(wrappedParent) : nullptr;
   }
 };
 
@@ -2808,7 +2803,7 @@ FinalizeGlobal(JSFreeOp* aFop, JSObject* aObj);
 
 bool
 ResolveGlobal(JSContext* aCx, JS::Handle<JSObject*> aObj,
-              JS::Handle<jsid> aId, JS::MutableHandle<JSObject*> aObjp);
+              JS::Handle<jsid> aId, bool* aResolvedp);
 
 bool
 EnumerateGlobal(JSContext* aCx, JS::Handle<JSObject*> aObj);

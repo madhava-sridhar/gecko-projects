@@ -243,6 +243,16 @@ class gcstats::StatisticsSerializer
 JS_STATIC_ASSERT(JS::gcreason::NUM_TELEMETRY_REASONS >= JS::gcreason::NUM_REASONS);
 
 const char *
+js::gcstats::ExplainInvocationKind(JSGCInvocationKind gckind)
+{
+    MOZ_ASSERT(gckind == GC_NORMAL || gckind == GC_SHRINK);
+    if (gckind == GC_NORMAL)
+         return "Normal";
+    else
+         return "Shrinking";
+}
+
+const char *
 js::gcstats::ExplainReason(JS::gcreason::Reason reason)
 {
     switch (reason) {
@@ -301,10 +311,9 @@ static const PhaseInfo phases[] = {
             { PHASE_SWEEP_BREAKPOINT, "Sweep Breakpoints", PHASE_SWEEP_COMPARTMENTS },
             { PHASE_SWEEP_REGEXP, "Sweep Regexps", PHASE_SWEEP_COMPARTMENTS },
             { PHASE_SWEEP_MISC, "Sweep Miscellaneous", PHASE_SWEEP_COMPARTMENTS },
-            { PHASE_DISCARD_ANALYSIS, "Discard Analysis", PHASE_SWEEP_COMPARTMENTS },
-                { PHASE_DISCARD_TI, "Discard TI", PHASE_DISCARD_ANALYSIS },
-                { PHASE_FREE_TI_ARENA, "Free TI Arena", PHASE_DISCARD_ANALYSIS },
-                { PHASE_SWEEP_TYPES, "Sweep Types", PHASE_DISCARD_ANALYSIS },
+            { PHASE_SWEEP_TYPES, "Sweep type information", PHASE_SWEEP_COMPARTMENTS },
+                { PHASE_SWEEP_TYPES_BEGIN, "Sweep type tables and compilations", PHASE_SWEEP_TYPES },
+                { PHASE_SWEEP_TYPES_END, "Free type arena", PHASE_SWEEP_TYPES },
         { PHASE_SWEEP_OBJECT, "Sweep Object", PHASE_SWEEP },
         { PHASE_SWEEP_STRING, "Sweep String", PHASE_SWEEP },
         { PHASE_SWEEP_SCRIPT, "Sweep Script", PHASE_SWEEP },
@@ -461,6 +470,7 @@ Statistics::formatDescription()
 
     const char *format =
 "=================================================================\n\
+  Invocation Kind: %s\n\
   Reason: %s\n\
   Incremental: %s%s\n\
   Zones Collected: %d of %d\n\
@@ -474,6 +484,7 @@ Statistics::formatDescription()
     char buffer[1024];
     memset(buffer, 0, sizeof(buffer));
     JS_snprintf(buffer, sizeof(buffer), format,
+                ExplainInvocationKind(gckind),
                 ExplainReason(slices[0].reason),
                 nonincrementalReason ? "no - " : "yes",
                                                   nonincrementalReason ? nonincrementalReason : "",
@@ -710,13 +721,14 @@ Statistics::printStats()
 }
 
 void
-Statistics::beginGC()
+Statistics::beginGC(JSGCInvocationKind kind)
 {
     PodArrayZero(phaseStartTimes);
     PodArrayZero(phaseTimes);
 
     slices.clearAndFree();
     sccTimes.clearAndFree();
+    gckind = kind;
     nonincrementalReason = nullptr;
 
     preBytes = runtime->gc.usage.gcBytes();
@@ -758,16 +770,18 @@ Statistics::endGC()
 }
 
 void
-Statistics::beginSlice(const ZoneGCStats &zoneStats, JS::gcreason::Reason reason)
+Statistics::beginSlice(const ZoneGCStats &zoneStats, JSGCInvocationKind gckind,
+                       JS::gcreason::Reason reason)
 {
     this->zoneStats = zoneStats;
 
     bool first = runtime->gc.state() == gc::NO_INCREMENTAL;
     if (first)
-        beginGC();
+        beginGC(gckind);
 
     SliceData data(reason, PRMJ_Now(), GetPageFaultCount());
-    (void) slices.append(data); /* Ignore any OOMs here. */
+    if (!slices.append(data))
+        CrashAtUnhandlableOOM("Failed to allocate statistics slice.");
 
     if (JSAccumulateTelemetryDataCallback cb = runtime->telemetryCallback)
         (*cb)(JS_TELEMETRY_GC_REASON, reason);

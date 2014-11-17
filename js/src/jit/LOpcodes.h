@@ -48,6 +48,7 @@
     _(NewArrayCopyOnWrite)          \
     _(ArraySplice)                  \
     _(NewObject)                    \
+    _(NewTypedObject)               \
     _(NewDeclEnvObject)             \
     _(NewCallObject)                \
     _(NewSingletonCallObject)       \
@@ -172,6 +173,7 @@
     _(IntToString)                  \
     _(DoubleToString)               \
     _(ValueToString)                \
+    _(ValueToObjectOrNull)          \
     _(Int32x4ToFloat32x4)           \
     _(Float32x4ToInt32x4)           \
     _(Start)                        \
@@ -211,15 +213,17 @@
     _(PostWriteBarrierV)            \
     _(InitializedLength)            \
     _(SetInitializedLength)         \
-    _(NeuterCheck)                  \
     _(BoundsCheck)                  \
     _(BoundsCheckRange)             \
     _(BoundsCheckLower)             \
     _(LoadElementV)                 \
     _(LoadElementT)                 \
     _(LoadElementHole)              \
+    _(LoadUnboxedPointerV)          \
+    _(LoadUnboxedPointerT)          \
     _(StoreElementV)                \
     _(StoreElementT)                \
+    _(StoreUnboxedPointer)          \
     _(ArrayPopShiftV)               \
     _(ArrayPopShiftT)               \
     _(ArrayPushV)                   \
@@ -234,6 +238,8 @@
     _(StoreTypedArrayElement)       \
     _(StoreTypedArrayElementHole)   \
     _(StoreTypedArrayElementStatic) \
+    _(CompareExchangeTypedArrayElement) \
+    _(AtomicTypedArrayElementBinop) \
     _(EffectiveAddress)             \
     _(ClampIToUint8)                \
     _(ClampDToUint8)                \
@@ -278,7 +284,6 @@
     _(TypedArrayLength)             \
     _(TypedArrayElements)           \
     _(TypedObjectProto)             \
-    _(TypedObjectUnsizedLength)     \
     _(TypedObjectElements)          \
     _(SetTypedObjectOffset)         \
     _(StringLength)                 \
@@ -313,6 +318,7 @@
     _(CallDOMNative)                \
     _(IsCallable)                   \
     _(IsObject)                     \
+    _(IsObjectAndBranch)            \
     _(HaveSameClass)                \
     _(HasClass)                     \
     _(AsmJSLoadHeap)                \
@@ -327,6 +333,7 @@
     _(AsmJSCall)                    \
     _(InterruptCheckPar)            \
     _(RecompileCheck)               \
+    _(MemoryBarrier)                \
     _(AssertRangeI)                 \
     _(AssertRangeD)                 \
     _(AssertRangeF)                 \

@@ -31,7 +31,6 @@
 //
 // The few items below here are either self-hosted or installing them under a
 // std_Foo name would require ugly contortions, so they just get aliased here.
-var std_iterator = '@@iterator'; // FIXME: Change to be a symbol.
 var std_Array_indexOf = ArrayIndexOf;
 // WeakMap is a bare constructor without properties or methods.
 var std_WeakMap = WeakMap;
@@ -100,7 +99,7 @@ function ToLength(v) {
         return 0;
 
     // Math.pow(2, 53) - 1 = 0x1fffffffffffff
-    return v < 0x1fffffffffffff ? v : 0x1fffffffffffff;
+    return std_Math_min(v, 0x1fffffffffffff);
 }
 
 /********** Testing code **********/

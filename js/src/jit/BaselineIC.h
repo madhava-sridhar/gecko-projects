@@ -375,10 +375,12 @@ class ICEntry
     _(Call_Scripted)            \
     _(Call_AnyScripted)         \
     _(Call_Native)              \
+    _(Call_ClassHook)           \
     _(Call_ScriptedApplyArray)  \
     _(Call_ScriptedApplyArguments) \
     _(Call_ScriptedFunCall)     \
     _(Call_StringSplit)         \
+    _(Call_IsSuspendedStarGenerator) \
                                 \
     _(GetElem_Fallback)         \
     _(GetElem_NativeSlot)       \
@@ -790,6 +792,7 @@ class ICStub
           case Call_Scripted:
           case Call_AnyScripted:
           case Call_Native:
+          case Call_ClassHook:
           case Call_ScriptedApplyArray:
           case Call_ScriptedApplyArguments:
           case Call_ScriptedFunCall:
@@ -4421,6 +4424,7 @@ class ICGetPropNativeCompiler : public ICStubCompiler
     HandlePropertyName propName_;
     bool isFixedSlot_;
     uint32_t offset_;
+    bool inputDefinitelyObject_;
 
     bool generateStubCode(MacroAssembler &masm);
 
@@ -4429,16 +4433,20 @@ class ICGetPropNativeCompiler : public ICStubCompiler
 #if JS_HAS_NO_SUCH_METHOD
         return static_cast<int32_t>(kind) |
                (static_cast<int32_t>(isCallProp_) << 16) |
-               (static_cast<int32_t>(isFixedSlot_) << 17);
+               (static_cast<int32_t>(isFixedSlot_) << 17) |
+               (static_cast<int32_t>(inputDefinitelyObject_) << 18);
 #else
-        return static_cast<int32_t>(kind) | (static_cast<int32_t>(isFixedSlot_) << 16);
+        return static_cast<int32_t>(kind) |
+               (static_cast<int32_t>(isFixedSlot_) << 16) |
+               (static_cast<int32_t>(inputDefinitelyObject_) << 17);
 #endif
     }
 
   public:
     ICGetPropNativeCompiler(JSContext *cx, ICStub::Kind kind, bool isCallProp,
                             ICStub *firstMonitorStub, HandleObject obj, HandleObject holder,
-                            HandlePropertyName propName, bool isFixedSlot, uint32_t offset)
+                            HandlePropertyName propName, bool isFixedSlot, uint32_t offset,
+                            bool inputDefinitelyObject = false)
       : ICStubCompiler(cx, kind),
         isCallProp_(isCallProp),
         firstMonitorStub_(firstMonitorStub),
@@ -4446,7 +4454,8 @@ class ICGetPropNativeCompiler : public ICStubCompiler
         holder_(holder),
         propName_(propName),
         isFixedSlot_(isFixedSlot),
-        offset_(offset)
+        offset_(offset),
+        inputDefinitelyObject_(inputDefinitelyObject)
     {}
 
     ICGetPropNativeStub *getStub(ICStubSpace *space) {
@@ -4806,15 +4815,23 @@ class ICGetProp_CallNativePrototype : public ICGetPropCallPrototypeGetter
                                                 ICGetProp_CallNativePrototype &other);
 
     class Compiler : public ICGetPropCallPrototypeGetter::Compiler {
+        bool inputDefinitelyObject_;
       protected:
         bool generateStubCode(MacroAssembler &masm);
 
+        virtual int32_t getKey() const {
+            return static_cast<int32_t>(kind) |
+                   (static_cast<int32_t>(inputDefinitelyObject_) << 16);
+        }
+
       public:
         Compiler(JSContext *cx, ICStub *firstMonitorStub, HandleObject obj,
-                 HandleObject holder, HandleFunction getter, uint32_t pcOffset)
+                 HandleObject holder, HandleFunction getter, uint32_t pcOffset,
+                 bool inputDefinitelyObject = false)
           : ICGetPropCallPrototypeGetter::Compiler(cx, ICStub::GetProp_CallNativePrototype,
                                                    firstMonitorStub, obj, holder,
-                                                   getter, pcOffset)
+                                                   getter, pcOffset),
+            inputDefinitelyObject_(inputDefinitelyObject)
         {}
 
         ICStub *getStub(ICStubSpace *space) {
@@ -5883,6 +5900,92 @@ class ICCall_Native : public ICMonitoredStub
     };
 };
 
+class ICCall_ClassHook : public ICMonitoredStub
+{
+    friend class ICStubSpace;
+
+  protected:
+    const Class *clasp_;
+    void *native_;
+    HeapPtrObject templateObject_;
+    uint32_t pcOffset_;
+
+    ICCall_ClassHook(JitCode *stubCode, ICStub *firstMonitorStub,
+                     const Class *clasp, Native native, HandleObject templateObject,
+                     uint32_t pcOffset);
+
+  public:
+    static inline ICCall_ClassHook *New(ICStubSpace *space,
+                                        JitCode *code, ICStub *firstMonitorStub,
+                                        const Class *clasp, Native native,
+                                        HandleObject templateObject,
+                                        uint32_t pcOffset)
+    {
+        if (!code)
+            return nullptr;
+        return space->allocate<ICCall_ClassHook>(code, firstMonitorStub,
+                                                 clasp, native, templateObject, pcOffset);
+    }
+
+    static ICCall_ClassHook *Clone(JSContext *cx, ICStubSpace *space, ICStub *firstMonitorStub,
+                                   ICCall_ClassHook &other);
+
+    const Class *clasp() {
+        return clasp_;
+    }
+    void *native() {
+        return native_;
+    }
+    HeapPtrObject &templateObject() {
+        return templateObject_;
+    }
+
+    static size_t offsetOfClass() {
+        return offsetof(ICCall_ClassHook, clasp_);
+    }
+    static size_t offsetOfNative() {
+        return offsetof(ICCall_ClassHook, native_);
+    }
+    static size_t offsetOfPCOffset() {
+        return offsetof(ICCall_ClassHook, pcOffset_);
+    }
+
+    // Compiler for this stub kind.
+    class Compiler : public ICCallStubCompiler {
+      protected:
+        ICStub *firstMonitorStub_;
+        bool isConstructing_;
+        const Class *clasp_;
+        Native native_;
+        RootedObject templateObject_;
+        uint32_t pcOffset_;
+        bool generateStubCode(MacroAssembler &masm);
+
+        virtual int32_t getKey() const {
+            return static_cast<int32_t>(kind) | (static_cast<int32_t>(isConstructing_) << 16);
+        }
+
+      public:
+        Compiler(JSContext *cx, ICStub *firstMonitorStub,
+                 const Class *clasp, Native native,
+                 HandleObject templateObject, uint32_t pcOffset,
+                 bool isConstructing)
+          : ICCallStubCompiler(cx, ICStub::Call_ClassHook),
+            firstMonitorStub_(firstMonitorStub),
+            isConstructing_(isConstructing),
+            clasp_(clasp),
+            native_(native),
+            templateObject_(cx, templateObject),
+            pcOffset_(pcOffset)
+        { }
+
+        ICStub *getStub(ICStubSpace *space) {
+            return ICCall_ClassHook::New(space, getStubCode(), firstMonitorStub_,
+                                         clasp_, native_, templateObject_, pcOffset_);
+        }
+    };
+};
+
 class ICCall_ScriptedApplyArray : public ICMonitoredStub
 {
     friend class ICStubSpace;
@@ -6058,10 +6161,10 @@ class ICCall_StringSplit : public ICMonitoredStub
     uint32_t pcOffset_;
     HeapPtrString expectedThis_;
     HeapPtrString expectedArg_;
-    HeapPtrObject templateObject_;
+    HeapPtrNativeObject templateObject_;
 
     ICCall_StringSplit(JitCode *stubCode, ICStub *firstMonitorStub, uint32_t pcOffset, HandleString thisString,
-                       HandleString argString, HandleObject templateObject)
+                       HandleString argString, HandleNativeObject templateObject)
       : ICMonitoredStub(ICStub::Call_StringSplit, stubCode, firstMonitorStub),
         pcOffset_(pcOffset), expectedThis_(thisString), expectedArg_(argString),
         templateObject_(templateObject)
@@ -6070,7 +6173,7 @@ class ICCall_StringSplit : public ICMonitoredStub
   public:
     static inline ICCall_StringSplit *New(ICStubSpace *space, JitCode *code,
                                           ICStub *firstMonitorStub, uint32_t pcOffset, HandleString thisString,
-                                          HandleString argString, HandleObject templateObject)
+                                          HandleString argString, HandleNativeObject templateObject)
     {
         if (!code)
             return nullptr;
@@ -6098,7 +6201,7 @@ class ICCall_StringSplit : public ICMonitoredStub
         return expectedArg_;
     }
 
-    HeapPtrObject &templateObject() {
+    HeapPtrNativeObject &templateObject() {
         return templateObject_;
     }
 
@@ -6108,7 +6211,7 @@ class ICCall_StringSplit : public ICMonitoredStub
         uint32_t pcOffset_;
         RootedString expectedThis_;
         RootedString expectedArg_;
-        RootedObject templateObject_;
+        RootedNativeObject templateObject_;
 
         bool generateStubCode(MacroAssembler &masm);
 
@@ -6124,13 +6227,43 @@ class ICCall_StringSplit : public ICMonitoredStub
             pcOffset_(pcOffset),
             expectedThis_(cx, thisString),
             expectedArg_(cx, argString),
-            templateObject_(cx, &templateObject.toObject())
+            templateObject_(cx, &templateObject.toObject().as<NativeObject>())
         { }
 
         ICStub *getStub(ICStubSpace *space) {
             return ICCall_StringSplit::New(space, getStubCode(), firstMonitorStub_,
                                            pcOffset_, expectedThis_, expectedArg_,
                                            templateObject_);
+        }
+   };
+};
+
+class ICCall_IsSuspendedStarGenerator : public ICStub
+{
+    friend class ICStubSpace;
+
+  protected:
+    explicit ICCall_IsSuspendedStarGenerator(JitCode *stubCode)
+      : ICStub(ICStub::Call_IsSuspendedStarGenerator, stubCode)
+    {}
+
+  public:
+    static inline ICCall_IsSuspendedStarGenerator *New(ICStubSpace *space, JitCode *code) {
+        if (!code)
+            return nullptr;
+        return space->allocate<ICCall_IsSuspendedStarGenerator>(code);
+    }
+
+    class Compiler : public ICStubCompiler {
+      protected:
+        bool generateStubCode(MacroAssembler &masm);
+
+      public:
+        explicit Compiler(JSContext *cx)
+          : ICStubCompiler(cx, ICStub::Call_IsSuspendedStarGenerator)
+        {}
+        ICStub *getStub(ICStubSpace *space) {
+            return ICCall_IsSuspendedStarGenerator::New(space, getStubCode());
         }
    };
 };

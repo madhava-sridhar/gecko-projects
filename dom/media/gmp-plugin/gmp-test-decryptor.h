@@ -70,12 +70,24 @@ public:
 
 private:
 
+  virtual ~FakeDecryptor() {}
   static FakeDecryptor* sInstance;
 
   void TestStorage();
 
   GMPDecryptorCallback* mCallback;
   GMPDecryptorHost* mHost;
+};
+
+class TestAsyncShutdown : public GMPAsyncShutdown {
+public:
+  explicit TestAsyncShutdown(GMPAsyncShutdownHost* aHost)
+    : mHost(aHost)
+  {
+  }
+  virtual void BeginShutdown() MOZ_OVERRIDE;
+private:
+  GMPAsyncShutdownHost* mHost;
 };
 
 #endif

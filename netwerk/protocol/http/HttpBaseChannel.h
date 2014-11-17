@@ -124,6 +124,9 @@ public:
   NS_IMETHOD GetApplyConversion(bool *value);
   NS_IMETHOD SetApplyConversion(bool value);
   NS_IMETHOD GetContentEncodings(nsIUTF8StringEnumerator** aEncodings);
+  NS_IMETHOD DoApplyContentConversions(nsIStreamListener *aNextListener,
+                                       nsIStreamListener **aNewNextListener,
+                                       nsISupports *aCtxt);
 
   // HttpBaseChannel::nsIHttpChannel
   NS_IMETHOD GetRequestMethod(nsACString& aMethod);
@@ -157,6 +160,8 @@ public:
   NS_IMETHOD GetRequestVersion(uint32_t *major, uint32_t *minor);
   NS_IMETHOD GetResponseVersion(uint32_t *major, uint32_t *minor);
   NS_IMETHOD SetCookie(const char *aCookieHeader);
+  NS_IMETHOD GetThirdPartyFlags(uint32_t *aForce);
+  NS_IMETHOD SetThirdPartyFlags(uint32_t aForce);
   NS_IMETHOD GetForceAllowThirdPartyCookie(bool *aForce);
   NS_IMETHOD SetForceAllowThirdPartyCookie(bool aForce);
   NS_IMETHOD GetCanceled(bool *aCanceled);
@@ -182,6 +187,7 @@ public:
   NS_IMETHOD ForcePending(bool aForcePending);
   NS_IMETHOD GetLastModifiedTime(PRTime* lastModifiedTime);
   NS_IMETHOD ForceNoIntercept();
+  NS_IMETHOD GetTopWindowURI(nsIURI **aTopWindowURI);
 
   inline void CleanRedirectCacheChainIfNecessary()
   {
@@ -236,6 +242,11 @@ public: /* Necko internal use only... */
     static bool ShouldRewriteRedirectToGET(uint32_t httpStatus,
                                            nsHttpRequestHead::ParsedMethodType method);
 
+    // Like nsIEncodedChannel::DoApplyConversions except context is set to
+    // mListenerContext.
+    nsresult DoApplyContentConversions(nsIStreamListener *aNextListener,
+                                       nsIStreamListener **aNewNextListener);
+
 protected:
   nsCOMArray<nsISecurityConsoleMessage> mSecurityConsoleMessages;
 
@@ -247,10 +258,6 @@ protected:
   void ReleaseListeners();
 
   nsPerformance* GetPerformance();
-
-  NS_IMETHOD DoApplyContentConversions(nsIStreamListener *aNextListener,
-                                     nsIStreamListener **aNewNextListener,
-                                     nsISupports *aCtxt);
 
   void AddCookiesToRequest();
   virtual nsresult SetupReplacementChannel(nsIURI *,
@@ -337,7 +344,7 @@ protected:
   uint32_t                          mResponseHeadersModified    : 1;
   uint32_t                          mAllowPipelining            : 1;
   uint32_t                          mAllowSTS                   : 1;
-  uint32_t                          mForceAllowThirdPartyCookie : 1;
+  uint32_t                          mThirdPartyFlags            : 3;
   uint32_t                          mUploadStreamHasHeaders     : 1;
   uint32_t                          mInheritApplicationCache    : 1;
   uint32_t                          mChooseApplicationCache     : 1;
@@ -401,6 +408,7 @@ protected:
   nsCOMPtr<nsIPrincipal>            mPrincipal;
 
   bool                              mForcePending;
+  nsCOMPtr<nsIURI>                  mTopWindowURI;
 };
 
 // Share some code while working around C++'s absurd inability to handle casting

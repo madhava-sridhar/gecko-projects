@@ -202,6 +202,7 @@ abstract class BaseTest extends BaseRobocopTest {
      */
     protected final void focusUrlBar() {
         // Click on the browser toolbar to enter editing mode
+        mSolo.waitForView(R.id.browser_toolbar);
         final View toolbarView = mSolo.getView(R.id.browser_toolbar);
         mSolo.clickOnView(toolbarView);
 
@@ -221,9 +222,9 @@ abstract class BaseTest extends BaseRobocopTest {
     }
 
     protected final void enterUrl(String url) {
-        final EditText urlEditView = (EditText) mSolo.getView(R.id.url_edit_text);
-
         focusUrlBar();
+
+        final EditText urlEditView = (EditText) mSolo.getView(R.id.url_edit_text);
 
         // Send the keys for the URL we want to enter
         mSolo.clearEditText(urlEditView);
@@ -329,25 +330,27 @@ abstract class BaseTest extends BaseRobocopTest {
         return result;
     }
 
-    // TODO: With Robotium 4.2, we should use Condition and waitForCondition instead.
-    // Future boolean tests should not use this method.
-    protected final boolean waitForTest(BooleanTest t, int timeout) {
-        long end = SystemClock.uptimeMillis() + timeout;
-        while (SystemClock.uptimeMillis() < end) {
-            if (t.test()) {
-                return true;
+    /**
+     * @deprecated use {@link #waitForCondition(Condition, int)} instead
+     */
+    @Deprecated
+    protected final boolean waitForTest(final BooleanTest t, final int timeout) {
+        final boolean isSatisfied = mSolo.waitForCondition(new Condition() {
+            @Override
+            public boolean isSatisfied() {
+                return t.test();
             }
-            mSolo.sleep(100);
+        }, timeout);
+
+        if (!isSatisfied) {
+            // log out wait failure for diagnostic purposes only;
+            // a failed wait may be normal and does not necessarily
+            // warrant a test assertion/failure
+            mAsserter.dumpLog("waitForTest timeout after " + timeout + " ms");
         }
-        // log out wait failure for diagnostic purposes only;
-        // a failed wait may be normal and does not necessarily
-        // warrant a test assertion/failure
-        mAsserter.dumpLog("waitForTest timeout after "+timeout+" ms");
-        return false;
+        return isSatisfied;
     }
 
-    // TODO: With Robotium 4.2, we should use Condition and waitForCondition instead.
-    // Future boolean tests should not implement this interface.
     protected interface BooleanTest {
         public boolean test();
     }
@@ -565,6 +568,21 @@ abstract class BaseTest extends BaseRobocopTest {
         String tabCountText = tabCount.getText();
         int tabCountInt = Integer.parseInt(tabCountText);
         mAsserter.is(tabCountInt, expectedTabCount, "The correct number of tabs are opened");
+    }
+
+    public void verifyPinned(final boolean isPinned, final String gridItemTitle) {
+        boolean viewFound = waitForText(gridItemTitle);
+        mAsserter.ok(viewFound, "Found top site title: " + gridItemTitle, null);
+
+        boolean success = waitForCondition(new Condition() {
+            @Override
+            public boolean isSatisfied() {
+                // We set the left compound drawable (index 0) to the pin icon.
+                final TextView gridItemTextView = mSolo.getText(gridItemTitle);
+                return isPinned == (gridItemTextView.getCompoundDrawables()[0] != null);
+            }
+        }, MAX_WAIT_MS);
+        mAsserter.ok(success, "Top site item was pinned: " + isPinned, null);
     }
 
     // Used to perform clicks on pop-up buttons without having to close the virtual keyboard

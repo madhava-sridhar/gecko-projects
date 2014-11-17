@@ -45,6 +45,7 @@ enum FrameType
     // An unwound JS frame is a JS frame signalling that its callee frame has been
     // turned into an exit frame (see EnsureExitFrame). Used by Ion bailouts and
     // Baseline exception unwinding.
+    JitFrame_Unwound_BaselineJS,
     JitFrame_Unwound_IonJS,
 
     // Like Unwound_IonJS, but the caller is a baseline stub frame.
@@ -275,7 +276,7 @@ class RInstructionResults
     bool initialized_;
 
   public:
-    RInstructionResults(IonJSFrameLayout *fp);
+    explicit RInstructionResults(IonJSFrameLayout *fp);
     RInstructionResults(RInstructionResults&& src);
 
     RInstructionResults& operator=(RInstructionResults&& rhs);
@@ -299,24 +300,33 @@ struct MaybeReadFallback
         NoGC_MagicOptimizedOut
     };
 
+    enum FallbackConsequence {
+        Fallback_Invalidate,
+        Fallback_DoNothing
+    };
+
     JSContext *maybeCx;
     JitActivation *activation;
     JitFrameIterator *frame;
     const NoGCValue unreadablePlaceholder_;
+    const FallbackConsequence consequence;
 
-    MaybeReadFallback(const Value &placeholder = UndefinedValue())
+    explicit MaybeReadFallback(const Value &placeholder = UndefinedValue())
       : maybeCx(nullptr),
         activation(nullptr),
         frame(nullptr),
-        unreadablePlaceholder_(noGCPlaceholder(placeholder))
+        unreadablePlaceholder_(noGCPlaceholder(placeholder)),
+        consequence(Fallback_Invalidate)
     {
     }
 
-    MaybeReadFallback(JSContext *cx, JitActivation *activation, JitFrameIterator *frame)
+    MaybeReadFallback(JSContext *cx, JitActivation *activation, JitFrameIterator *frame,
+                      FallbackConsequence consequence = Fallback_Invalidate)
       : maybeCx(cx),
         activation(activation),
         frame(frame),
-        unreadablePlaceholder_(NoGC_UndefinedValue)
+        unreadablePlaceholder_(NoGC_UndefinedValue),
+        consequence(consequence)
     {
     }
 
@@ -379,6 +389,7 @@ class SnapshotIterator
 
     Value allocationValue(const RValueAllocation &a);
     bool allocationReadable(const RValueAllocation &a);
+    void writeAllocationValuePayload(const RValueAllocation &a, Value v);
     void warnUnreadableAllocation();
 
   public:
@@ -492,6 +503,8 @@ class SnapshotIterator
 
         return fallback.unreadablePlaceholder();
     }
+
+    void traceAllocation(JSTracer *trc);
 
     void readCommonFrameSlots(Value *scopeChain, Value *rval) {
         if (scopeChain)

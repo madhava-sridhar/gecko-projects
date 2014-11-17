@@ -403,6 +403,10 @@ class TypedArrayObjectTemplate : public TypedArrayObject
     class_constructor(JSContext *cx, unsigned argc, Value *vp)
     {
         CallArgs args = CallArgsFromVp(argc, vp);
+
+        if (!WarnIfNotConstructing(cx, args, "typed array"))
+            return false;
+
         JSObject *obj = create(cx, args);
         if (!obj)
             return false;
@@ -756,7 +760,7 @@ TypedArrayObject::subarray(JSContext *cx, unsigned argc, Value *vp)
 
 /* static */ const JSFunctionSpec
 TypedArrayObject::protoFunctions[] = {
-    JS_SELF_HOSTED_FN("@@iterator", "ArrayValues", 0, 0),
+    JS_SELF_HOSTED_SYM_FN(iterator, "ArrayValues", 0, 0),                          \
     JS_FN("subarray", TypedArrayObject::subarray, 2, 0),
     JS_FN("set", TypedArrayObject::set, 2, 0),
     JS_FN("copyWithin", TypedArrayObject::copyWithin, 2, 0),
@@ -1743,7 +1747,6 @@ IMPL_TYPED_ARRAY_COMBINED_UNWRAPPERS(Float64, double, double)
     {                                                                          \
         nullptr,             /* outerObject */                                 \
         nullptr,             /* innerObject */                                 \
-        nullptr,             /* iteratorObject */                              \
         false,               /* isWrappedNative */                             \
         nullptr,             /* weakmapKeyDelegateOp */                        \
         TypedArrayObject::ObjectMoved                                          \

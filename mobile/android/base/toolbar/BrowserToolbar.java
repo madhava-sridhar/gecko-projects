@@ -26,6 +26,7 @@ import org.mozilla.gecko.animation.PropertyAnimator.PropertyAnimationListener;
 import org.mozilla.gecko.animation.ViewHelper;
 import org.mozilla.gecko.menu.GeckoMenu;
 import org.mozilla.gecko.menu.MenuPopup;
+import org.mozilla.gecko.tabs.TabHistoryController;
 import org.mozilla.gecko.toolbar.ToolbarDisplayLayout.OnStopListener;
 import org.mozilla.gecko.toolbar.ToolbarDisplayLayout.OnTitleChangeListener;
 import org.mozilla.gecko.toolbar.ToolbarDisplayLayout.UpdateFlags;
@@ -132,6 +133,7 @@ public abstract class BrowserToolbar extends ThemedRelativeLayout
     protected boolean hasSoftMenuButton;
 
     protected UIMode uiMode;
+    protected TabHistoryController tabHistoryController;
 
     private final Paint shadowPaint;
     private final int shadowSize;
@@ -315,6 +317,10 @@ public abstract class BrowserToolbar extends ThemedRelativeLayout
         tabsButton.setOnClickListener(new Button.OnClickListener() {
             @Override
             public void onClick(View v) {
+                // Clear focus so a back press with the tabs
+                // panel open does not go to the editing field.
+                urlEditLayout.clearFocus();
+
                 toggleTabs();
             }
         });
@@ -341,6 +347,8 @@ public abstract class BrowserToolbar extends ThemedRelativeLayout
             menuButton.setOnClickListener(new Button.OnClickListener() {
                 @Override
                 public void onClick(View view) {
+                    // Drop the soft keyboard.
+                    urlEditLayout.clearFocus();
                     activity.openOptionsMenu();
                 }
             });
@@ -364,6 +372,10 @@ public abstract class BrowserToolbar extends ThemedRelativeLayout
 
     public void setProgressBar(ToolbarProgressView progressBar) {
         this.progressBar = progressBar;
+    }
+
+    public void setTabHistoryController(TabHistoryController tabHistoryController) {
+        this.tabHistoryController = tabHistoryController;
     }
 
     public void refresh() {
@@ -408,6 +420,18 @@ public abstract class BrowserToolbar extends ThemedRelativeLayout
                 }
             });
         }
+    }
+
+    public void saveTabEditingState(final TabEditingState editingState) {
+        urlEditLayout.saveTabEditingState(editingState);
+    }
+
+    public void restoreTabEditingState(final TabEditingState editingState) {
+        if (!isEditing()) {
+            throw new IllegalStateException("Expected to be editing");
+        }
+
+        urlEditLayout.restoreTabEditingState(editingState);
     }
 
     @Override
@@ -903,5 +927,30 @@ public abstract class BrowserToolbar extends ThemedRelativeLayout
     public void onLightweightThemeReset() {
         setBackgroundResource(R.drawable.url_bar_bg);
         editCancel.onLightweightThemeReset();
+    }
+
+    public static class TabEditingState {
+        // The edited text from the most recent time this tab was unselected.
+        protected String lastEditingText;
+        protected int selectionStart;
+        protected int selectionEnd;
+
+        public boolean isBrowserSearchShown;
+
+        public void copyFrom(final TabEditingState s2) {
+            lastEditingText = s2.lastEditingText;
+            selectionStart = s2.selectionStart;
+            selectionEnd = s2.selectionEnd;
+
+            isBrowserSearchShown = s2.isBrowserSearchShown;
+        }
+
+        public boolean isBrowserSearchShown() {
+            return isBrowserSearchShown;
+        }
+
+        public void setIsBrowserSearchShown(final boolean isShown) {
+            isBrowserSearchShown = isShown;
+        }
     }
 }

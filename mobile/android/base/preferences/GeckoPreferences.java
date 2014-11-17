@@ -296,6 +296,9 @@ OnSharedPreferenceChangeListener
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
+        // Make sure RestrictedProfiles is ready.
+        RestrictedProfiles.initWithProfile(GeckoProfile.get(this));
+
         if (GeckoProfile.get(this).inGuestMode()) {
             GuestSession.configureWindow(getWindow());
         }
@@ -700,23 +703,11 @@ OnSharedPreferenceChangeListener
                     i--;
                     continue;
                 } else if (PREFS_DEVTOOLS_REMOTE_ENABLED.equals(key)) {
-                    if (!RestrictedProfiles.isAllowed(RestrictedProfiles.Restriction.DISALLOW_REMOTE_DEBUGGING)) {
+                    if (!RestrictedProfiles.isAllowed(this, RestrictedProfiles.Restriction.DISALLOW_REMOTE_DEBUGGING)) {
                         preferences.removePreference(pref);
                         i--;
                         continue;
                     }
-
-                    final Context thisContext = this;
-                    pref.setOnPreferenceClickListener(new OnPreferenceClickListener() {
-                        @Override
-                        public boolean onPreferenceClick(Preference preference) {
-                            // Display toast to remind setting up tcp forwarding.
-                            if (((CheckBoxPreference) preference).isChecked()) {
-                                Toast.makeText(thisContext, R.string.devtools_remote_debugging_forward, Toast.LENGTH_SHORT).show();
-                            }
-                            return true;
-                        }
-                    });
                 } else if (PREFS_RESTORE_SESSION.equals(key) ||
                            PREFS_BROWSER_LOCALE.equals(key)) {
                     // Set the summary string to the current entry. The summary
@@ -728,7 +719,7 @@ OnSharedPreferenceChangeListener
                     listPref.setSummary(selectedEntry);
                     continue;
                 } else if (PREFS_SYNC.equals(key) &&
-                           !RestrictedProfiles.isAllowed(RestrictedProfiles.Restriction.DISALLOW_MODIFY_ACCOUNTS)) {
+                           !RestrictedProfiles.isAllowed(this, RestrictedProfiles.Restriction.DISALLOW_MODIFY_ACCOUNTS)) {
                     // Don't show sync prefs while in guest mode.
                     preferences.removePreference(pref);
                     i--;
@@ -899,9 +890,6 @@ OnSharedPreferenceChangeListener
                 .putExtra("moz_mozilla_api_key", AppConstants.MOZ_STUMBLER_API_KEY);
        if (GeckoAppShell.getGeckoInterface() != null) {
            intent.putExtra("user_agent", GeckoAppShell.getGeckoInterface().getDefaultUAString());
-       }
-       if (!AppConstants.MOZILLA_OFFICIAL) {
-           intent.putExtra("is_debug", true);
        }
        broadcastAction(context, intent);
     }

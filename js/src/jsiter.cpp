@@ -273,8 +273,9 @@ struct SortComparatorIds
 static bool
 Snapshot(JSContext *cx, HandleObject pobj_, unsigned flags, AutoIdVector *props)
 {
+    // ~90% of the time this table ends up with 3 or fewer elements.
     IdSet ht(cx);
-    if (!ht.init(32))
+    if (!ht.init(3))
         return false;
 
     RootedObject pobj(cx, pobj_);
@@ -304,7 +305,7 @@ Snapshot(JSContext *cx, HandleObject pobj_, unsigned flags, AutoIdVector *props)
                             return false;
                     }
                 } else {
-                    if (!Proxy::enumerate(cx, pobj, proxyProps))
+                    if (!Proxy::getEnumerablePropertyKeys(cx, pobj, proxyProps))
                         return false;
                 }
 
@@ -666,11 +667,8 @@ js::GetIterator(JSContext *cx, HandleObject obj, unsigned flags, MutableHandleVa
     bool keysOnly = (flags == JSITER_ENUMERATE);
 
     if (obj) {
-        if (JSIteratorOp op = obj->getClass()->ext.iteratorObject) {
-            JSObject *iterobj = op(cx, obj, !(flags & JSITER_FOREACH));
-            if (!iterobj)
-                return false;
-            vp.setObject(*iterobj);
+        if (obj->is<PropertyIteratorObject>() || obj->is<LegacyGeneratorObject>()) {
+            vp.setObject(*obj);
             return true;
         }
 
@@ -886,16 +884,10 @@ iterator_next(JSContext *cx, unsigned argc, Value *vp)
 }
 
 static const JSFunctionSpec iterator_methods[] = {
-    JS_SELF_HOSTED_FN("@@iterator", "LegacyIteratorShim", 0, 0),
+    JS_SELF_HOSTED_SYM_FN(iterator, "LegacyIteratorShim", 0, 0),
     JS_FN("next",      iterator_next,       0, 0),
     JS_FS_END
 };
-
-static JSObject *
-iterator_iteratorObject(JSContext *cx, HandleObject obj, bool keysonly)
-{
-    return obj;
-}
 
 size_t
 PropertyIteratorObject::sizeOfMisc(mozilla::MallocSizeOf mallocSizeOf) const
@@ -935,12 +927,6 @@ const Class PropertyIteratorObject::class_ = {
     nullptr,                 /* hasInstance */
     nullptr,                 /* construct   */
     trace,
-    JS_NULL_CLASS_SPEC,
-    {
-        nullptr,             /* outerObject    */
-        nullptr,             /* innerObject    */
-        iterator_iteratorObject,
-    }
 };
 
 enum {
@@ -965,7 +951,7 @@ const Class ArrayIteratorObject::class_ = {
 };
 
 static const JSFunctionSpec array_iterator_methods[] = {
-    JS_SELF_HOSTED_FN("@@iterator", "ArrayIteratorIdentity", 0, 0),
+    JS_SELF_HOSTED_SYM_FN(iterator, "ArrayIteratorIdentity", 0, 0),
     JS_SELF_HOSTED_FN("next", "ArrayIteratorNext", 0, 0),
     JS_FS_END
 };
@@ -1004,7 +990,7 @@ const Class StringIteratorObject::class_ = {
 };
 
 static const JSFunctionSpec string_iterator_methods[] = {
-    JS_SELF_HOSTED_FN("@@iterator", "StringIteratorIdentity", 0, 0),
+    JS_SELF_HOSTED_SYM_FN(iterator, "StringIteratorIdentity", 0, 0),
     JS_SELF_HOSTED_FN("next", "StringIteratorNext", 0, 0),
     JS_FS_END
 };
@@ -1331,189 +1317,6 @@ const Class StopIterationObject::class_ = {
     stopiter_hasInstance,
     nullptr                  /* construct   */
 };
-
-bool
-ForOfIterator::init(HandleValue iterable, NonIterableBehavior nonIterableBehavior)
-{
-    JSContext *cx = cx_;
-    RootedObject iterableObj(cx, ToObject(cx, iterable));
-    if (!iterableObj)
-        return false;
-
-    MOZ_ASSERT(index == NOT_ARRAY);
-
-    // Check the PIC first for a match.
-    if (iterableObj->is<ArrayObject>()) {
-        ForOfPIC::Chain *stubChain = ForOfPIC::getOrCreate(cx);
-        if (!stubChain)
-            return false;
-
-        bool optimized;
-        if (!stubChain->tryOptimizeArray(cx, iterableObj.as<ArrayObject>(), &optimized))
-            return false;
-
-        if (optimized) {
-            // Got optimized stub.  Array is optimizable.
-            index = 0;
-            iterator = iterableObj;
-            return true;
-        }
-    }
-
-    MOZ_ASSERT(index == NOT_ARRAY);
-
-    // The iterator is the result of calling obj[@@iterator]().
-    InvokeArgs args(cx);
-    if (!args.init(0))
-        return false;
-    args.setThis(ObjectValue(*iterableObj));
-
-    RootedValue callee(cx);
-    if (!JSObject::getProperty(cx, iterableObj, iterableObj, cx->names().std_iterator, &callee))
-        return false;
-
-    // If obj[@@iterator] is undefined and we were asked to allow non-iterables,
-    // bail out now without setting iterator.  This will make valueIsIterable(),
-    // which our caller should check, return false.
-    if (nonIterableBehavior == AllowNonIterable && callee.isUndefined())
-        return true;
-
-    // Throw if obj[@@iterator] isn't callable.
-    // js::Invoke is about to check for this kind of error anyway, but it would
-    // throw an inscrutable error message about |method| rather than this nice
-    // one about |obj|.
-    if (!callee.isObject() || !callee.toObject().isCallable()) {
-        char *bytes = DecompileValueGenerator(cx, JSDVG_SEARCH_STACK, iterable, NullPtr());
-        if (!bytes)
-            return false;
-        JS_ReportErrorNumber(cx, js_GetErrorMessage, nullptr, JSMSG_NOT_ITERABLE, bytes);
-        js_free(bytes);
-        return false;
-    }
-
-    args.setCallee(callee);
-    if (!Invoke(cx, args))
-        return false;
-
-    iterator = ToObject(cx, args.rval());
-    if (!iterator)
-        return false;
-
-    return true;
-}
-
-bool
-ForOfIterator::initWithIterator(HandleValue aIterator)
-{
-    JSContext *cx = cx_;
-    RootedObject iteratorObj(cx, ToObject(cx, aIterator));
-    return iterator = iteratorObj;
-}
-
-inline bool
-ForOfIterator::nextFromOptimizedArray(MutableHandleValue vp, bool *done)
-{
-    MOZ_ASSERT(index != NOT_ARRAY);
-
-    if (!CheckForInterrupt(cx_))
-        return false;
-
-    ArrayObject *arr = &iterator->as<ArrayObject>();
-
-    if (index >= arr->length()) {
-        vp.setUndefined();
-        *done = true;
-        return true;
-    }
-    *done = false;
-
-    // Try to get array element via direct access.
-    if (index < arr->getDenseInitializedLength()) {
-        vp.set(arr->getDenseElement(index));
-        if (!vp.isMagic(JS_ELEMENTS_HOLE)) {
-            ++index;
-            return true;
-        }
-    }
-
-    return JSObject::getElement(cx_, iterator, iterator, index++, vp);
-}
-
-bool
-ForOfIterator::next(MutableHandleValue vp, bool *done)
-{
-    MOZ_ASSERT(iterator);
-
-    if (index != NOT_ARRAY) {
-        ForOfPIC::Chain *stubChain = ForOfPIC::getOrCreate(cx_);
-        if (!stubChain)
-            return false;
-
-        if (stubChain->isArrayNextStillSane())
-            return nextFromOptimizedArray(vp, done);
-
-        // ArrayIterator.prototype.next changed, materialize a proper
-        // ArrayIterator instance and fall through to slowpath case.
-        if (!materializeArrayIterator())
-            return false;
-    }
-
-    RootedValue method(cx_);
-    if (!JSObject::getProperty(cx_, iterator, iterator, cx_->names().next, &method))
-        return false;
-
-    InvokeArgs args(cx_);
-    if (!args.init(1))
-        return false;
-    args.setCallee(method);
-    args.setThis(ObjectValue(*iterator));
-    args[0].setUndefined();
-    if (!Invoke(cx_, args))
-        return false;
-
-    RootedObject resultObj(cx_, ToObject(cx_, args.rval()));
-    if (!resultObj)
-        return false;
-    RootedValue doneVal(cx_);
-    if (!JSObject::getProperty(cx_, resultObj, resultObj, cx_->names().done, &doneVal))
-        return false;
-    *done = ToBoolean(doneVal);
-    if (*done) {
-        vp.setUndefined();
-        return true;
-    }
-    return JSObject::getProperty(cx_, resultObj, resultObj, cx_->names().value, vp);
-}
-
-bool
-ForOfIterator::materializeArrayIterator()
-{
-    MOZ_ASSERT(index != NOT_ARRAY);
-
-    const char *nameString = "ArrayValuesAt";
-
-    RootedAtom name(cx_, Atomize(cx_, nameString, strlen(nameString)));
-    if (!name)
-        return false;
-
-    RootedValue val(cx_);
-    if (!cx_->global()->getSelfHostedFunction(cx_, name, name, 1, &val))
-        return false;
-
-    InvokeArgs args(cx_);
-    if (!args.init(1))
-        return false;
-    args.setCallee(val);
-    args.setThis(ObjectValue(*iterator));
-    args[0].set(Int32Value(index));
-    if (!Invoke(cx_, args))
-        return false;
-
-    index = NOT_ARRAY;
-    // Result of call to ArrayValuesAt must be an object.
-    iterator = &args.rval().toObject();
-    return true;
-}
 
 /* static */ bool
 GlobalObject::initIteratorClasses(JSContext *cx, Handle<GlobalObject *> global)

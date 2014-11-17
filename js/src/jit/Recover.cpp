@@ -983,6 +983,27 @@ RTypeOf::recover(JSContext *cx, SnapshotIterator &iter) const
 }
 
 bool
+MToDouble::writeRecoverData(CompactBufferWriter &writer) const
+{
+    MOZ_ASSERT(canRecoverOnBailout());
+    writer.writeUnsigned(uint32_t(RInstruction::Recover_ToDouble));
+    return true;
+}
+
+RToDouble::RToDouble(CompactBufferReader &reader)
+{ }
+
+bool
+RToDouble::recover(JSContext *cx, SnapshotIterator &iter) const
+{
+    Value v = iter.read();
+
+    MOZ_ASSERT(!v.isObject());
+    iter.storeInstructionResult(v);
+    return true;
+}
+
+bool
 MToFloat32::writeRecoverData(CompactBufferWriter &writer) const
 {
     MOZ_ASSERT(canRecoverOnBailout());
@@ -1092,7 +1113,7 @@ RNewDerivedTypedObject::RNewDerivedTypedObject(CompactBufferReader &reader)
 bool
 RNewDerivedTypedObject::recover(JSContext *cx, SnapshotIterator &iter) const
 {
-    Rooted<SizedTypeDescr *> descr(cx, &iter.read().toObject().as<SizedTypeDescr>());
+    Rooted<TypeDescr *> descr(cx, &iter.read().toObject().as<TypeDescr>());
     Rooted<TypedObject *> owner(cx, &iter.read().toObject().as<TypedObject>());
     int32_t offset = iter.read().toInt32();
 

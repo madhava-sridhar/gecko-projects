@@ -5,6 +5,7 @@
 
 #include "gmp-test-decryptor.h"
 #include "gmp-test-storage.h"
+#include "gmp-test-output-protection.h"
 
 #include <string>
 #include <vector>
@@ -12,8 +13,8 @@
 #include <istream>
 #include <iterator>
 #include <sstream>
-#include <assert.h>
 
+#include "mozilla/Assertions.h"
 #include "mozilla/Attributes.h"
 #include "mozilla/NullPtr.h"
 
@@ -34,10 +35,10 @@ MaybeFinish()
 }
 
 FakeDecryptor::FakeDecryptor(GMPDecryptorHost* aHost)
-  : mHost(aHost)
-  , mCallback(nullptr)
+  : mCallback(nullptr)
+  , mHost(aHost)
 {
-  assert(!sInstance);
+  MOZ_ASSERT(!sInstance);
   sInstance = this;
 }
 
@@ -50,7 +51,7 @@ void FakeDecryptor::DecryptingComplete()
 void
 FakeDecryptor::Message(const std::string& aMessage)
 {
-  assert(sInstance);
+  MOZ_ASSERT(sInstance);
   const static std::string sid("fake-session-id");
   sInstance->mCallback->SessionMessage(sid.c_str(), sid.size(),
                                        (const uint8_t*)aMessage.c_str(), aMessage.size(),
@@ -80,8 +81,8 @@ public:
   void Destroy() MOZ_OVERRIDE {
     delete this;
   }
-  ReadContinuation* mThen;
   string mId;
+  ReadContinuation* mThen;
 };
 
 class TestEmptyContinuation : public ReadContinuation {
@@ -110,7 +111,7 @@ public:
 
 class VerifyAndFinishContinuation : public ReadContinuation {
 public:
-  VerifyAndFinishContinuation(string aValue)
+  explicit VerifyAndFinishContinuation(string aValue)
     : mValue(aValue)
   {}
   void ReadComplete(GMPErr aErr, const std::string& aData) MOZ_OVERRIDE {
@@ -147,7 +148,7 @@ static const string OpenAgainRecordId = "open-again-record-id";
 
 class OpenedSecondTimeContinuation : public OpenContinuation {
 public:
-  OpenedSecondTimeContinuation(GMPRecord* aRecord)
+  explicit OpenedSecondTimeContinuation(GMPRecord* aRecord)
     : mRecord(aRecord)
   {
   }
@@ -178,7 +179,7 @@ public:
       return;
     }
 
-    auto err = GMPOpenRecord(OpenAgainRecordId, new OpenedSecondTimeContinuation(aRecord));
+    GMPOpenRecord(OpenAgainRecordId, new OpenedSecondTimeContinuation(aRecord));
 
     delete this;
   }
@@ -249,7 +250,7 @@ public:
 
 class ReportReadStatusContinuation : public ReadContinuation {
 public:
-  ReportReadStatusContinuation(const string& aRecordId)
+  explicit ReportReadStatusContinuation(const string& aRecordId)
     : mRecordId(aRecordId)
   {}
   void ReadComplete(GMPErr aErr, const std::string& aData) MOZ_OVERRIDE {
@@ -267,6 +268,31 @@ public:
   }
   string mRecordId;
 };
+
+class ReportReadRecordContinuation : public ReadContinuation {
+public:
+  explicit ReportReadRecordContinuation(const string& aRecordId)
+    : mRecordId(aRecordId)
+  {}
+  void ReadComplete(GMPErr aErr, const std::string& aData) MOZ_OVERRIDE {
+    if (GMP_FAILED(aErr)) {
+      FakeDecryptor::Message("retrieved " + mRecordId + " failed");
+    } else {
+      FakeDecryptor::Message("retrieved " + mRecordId + " " + aData);
+    }
+    delete this;
+  }
+  string mRecordId;
+};
+
+enum ShutdownMode {
+  ShutdownNormal,
+  ShutdownTimeout,
+  ShutdownStoreToken
+};
+
+static ShutdownMode sShutdownMode = ShutdownNormal;
+static string sShutdownToken = "";
 
 void
 FakeDecryptor::UpdateSession(uint32_t aPromiseId,
@@ -290,5 +316,56 @@ FakeDecryptor::UpdateSession(uint32_t aPromiseId,
   } else if (task == "retrieve") {
     const string& id = tokens[1];
     ReadRecord(id, new ReportReadStatusContinuation(id));
+  } else if (task == "shutdown-mode") {
+    const string& mode = tokens[1];
+    if (mode == "timeout") {
+      sShutdownMode = ShutdownTimeout;
+    } else if (mode == "token") {
+      sShutdownMode = ShutdownStoreToken;
+      sShutdownToken = tokens[2];
+      Message("shutdown-token received " + sShutdownToken);
+    }
+  } else if (task == "retrieve-shutdown-token") {
+    ReadRecord("shutdown-token", new ReportReadRecordContinuation("shutdown-token"));
+  } else if (task == "test-op-apis") {
+    mozilla::gmptest::TestOuputProtectionAPIs();
+  } else if (task == "retrieve-plugin-voucher") {
+    const uint8_t* rawVoucher = nullptr;
+    uint32_t length = 0;
+    mHost->GetPluginVoucher(&rawVoucher, &length);
+    std::string voucher((const char*)rawVoucher, (const char*)(rawVoucher + length));
+    Message("retrieved plugin-voucher: " + voucher);
+  }
+}
+
+class CompleteShutdownTask : public GMPTask {
+public:
+  explicit CompleteShutdownTask(GMPAsyncShutdownHost* aHost)
+    : mHost(aHost)
+  {
+  }
+  virtual void Run() {
+    mHost->ShutdownComplete();
+  }
+  virtual void Destroy() { delete this; }
+  GMPAsyncShutdownHost* mHost;
+};
+
+void
+TestAsyncShutdown::BeginShutdown() {
+  switch (sShutdownMode) {
+    case ShutdownNormal:
+      mHost->ShutdownComplete();
+      break;
+    case ShutdownTimeout:
+      // Don't do anything; wait for timeout, Gecko should kill
+      // the plugin and recover.
+      break;
+    case ShutdownStoreToken:
+      // Store message, then shutdown.
+      WriteRecord("shutdown-token",
+                  sShutdownToken,
+                  new CompleteShutdownTask(mHost));
+      break;
   }
 }

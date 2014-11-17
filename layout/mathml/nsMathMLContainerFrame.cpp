@@ -52,13 +52,15 @@ nsMathMLContainerFrame::ReflowError(nsRenderingContext& aRenderingContext,
   ///////////////
   // Set font
   nsRefPtr<nsFontMetrics> fm;
-  nsLayoutUtils::GetFontMetricsForFrame(this, getter_AddRefs(fm));
-  aRenderingContext.SetFont(fm);
+  nsLayoutUtils::GetFontMetricsForFrame(this, getter_AddRefs(fm),
+                                        nsLayoutUtils::
+                                        FontSizeInflationFor(this));
 
   // bounding metrics
   nsAutoString errorMsg; errorMsg.AssignLiteral("invalid-markup");
   mBoundingMetrics =
-    aRenderingContext.GetBoundingMetrics(errorMsg.get(), errorMsg.Length());
+    nsLayoutUtils::AppUnitBoundsOfString(errorMsg.get(), errorMsg.Length(),
+                                         *fm, aRenderingContext);
 
   // reflow metrics
   WritingMode wm = aDesiredSize.GetWritingMode();
@@ -96,21 +98,21 @@ void nsDisplayMathMLError::Paint(nsDisplayListBuilder* aBuilder,
   // Set color and font ...
   nsRefPtr<nsFontMetrics> fm;
   nsLayoutUtils::GetFontMetricsForFrame(mFrame, getter_AddRefs(fm));
-  aCtx->SetFont(fm);
 
   nsPoint pt = ToReferenceFrame();
   int32_t appUnitsPerDevPixel = mFrame->PresContext()->AppUnitsPerDevPixel();
   DrawTarget* drawTarget = aCtx->GetDrawTarget();
-  Rect rect = NSRectToRect(nsRect(pt, mFrame->GetSize()), appUnitsPerDevPixel,
-                           *drawTarget);
+  Rect rect = NSRectToSnappedRect(nsRect(pt, mFrame->GetSize()),
+                                  appUnitsPerDevPixel,
+                                  *drawTarget);
   ColorPattern red(ToDeviceColor(Color(1.f, 0.f, 0.f, 1.f)));
   drawTarget->FillRect(rect, red);
 
   aCtx->ThebesContext()->SetColor(NS_RGB(255,255,255));
-  nscoord ascent = aCtx->FontMetrics()->MaxAscent();
+  nscoord ascent = fm->MaxAscent();
   NS_NAMED_LITERAL_STRING(errorMsg, "invalid-markup");
-  aCtx->DrawString(errorMsg.get(), uint32_t(errorMsg.Length()),
-                   pt.x, pt.y+ascent);
+  nsLayoutUtils::DrawUniDirString(errorMsg.get(), uint32_t(errorMsg.Length()),
+                                  nsPoint(pt.x, pt.y + ascent), *fm, *aCtx);
 }
 
 /* /////////////

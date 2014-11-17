@@ -41,8 +41,13 @@ describe("loop.conversation", function() {
       setLoopCharPref: sinon.stub(),
       getLoopCharPref: sinon.stub().returns("http://fakeurl"),
       getLoopBoolPref: sinon.stub(),
-      getCallData: sinon.stub(),
-      releaseCallData: sinon.stub(),
+      calls: {
+        clearCallInProgress: sinon.stub()
+      },
+      LOOP_SESSION_TYPE: {
+        GUEST: 1,
+        FXA: 2
+      },
       startAlerting: sinon.stub(),
       stopAlerting: sinon.stub(),
       ensureRegistered: sinon.stub(),
@@ -52,7 +57,10 @@ describe("loop.conversation", function() {
           channel: "test",
           platform: "test"
         };
-      }
+      },
+      getAudioBlob: sinon.spy(function(name, callback) {
+        callback(null, new Blob([new ArrayBuffer(10)], {type: 'audio/ogg'}));
+      })
     };
 
     // XXX These stubs should be hoisted in a common file
@@ -79,7 +87,10 @@ describe("loop.conversation", function() {
       sandbox.stub(loop.Dispatcher.prototype, "dispatch");
 
       sandbox.stub(loop.shared.utils.Helper.prototype,
-        "locationHash").returns("#incoming/42");
+        "locationData").returns({
+          hash: "#42",
+          pathname: "/"
+        });
 
       window.OT = {
         overrideGuidStorage: sinon.stub()
@@ -109,80 +120,31 @@ describe("loop.conversation", function() {
       }));
     });
 
-    describe("when locationHash begins with #room", function () {
-      // XXX must stay in sync with "test.alwaysUseRooms" pref check
-      // in conversation.jsx:init until we remove that code, which should
-      // happen in the second patch in bug 1074686, at which time this comment
-      // can go away as well.
-      var fakeRoomID = "32";
-
-      beforeEach(function() {
-        loop.shared.utils.Helper.prototype.locationHash
-          .returns("#room/" + fakeRoomID);
-
-        sandbox.stub(loop.store, "LocalRoomStore");
-      });
-
-      it("should create a localRoomStore", function() {
-        loop.conversation.init();
-
-        sinon.assert.calledOnce(loop.store.LocalRoomStore);
-        sinon.assert.calledWithNew(loop.store.LocalRoomStore);
-        sinon.assert.calledWithExactly(loop.store.LocalRoomStore,
-          sinon.match({
-            dispatcher: sinon.match.instanceOf(loop.Dispatcher),
-            mozLoop: sinon.match.same(navigator.mozLoop)
-          }));
-      });
-
-      it("should dispatch SetupEmptyRoom with localRoomId from locationHash",
-        function() {
-
-          loop.conversation.init();
-
-          sinon.assert.calledOnce(loop.Dispatcher.prototype.dispatch);
-          sinon.assert.calledWithExactly(loop.Dispatcher.prototype.dispatch,
-            new loop.shared.actions.SetupEmptyRoom({localRoomId: fakeRoomID}));
-        });
-    });
-
-    it("should trigger a gatherCallData action", function() {
+    it("should trigger a getWindowData action", function() {
       loop.conversation.init();
 
       sinon.assert.calledOnce(loop.Dispatcher.prototype.dispatch);
       sinon.assert.calledWithExactly(loop.Dispatcher.prototype.dispatch,
-        new loop.shared.actions.GatherCallData({
-          callId: "42",
-          outgoing: false
+        new loop.shared.actions.GetWindowData({
+          windowId: "42"
         }));
     });
-
-    it("should trigger an outgoing gatherCallData action for outgoing calls",
-      function() {
-        loop.shared.utils.Helper.prototype.locationHash.returns("#outgoing/24");
-
-        loop.conversation.init();
-
-        sinon.assert.calledOnce(loop.Dispatcher.prototype.dispatch);
-        sinon.assert.calledWithExactly(loop.Dispatcher.prototype.dispatch,
-          new loop.shared.actions.GatherCallData({
-            callId: "24",
-            outgoing: true
-          }));
-      });
   });
 
-  describe("ConversationControllerView", function() {
-    var store, conversation, client, ccView, oldTitle, dispatcher;
+  describe("AppControllerView", function() {
+    var conversationStore, conversation, client, ccView, oldTitle, dispatcher;
+    var conversationAppStore, roomStore;
 
-    function mountTestComponent(localRoomStore) {
+    function mountTestComponent() {
       return TestUtils.renderIntoDocument(
         loop.conversation.AppControllerView({
           client: client,
           conversation: conversation,
-          localRoomStore: localRoomStore,
+          roomStore: roomStore,
           sdk: {},
-          store: store
+          conversationStore: conversationStore,
+          conversationAppStore: conversationAppStore,
+          dispatcher: dispatcher
         }));
     }
 
@@ -193,7 +155,7 @@ describe("loop.conversation", function() {
         sdk: {}
       });
       dispatcher = new loop.Dispatcher();
-      store = new loop.store.ConversationStore({
+      conversationStore = new loop.store.ConversationStore({
         contact: {
           name: [ "Mr Smith" ],
           email: [{
@@ -207,6 +169,14 @@ describe("loop.conversation", function() {
         dispatcher: dispatcher,
         sdkDriver: {}
       });
+      roomStore = new loop.store.RoomStore({
+        mozLoop: navigator.mozLoop,
+        dispatcher: dispatcher
+      });
+      conversationAppStore = new loop.store.ConversationAppStore({
+        dispatcher: dispatcher,
+        mozLoop: navigator.mozLoop
+      });
     });
 
     afterEach(function() {
@@ -215,7 +185,7 @@ describe("loop.conversation", function() {
     });
 
     it("should display the OutgoingConversationView for outgoing calls", function() {
-      store.set({outgoing: true});
+      conversationAppStore.setStoreState({windowType: "outgoing"});
 
       ccView = mountTestComponent();
 
@@ -224,7 +194,14 @@ describe("loop.conversation", function() {
     });
 
     it("should display the IncomingConversationView for incoming calls", function() {
-      store.set({outgoing: false});
+      sandbox.stub(conversation, "setIncomingSessionData");
+      sandbox.stub(loop, "CallConnectionWebSocket").returns({
+        promiseConnect: function() {
+          return new Promise(function() {});
+        },
+        on: sandbox.spy()
+      });
+      conversationAppStore.setStoreState({windowType: "incoming"});
 
       ccView = mountTestComponent();
 
@@ -232,32 +209,35 @@ describe("loop.conversation", function() {
         loop.conversation.IncomingConversationView);
     });
 
-    it("should display the EmptyRoomView for rooms", function() {
-      navigator.mozLoop.rooms = {
-        addCallback: function() {},
-        removeCallback: function() {}
-      };
-      var localRoomStore = new loop.store.LocalRoomStore({
-        mozLoop: navigator.mozLoop,
-        dispatcher: dispatcher
-      });
+    it("should display the RoomView for rooms", function() {
+      conversationAppStore.setStoreState({windowType: "room"});
 
-      ccView = mountTestComponent(localRoomStore);
+      ccView = mountTestComponent();
 
       TestUtils.findRenderedComponentWithType(ccView,
-        loop.roomViews.EmptyRoomView);
+        loop.roomViews.DesktopRoomConversationView);
+    });
+
+    it("should display the GenericFailureView for failures", function() {
+      conversationAppStore.setStoreState({windowType: "failed"});
+
+      ccView = mountTestComponent();
+
+      TestUtils.findRenderedComponentWithType(ccView,
+        loop.conversation.GenericFailureView);
     });
   });
 
   describe("IncomingConversationView", function() {
-    var conversation, client, icView, oldTitle;
+    var conversationAppStore, conversation, client, icView, oldTitle;
 
     function mountTestComponent() {
       return TestUtils.renderIntoDocument(
         loop.conversation.IncomingConversationView({
           client: client,
           conversation: conversation,
-          sdk: {}
+          sdk: {},
+          conversationAppStore: conversationAppStore
         }));
     }
 
@@ -267,7 +247,12 @@ describe("loop.conversation", function() {
       conversation = new loop.shared.models.ConversationModel({}, {
         sdk: {}
       });
-      conversation.set({callId: 42});
+      conversation.set({windowId: 42});
+      var dispatcher = new loop.Dispatcher();
+      conversationAppStore = new loop.store.ConversationAppStore({
+        dispatcher: dispatcher,
+        mozLoop: navigator.mozLoop
+      });
       sandbox.stub(conversation, "setOutgoingSessionData");
     });
 
@@ -278,13 +263,13 @@ describe("loop.conversation", function() {
 
     describe("start", function() {
       it("should set the title to incoming_call_title2", function() {
-        navigator.mozLoop.getCallData = function() {
-          return {
+        conversationAppStore.setStoreState({
+          windowData: {
             progressURL:    "fake",
             websocketToken: "fake",
             callId: 42
-          };
-        };
+          }
+        });
 
         icView = mountTestComponent();
 
@@ -293,7 +278,8 @@ describe("loop.conversation", function() {
     });
 
     describe("componentDidMount", function() {
-      var fakeSessionData;
+      var fakeSessionData, promise, resolveWebSocketConnect;
+      var rejectWebSocketConnect;
 
       beforeEach(function() {
         fakeSessionData  = {
@@ -306,7 +292,10 @@ describe("loop.conversation", function() {
           websocketToken: "7b"
         };
 
-        navigator.mozLoop.getCallData.returns(fakeSessionData);
+        conversationAppStore.setStoreState({
+          windowData: fakeSessionData
+        });
+
         stubComponent(loop.conversation, "IncomingCallView");
         stubComponent(sharedView, "ConversationView");
       });
@@ -317,247 +306,167 @@ describe("loop.conversation", function() {
         sinon.assert.calledOnce(navigator.mozLoop.startAlerting);
       });
 
-      it("should call getCallData on navigator.mozLoop", function() {
-        icView = mountTestComponent();
-
-        sinon.assert.calledOnce(navigator.mozLoop.getCallData);
-        sinon.assert.calledWith(navigator.mozLoop.getCallData, 42);
-      });
-
-      describe("getCallData successful", function() {
-        var promise, resolveWebSocketConnect,
-            rejectWebSocketConnect;
-
-        describe("Session Data setup", function() {
-          beforeEach(function() {
-            sandbox.stub(loop, "CallConnectionWebSocket").returns({
-              promiseConnect: function () {
-                promise = new Promise(function(resolve, reject) {
-                  resolveWebSocketConnect = resolve;
-                  rejectWebSocketConnect = reject;
-                });
-                return promise;
-              },
-              on: sinon.stub()
-            });
-          });
-
-          it("should store the session data", function() {
-            sandbox.stub(conversation, "setIncomingSessionData");
-
-            icView = mountTestComponent();
-
-            sinon.assert.calledOnce(conversation.setIncomingSessionData);
-            sinon.assert.calledWithExactly(conversation.setIncomingSessionData,
-                                           fakeSessionData);
-          });
-
-          it("should setup the websocket connection", function() {
-            icView = mountTestComponent();
-
-            sinon.assert.calledOnce(loop.CallConnectionWebSocket);
-            sinon.assert.calledWithExactly(loop.CallConnectionWebSocket, {
-              callId: "Hello",
-              url: "http://progress.example.com",
-              websocketToken: "7b"
-            });
+      describe("Session Data setup", function() {
+        beforeEach(function() {
+          sandbox.stub(loop, "CallConnectionWebSocket").returns({
+            promiseConnect: function () {
+              promise = new Promise(function(resolve, reject) {
+                resolveWebSocketConnect = resolve;
+                rejectWebSocketConnect = reject;
+              });
+              return promise;
+            },
+            on: sinon.stub()
           });
         });
 
-        describe("WebSocket Handling", function() {
-          beforeEach(function() {
-            promise = new Promise(function(resolve, reject) {
-              resolveWebSocketConnect = resolve;
-              rejectWebSocketConnect = reject;
-            });
+        it("should store the session data", function() {
+          sandbox.stub(conversation, "setIncomingSessionData");
 
-            sandbox.stub(loop.CallConnectionWebSocket.prototype, "promiseConnect").returns(promise);
+          icView = mountTestComponent();
+
+          sinon.assert.calledOnce(conversation.setIncomingSessionData);
+          sinon.assert.calledWithExactly(conversation.setIncomingSessionData,
+                                         fakeSessionData);
+        });
+
+        it("should setup the websocket connection", function() {
+          icView = mountTestComponent();
+
+          sinon.assert.calledOnce(loop.CallConnectionWebSocket);
+          sinon.assert.calledWithExactly(loop.CallConnectionWebSocket, {
+            callId: "Hello",
+            url: "http://progress.example.com",
+            websocketToken: "7b"
+          });
+        });
+      });
+
+      describe("WebSocket Handling", function() {
+        beforeEach(function() {
+          promise = new Promise(function(resolve, reject) {
+            resolveWebSocketConnect = resolve;
+            rejectWebSocketConnect = reject;
           });
 
-          it("should set the state to incoming on success", function(done) {
+          sandbox.stub(loop.CallConnectionWebSocket.prototype, "promiseConnect").returns(promise);
+        });
+
+        it("should set the state to incoming on success", function(done) {
+          icView = mountTestComponent();
+          resolveWebSocketConnect("incoming");
+
+          promise.then(function () {
+            expect(icView.state.callStatus).eql("incoming");
+            done();
+          });
+        });
+
+        it("should set the state to close on success if the progress " +
+          "state is terminated", function(done) {
             icView = mountTestComponent();
-            resolveWebSocketConnect("incoming");
+            resolveWebSocketConnect("terminated");
 
             promise.then(function () {
-              expect(icView.state.callStatus).eql("incoming");
+              expect(icView.state.callStatus).eql("close");
               done();
             });
           });
 
-          it("should set the state to close on success if the progress " +
-            "state is terminated", function(done) {
-              icView = mountTestComponent();
-              resolveWebSocketConnect("terminated");
+        // XXX implement me as part of bug 1047410
+        // see https://hg.mozilla.org/integration/fx-team/rev/5d2c69ebb321#l18.259
+        it.skip("should should switch view state to failed", function(done) {
+          icView = mountTestComponent();
+          rejectWebSocketConnect();
 
-              promise.then(function () {
-                expect(icView.state.callStatus).eql("close");
+          promise.then(function() {}, function() {
+            done();
+          });
+        });
+      });
+
+      describe("WebSocket Events", function() {
+        describe("Call cancelled or timed out before acceptance", function() {
+          beforeEach(function() {
+            // Mounting the test component automatically calls the required
+            // setup functions
+            icView = mountTestComponent();
+            promise = new Promise(function(resolve, reject) {
+              resolve();
+            });
+
+            sandbox.stub(loop.CallConnectionWebSocket.prototype, "promiseConnect").returns(promise);
+            sandbox.stub(loop.CallConnectionWebSocket.prototype, "close");
+            sandbox.stub(window, "close");
+          });
+
+          describe("progress - terminated (previousState = alerting)", function() {
+            it("should stop alerting", function(done) {
+              promise.then(function() {
+                icView._websocket.trigger("progress", {
+                  state: "terminated",
+                  reason: "timeout"
+                }, "alerting");
+
+                sinon.assert.calledOnce(navigator.mozLoop.stopAlerting);
                 done();
               });
             });
 
-          // XXX implement me as part of bug 1047410
-          // see https://hg.mozilla.org/integration/fx-team/rev/5d2c69ebb321#l18.259
-          it.skip("should should switch view state to failed", function(done) {
-            icView = mountTestComponent();
-            rejectWebSocketConnect();
+            it("should close the websocket", function(done) {
+              promise.then(function() {
+                icView._websocket.trigger("progress", {
+                  state: "terminated",
+                  reason: "closed"
+                }, "alerting");
 
-            promise.then(function() {}, function() {
-              done();
+                sinon.assert.calledOnce(icView._websocket.close);
+                done();
+              });
+            });
+
+            it("should close the window", function(done) {
+              promise.then(function() {
+                icView._websocket.trigger("progress", {
+                  state: "terminated",
+                  reason: "answered-elsewhere"
+                }, "alerting");
+
+                sandbox.clock.tick(1);
+
+                sinon.assert.calledOnce(window.close);
+                done();
+              });
             });
           });
-        });
 
-        describe("WebSocket Events", function() {
-          describe("Call cancelled or timed out before acceptance", function() {
-            beforeEach(function() {
-              // Mounting the test component automatically calls the required
-              // setup functions
-              icView = mountTestComponent();
-              promise = new Promise(function(resolve, reject) {
-                resolve();
+          describe("progress - terminated (previousState not init" +
+                   " nor alerting)",
+            function() {
+              it("should set the state to end", function(done) {
+                promise.then(function() {
+                  icView._websocket.trigger("progress", {
+                    state: "terminated",
+                    reason: "media-fail"
+                  }, "connecting");
+
+                  expect(icView.state.callStatus).eql("end");
+                  done();
+                });
               });
 
-              sandbox.stub(loop.CallConnectionWebSocket.prototype, "promiseConnect").returns(promise);
-              sandbox.stub(loop.CallConnectionWebSocket.prototype, "close");
-              sandbox.stub(window, "close");
-            });
-
-            describe("progress - terminated - cancel", function() {
               it("should stop alerting", function(done) {
                 promise.then(function() {
                   icView._websocket.trigger("progress", {
                     state: "terminated",
-                    reason: "cancel"
-                  });
+                    reason: "media-fail"
+                  }, "connecting");
 
                   sinon.assert.calledOnce(navigator.mozLoop.stopAlerting);
                   done();
                 });
               });
-
-              it("should close the websocket", function(done) {
-                promise.then(function() {
-                  icView._websocket.trigger("progress", {
-                    state: "terminated",
-                    reason: "cancel"
-                  });
-
-                  sinon.assert.calledOnce(icView._websocket.close);
-                  done();
-                });
-              });
-
-              it("should close the window", function(done) {
-                promise.then(function() {
-                  icView._websocket.trigger("progress", {
-                    state: "terminated",
-                    reason: "cancel"
-                  });
-
-                  sandbox.clock.tick(1);
-
-                  sinon.assert.calledOnce(window.close);
-                  done();
-                });
-              });
             });
-
-            describe("progress - terminated - closed", function() {
-              it("should stop alerting", function(done) {
-                promise.then(function() {
-                  icView._websocket.trigger("progress", {
-                    state: "terminated",
-                    reason: "closed"
-                  });
-
-                  sinon.assert.calledOnce(navigator.mozLoop.stopAlerting);
-                  done();
-                });
-              });
-
-              it("should close the websocket", function(done) {
-                promise.then(function() {
-                  icView._websocket.trigger("progress", {
-                    state: "terminated",
-                    reason: "closed"
-                  });
-
-                  sinon.assert.calledOnce(icView._websocket.close);
-                  done();
-                });
-              });
-
-              it("should close the window", function(done) {
-                promise.then(function() {
-                  icView._websocket.trigger("progress", {
-                    state: "terminated",
-                    reason: "closed"
-                  });
-
-                  sandbox.clock.tick(1);
-
-                  sinon.assert.calledOnce(window.close);
-                  done();
-                });
-              });
-            });
-
-            describe("progress - terminated - timeout (previousState = alerting)", function() {
-              it("should stop alerting", function(done) {
-                promise.then(function() {
-                  icView._websocket.trigger("progress", {
-                    state: "terminated",
-                    reason: "timeout"
-                  }, "alerting");
-
-                  sinon.assert.calledOnce(navigator.mozLoop.stopAlerting);
-                  done();
-                });
-              });
-
-              it("should close the websocket", function(done) {
-                promise.then(function() {
-                  icView._websocket.trigger("progress", {
-                    state: "terminated",
-                    reason: "timeout"
-                  }, "alerting");
-
-                  sinon.assert.calledOnce(icView._websocket.close);
-                  done();
-                });
-              });
-
-              it("should close the window", function(done) {
-                promise.then(function() {
-                  icView._websocket.trigger("progress", {
-                    state: "terminated",
-                    reason: "timeout"
-                  }, "alerting");
-
-                  sandbox.clock.tick(1);
-
-                  sinon.assert.calledOnce(window.close);
-                  done();
-                });
-              });
-            });
-
-            describe("progress - terminated - timeout (previousState not init" +
-                     " nor alerting)",
-              function() {
-                it("should set the state to end", function(done) {
-                  promise.then(function() {
-                    icView._websocket.trigger("progress", {
-                      state: "terminated",
-                      reason: "timeout"
-                    }, "connecting");
-
-                    expect(icView.state.callStatus).eql("end");
-                    done();
-                  });
-                });
-              });
-          });
         });
       });
 
@@ -606,8 +515,10 @@ describe("loop.conversation", function() {
             decline: sinon.stub(),
             close: sinon.stub()
           };
+          conversation.set({
+            windowId: "8699"
+          });
           conversation.setIncomingSessionData({
-            callId:         8699,
             websocketToken: 123
           });
         });
@@ -629,12 +540,15 @@ describe("loop.conversation", function() {
         it("should release callData", function() {
           icView.decline();
 
-          sinon.assert.calledOnce(navigator.mozLoop.releaseCallData);
-          sinon.assert.calledWithExactly(navigator.mozLoop.releaseCallData, 8699);
+          sinon.assert.calledOnce(navigator.mozLoop.calls.clearCallInProgress);
+          sinon.assert.calledWithExactly(
+            navigator.mozLoop.calls.clearCallInProgress, "8699");
         });
       });
 
       describe("#blocked", function() {
+        var mozLoop;
+
         beforeEach(function() {
           icView = mountTestComponent();
 
@@ -643,6 +557,13 @@ describe("loop.conversation", function() {
             close: sinon.stub()
           };
           sandbox.stub(window, "close");
+
+          mozLoop = {
+            LOOP_SESSION_TYPE: {
+              GUEST: 1,
+              FXA: 2
+            }
+          };
         });
 
         it("should call mozLoop.stopAlerting", function() {
@@ -653,23 +574,26 @@ describe("loop.conversation", function() {
 
         it("should call delete call", function() {
           sandbox.stub(conversation, "get").withArgs("callToken")
-                                           .returns("fakeToken");
+                                           .returns("fakeToken")
+                                           .withArgs("sessionType")
+                                           .returns(mozLoop.LOOP_SESSION_TYPE.FXA);
+
           var deleteCallUrl = sandbox.stub(loop.Client.prototype,
                                            "deleteCallUrl");
           icView.declineAndBlock();
 
           sinon.assert.calledOnce(deleteCallUrl);
-          sinon.assert.calledWithExactly(deleteCallUrl, "fakeToken",
-                                                        sinon.match.func);
+          sinon.assert.calledWithExactly(deleteCallUrl,
+            "fakeToken", mozLoop.LOOP_SESSION_TYPE.FXA, sinon.match.func);
         });
 
         it("should get callToken from conversation model", function() {
           sandbox.stub(conversation, "get");
           icView.declineAndBlock();
 
-          sinon.assert.calledTwice(conversation.get);
+          sinon.assert.called(conversation.get);
           sinon.assert.calledWithExactly(conversation.get, "callToken");
-          sinon.assert.calledWithExactly(conversation.get, "callId");
+          sinon.assert.calledWithExactly(conversation.get, "windowId");
         });
 
         it("should trigger error handling in case of error", function() {
@@ -678,7 +602,7 @@ describe("loop.conversation", function() {
           var fakeError = {
             error: true
           };
-          sandbox.stub(loop.Client.prototype, "deleteCallUrl", function(_, cb) {
+          sandbox.stub(loop.Client.prototype, "deleteCallUrl", function(_, __, cb) {
             cb(fakeError);
           });
           icView.declineAndBlock();
@@ -701,13 +625,27 @@ describe("loop.conversation", function() {
       var fakeSessionData;
 
       beforeEach(function() {
-        icView = mountTestComponent();
 
         fakeSessionData = {
           sessionId:    "sessionId",
           sessionToken: "sessionToken",
           apiKey:       "apiKey"
         };
+
+        conversationAppStore.setStoreState({
+          windowData: fakeSessionData
+        });
+
+        sandbox.stub(conversation, "setIncomingSessionData");
+        sandbox.stub(loop, "CallConnectionWebSocket").returns({
+          promiseConnect: function() {
+            return new Promise(function() {});
+          },
+          on: sandbox.spy()
+        });
+
+        icView = mountTestComponent();
+
         conversation.set("loopToken", "fakeToken");
         navigator.mozLoop.getLoopCharPref.returns("http://fake");
         stubComponent(sharedView, "ConversationView");
@@ -752,12 +690,12 @@ describe("loop.conversation", function() {
       });
 
       describe("session:network-disconnected", function() {
-        it("should navigate to call/feedback when network disconnects",
+        it("should navigate to call failed when network disconnects",
           function() {
             conversation.trigger("session:network-disconnected");
 
-              TestUtils.findRenderedComponentWithType(icView,
-                sharedView.FeedbackView);
+            TestUtils.findRenderedComponentWithType(icView,
+              loop.conversation.GenericFailureView);
           });
 
         it("should update the conversation window toolbar title",
@@ -813,7 +751,7 @@ describe("loop.conversation", function() {
   });
 
   describe("IncomingCallView", function() {
-    var view, model;
+    var view, model, fakeAudio;
 
     beforeEach(function() {
       var Model = Backbone.Model.extend({
@@ -822,6 +760,13 @@ describe("loop.conversation", function() {
       model = new Model();
       sandbox.spy(model, "trigger");
       sandbox.stub(model, "set");
+
+      fakeAudio = {
+        play: sinon.spy(),
+        pause: sinon.spy(),
+        removeAttribute: sinon.spy()
+      };
+      sandbox.stub(window, "Audio").returns(fakeAudio);
 
       view = TestUtils.renderIntoDocument(loop.conversation.IncomingCallView({
         model: model,
@@ -961,5 +906,33 @@ describe("loop.conversation", function() {
         sinon.assert.calledWith(model.trigger, "declineAndBlock");
       });
     });
+  });
+
+  describe("GenericFailureView", function() {
+    var view, fakeAudio;
+
+    beforeEach(function() {
+      fakeAudio = {
+        play: sinon.spy(),
+        pause: sinon.spy(),
+        removeAttribute: sinon.spy()
+      };
+      sandbox.stub(window, "Audio").returns(fakeAudio);
+
+      view = TestUtils.renderIntoDocument(
+        loop.conversation.GenericFailureView({
+          cancelCall: function() {}
+        })
+      );
+    });
+
+    it("should play a failure sound, once", function() {
+      sinon.assert.calledOnce(navigator.mozLoop.getAudioBlob);
+      sinon.assert.calledWithExactly(navigator.mozLoop.getAudioBlob,
+                                     "failure", sinon.match.func);
+      sinon.assert.calledOnce(fakeAudio.play);
+      expect(fakeAudio.loop).to.equal(false);
+    });
+
   });
 });

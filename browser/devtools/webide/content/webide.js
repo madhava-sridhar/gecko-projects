@@ -22,11 +22,16 @@ const {GetAvailableAddons} = require("devtools/webide/addons");
 const {GetTemplatesJSON, GetAddonsJSON} = require("devtools/webide/remote-resources");
 const utils = require("devtools/webide/utils");
 const Telemetry = require("devtools/shared/telemetry");
+const {RuntimeScanners, WiFiScanner} = require("devtools/webide/runtimes");
+const {showDoorhanger} = require("devtools/shared/doorhanger");
 
 const Strings = Services.strings.createBundle("chrome://browser/locale/devtools/webide.properties");
 
 const HTML = "http://www.w3.org/1999/xhtml";
 const HELP_URL = "https://developer.mozilla.org/docs/Tools/WebIDE/Troubleshooting";
+
+const MAX_ZOOM = 1.4;
+const MIN_ZOOM = 0.6;
 
 // download template index early
 GetTemplatesJSON(true);
@@ -88,7 +93,19 @@ let UI = {
 
     this.lastConnectedRuntime = Services.prefs.getCharPref("devtools.webide.lastConnectedRuntime");
 
+    if (Services.prefs.getBoolPref("devtools.webide.widget.autoinstall") &&
+        !Services.prefs.getBoolPref("devtools.webide.widget.enabled")) {
+      Services.prefs.setBoolPref("devtools.webide.widget.enabled", true);
+      gDevToolsBrowser.moveWebIDEWidgetInNavbar();
+    }
+
     this.setupDeck();
+
+    this.contentViewer = window.QueryInterface(Ci.nsIInterfaceRequestor)
+                               .getInterface(Ci.nsIWebNavigation)
+                               .QueryInterface(Ci.nsIDocShell)
+                               .contentViewer;
+    this.contentViewer.fullZoom = Services.prefs.getCharPref("devtools.webide.zoom");
   },
 
   uninit: function() {
@@ -118,6 +135,11 @@ let UI = {
         AppManager.selectedProject.type != "tab") {
       AppManager.validateProject(AppManager.selectedProject);
     }
+
+    // Hook to display promotional Developer Edition doorhanger. Only displayed once.
+    // Hooked into the `onfocus` event because sometimes does not work
+    // when run at the end of `init`. ¯\(°_o)/¯
+    showDoorhanger({ window, type: "deveditionpromo", anchor: document.querySelector("#deck") });
   },
 
   appManagerUpdate: function(event, what, details) {
@@ -148,7 +170,10 @@ let UI = {
       case "list-tabs-response":
         this.updateCommands();
         break;
-      case "runtime":
+      case "runtime-details":
+        this.updateRuntimeButton();
+        break;
+      case "runtime-changed":
         this.updateRuntimeButton();
         this.saveLastConnectedRuntime();
         break;
@@ -260,7 +285,14 @@ let UI = {
       this.cancelBusyTimeout();
       this.unbusy();
     }, (e) => {
-      let message = operationDescription + (e ? (": " + e) : "");
+      let message;
+      if (e.error && e.message) {
+        // Some errors come from fronts that are not based on protocol.js.
+        // Errors are not translated to strings.
+        message = operationDescription + " (" + e.error + "): " + e.message;
+      } else {
+        message = operationDescription + (e ? (": " + e) : "");
+      }
       this.cancelBusyTimeout();
       let operationCanceled = e && e.canceled;
       if (!operationCanceled) {
@@ -305,17 +337,17 @@ let UI = {
   /********** RUNTIME **********/
 
   updateRuntimeList: function() {
-    let wifiHeaderNode = document.querySelector("#runtime-header-wifi-devices");
-    if (AppManager.isWiFiScanningEnabled) {
+    let wifiHeaderNode = document.querySelector("#runtime-header-wifi");
+    if (WiFiScanner.allowed) {
       wifiHeaderNode.removeAttribute("hidden");
     } else {
       wifiHeaderNode.setAttribute("hidden", "true");
     }
 
-    let USBListNode = document.querySelector("#runtime-panel-usbruntime");
-    let WiFiListNode = document.querySelector("#runtime-panel-wifi-devices");
-    let simulatorListNode = document.querySelector("#runtime-panel-simulators");
-    let customListNode = document.querySelector("#runtime-panel-custom");
+    let usbListNode = document.querySelector("#runtime-panel-usb");
+    let wifiListNode = document.querySelector("#runtime-panel-wifi");
+    let simulatorListNode = document.querySelector("#runtime-panel-simulator");
+    let otherListNode = document.querySelector("#runtime-panel-other");
 
     let noHelperNode = document.querySelector("#runtime-panel-noadbhelper");
     let noUSBNode = document.querySelector("#runtime-panel-nousbdevice");
@@ -326,25 +358,27 @@ let UI = {
       noHelperNode.removeAttribute("hidden");
     }
 
-    if (AppManager.runtimeList.usb.length == 0 && Devices.helperAddonInstalled) {
+    let runtimeList = AppManager.runtimeList;
+
+    if (runtimeList.usb.length === 0 && Devices.helperAddonInstalled) {
       noUSBNode.removeAttribute("hidden");
     } else {
       noUSBNode.setAttribute("hidden", "true");
     }
 
     for (let [type, parent] of [
-      ["usb", USBListNode],
-      ["wifi", WiFiListNode],
+      ["usb", usbListNode],
+      ["wifi", wifiListNode],
       ["simulator", simulatorListNode],
-      ["custom", customListNode],
+      ["other", otherListNode],
     ]) {
       while (parent.hasChildNodes()) {
         parent.firstChild.remove();
       }
-      for (let runtime of AppManager.runtimeList[type]) {
+      for (let runtime of runtimeList[type]) {
         let panelItemNode = document.createElement("toolbarbutton");
         panelItemNode.className = "panel-item runtime-panel-item-" + type;
-        panelItemNode.setAttribute("label", runtime.getName());
+        panelItemNode.setAttribute("label", runtime.name);
         parent.appendChild(panelItemNode);
         let r = runtime;
         panelItemNode.addEventListener("click", () => {
@@ -366,18 +400,18 @@ let UI = {
 
     type = type.toLowerCase();
 
-    // Local connection is mapped to AppManager.runtimeList.custom array
+    // Local connection is mapped to AppManager.runtimeList.other array
     if (type == "local") {
-      type = "custom";
+      type = "other";
     }
 
     // We support most runtimes except simulator, that needs to be manually
     // launched
-    if (type == "usb" || type == "wifi" || type == "custom") {
+    if (type == "usb" || type == "wifi" || type == "other") {
       for (let runtime of AppManager.runtimeList[type]) {
-        // Some runtimes do not expose getID function and don't support
-        // autoconnect (like remote connection)
-        if (typeof(runtime.getID) == "function" && runtime.getID() == id) {
+        // Some runtimes do not expose an id and don't support autoconnect (like
+        // remote connection)
+        if (runtime.id == id) {
           this.connectToRuntime(runtime);
         }
       }
@@ -385,10 +419,10 @@ let UI = {
   },
 
   connectToRuntime: function(runtime) {
-    let name = runtime.getName();
+    let name = runtime.name;
     let promise = AppManager.connectToRuntime(runtime);
     promise.then(() => this.initConnectionTelemetry());
-    return this.busyUntil(promise, "connecting to runtime");
+    return this.busyUntil(promise, "connecting to runtime " + name);
   },
 
   updateRuntimeButton: function() {
@@ -396,15 +430,16 @@ let UI = {
     if (!AppManager.selectedRuntime) {
       labelNode.setAttribute("value", Strings.GetStringFromName("runtimeButton_label"));
     } else {
-      let name = AppManager.selectedRuntime.getName();
+      let name = AppManager.selectedRuntime.name;
       labelNode.setAttribute("value", name);
     }
   },
 
   saveLastConnectedRuntime: function () {
     if (AppManager.selectedRuntime &&
-        typeof(AppManager.selectedRuntime.getID) === "function") {
-      this.lastConnectedRuntime = AppManager.selectedRuntime.type + ":" + AppManager.selectedRuntime.getID();
+        AppManager.selectedRuntime.id !== undefined) {
+      this.lastConnectedRuntime = AppManager.selectedRuntime.type + ":" +
+                                  AppManager.selectedRuntime.id;
     } else {
       this.lastConnectedRuntime = "";
     }
@@ -719,6 +754,7 @@ let UI = {
     }
     deck.selectedPanel = panel;
     this.updateProjectEditorMenusVisibility();
+    this.updateToolboxFullscreenState();
   },
 
   resetDeck: function() {
@@ -746,6 +782,7 @@ let UI = {
       document.querySelector("#cmd_play").setAttribute("disabled", "true");
       document.querySelector("#cmd_stop").setAttribute("disabled", "true");
       document.querySelector("#cmd_toggleToolbox").setAttribute("disabled", "true");
+      document.querySelector("#cmd_showDevicePrefs").setAttribute("disabled", "true");
       return;
     }
 
@@ -787,7 +824,8 @@ let UI = {
         playCmd.setAttribute("disabled", "true");
         stopCmd.setAttribute("disabled", "true");
       } else {
-        if (AppManager.selectedProject.errorsCount == 0) {
+        if (AppManager.selectedProject.errorsCount == 0 &&
+            AppManager.runtimeCanHandleApps()) {
           playCmd.removeAttribute("disabled");
         } else {
           playCmd.setAttribute("disabled", "true");
@@ -808,6 +846,7 @@ let UI = {
     let permissionsCmd = document.querySelector("#cmd_showPermissionsTable");
     let detailsCmd = document.querySelector("#cmd_showRuntimeDetails");
     let disconnectCmd = document.querySelector("#cmd_disconnectRuntime");
+    let devicePrefsCmd = document.querySelector("#cmd_showDevicePrefs");
 
     let box = document.querySelector("#runtime-actions");
 
@@ -818,6 +857,9 @@ let UI = {
         permissionsCmd.removeAttribute("disabled");
         screenshotCmd.removeAttribute("disabled");
       }
+      if (AppManager.preferenceFront) {
+        devicePrefsCmd.removeAttribute("disabled");
+      }
       disconnectCmd.removeAttribute("disabled");
       runtimePanelButton.setAttribute("active", "true");
     } else {
@@ -825,6 +867,7 @@ let UI = {
       permissionsCmd.setAttribute("disabled", "true");
       screenshotCmd.setAttribute("disabled", "true");
       disconnectCmd.setAttribute("disabled", "true");
+      devicePrefsCmd.setAttribute("disabled", "true");
       runtimePanelButton.removeAttribute("active");
     }
 
@@ -871,9 +914,11 @@ let UI = {
     splitter.removeAttribute("hidden");
 
     let iframe = document.createElement("iframe");
+    iframe.id = "toolbox";
+
     document.querySelector("notificationbox").insertBefore(iframe, splitter.nextSibling);
     let host = devtools.Toolbox.HostType.CUSTOM;
-    let options = { customIframe: iframe };
+    let options = { customIframe: iframe, zoom: false };
     this.toolboxIframe = iframe;
 
     let height = Services.prefs.getIntPref("devtools.toolbox.footer.height");
@@ -881,7 +926,20 @@ let UI = {
 
     document.querySelector("#action-button-debug").setAttribute("active", "true");
 
+    this.updateToolboxFullscreenState();
     return gDevTools.showToolbox(target, null, host, options);
+  },
+
+  updateToolboxFullscreenState: function() {
+    let panel = document.querySelector("#deck").selectedPanel;
+    let nbox = document.querySelector("#notificationbox");
+    if (panel.id == "deck-panel-details" &&
+        AppManager.selectedProject.type != "packaged" &&
+        this.toolboxIframe) {
+      nbox.setAttribute("toolboxfullscreen", "true");
+    } else {
+      nbox.removeAttribute("toolboxfullscreen");
+    }
   },
 
   closeToolboxUI: function() {
@@ -896,6 +954,7 @@ let UI = {
     let splitter = document.querySelector(".devtools-horizontal-splitter");
     splitter.setAttribute("hidden", "true");
     document.querySelector("#action-button-debug").removeAttribute("active");
+    this.updateToolboxFullscreenState();
   },
 };
 
@@ -1125,7 +1184,7 @@ let Cmds = {
   },
 
   showRuntimePanel: function() {
-    AppManager.scanForWiFiRuntimes();
+    RuntimeScanners.scan();
 
     let panel = document.querySelector("#runtime-panel");
     let anchor = document.querySelector("#runtime-panel-button > .panel-button-anchor");
@@ -1160,6 +1219,10 @@ let Cmds = {
 
   showRuntimeDetails: function() {
     UI.selectDeckPanel("runtimedetails");
+  },
+
+  showDevicePrefs: function() {
+    UI.selectDeckPanel("devicepreferences");
   },
 
   showMonitor: function() {
@@ -1228,5 +1291,24 @@ let Cmds = {
 
   showPrefs: function() {
     UI.selectDeckPanel("prefs");
+  },
+
+  zoomIn: function() {
+    if (UI.contentViewer.fullZoom < MAX_ZOOM) {
+      UI.contentViewer.fullZoom += 0.1;
+      Services.prefs.setCharPref("devtools.webide.zoom", UI.contentViewer.fullZoom);
+    }
+  },
+
+  zoomOut: function() {
+    if (UI.contentViewer.fullZoom > MIN_ZOOM) {
+      UI.contentViewer.fullZoom -= 0.1;
+      Services.prefs.setCharPref("devtools.webide.zoom", UI.contentViewer.fullZoom);
+    }
+  },
+
+  resetZoom: function() {
+    UI.contentViewer.fullZoom = 1;
+    Services.prefs.setCharPref("devtools.webide.zoom", 1);
   },
 };

@@ -10,10 +10,11 @@
 #include <string.h>
 
 #include "mozilla/Types.h"
+#include "mozilla/UniquePtr.h"
 
 namespace mozilla {
 
-class JSONWriter;
+class JSONWriteFunc;
 
 namespace dmd {
 
@@ -121,7 +122,7 @@ ClearReports();
 //   }
 // }
 MOZ_EXPORT void
-AnalyzeReports(mozilla::JSONWriter& aWriter);
+AnalyzeReports(mozilla::UniquePtr<mozilla::JSONWriteFunc>);
 
 struct Sizes
 {
@@ -146,6 +147,14 @@ StatusMsg(const char* aFmt, ...);
 // Indicates whether or not DMD is running.
 MOZ_EXPORT bool
 IsRunning();
+
+// Sets the sample-below size. Only used for testing purposes.
+MOZ_EXPORT void
+SetSampleBelowSize(size_t aSize);
+
+// Clears all records of live allocations. Only used for testing purposes.
+MOZ_EXPORT void
+ClearBlocks();
 
 } // namespace mozilla
 } // namespace dmd

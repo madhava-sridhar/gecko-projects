@@ -257,6 +257,7 @@ public:
     mReferenceFrame(nullptr),
     mLayer(nullptr),
     mIsSolidColorInVisibleRegion(false),
+    mFontSmoothingBackgroundColor(NS_RGBA(0,0,0,0)),
     mSingleItemFixedToViewport(false),
     mNeedComponentAlpha(false),
     mForceTransparentSurface(false),
@@ -440,6 +441,11 @@ public:
    * True if every pixel in mVisibleRegion will have color mSolidColor.
    */
   bool mIsSolidColorInVisibleRegion;
+  /**
+   * The target background color for smoothing fonts that are drawn on top of
+   * transparent parts of the layer.
+   */
+  nscolor mFontSmoothingBackgroundColor;
   /**
    * True if the layer contains exactly one item that returned true for
    * ShouldFixToViewport.
@@ -900,6 +906,7 @@ public:
   PaintedDisplayItemLayerUserData() :
     mMaskClipCount(0),
     mForcedBackgroundColor(NS_RGBA(0,0,0,0)),
+    mFontSmoothingBackgroundColor(NS_RGBA(0,0,0,0)),
     mXScale(1.f), mYScale(1.f),
     mAppUnitsPerDevPixel(0),
     mTranslation(0, 0),
@@ -917,6 +924,12 @@ public:
    * region before any other content is painted.
    */
   nscolor mForcedBackgroundColor;
+
+  /**
+   * The target background color for smoothing fonts that are drawn on top of
+   * transparent parts of the layer.
+   */
+  nscolor mFontSmoothingBackgroundColor;
 
   /**
    * The resolution scale used.
@@ -2213,6 +2226,8 @@ ContainerState::PopPaintedLayerData()
     }
     userData->mForcedBackgroundColor = backgroundColor;
 
+    userData->mFontSmoothingBackgroundColor = data->mFontSmoothingBackgroundColor;
+
     // use a mask layer for rounded rect clipping.
     // data->mCommonClipCount may be -1 if we haven't put any actual
     // drawable items in this layer (i.e. it's only catching events).
@@ -2378,6 +2393,15 @@ PaintedLayerData::Accumulate(ContainerState* aState,
     mImage = nullptr;
   }
 
+  bool isFirstVisibleItem = mVisibleRegion.IsEmpty();
+  if (isFirstVisibleItem) {
+    nscolor fontSmoothingBGColor;
+    if (aItem->ProvidesFontSmoothingBackgroundColor(aState->mBuilder,
+                                                    &fontSmoothingBGColor)) {
+      mFontSmoothingBackgroundColor = fontSmoothingBGColor;
+    }
+  }
+
   nscolor uniformColor;
   bool isUniform = aItem->IsUniform(aState->mBuilder, &uniformColor);
 
@@ -2397,7 +2421,7 @@ PaintedLayerData::Accumulate(ContainerState* aState,
       }
     }
     if (isUniform) {
-      if (mVisibleRegion.IsEmpty()) {
+      if (isFirstVisibleItem) {
         // This color is all we have
         mSolidColor = uniformColor;
         mIsSolidColorInVisibleRegion = true;
@@ -2804,7 +2828,7 @@ ContainerState::ProcessDisplayItems(nsDisplayList* aList)
     nsIntRect itemDrawRect = ScaleToOutsidePixels(itemContent, snap);
     nsDisplayItem::Type itemType = item->GetType();
     bool prerenderedTransform = itemType == nsDisplayItem::TYPE_TRANSFORM &&
-        static_cast<nsDisplayTransform*>(item)->ShouldPrerender();
+        static_cast<nsDisplayTransform*>(item)->ShouldPrerender(mBuilder);
     nsIntRect clipRect;
     const DisplayItemClip& itemClip = item->GetClip();
     if (itemClip.HasClip()) {
@@ -3492,7 +3516,7 @@ ContainerState::SetupScrollingMetadata(NewLayerEntry* aEntry)
   nsIFrame* fParent;
   for (const nsIFrame* f = aEntry->mAnimatedGeometryRoot;
        f != mContainerAnimatedGeometryRoot;
-       f = nsLayoutUtils::GetAnimatedGeometryRootForFrame(
+       f = nsLayoutUtils::GetAnimatedGeometryRootForFrame(this->mBuilder,
            fParent, mContainerAnimatedGeometryRoot)) {
     fParent = nsLayoutUtils::GetCrossDocParentFrame(f);
     if (!fParent) {
@@ -3575,7 +3599,7 @@ ContainerState::PostprocessRetainedLayers(nsIntRegion* aOpaqueRegionForContainer
     if (!e->mOpaqueRegion.IsEmpty()) {
       const nsIFrame* animatedGeometryRootToCover = animatedGeometryRootForOpaqueness;
       if (e->mOpaqueForAnimatedGeometryRootParent &&
-          nsLayoutUtils::GetAnimatedGeometryRootForFrame(e->mAnimatedGeometryRoot->GetParent(),
+          nsLayoutUtils::GetAnimatedGeometryRootForFrame(mBuilder, e->mAnimatedGeometryRoot->GetParent(),
                                                          mContainerAnimatedGeometryRoot)
             == mContainerAnimatedGeometryRoot) {
         animatedGeometryRootToCover = mContainerAnimatedGeometryRoot;
@@ -3593,7 +3617,13 @@ ContainerState::PostprocessRetainedLayers(nsIntRegion* aOpaqueRegionForContainer
         data->mAnimatedGeometryRoot = animatedGeometryRootToCover;
         data->mFixedPosFrameForLayerData = e->mFixedPosFrameForLayerData;
       }
-      data->mOpaqueRegion.Or(data->mOpaqueRegion, e->mOpaqueRegion);
+
+      nsIntRegion clippedOpaque = e->mOpaqueRegion;
+      const nsIntRect* clipRect = e->mLayer->GetClipRect();
+      if (clipRect) {
+        clippedOpaque.AndWith(*clipRect);
+      }
+      data->mOpaqueRegion.Or(data->mOpaqueRegion, clippedOpaque);
       if (e->mHideAllLayersBelow) {
         hideAll = true;
       }
@@ -3792,7 +3822,7 @@ ChooseScaleAndSetTransform(FrameLayerBuilder* aLayerBuilder,
       // jaggies. It also ensures we never scale down by more than a factor of 2,
       // avoiding bad downscaling quality.
       Matrix frameTransform;
-      if (ActiveLayerTracker::IsStyleAnimated(aContainerFrame, eCSSProperty_transform) &&
+      if (ActiveLayerTracker::IsStyleAnimated(aDisplayListBuilder, aContainerFrame, eCSSProperty_transform) &&
           aTransform &&
           (!aTransform->Is2D(&frameTransform) || frameTransform.HasNonTranslationOrFlip())) {
         // Don't clamp the scale factor when the new desired scale factor matches the old one
@@ -3839,7 +3869,8 @@ ChooseScaleAndSetTransform(FrameLayerBuilder* aLayerBuilder,
     ContainerLayerParameters(scale.width, scale.height, -offset, aIncomingScale);
   if (aTransform) {
     aOutgoingScale.mInTransformedSubtree = true;
-    if (ActiveLayerTracker::IsStyleAnimated(aContainerFrame, eCSSProperty_transform)) {
+    if (ActiveLayerTracker::IsStyleAnimated(aDisplayListBuilder, aContainerFrame,
+                                            eCSSProperty_transform)) {
       aOutgoingScale.mInActiveTransformedSubtree = true;
     }
   }
@@ -4195,32 +4226,27 @@ FrameLayerBuilder::GetPaintedLayerScaleForFrame(nsIFrame* aFrame)
 }
 
 #ifdef MOZ_DUMP_PAINTING
-static void DebugPaintItem(nsRenderingContext* aDest,
+static void DebugPaintItem(DrawTarget& aDrawTarget,
                            nsPresContext* aPresContext,
                            nsDisplayItem *aItem,
                            nsDisplayListBuilder* aBuilder)
 {
   bool snap;
-  nsRect appUnitBounds = aItem->GetBounds(aBuilder, &snap);
-  gfxRect bounds(appUnitBounds.x, appUnitBounds.y, appUnitBounds.width, appUnitBounds.height);
-  bounds.ScaleInverse(aPresContext->AppUnitsPerDevPixel());
+  Rect bounds = NSRectToRect(aItem->GetBounds(aBuilder, &snap),
+                             aPresContext->AppUnitsPerDevPixel());
 
   RefPtr<DrawTarget> tempDT =
-    gfxPlatform::GetPlatform()->CreateOffscreenContentDrawTarget(
-                                          IntSize(bounds.width, bounds.height),
-                                          SurfaceFormat::B8G8R8A8);
+    aDrawTarget.CreateSimilarDrawTarget(IntSize(bounds.width, bounds.height),
+                                        SurfaceFormat::B8G8R8A8);
   nsRefPtr<gfxContext> context = new gfxContext(tempDT);
-  context->SetMatrix(gfxMatrix::Translation(-gfxPoint(bounds.x, bounds.y)));
-  nsRefPtr<nsRenderingContext> ctx = new nsRenderingContext();
-  ctx->Init(context);
+  context->SetMatrix(gfxMatrix::Translation(-bounds.x, -bounds.y));
+  nsRenderingContext ctx(context);
 
-  aItem->Paint(aBuilder, ctx);
+  aItem->Paint(aBuilder, &ctx);
   RefPtr<SourceSurface> surface = tempDT->Snapshot();
   DumpPaintedImage(aItem, surface);
 
-  DrawTarget* drawTarget = aDest->ThebesContext()->GetDrawTarget();
-  Rect rect = ToRect(bounds);
-  drawTarget->DrawSurface(surface, rect, Rect(Point(0,0), rect.Size()));
+  aDrawTarget.DrawSurface(surface, bounds, Rect(Point(0,0), bounds.Size()));
 
   aItem->SetPainted();
 }
@@ -4291,6 +4317,9 @@ FrameLayerBuilder::PaintItems(nsTArray<ClippedDisplayItem>& aItems,
                               float aXScale, float aYScale,
                               int32_t aCommonClipCount)
 {
+#ifdef MOZ_DUMP_PAINTING
+  DrawTarget& aDrawTarget = *aRC->GetDrawTarget();
+#endif
   int32_t appUnitsPerDevPixel = aPresContext->AppUnitsPerDevPixel();
   nsRect boundRect = aRect.ToAppUnits(appUnitsPerDevPixel);
   boundRect.MoveBy(NSIntPixelsToAppUnits(aOffset.x, appUnitsPerDevPixel),
@@ -4347,7 +4376,7 @@ FrameLayerBuilder::PaintItems(nsTArray<ClippedDisplayItem>& aItems,
 #ifdef MOZ_DUMP_PAINTING
 
       if (gfxUtils::sDumpPainting) {
-        DebugPaintItem(aRC, aPresContext, cdi->mItem, aBuilder);
+        DebugPaintItem(aDrawTarget, aPresContext, cdi->mItem, aBuilder);
       } else {
 #else
       {
@@ -4378,7 +4407,7 @@ static bool ShouldDrawRectsSeparately(gfxContext* aContext, DrawRegionClip aClip
   }
 
   DrawTarget *dt = aContext->GetDrawTarget();
-  return dt->GetBackendType() == BackendType::DIRECT2D;
+  return !dt->SupportsRegionClipping();
 }
 
 static void DrawForcedBackgroundColor(gfxContext* aContext, Layer* aLayer, nscolor aBackgroundColor)
@@ -4462,6 +4491,11 @@ FrameLayerBuilder::DrawPaintedLayer(PaintedLayer* aLayer,
     DrawForcedBackgroundColor(aContext, aLayer, userData->mForcedBackgroundColor);
   }
 
+  if (NS_GET_A(userData->mFontSmoothingBackgroundColor) > 0) {
+    aContext->SetFontSmoothingBackgroundColor(
+      Color::FromABGR(userData->mFontSmoothingBackgroundColor));
+  }
+
   // make the origin of the context coincide with the origin of the
   // PaintedLayer
   gfxContextMatrixAutoSaveRestore saveMatrix(aContext);
@@ -4478,8 +4512,7 @@ FrameLayerBuilder::DrawPaintedLayer(PaintedLayer* aLayer,
                                 userData->mXScale, userData->mYScale);
   }
 
-  nsRefPtr<nsRenderingContext> rc = new nsRenderingContext();
-  rc->Init(aContext);
+  nsRenderingContext rc(aContext);
 
   if (shouldDrawRectsSeparately) {
     nsIntRegionRectIterator it(aRegionToDraw);
@@ -4498,7 +4531,7 @@ FrameLayerBuilder::DrawPaintedLayer(PaintedLayer* aLayer,
         aContext->CurrentMatrix().Translate(aLayer->GetResidualTranslation() - gfxPoint(offset.x, offset.y)).
                                   Scale(userData->mXScale, userData->mYScale));
 
-      layerBuilder->PaintItems(entry->mItems, *iterRect, aContext, rc,
+      layerBuilder->PaintItems(entry->mItems, *iterRect, aContext, &rc,
                                builder, presContext,
                                offset, userData->mXScale, userData->mYScale,
                                entry->mCommonClipCount);
@@ -4511,11 +4544,13 @@ FrameLayerBuilder::DrawPaintedLayer(PaintedLayer* aLayer,
       aContext->CurrentMatrix().Translate(aLayer->GetResidualTranslation() - gfxPoint(offset.x, offset.y)).
                                 Scale(userData->mXScale,userData->mYScale));
 
-    layerBuilder->PaintItems(entry->mItems, aRegionToDraw.GetBounds(), aContext, rc,
+    layerBuilder->PaintItems(entry->mItems, aRegionToDraw.GetBounds(), aContext, &rc,
                              builder, presContext,
                              offset, userData->mXScale, userData->mYScale,
                              entry->mCommonClipCount);
   }
+
+  aContext->SetFontSmoothingBackgroundColor(Color());
 
   bool isActiveLayerManager = !aLayer->Manager()->IsInactiveLayerManager();
 

@@ -27,34 +27,29 @@ import android.widget.Toast;
 public final class ReadingListHelper implements GeckoEventListener, NativeEventListener {
     private static final String LOGTAG = "ReadingListHelper";
 
-    private static final int READER_ADD_SUCCESS = 0;
-    private static final int READER_ADD_FAILED = 1;
-    private static final int READER_ADD_DUPLICATE = 2;
-
     protected final Context context;
-
 
     public ReadingListHelper(Context context) {
         this.context = context;
 
         EventDispatcher.getInstance().registerGeckoThreadListener((GeckoEventListener) this,
-            "Reader:Added", "Reader:FaviconRequest");
+            "Reader:AddToList", "Reader:FaviconRequest");
         EventDispatcher.getInstance().registerGeckoThreadListener((NativeEventListener) this,
-            "Reader:ListStatusRequest", "Reader:Removed");
+            "Reader:ListStatusRequest", "Reader:RemoveFromList");
     }
 
     public void uninit() {
         EventDispatcher.getInstance().unregisterGeckoThreadListener((GeckoEventListener) this,
-            "Reader:Added", "Reader:FaviconRequest");
+            "Reader:AddToList", "Reader:FaviconRequest");
         EventDispatcher.getInstance().unregisterGeckoThreadListener((NativeEventListener) this,
-            "Reader:ListStatusRequest", "Reader:Removed");
+            "Reader:ListStatusRequest", "Reader:RemoveFromList");
     }
 
     @Override
     public void handleMessage(String event, JSONObject message) {
         switch(event) {
-            case "Reader:Added": {
-                handleReadingListAdded(message);
+            case "Reader:AddToList": {
+                handleAddToList(message);
                 break;
             }
 
@@ -69,13 +64,13 @@ public final class ReadingListHelper implements GeckoEventListener, NativeEventL
     public void handleMessage(final String event, final NativeJSObject message,
                               final EventCallback callback) {
         switch(event) {
-            case "Reader:Removed": {
-                handleReadingListRemoved(message.getString("url"));
+            case "Reader:RemoveFromList": {
+                handleRemoveFromList(message.getString("url"));
                 break;
             }
 
             case "Reader:ListStatusRequest": {
-                handleReadingListStatusRequest(message.getString("url"));
+                handleReadingListStatusRequest(callback, message.getString("url"));
                 break;
             }
         }
@@ -85,30 +80,30 @@ public final class ReadingListHelper implements GeckoEventListener, NativeEventL
      * A page can be added to the ReadingList by long-tap of the page-action
      * icon, or by tapping the readinglist-add icon in the ReaderMode banner.
      */
-    private void handleReadingListAdded(JSONObject message) {
-        final int result = message.optInt("result", READER_ADD_FAILED);
-        if (result != READER_ADD_SUCCESS) {
-            if (result == READER_ADD_FAILED) {
-                showToast(R.string.reading_list_failed, Toast.LENGTH_SHORT);
-            } else if (result == READER_ADD_DUPLICATE) {
-                showToast(R.string.reading_list_duplicate, Toast.LENGTH_SHORT);
-            }
-            return;
-        }
-
-        final ContentValues values = new ContentValues();
-        values.put(ReadingListItems.URL, message.optString("url"));
-        values.put(ReadingListItems.TITLE, message.optString("title"));
-        values.put(ReadingListItems.LENGTH, message.optInt("length"));
-        values.put(ReadingListItems.EXCERPT, message.optString("excerpt"));
+    private void handleAddToList(final JSONObject message) {
+        final ContentResolver cr = context.getContentResolver();
+        final String url = message.optString("url");
 
         ThreadUtils.postToBackgroundThread(new Runnable() {
             @Override
             public void run() {
-                BrowserDB.addReadingListItem(context.getContentResolver(), values);
-                showToast(R.string.reading_list_added, Toast.LENGTH_SHORT);
+                if (BrowserDB.isReadingListItem(cr, url)) {
+                    showToast(R.string.reading_list_duplicate, Toast.LENGTH_SHORT);
+
+                } else {
+                    final ContentValues values = new ContentValues();
+                    values.put(ReadingListItems.URL, url);
+                    values.put(ReadingListItems.TITLE, message.optString("title"));
+                    values.put(ReadingListItems.LENGTH, message.optInt("length"));
+                    values.put(ReadingListItems.EXCERPT, message.optString("excerpt"));
+                    BrowserDB.addReadingListItem(cr, values);
+
+                    showToast(R.string.reading_list_added, Toast.LENGTH_SHORT);
+                }
             }
         });
+
+        GeckoAppShell.sendEventToGecko(GeckoEvent.createBroadcastEvent("Reader:Added", url));
     }
 
     /**
@@ -145,11 +140,12 @@ public final class ReadingListHelper implements GeckoEventListener, NativeEventL
      * A page can be removed from the ReadingList by panel context menu,
      * or by tapping the readinglist-remove icon in the ReaderMode banner.
      */
-    private void handleReadingListRemoved(final String url) {
+    private void handleRemoveFromList(final String url) {
         ThreadUtils.postToBackgroundThread(new Runnable() {
             @Override
             public void run() {
                 BrowserDB.removeReadingListItemWithURL(context.getContentResolver(), url);
+                GeckoAppShell.sendEventToGecko(GeckoEvent.createBroadcastEvent("Reader:Removed", url));
                 showToast(R.string.page_removed, Toast.LENGTH_SHORT);
             }
         });
@@ -159,7 +155,7 @@ public final class ReadingListHelper implements GeckoEventListener, NativeEventL
      * Gecko (ReaderMode) requests the page ReadingList status, to display
      * the proper ReaderMode banner icon (readinglist-add / readinglist-remove).
      */
-    private void handleReadingListStatusRequest(final String url) {
+    private void handleReadingListStatusRequest(final EventCallback callback, final String url) {
         ThreadUtils.postToBackgroundThread(new Runnable() {
             @Override
             public void run() {
@@ -172,11 +168,10 @@ public final class ReadingListHelper implements GeckoEventListener, NativeEventL
                     json.put("inReadingList", inReadingList);
                 } catch (JSONException e) {
                     Log.e(LOGTAG, "JSON error - failed to return inReadingList status", e);
-                    return;
                 }
 
-                GeckoAppShell.sendEventToGecko(
-                    GeckoEvent.createBroadcastEvent("Reader:ListStatusReturn", json.toString()));
+                // Return the json object to fulfill the promise.
+                callback.sendSuccess(json.toString());
             }
         });
     }

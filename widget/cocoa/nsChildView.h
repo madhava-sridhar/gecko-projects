@@ -339,6 +339,7 @@ typedef NSInteger NSEventGestureAxis;
 - (BOOL)isCoveringTitlebar;
 
 - (NSColor*)vibrancyFillColorForWidgetType:(uint8_t)aWidgetType;
+- (NSColor*)vibrancyFontSmoothingBackgroundColorForWidgetType:(uint8_t)aWidgetType;
 
 // Simple gestures support
 //
@@ -582,9 +583,9 @@ public:
     return mTextInputHandler;
   }
 
-  void              NotifyDirtyRegion(const nsIntRegion& aDirtyRegion);
   void              ClearVibrantAreas();
   NSColor*          VibrancyFillColorForWidgetType(uint8_t aWidgetType);
+  NSColor*          VibrancyFontSmoothingBackgroundColorForWidgetType(uint8_t aWidgetType);
 
   // unit conversion convenience functions
   int32_t           CocoaPointsToDevPixels(CGFloat aPts) const {

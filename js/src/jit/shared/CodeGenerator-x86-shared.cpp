@@ -441,7 +441,7 @@ CodeGeneratorX86Shared::bailout(const T &binder, LSnapshot *snapshot)
     // bailing out from.
     InlineScriptTree *tree = snapshot->mir()->block()->trackedTree();
     OutOfLineBailout *ool = new(alloc()) OutOfLineBailout(snapshot);
-    if (!addOutOfLineCode(ool, BytecodeSite(tree, tree->script()->code())))
+    if (!addOutOfLineCode(ool, new(alloc()) BytecodeSite(tree, tree->script()->code())))
         return false;
 
     binder(masm, ool->entry());
@@ -2209,8 +2209,7 @@ CodeGeneratorX86Shared::visitFloat32x4ToInt32x4(LFloat32x4ToInt32x4 *ins)
 bool
 CodeGeneratorX86Shared::visitSimdValueInt32x4(LSimdValueInt32x4 *ins)
 {
-    MSimdValueX4 *mir = ins->mir();
-    MOZ_ASSERT(mir->type() == MIRType_Int32x4);
+    MOZ_ASSERT(ins->mir()->type() == MIRType_Int32x4);
 
     FloatRegister output = ToFloatRegister(ins->output());
     if (AssemblerX86Shared::HasSSE41()) {
@@ -2235,12 +2234,10 @@ CodeGeneratorX86Shared::visitSimdValueInt32x4(LSimdValueInt32x4 *ins)
 bool
 CodeGeneratorX86Shared::visitSimdValueFloat32x4(LSimdValueFloat32x4 *ins)
 {
-    MSimdValueX4 *mir = ins->mir();
-    MOZ_ASSERT(mir->type() == MIRType_Float32x4);
+    MOZ_ASSERT(ins->mir()->type() == MIRType_Float32x4);
 
-    FloatRegister output = ToFloatRegister(ins->output());
     FloatRegister r0 = ToFloatRegister(ins->getOperand(0));
-    MOZ_ASSERT(r0 == output); // defineReuseInput(0)
+    MOZ_ASSERT(r0 == ToFloatRegister(ins->output())); // defineReuseInput(0)
 
     FloatRegister r1 = ToFloatRegister(ins->getTemp(0));
     FloatRegister r2 = ToFloatRegister(ins->getOperand(2));
@@ -2291,6 +2288,8 @@ CodeGeneratorX86Shared::visitSimdExtractElementI(LSimdExtractElementI *ins)
     if (lane == LaneX) {
         // The value we want to extract is in the low double-word
         masm.moveLowInt32(input, output);
+    } else if (AssemblerX86Shared::HasSSE41()) {
+        masm.pextrd(lane, input, output);
     } else {
         uint32_t mask = MacroAssembler::ComputeShuffleMask(lane);
         masm.shuffleInt32(mask, input, ScratchSimdReg);
@@ -2415,6 +2414,17 @@ CodeGeneratorX86Shared::visitSimdSwizzleF(LSimdSwizzleF *ins)
     uint32_t z = ins->laneZ();
     uint32_t w = ins->laneW();
 
+    if (AssemblerX86Shared::HasSSE3()) {
+        if (ins->lanesMatch(0, 0, 2, 2)) {
+            masm.movsldup(input, output);
+            return true;
+        }
+        if (ins->lanesMatch(1, 1, 3, 3)) {
+            masm.movshdup(input, output);
+            return true;
+        }
+    }
+
     // TODO Here and below, arch specific lowering could identify this pattern
     // and use defineReuseInput to avoid this move (bug 1084404)
     if (ins->lanesMatch(2, 3, 2, 3)) {
@@ -2478,12 +2488,44 @@ CodeGeneratorX86Shared::visitSimdShuffle(LSimdShuffle *ins)
     // MSimdSwizzle instead.
     MOZ_ASSERT(numLanesFromLHS < 4);
 
+    // If all values stay in their lane, this is a blend.
+    if (AssemblerX86Shared::HasSSE41()) {
+        if (x % 4 == 0 && y % 4 == 1 && z % 4 == 2 && w % 4 == 3) {
+            masm.blendps(rhs, out, masm.blendpsMask(x >= 4, y >= 4, z >= 4, w >= 4));
+            return true;
+        }
+    }
+
     // One element of the second, all other elements of the first
     if (numLanesFromLHS == 3) {
         unsigned firstMask = -1, secondMask = -1;
 
+        // register-register movss preserves the high lanes.
         if (ins->lanesMatch(4, 1, 2, 3)) {
             masm.movss(rhs, out);
+            return true;
+        }
+
+        // SSE4.1 insertps can handle any single element.
+        unsigned numLanesUnchanged = (x == 0) + (y == 1) + (z == 2) + (w == 3);
+        if (AssemblerX86Shared::HasSSE41() && numLanesUnchanged == 3) {
+            SimdLane srcLane;
+            SimdLane dstLane;
+            if (x >= 4) {
+                srcLane = SimdLane(x - 4);
+                dstLane = LaneX;
+            } else if (y >= 4) {
+                srcLane = SimdLane(y - 4);
+                dstLane = LaneY;
+            } else if (z >= 4) {
+                srcLane = SimdLane(z - 4);
+                dstLane = LaneZ;
+            } else {
+                MOZ_ASSERT(w >= 4);
+                srcLane = SimdLane(w - 4);
+                dstLane = LaneW;
+            }
+            masm.insertps(rhs, out, masm.insertpsMask(srcLane, dstLane));
             return true;
         }
 
@@ -2848,9 +2890,8 @@ CodeGeneratorX86Shared::visitSimdBinaryBitwiseX4(LSimdBinaryBitwiseX4 *ins)
 bool
 CodeGeneratorX86Shared::visitSimdShift(LSimdShift *ins)
 {
-    FloatRegister vec = ToFloatRegister(ins->vector());
     FloatRegister out = ToFloatRegister(ins->output());
-    MOZ_ASSERT(vec == out); // defineReuseInput(0);
+    MOZ_ASSERT(ToFloatRegister(ins->vector()) == out); // defineReuseInput(0);
 
     // TODO: If the shift count is greater than 31, this will just zero all
     // lanes by default for lsh and ursh, and set the count to 32 for rsh
@@ -3079,6 +3120,14 @@ JitRuntime::generateForkJoinGetSliceStub(JSContext *cx)
 #endif
 
     return code;
+}
+
+bool
+CodeGeneratorX86Shared::visitMemoryBarrier(LMemoryBarrier *ins)
+{
+    if (ins->type() & MembarStoreLoad)
+        masm.storeLoadFence();
+    return true;
 }
 
 } // namespace jit

@@ -39,13 +39,6 @@
   }                                                                     \
 }
 
-#define CONVERT_ENUM_TO_STRING(_enumType, _enum, _string)               \
-{                                                                       \
-  uint32_t index = uint32_t(_enum);                                     \
-  _string.AssignASCII(_enumType##Values::strings[index].value,          \
-                      _enumType##Values::strings[index].length);        \
-}
-
 using mozilla::ErrorResult;
 using namespace mozilla::dom;
 using namespace mozilla::dom::mobileconnection;
@@ -368,9 +361,12 @@ MobileConnection::GetRadioState() const
     return retVal;
   }
 
-  nsAutoString state;
-  mMobileConnection->GetRadioState(state);
-  CONVERT_STRING_TO_NULLABLE_ENUM(state, MobileRadioState, retVal);
+  int32_t state = nsIMobileConnection::MOBILE_RADIO_STATE_UNKNOWN;
+  if (NS_SUCCEEDED(mMobileConnection->GetRadioState(&state)) &&
+      state != nsIMobileConnection::MOBILE_RADIO_STATE_UNKNOWN) {
+    MOZ_ASSERT(state < static_cast<int32_t>(MobileRadioState::EndGuard_));
+    retVal.SetValue(static_cast<MobileRadioState>(state));
+  }
 
   return retVal;
 }
@@ -474,8 +470,7 @@ MobileConnection::SetPreferredNetworkType(MobilePreferredNetworkType& aType,
     return nullptr;
   }
 
-  nsAutoString type;
-  CONVERT_ENUM_TO_STRING(MobilePreferredNetworkType, aType, type);
+  int32_t type = static_cast<int32_t>(aType);
 
   nsRefPtr<DOMRequest> request = new DOMRequest(GetOwner());
   nsRefPtr<MobileConnectionCallback> requestCallback =
@@ -521,8 +516,7 @@ MobileConnection::SetRoamingPreference(MobileRoamingMode& aMode,
     return nullptr;
   }
 
-  nsAutoString mode;
-  CONVERT_ENUM_TO_STRING(MobileRoamingMode, aMode, mode);
+  int32_t mode = static_cast<int32_t>(aMode);
 
   nsRefPtr<DOMRequest> request = new DOMRequest(GetOwner());
   nsRefPtr<MobileConnectionCallback> requestCallback =
@@ -1038,8 +1032,7 @@ MobileConnection::NotifyDataError(const nsAString& aMessage)
 }
 
 NS_IMETHODIMP
-MobileConnection::NotifyCFStateChanged(bool aSuccess,
-                                       unsigned short aAction,
+MobileConnection::NotifyCFStateChanged(unsigned short aAction,
                                        unsigned short aReason,
                                        const nsAString& aNumber,
                                        unsigned short aSeconds,
@@ -1052,7 +1045,6 @@ MobileConnection::NotifyCFStateChanged(bool aSuccess,
   CFStateChangeEventInit init;
   init.mBubbles = false;
   init.mCancelable = false;
-  init.mSuccess = aSuccess;
   init.mAction = aAction;
   init.mReason = aReason;
   init.mNumber = aNumber;

@@ -85,6 +85,8 @@ public:
 
   virtual bool RecvRemoveTexture() MOZ_OVERRIDE;
 
+  virtual bool RecvRecycleTexture(const TextureFlags& aTextureFlags) MOZ_OVERRIDE;
+
   TextureHost* GetTextureHost() { return mTextureHost; }
 
   void ActorDestroy(ActorDestroyReason why) MOZ_OVERRIDE;
@@ -142,6 +144,13 @@ PTextureParent*
 TextureHost::GetIPDLActor()
 {
   return mActor;
+}
+
+bool
+TextureHost::BindTextureSource(CompositableTextureSourceRef& texture)
+{
+  texture = GetTextureSources();
+  return !!texture;
 }
 
 FenceHandle
@@ -277,18 +286,6 @@ TextureHost::CompositorRecycle()
   static_cast<TextureParent*>(mActor)->CompositorRecycle();
 }
 
-void
-TextureHost::SetCompositableBackendSpecificData(CompositableBackendSpecificData* aBackendData)
-{
-  mCompositableBackendData = aBackendData;
-}
-
-void
-TextureHost::UnsetCompositableBackendSpecificData(CompositableBackendSpecificData* aBackendData)
-{
-  mCompositableBackendData = nullptr;
-}
-
 TextureHost::TextureHost(TextureFlags aFlags)
     : mActor(nullptr)
     , mFlags(aFlags)
@@ -307,6 +304,15 @@ void TextureHost::Finalize()
 }
 
 void
+TextureHost::RecycleTexture(TextureFlags aFlags)
+{
+  MOZ_ASSERT(GetFlags() & TextureFlags::RECYCLE);
+  MOZ_ASSERT(aFlags & TextureFlags::RECYCLE);
+  MOZ_ASSERT(!HasRecycleCallback());
+  mFlags = aFlags;
+}
+
+void
 TextureHost::PrintInfo(std::stringstream& aStream, const char* aPrefix)
 {
   aStream << aPrefix;
@@ -322,9 +328,11 @@ TextureHost::PrintInfo(std::stringstream& aStream, const char* aPrefix)
 }
 
 TextureSource::TextureSource()
+: mCompositableCount(0)
 {
     MOZ_COUNT_CTOR(TextureSource);
 }
+
 TextureSource::~TextureSource()
 {
     MOZ_COUNT_DTOR(TextureSource);
@@ -339,6 +347,22 @@ BufferTextureHost::BufferTextureHost(gfx::SurfaceFormat aFormat,
 , mLocked(false)
 , mNeedsFullUpdate(false)
 {}
+
+void
+BufferTextureHost::InitSize()
+{
+  if (mFormat == gfx::SurfaceFormat::YUV) {
+    YCbCrImageDataDeserializer yuvDeserializer(GetBuffer(), GetBufferSize());
+    if (yuvDeserializer.IsValid()) {
+      mSize = yuvDeserializer.GetYSize();
+    }
+  } else if (mFormat != gfx::SurfaceFormat::UNKNOWN) {
+    ImageDataDeserializer deserializer(GetBuffer(), GetBufferSize());
+    if (deserializer.IsValid()) {
+      mSize = deserializer.GetSize();
+    }
+  }
+}
 
 BufferTextureHost::~BufferTextureHost()
 {}
@@ -589,6 +613,7 @@ ShmemTextureHost::ShmemTextureHost(const ipc::Shmem& aShmem,
 , mDeallocator(aDeallocator)
 {
   MOZ_COUNT_CTOR(ShmemTextureHost);
+  InitSize();
 }
 
 ShmemTextureHost::~ShmemTextureHost()
@@ -641,6 +666,7 @@ MemoryTextureHost::MemoryTextureHost(uint8_t* aBuffer,
 , mBuffer(aBuffer)
 {
   MOZ_COUNT_CTOR(MemoryTextureHost);
+  InitSize();
 }
 
 MemoryTextureHost::~MemoryTextureHost()
@@ -796,6 +822,16 @@ TextureParent::ClearTextureHost()
   mTextureHost = nullptr;
 }
 
+bool
+TextureParent::RecvRecycleTexture(const TextureFlags& aTextureFlags)
+{
+  if (!mTextureHost) {
+    return true;
+  }
+  mTextureHost->RecycleTexture(aTextureFlags);
+  return true;
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 
 static RefPtr<TextureSource>
@@ -817,17 +853,12 @@ SharedSurfaceToTexSource(gl::SharedSurface* abstractSurf, Compositor* compositor
 #ifdef XP_WIN
     case gl::SharedSurfaceType::EGLSurfaceANGLE: {
       auto surf = gl::SharedSurface_ANGLEShareHandle::Cast(abstractSurf);
-      HANDLE shareHandle = surf->GetShareHandle();
 
       MOZ_ASSERT(compositor->GetBackendType() == LayersBackend::LAYERS_D3D11);
       CompositorD3D11* compositorD3D11 = static_cast<CompositorD3D11*>(compositor);
-      ID3D11Device* d3d = compositorD3D11->GetDevice();
+      RefPtr<ID3D11Texture2D> tex = surf->GetConsumerTexture();
 
-      nsRefPtr<ID3D11Texture2D> tex;
-      HRESULT hr = d3d->OpenSharedResource(shareHandle,
-                                           __uuidof(ID3D11Texture2D),
-                                           getter_AddRefs(tex));
-      if (FAILED(hr)) {
+      if (!tex) {
         NS_WARNING("Failed to open shared resource.");
         break;
       }
@@ -844,8 +875,9 @@ SharedSurfaceToTexSource(gl::SharedSurface* abstractSurf, Compositor* compositor
 
       GLenum target = surf->ConsTextureTarget();
       GLuint tex = surf->ConsTexture(gl);
-      texSource = new GLTextureSource(compositorOGL, tex, format, target,
-                                      surf->mSize);
+      texSource = new GLTextureSource(compositorOGL, tex, target,
+                                      surf->mSize, format,
+                                      true/*externally owned*/);
       break;
     }
     case gl::SharedSurfaceType::EGLImageShare: {
@@ -860,8 +892,9 @@ SharedSurfaceToTexSource(gl::SharedSurface* abstractSurf, Compositor* compositor
       GLuint tex = 0;
       surf->AcquireConsumerTexture(gl, &tex, &target);
 
-      texSource = new GLTextureSource(compositorOGL, tex, format, target,
-                                      surf->mSize);
+      texSource = new GLTextureSource(compositorOGL, tex, target,
+                                      surf->mSize, format,
+                                      true/*externally owned*/);
       break;
     }
 #ifdef XP_MACOSX

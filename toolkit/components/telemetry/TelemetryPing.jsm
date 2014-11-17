@@ -227,7 +227,16 @@ this.TelemetryPing = Object.freeze({
    */
   observe: function (aSubject, aTopic, aData) {
     return Impl.observe(aSubject, aTopic, aData);
-  }
+  },
+
+  /**
+   * The client id send with the telemetry ping.
+   *
+   * @return The client id as string, or null.
+   */
+   get clientID() {
+    return Impl.clientID;
+   },
 });
 
 let Impl = {
@@ -421,6 +430,22 @@ let Impl = {
       }
       if (Object.keys(packedHistograms).length != 0)
         ret[addonName] = packedHistograms;
+    }
+
+    return ret;
+  },
+
+  getKeyedHistograms: function() {
+    let registered = Telemetry.registeredKeyedHistograms([]);
+    let ret = {};
+
+    for (let id of registered) {
+      ret[id] = {};
+      let keyed = Telemetry.getKeyedHistogramById(id);
+      let snapshot = keyed.snapshot();
+      for (let key of Object.keys(snapshot)) {
+        ret[id][key] = this.packHistogram(snapshot[key]);
+      }
     }
 
     return ret;
@@ -694,6 +719,7 @@ let Impl = {
       ver: PAYLOAD_VERSION,
       simpleMeasurements: simpleMeasurements,
       histograms: this.getHistograms(Telemetry.histogramSnapshots),
+      keyedHistograms: this.getKeyedHistograms(),
       slowSQL: Telemetry.slowSQL,
       fileIOReports: Telemetry.fileIOReports,
       chromeHangs: Telemetry.chromeHangs,
@@ -1146,5 +1172,9 @@ let Impl = {
       break;
 #endif
     }
+  },
+
+  get clientID() {
+    return this._clientID;
   },
 };

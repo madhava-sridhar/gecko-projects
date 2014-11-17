@@ -1485,10 +1485,12 @@
             // Restore the progress listener.
             aBrowser.webProgress.addProgressListener(filter, Ci.nsIWebProgress.NOTIFY_ALL);
 
-            if (aShouldBeRemote)
+            if (aShouldBeRemote) {
               tab.setAttribute("remote", "true");
-            else
+            } else {
               tab.removeAttribute("remote");
+              aBrowser.messageManager.sendAsyncMessage("Browser:AppTab", { isAppTab: tab.pinned })
+            }
 
             if (wasActive)
               aBrowser.focus();
@@ -2592,6 +2594,7 @@
           ]]>
         </body>
       </method>
+#endif
 
       <method name="moveTabTo">
         <parameter name="aTab"/>
@@ -2834,18 +2837,16 @@
 
       <method name="attachFormFill">
         <body><![CDATA[
-          for (var i = 0; i < this.mPanelContainer.childNodes.length; ++i) {
-            var cb = this.getBrowserAtIndex(i);
-            cb.attachFormFill();
+          for (let browser of this.browsers) {
+            browser.attachFormFill();
           }
         ]]></body>
       </method>
 
       <method name="detachFormFill">
         <body><![CDATA[
-          for (var i = 0; i < this.mPanelContainer.childNodes.length; ++i) {
-            var cb = this.getBrowserAtIndex(i);
-            cb.detachFormFill();
+          for (let browser of this.browsers) {
+            browser.detachFormFill();
           }
         ]]></body>
       </method>
@@ -3099,6 +3100,13 @@
               window.focus();
               break;
             }
+            case "Browser:Init": {
+              let tab = this.getTabForBrowser(browser);
+              if (!tab)
+                return;
+              browser.messageManager.sendAsyncMessage("Browser:AppTab", { isAppTab: tab.pinned })
+              break;
+            }
           }
         ]]></body>
       </method>
@@ -3156,6 +3164,7 @@
             messageManager.addMessageListener("DOMTitleChanged", this);
             messageManager.addMessageListener("DOMWindowClose", this);
             messageManager.addMessageListener("contextmenu", this);
+            messageManager.addMessageListener("Browser:Init", this);
 
             // If this window has remote tabs, switch to our tabpanels fork
             // which does asynchronous tab switching.
@@ -5364,6 +5373,44 @@
         ]]>
         </setter>
       </property>
+    </implementation>
+  </binding>
+
+  <binding id="tabbrowser-browser"
+           extends="chrome://global/content/bindings/browser.xml#browser">
+    <implementation>
+      <!-- throws exception for unknown schemes -->
+      <method name="loadURIWithFlags">
+        <parameter name="aURI"/>
+        <parameter name="aFlags"/>
+        <parameter name="aReferrerURI"/>
+        <parameter name="aCharset"/>
+        <parameter name="aPostData"/>
+        <body>
+          <![CDATA[
+            _loadURIWithFlags(this, aURI, aFlags, aReferrerURI, aCharset, aPostData);
+          ]]>
+        </body>
+      </method>
+    </implementation>
+  </binding>
+
+  <binding id="tabbrowser-remote-browser"
+           extends="chrome://global/content/bindings/remote-browser.xml#remote-browser">
+    <implementation>
+      <!-- throws exception for unknown schemes -->
+      <method name="loadURIWithFlags">
+        <parameter name="aURI"/>
+        <parameter name="aFlags"/>
+        <parameter name="aReferrerURI"/>
+        <parameter name="aCharset"/>
+        <parameter name="aPostData"/>
+        <body>
+          <![CDATA[
+            _loadURIWithFlags(this, aURI, aFlags, aReferrerURI, aCharset, aPostData);
+          ]]>
+        </body>
+      </method>
     </implementation>
   </binding>
 

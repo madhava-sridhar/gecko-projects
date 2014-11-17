@@ -333,11 +333,6 @@ protected:
     nsresult ScrollToAnchor(nsACString & curHash, nsACString & newHash,
                             uint32_t aLoadType);
 
-    // Tries to serialize a given variant using structured clone.  This only
-    // works if the variant is backed by a JSVal.
-    nsresult SerializeJSValVariant(JSContext *aCx, nsIVariant *aData,
-                                   nsAString &aResult);
-
     // Returns true if would have called FireOnLocationChange,
     // but did not because aFireOnLocationChange was false on entry.
     // In this case it is the caller's responsibility to ensure
@@ -376,8 +371,12 @@ protected:
                                          nsISupports* aOwner,
                                          bool aCloneChildren,
                                          nsISHEntry ** aNewEntry);
-    nsresult DoAddChildSHEntry(nsISHEntry* aNewEntry, int32_t aChildOffset,
-                               bool aCloneChildren);
+    nsresult AddChildSHEntryToParent(nsISHEntry* aNewEntry, int32_t aChildOffset,
+                                     bool aCloneChildren);
+
+    nsresult AddChildSHEntryInternal(nsISHEntry* aCloneRef, nsISHEntry* aNewEntry,
+                                     int32_t aChildOffset, uint32_t loadType,
+                                     bool aCloneChildren);
 
     NS_IMETHOD LoadHistoryEntry(nsISHEntry * aEntry, uint32_t aLoadType);
     NS_IMETHOD PersistLayoutHistoryState();
@@ -951,6 +950,10 @@ private:
     nsWeakPtr mOpener;
     nsWeakPtr mOpenedRemote;
 
+    // A depth count of how many times NotifyRunToCompletionStart
+    // has been called without a matching NotifyRunToCompletionStop.
+    uint32_t          mJSRunToCompletionDepth;
+
     // True if recording profiles.
     bool mProfileTimelineRecording;
 
@@ -970,7 +973,7 @@ private:
         delete mPayload;
       }
 
-      const char* mName;
+      nsCString mName;
       ProfilerMarkerTracing* mPayload;
       DOMHighResTimeStamp mTime;
     };

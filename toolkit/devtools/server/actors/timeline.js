@@ -116,7 +116,15 @@ let TimelineActor = exports.TimelineActor = protocol.ActorClass({
    * @return {Array}
    */
   get docShells() {
-    let docShellsEnum = this.tabActor.originalDocShell.getDocShellEnumerator(
+    let originalDocShell;
+
+    if (this.tabActor.isRootActor) {
+      originalDocShell = this.tabActor.docShell;
+    } else {
+      originalDocShell = this.tabActor.originalDocShell;
+    }
+
+    let docShellsEnum = originalDocShell.getDocShellEnumerator(
       Ci.nsIDocShellTreeItem.typeAll,
       Ci.nsIDocShell.ENUMERATE_FORWARDS
     );
@@ -148,7 +156,9 @@ let TimelineActor = exports.TimelineActor = protocol.ActorClass({
     for (let docShell of this.docShells) {
       markers = [...markers, ...docShell.popProfileTimelineMarkers()];
     }
+
     if (markers.length > 0) {
+      this._postProcessMarkers(markers);
       events.emit(this, "markers", markers, endTime);
     }
     if (this._memoryActor) {
@@ -161,6 +171,25 @@ let TimelineActor = exports.TimelineActor = protocol.ActorClass({
     this._dataPullTimeout = setTimeout(() => {
       this._pullTimelineData();
     }, DEFAULT_TIMELINE_DATA_PULL_TIMEOUT);
+  },
+
+  /**
+   * Some markers need post processing.
+   * We will eventually do that platform side: bug 1069661
+   */
+  _postProcessMarkers: function(m) {
+    m.forEach(m => {
+      // A marker named "ConsoleTime:foobar" needs
+      // to be renamed "ConsoleTime".
+      let split = m.name.match(/ConsoleTime:(.*)/);
+      if (split && split.length > 0) {
+        if (!m.detail) {
+          m.detail = {}
+        }
+        m.detail.causeName = split[1];
+        m.name = "ConsoleTime";
+      }
+    });
   },
 
   /**
@@ -191,7 +220,7 @@ let TimelineActor = exports.TimelineActor = protocol.ActorClass({
 
     if (withMemory) {
       this._memoryActor = new MemoryActor(this.conn, this.tabActor);
-      events.emit(this, "memory", Date.now(), this._memoryActor.measure());
+      events.emit(this, "memory", this._startTime, this._memoryActor.measure());
     }
     if (withTicks) {
       this._framerateActor = new FramerateActor(this.conn, this.tabActor);

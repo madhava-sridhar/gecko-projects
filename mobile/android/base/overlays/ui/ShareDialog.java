@@ -12,6 +12,8 @@ import org.mozilla.gecko.Assert;
 import org.mozilla.gecko.GeckoProfile;
 import org.mozilla.gecko.LocaleAware;
 import org.mozilla.gecko.R;
+import org.mozilla.gecko.Telemetry;
+import org.mozilla.gecko.TelemetryContract;
 import org.mozilla.gecko.db.LocalBrowserDB;
 import org.mozilla.gecko.overlays.OverlayConstants;
 import org.mozilla.gecko.overlays.service.OverlayActionService;
@@ -19,8 +21,8 @@ import org.mozilla.gecko.overlays.service.sharemethods.ParcelableClientRecord;
 import org.mozilla.gecko.overlays.service.sharemethods.SendTab;
 import org.mozilla.gecko.overlays.service.sharemethods.ShareMethod;
 import org.mozilla.gecko.sync.setup.activities.WebURLFinder;
+import org.mozilla.gecko.mozglue.ContextUtils;
 import org.mozilla.gecko.util.HardwareUtils;
-import org.mozilla.gecko.util.StringUtils;
 import org.mozilla.gecko.util.ThreadUtils;
 import org.mozilla.gecko.util.UIAsyncTask;
 
@@ -121,7 +123,7 @@ public class ShareDialog extends LocaleAware.LocaleAwareActivity implements Send
         final Resources resources = getResources();
 
         // The URL is usually hiding somewhere in the extra text. Extract it.
-        final String extraText = StringUtils.getStringExtra(intent, Intent.EXTRA_TEXT);
+        final String extraText = ContextUtils.getStringExtra(intent, Intent.EXTRA_TEXT);
         if (TextUtils.isEmpty(extraText)) {
             abortDueToNoURL();
             return;
@@ -147,11 +149,16 @@ public class ShareDialog extends LocaleAware.LocaleAwareActivity implements Send
 
         // If provided, we use the subject text to give us something nice to display.
         // If not, we wing it with the URL.
+
         // TODO: Consider polling Fennec databases to find better information to display.
         String subjectText = intent.getStringExtra(Intent.EXTRA_SUBJECT);
+
+        String telemetryExtras = "title=" + (subjectText != null);
         if (subjectText != null) {
             ((TextView) findViewById(R.id.title)).setText(subjectText);
         }
+
+        Telemetry.sendUIEvent(TelemetryContract.Event.SHOW, TelemetryContract.Method.SHARE_OVERLAY, telemetryExtras);
 
         title = subjectText;
         url = pageUrl;
@@ -321,16 +328,22 @@ public class ShareDialog extends LocaleAware.LocaleAwareActivity implements Send
 
         startService(serviceIntent);
         slideOut();
+
+        Telemetry.sendUIEvent(TelemetryContract.Event.SHARE, TelemetryContract.Method.SHARE_OVERLAY, "sendtab");
     }
 
     public void addToReadingList() {
         startService(getServiceIntent(ShareMethod.Type.ADD_TO_READING_LIST));
         slideOut();
+
+        Telemetry.sendUIEvent(TelemetryContract.Event.SAVE, TelemetryContract.Method.SHARE_OVERLAY, "reading_list");
     }
 
     public void addBookmark() {
         startService(getServiceIntent(ShareMethod.Type.ADD_BOOKMARK));
         slideOut();
+
+        Telemetry.sendUIEvent(TelemetryContract.Event.SAVE, TelemetryContract.Method.SHARE_OVERLAY, "bookmark");
     }
 
     public void launchBrowser() {
@@ -386,6 +399,7 @@ public class ShareDialog extends LocaleAware.LocaleAwareActivity implements Send
     @Override
     public void onBackPressed() {
         slideOut();
+        Telemetry.sendUIEvent(TelemetryContract.Event.CANCEL, TelemetryContract.Method.SHARE_OVERLAY);
     }
 
     /**
@@ -394,6 +408,7 @@ public class ShareDialog extends LocaleAware.LocaleAwareActivity implements Send
     @Override
     public boolean onTouchEvent(MotionEvent event) {
         slideOut();
+        Telemetry.sendUIEvent(TelemetryContract.Event.CANCEL, TelemetryContract.Method.SHARE_OVERLAY);
         return true;
     }
 }

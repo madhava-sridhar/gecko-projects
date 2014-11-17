@@ -804,6 +804,10 @@ js_DumpPC(JSContext *cx)
     if (!sprinter.init())
         return false;
     ScriptFrameIter iter(cx);
+    if (iter.done()) {
+        fprintf(stdout, "Empty stack.\n");
+        return true;
+    }
     RootedScript script(cx, iter.script());
     bool ok = js_DisassembleAtPC(cx, script, true, iter.pc(), false, &sprinter);
     fprintf(stdout, "%s", sprinter.string());
@@ -1001,7 +1005,7 @@ js_Disassemble1(JSContext *cx, HandleScript script, jsbytecode *pc,
 
       case JOF_OBJECT: {
         /* Don't call obj.toSource if analysis/inference is active. */
-        if (script->compartment()->activeAnalysis) {
+        if (script->zone()->types.activeAnalysis) {
             Sprint(sp, " object");
             break;
         }
@@ -1063,8 +1067,7 @@ js_Disassemble1(JSContext *cx, HandleScript script, jsbytecode *pc,
         goto print_int;
 
       case JOF_UINT24:
-        MOZ_ASSERT(op == JSOP_UINT24 || op == JSOP_NEWARRAY || op == JSOP_INITELEM_ARRAY ||
-                   op == JSOP_DUPAT);
+        MOZ_ASSERT(len == 4);
         i = (int)GET_UINT24(pc);
         goto print_int;
 
@@ -1588,6 +1591,13 @@ ExpressionDecompiler::decompilePC(jsbytecode *pc)
         return sprinter.printf("%d", GetBytecodeInteger(pc)) >= 0;
       case JSOP_STRING:
         return quote(loadAtom(pc), '"');
+      case JSOP_SYMBOL: {
+        unsigned i = uint8_t(pc[1]);
+        MOZ_ASSERT(i < JS::WellKnownSymbolLimit);
+        if (i < JS::WellKnownSymbolLimit)
+            return write(cx->names().wellKnownSymbolDescriptions()[i]);
+        break;
+      }
       case JSOP_UNDEFINED:
         return write(js_undefined_str);
       case JSOP_THIS:
@@ -2051,7 +2061,7 @@ js::StopPCCountProfiling(JSContext *cx)
     for (ZonesIter zone(rt, SkipAtoms); !zone.done(); zone.next()) {
         for (ZoneCellIter i(zone, FINALIZE_SCRIPT); !i.done(); i.next()) {
             JSScript *script = i.get<JSScript>();
-            if (script->hasScriptCounts() && script->types) {
+            if (script->hasScriptCounts() && script->types()) {
                 ScriptAndCounts sac;
                 sac.script = script;
                 sac.scriptCounts.set(script->releaseScriptCounts());

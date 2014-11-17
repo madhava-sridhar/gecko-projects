@@ -227,7 +227,7 @@ nsFieldSetFrame::PaintBorderBackground(nsRenderingContext& aRenderingContext,
     int32_t appUnitsPerDevPixel = presContext->AppUnitsPerDevPixel();
 
     gfx->Save();
-    gfx->Clip(NSRectToRect(clipRect, appUnitsPerDevPixel, *drawTarget));
+    gfx->Clip(NSRectToSnappedRect(clipRect, appUnitsPerDevPixel, *drawTarget));
     nsCSSRendering::PaintBorder(presContext, aRenderingContext, this,
                                 aDirtyRect, rect, mStyleContext);
     gfx->Restore();
@@ -240,7 +240,7 @@ nsFieldSetFrame::PaintBorderBackground(nsRenderingContext& aRenderingContext,
     clipRect.height = topBorder;
 
     gfx->Save();
-    gfx->Clip(NSRectToRect(clipRect, appUnitsPerDevPixel, *drawTarget));
+    gfx->Clip(NSRectToSnappedRect(clipRect, appUnitsPerDevPixel, *drawTarget));
     nsCSSRendering::PaintBorder(presContext, aRenderingContext, this,
                                 aDirtyRect, rect, mStyleContext);
     gfx->Restore();
@@ -252,7 +252,7 @@ nsFieldSetFrame::PaintBorderBackground(nsRenderingContext& aRenderingContext,
     clipRect.height = mRect.height - (yoff + topBorder);
     
     gfx->Save();
-    gfx->Clip(NSRectToRect(clipRect, appUnitsPerDevPixel, *drawTarget));
+    gfx->Clip(NSRectToSnappedRect(clipRect, appUnitsPerDevPixel, *drawTarget));
     nsCSSRendering::PaintBorder(presContext, aRenderingContext, this,
                                 aDirtyRect, rect, mStyleContext);
     gfx->Restore();
@@ -318,7 +318,7 @@ nsFieldSetFrame::ComputeSize(nsRenderingContext *aRenderingContext,
                              const LogicalSize& aMargin,
                              const LogicalSize& aBorder,
                              const LogicalSize& aPadding,
-                             uint32_t aFlags)
+                             ComputeSizeFlags aFlags)
 {
   LogicalSize result =
     nsContainerFrame::ComputeSize(aRenderingContext, aWM,

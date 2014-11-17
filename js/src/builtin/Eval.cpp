@@ -12,6 +12,7 @@
 #include "jscntxt.h"
 
 #include "frontend/BytecodeCompiler.h"
+#include "vm/Debugger.h"
 #include "vm/GlobalObject.h"
 #include "vm/JSONParser.h"
 
@@ -65,11 +66,7 @@ EvalCacheHashPolicy::match(const EvalCacheEntry &cacheEntry, const EvalCacheLook
 
     MOZ_ASSERT(IsEvalCacheCandidate(script));
 
-    // Get the source string passed for safekeeping in the atom map
-    // by the prior eval to frontend::CompileScript.
-    JSAtom *keyStr = script->atoms[0];
-
-    return EqualStrings(keyStr, l.str) &&
+    return EqualStrings(cacheEntry.str, l.str) &&
            cacheEntry.callerScript == l.callerScript &&
            script->getVersion() == l.version &&
            cacheEntry.pc == l.pc;
@@ -94,7 +91,7 @@ class EvalScriptGuard
     ~EvalScriptGuard() {
         if (script_) {
             script_->cacheForEval();
-            EvalCacheEntry cacheEntry = {script_, lookup_.callerScript, lookup_.pc};
+            EvalCacheEntry cacheEntry = {lookupStr_, script_, lookup_.callerScript, lookup_.pc};
             lookup_.str = lookupStr_;
             if (lookup_.str && IsEvalCacheCandidate(script_))
                 cx_->runtime()->evalCache.relookupOrAdd(p_, lookup_, cacheEntry);
@@ -484,6 +481,9 @@ js::ExecuteInGlobalAndReturnScope(JSContext *cx, HandleObject global, HandleScri
         script = CloneScript(cx, NullPtr(), NullPtr(), script);
         if (!script)
             return false;
+
+        Rooted<GlobalObject *> global(cx, script->compileAndGo() ? &script->global() : nullptr);
+        Debugger::onNewScript(cx, script, global);
     }
 
     RootedObject scope(cx, JS_NewObject(cx, nullptr, JS::NullPtr(), JS::NullPtr()));

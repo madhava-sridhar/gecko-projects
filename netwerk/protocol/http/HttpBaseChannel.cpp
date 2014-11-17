@@ -35,6 +35,7 @@
 #include "nsPIDOMWindow.h"
 #include "nsPerformance.h"
 #include "nsINetworkInterceptController.h"
+#include "mozIThirdPartyUtil.h"
 
 #include <algorithm>
 
@@ -56,7 +57,7 @@ HttpBaseChannel::HttpBaseChannel()
   , mResponseHeadersModified(false)
   , mAllowPipelining(true)
   , mAllowSTS(true)
-  , mForceAllowThirdPartyCookie(false)
+  , mThirdPartyFlags(0)
   , mUploadStreamHasHeaders(false)
   , mInheritApplicationCache(true)
   , mChooseApplicationCache(false)
@@ -619,6 +620,15 @@ HttpBaseChannel::SetApplyConversion(bool value)
   return NS_OK;
 }
 
+nsresult
+HttpBaseChannel::DoApplyContentConversions(nsIStreamListener* aNextListener,
+                                           nsIStreamListener** aNewNextListener)
+{
+  return DoApplyContentConversions(aNextListener,
+                                   aNewNextListener,
+                                   mListenerContext);
+}
+
 NS_IMETHODIMP
 HttpBaseChannel::DoApplyContentConversions(nsIStreamListener* aNextListener,
                                            nsIStreamListener** aNewNextListener,
@@ -639,10 +649,7 @@ HttpBaseChannel::DoApplyContentConversions(nsIStreamListener* aNextListener,
   }
 
   nsAutoCString contentEncoding;
-  char *cePtr, *val;
-  nsresult rv;
-
-  rv = mResponseHead->GetHeader(nsHttp::Content_Encoding, contentEncoding);
+  nsresult rv = mResponseHead->GetHeader(nsHttp::Content_Encoding, contentEncoding);
   if (NS_FAILED(rv) || contentEncoding.IsEmpty())
     return NS_OK;
 
@@ -652,9 +659,9 @@ HttpBaseChannel::DoApplyContentConversions(nsIStreamListener* aNextListener,
   // being a stack with the last converter created being the first one
   // to accept the raw network data.
 
-  cePtr = contentEncoding.BeginWriting();
+  char* cePtr = contentEncoding.BeginWriting();
   uint32_t count = 0;
-  while ((val = nsCRT::strtok(cePtr, HTTP_LWS ",", &cePtr))) {
+  while (char* val = nsCRT::strtok(cePtr, HTTP_LWS ",", &cePtr)) {
     if (++count > 16) {
       // That's ridiculous. We only understand 2 different ones :)
       // but for compatibility with old code, we will just carry on without
@@ -1326,6 +1333,36 @@ HttpBaseChannel::RedirectTo(nsIURI *newURI)
 //-----------------------------------------------------------------------------
 
 NS_IMETHODIMP
+HttpBaseChannel::GetTopWindowURI(nsIURI **aTopWindowURI)
+{
+  nsresult rv = NS_OK;
+  nsCOMPtr<mozIThirdPartyUtil> util;
+  // Only compute the top window URI once. In e10s, this must be computed in the
+  // child. The parent gets the top window URI through HttpChannelOpenArgs.
+  if (!mTopWindowURI) {
+    util = do_GetService(THIRDPARTYUTIL_CONTRACTID);
+    if (!util) {
+      return NS_ERROR_NOT_AVAILABLE;
+    }
+    nsCOMPtr<nsIDOMWindow> win;
+    nsresult rv = util->GetTopWindowForChannel(this, getter_AddRefs(win));
+    if (NS_SUCCEEDED(rv)) {
+      rv = util->GetURIFromWindow(win, getter_AddRefs(mTopWindowURI));
+#if DEBUG
+      if (mTopWindowURI) {
+        nsCString spec;
+        rv = mTopWindowURI->GetSpec(spec);
+        LOG(("HttpChannelBase::Setting topwindow URI spec %s [this=%p]\n",
+             spec.get(), this));
+      }
+#endif
+    }
+  }
+  NS_IF_ADDREF(*aTopWindowURI = mTopWindowURI);
+  return rv;
+}
+
+NS_IMETHODIMP
 HttpBaseChannel::GetDocumentURI(nsIURI **aDocumentURI)
 {
   NS_ENSURE_ARG_POINTER(aDocumentURI);
@@ -1423,9 +1460,25 @@ HttpBaseChannel::SetCookie(const char *aCookieHeader)
 }
 
 NS_IMETHODIMP
+HttpBaseChannel::GetThirdPartyFlags(uint32_t  *aFlags)
+{
+  *aFlags = mThirdPartyFlags;
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+HttpBaseChannel::SetThirdPartyFlags(uint32_t aFlags)
+{
+  ENSURE_CALLED_BEFORE_ASYNC_OPEN();
+
+  mThirdPartyFlags = aFlags;
+  return NS_OK;
+}
+
+NS_IMETHODIMP
 HttpBaseChannel::GetForceAllowThirdPartyCookie(bool *aForce)
 {
-  *aForce = mForceAllowThirdPartyCookie;
+  *aForce = !!(mThirdPartyFlags & nsIHttpChannelInternal::THIRD_PARTY_FORCE_ALLOW);
   return NS_OK;
 }
 
@@ -1434,7 +1487,11 @@ HttpBaseChannel::SetForceAllowThirdPartyCookie(bool aForce)
 {
   ENSURE_CALLED_BEFORE_ASYNC_OPEN();
 
-  mForceAllowThirdPartyCookie = aForce;
+  if (aForce)
+    mThirdPartyFlags |= nsIHttpChannelInternal::THIRD_PARTY_FORCE_ALLOW;
+  else
+    mThirdPartyFlags &= ~nsIHttpChannelInternal::THIRD_PARTY_FORCE_ALLOW;
+
   return NS_OK;
 }
 
@@ -2034,9 +2091,8 @@ HttpBaseChannel::SetupReplacementChannel(nsIURI       *newURI,
 
   nsCOMPtr<nsIHttpChannelInternal> httpInternal = do_QueryInterface(newChannel);
   if (httpInternal) {
-    // convey the mForceAllowThirdPartyCookie flag
-    httpInternal->SetForceAllowThirdPartyCookie(mForceAllowThirdPartyCookie);
-    // convey the spdy flag
+    // Convey third party cookie and spdy flags.
+    httpInternal->SetThirdPartyFlags(mThirdPartyFlags);
     httpInternal->SetAllowSpdy(mAllowSpdy);
 
     // update the DocumentURI indicator since we are being redirected.

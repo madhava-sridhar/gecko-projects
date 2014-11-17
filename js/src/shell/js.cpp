@@ -940,6 +940,15 @@ ParseCompileOptions(JSContext *cx, CompileOptions &options, HandleObject opts,
         options.setLine(u);
     }
 
+    if (!JS_GetProperty(cx, opts, "columnNumber", &v))
+        return false;
+    if (!v.isUndefined()) {
+        int32_t c;
+        if (!ToInt32(cx, v, &c))
+            return false;
+        options.setColumn(c);
+    }
+
     if (!JS_GetProperty(cx, opts, "sourceIsLazy", &v))
         return false;
     if (v.isBoolean())
@@ -990,6 +999,23 @@ class AutoNewContext
         }
     }
 };
+
+static void
+my_LargeAllocFailCallback(void *data)
+{
+    JSContext *cx = (JSContext*)data;
+    JSRuntime *rt = cx->runtime();
+
+    if (InParallelSection() || !cx->allowGC())
+        return;
+
+    MOZ_ASSERT(!rt->isHeapBusy());
+    MOZ_ASSERT(!rt->currentThreadHasExclusiveAccess());
+
+    JS::PrepareForFullGC(rt);
+    AutoKeepAtoms keepAtoms(cx->perThreadData);
+    rt->gc.gc(GC_NORMAL, JS::gcreason::SHARED_MEMORY_LIMIT);
+}
 
 static const uint32_t CacheEntry_SOURCE = 0;
 static const uint32_t CacheEntry_BYTECODE = 1;
@@ -1875,9 +1901,7 @@ SrcNotes(JSContext *cx, HandleScript script, Sprinter *sp)
             break;
 
           case SRC_COLSPAN:
-            colspan = js_GetSrcNoteOffset(sn, 0);
-            if (colspan >= SN_COLSPAN_DOMAIN / 2)
-                colspan -= SN_COLSPAN_DOMAIN;
+            colspan = SN_OFFSET_TO_COLSPAN(js_GetSrcNoteOffset(sn, 0));
             Sprint(sp, "%d", colspan);
             break;
 
@@ -2335,7 +2359,6 @@ DumpHeap(JSContext *cx, unsigned argc, jsval *vp)
         thingToIgnore = args[4];
     }
 
-
     FILE *dumpFile = stdout;
     if (fileName.length()) {
         dumpFile = fopen(fileName.ptr(), "w");
@@ -2440,7 +2463,12 @@ Clone(JSContext *cx, unsigned argc, jsval *vp)
         parent = JS_GetParent(&args.callee());
     }
 
-    JSObject *clone = JS_CloneFunctionObject(cx, funobj, parent);
+    // Should it worry us that we might be getting with wrappers
+    // around with wrappers here?
+    JS::AutoObjectVector scopeChain(cx);
+    if (!parent->is<GlobalObject>() && !scopeChain.append(parent))
+        return false;
+    JSObject *clone = JS::CloneFunctionObject(cx, funobj, scopeChain);
     if (!clone)
         return false;
     args.rval().setObject(*clone);
@@ -2492,31 +2520,23 @@ sandbox_enumerate(JSContext *cx, HandleObject obj)
 }
 
 static bool
-sandbox_resolve(JSContext *cx, HandleObject obj, HandleId id, MutableHandleObject objp)
+sandbox_resolve(JSContext *cx, HandleObject obj, HandleId id, bool *resolvedp)
 {
     RootedValue v(cx);
     if (!JS_GetProperty(cx, obj, "lazy", &v))
         return false;
 
-    if (ToBoolean(v)) {
-        bool resolved;
-        if (!JS_ResolveStandardClass(cx, obj, id, &resolved))
-            return false;
-        if (resolved) {
-            objp.set(obj);
-            return true;
-        }
-    }
-    objp.set(nullptr);
+    if (ToBoolean(v))
+        return JS_ResolveStandardClass(cx, obj, id, resolvedp);
     return true;
 }
 
 static const JSClass sandbox_class = {
     "sandbox",
-    JSCLASS_NEW_RESOLVE | JSCLASS_GLOBAL_FLAGS,
+    JSCLASS_GLOBAL_FLAGS,
     JS_PropertyStub,   JS_DeletePropertyStub,
     JS_PropertyStub,   JS_StrictPropertyStub,
-    sandbox_enumerate, (JSResolveOp)sandbox_resolve,
+    sandbox_enumerate, sandbox_resolve,
     JS_ConvertStub, nullptr,
     nullptr, nullptr, nullptr,
     JS_GlobalObjectTraceHook
@@ -2618,70 +2638,6 @@ EvalInContext(JSContext *cx, unsigned argc, jsval *vp)
     return true;
 }
 
-static bool
-EvalInFrame(JSContext *cx, unsigned argc, jsval *vp)
-{
-    CallArgs args = CallArgsFromVp(argc, vp);
-    if (!args.get(0).isInt32() || !args.get(1).isString()) {
-        JS_ReportError(cx, "Invalid arguments to evalInFrame");
-        return false;
-    }
-
-    uint32_t upCount = args[0].toInt32();
-    RootedString str(cx, args[1].toString());
-    bool saveCurrent = args.get(2).isBoolean() ? args[2].toBoolean() : false;
-
-    if (!cx->compartment()->debugMode()) {
-        JS_ReportErrorFlagsAndNumber(cx, JSREPORT_ERROR, js_GetErrorMessage,
-                                     nullptr, JSMSG_NEED_DEBUG_MODE);
-        return false;
-    }
-
-    /* Debug-mode currently disables Ion compilation. */
-    ScriptFrameIter fi(cx);
-    for (uint32_t i = 0; i < upCount; ++i, ++fi) {
-        ScriptFrameIter next(fi);
-        ++next;
-        if (next.done())
-            break;
-    }
-
-    AutoStableStringChars stableChars(cx);
-    if (!stableChars.initTwoByte(cx, str))
-        return JSTRAP_ERROR;
-
-    AbstractFramePtr frame = fi.abstractFramePtr();
-    RootedScript fpscript(cx, frame.script());
-
-    RootedObject scope(cx);
-    {
-        RootedObject scopeChain(cx, frame.scopeChain());
-        AutoCompartment ac(cx, scopeChain);
-        scope = GetDebugScopeForFrame(cx, frame, fi.pc());
-    }
-    Rooted<Env*> env(cx, scope);
-    if (!env)
-        return false;
-
-    if (!ComputeThis(cx, frame))
-        return false;
-    RootedValue thisv(cx, frame.thisValue());
-
-    AutoSaveFrameChain sfc(cx);
-    if (saveCurrent) {
-        if (!sfc.save())
-            return false;
-    }
-
-    bool ok;
-    {
-        AutoCompartment ac(cx, env);
-        ok = EvaluateInEnv(cx, env, thisv, frame, stableChars.twoByteRange(), fpscript->filename(),
-                           PCToLineNumber(fpscript, fi.pc()), args.rval());
-    }
-    return ok;
-}
-
 struct WorkerInput
 {
     JSRuntime *runtime;
@@ -2716,6 +2672,8 @@ WorkerMain(void *arg)
         return;
     }
 
+    JS::SetLargeAllocationFailureCallback(rt, my_LargeAllocFailCallback, (void*)cx);
+
     do {
         JSAutoRequest ar(cx);
 
@@ -2737,6 +2695,8 @@ WorkerMain(void *arg)
         RootedValue result(cx);
         JS_ExecuteScript(cx, global, script, &result);
     } while (0);
+
+    JS::SetLargeAllocationFailureCallback(rt, nullptr, nullptr);
 
     DestroyContext(cx, false);
     JS_DestroyRuntime(rt);
@@ -2792,132 +2752,6 @@ ShapeOf(JSContext *cx, unsigned argc, JS::Value *vp)
     }
     JSObject *obj = &args[0].toObject();
     args.rval().set(JS_NumberValue(double(uintptr_t(obj->lastProperty()) >> 3)));
-    return true;
-}
-
-/*
- * If referent has an own property named id, copy that property to obj[id].
- * Since obj is native, this isn't totally transparent; properties of a
- * non-native referent may be simplified to data properties.
- */
-static bool
-CopyProperty(JSContext *cx, HandleNativeObject obj, HandleObject referent, HandleId id,
-             MutableHandleObject objp)
-{
-    RootedShape shape(cx);
-    Rooted<PropertyDescriptor> desc(cx);
-    RootedObject obj2(cx);
-
-    objp.set(nullptr);
-    if (referent->isNative()) {
-        if (!LookupNativeProperty(cx, referent.as<NativeObject>(), id, &obj2, &shape))
-            return false;
-        if (obj2 != referent)
-            return true;
-
-        if (shape->hasSlot()) {
-            desc.value().set(referent->as<NativeObject>().getSlot(shape->slot()));
-        } else {
-            desc.value().setUndefined();
-        }
-
-        desc.setAttributes(shape->attributes());
-        desc.setGetter(shape->getter());
-        if (!desc.getter() && !desc.hasGetterObject())
-            desc.setGetter(JS_PropertyStub);
-        desc.setSetter(shape->setter());
-        if (!desc.setter() && !desc.hasSetterObject())
-            desc.setSetter(JS_StrictPropertyStub);
-    } else if (referent->is<ProxyObject>()) {
-        if (!Proxy::getOwnPropertyDescriptor(cx, referent, id, &desc))
-            return false;
-        if (!desc.object())
-            return true;
-    } else {
-        if (!JSObject::lookupGeneric(cx, referent, id, objp, &shape))
-            return false;
-        if (objp != referent)
-            return true;
-        RootedValue value(cx);
-        if (!JSObject::getGeneric(cx, referent, referent, id, &value) ||
-            !JSObject::getGenericAttributes(cx, referent, id, &desc.attributesRef()))
-        {
-            return false;
-        }
-        desc.value().set(value);
-        desc.attributesRef() &= JSPROP_ENUMERATE | JSPROP_READONLY | JSPROP_PERMANENT;
-        desc.setGetter(JS_PropertyStub);
-        desc.setSetter(JS_StrictPropertyStub);
-    }
-
-    objp.set(obj);
-    return DefineNativeProperty(cx, obj, id, desc.value(), desc.getter(), desc.setter(),
-                                desc.attributes());
-}
-
-static bool
-resolver_resolve(JSContext *cx, HandleObject obj, HandleId id, MutableHandleObject objp)
-{
-    jsval v = JS_GetReservedSlot(obj, 0);
-    Rooted<JSObject*> vobj(cx, &v.toObject());
-    return CopyProperty(cx, obj.as<NativeObject>(), vobj, id, objp);
-}
-
-static bool
-resolver_enumerate(JSContext *cx, HandleObject obj)
-{
-    jsval v = JS_GetReservedSlot(obj, 0);
-    RootedObject referent(cx, v.toObjectOrNull());
-
-    AutoIdArray ida(cx, JS_Enumerate(cx, referent));
-    bool ok = !!ida;
-    RootedObject ignore(cx);
-    for (size_t i = 0; ok && i < ida.length(); i++) {
-        Rooted<jsid> id(cx, ida[i]);
-        ok = CopyProperty(cx, obj.as<NativeObject>(), referent, id, &ignore);
-    }
-    return ok;
-}
-
-static const JSClass resolver_class = {
-    "resolver",
-    JSCLASS_NEW_RESOLVE | JSCLASS_HAS_RESERVED_SLOTS(1),
-    JS_PropertyStub,   JS_DeletePropertyStub,
-    JS_PropertyStub,   JS_StrictPropertyStub,
-    resolver_enumerate, (JSResolveOp)resolver_resolve,
-    JS_ConvertStub
-};
-
-
-static bool
-Resolver(JSContext *cx, unsigned argc, jsval *vp)
-{
-    CallArgs args = CallArgsFromVp(argc, vp);
-
-    RootedObject referent(cx);
-    if (!JS_ValueToObject(cx, args.get(0), &referent))
-        return false;
-    if (!referent) {
-        JS_ReportErrorNumber(cx, js_GetErrorMessage, nullptr, JSMSG_CANT_CONVERT_TO,
-                             args.get(0).isNull() ? "null" : "undefined", "object");
-        return false;
-    }
-
-    RootedObject proto(cx, nullptr);
-    if (!args.get(1).isNullOrUndefined()) {
-        if (!JS_ValueToObject(cx, args.get(1), &proto))
-            return false;
-    }
-
-    RootedObject parent(cx, JS_GetParent(referent));
-    JSObject *result = (args.length() > 1
-                        ? JS_NewObjectWithGivenProto
-                        : JS_NewObject)(cx, &resolver_class, proto, parent);
-    if (!result)
-        return false;
-
-    JS_SetReservedSlot(result, 0, ObjectValue(*referent));
-    args.rval().setObject(*result);
     return true;
 }
 
@@ -3218,6 +3052,7 @@ SetInterruptCallback(JSContext *cx, unsigned argc, Value *vp)
     return true;
 }
 
+#ifdef DEBUG
 static bool
 StackDump(JSContext *cx, unsigned argc, Value *vp)
 {
@@ -3238,7 +3073,7 @@ StackDump(JSContext *cx, unsigned argc, Value *vp)
     args.rval().setUndefined();
     return true;
 }
-
+#endif
 
 static bool
 Elapsed(JSContext *cx, unsigned argc, jsval *vp)
@@ -3356,6 +3191,8 @@ Parse(JSContext *cx, unsigned argc, jsval *vp)
            .setCompileAndGo(false);
     Parser<FullParseHandler> parser(cx, &cx->tempLifoAlloc(), options, chars, length,
                                     /* foldConstants = */ true, nullptr, nullptr);
+    if (!parser.checkOptions())
+        return false;
 
     ParseNode *pn = parser.parse(nullptr);
     if (!pn)
@@ -3402,6 +3239,8 @@ SyntaxParse(JSContext *cx, unsigned argc, jsval *vp)
     size_t length = scriptContents->length();
     Parser<frontend::SyntaxParseHandler> parser(cx, &cx->tempLifoAlloc(),
                                                 options, chars, length, false, nullptr, nullptr);
+    if (!parser.checkOptions())
+        return false;
 
     bool succeeded = parser.parse(nullptr);
     if (cx->isExceptionPending())
@@ -4363,6 +4202,7 @@ static const JSFunctionSpecWithHelp shell_functions[] = {
 "      noScriptRval: use the no-script-rval compiler option (default: false)\n"
 "      fileName: filename for error messages and debug info\n"
 "      lineNumber: starting line number for error messages and debug info\n"
+"      columnNumber: starting column number for error messages and debug info\n"
 "      global: global in which to execute the code\n"
 "      newContext: if true, create and use a new cx (default: false)\n"
 "      saveFrameChain: if true, save the frame chain before evaluating code\n"
@@ -4510,11 +4350,6 @@ static const JSFunctionSpecWithHelp shell_functions[] = {
 "  if (s == '' && !o) return new o with eager standard classes\n"
 "  if (s == 'lazy' && !o) return new o with lazy standard classes"),
 
-    JS_FN_HELP("evalInFrame", EvalInFrame, 2, 0,
-"evalInFrame(n,str,save)",
-"  Evaluate 'str' in the nth up frame.\n"
-"  If 'save' (default false), save the frame chain."),
-
     JS_FN_HELP("evalInWorker", EvalInWorker, 1, 0,
 "evalInWorker(str)",
 "  Evaluate 'str' in a separate thread with its own runtime.\n"),
@@ -4522,11 +4357,6 @@ static const JSFunctionSpecWithHelp shell_functions[] = {
     JS_FN_HELP("shapeOf", ShapeOf, 1, 0,
 "shapeOf(obj)",
 "  Get the shape of obj (an implementation detail)."),
-
-    JS_FN_HELP("resolver", Resolver, 1, 0,
-"resolver(src[, proto])",
-"  Create object with resolve hook that copies properties\n"
-"  from src. If proto is omitted, use Object.prototype."),
 
 #ifdef DEBUG
     JS_FN_HELP("arrayInfo", js_ArrayInfo, 1, 0,
@@ -4572,6 +4402,7 @@ static const JSFunctionSpecWithHelp shell_functions[] = {
 "      noScriptRval: use the no-script-rval compiler option (default: false)\n"
 "      fileName: filename for error messages and debug info\n"
 "      lineNumber: starting line number for error messages and debug info\n"
+"      columnNumber: starting column number for error messages and debug info\n"
 "      element: if present with value |v|, convert |v| to an object |o| and\n"
 "         mark the source as being attached to the DOM element |o|. If the\n"
 "         property is omitted or |v| is null, don't attribute the source to\n"
@@ -4929,27 +4760,20 @@ global_enumerate(JSContext *cx, HandleObject obj)
 }
 
 static bool
-global_resolve(JSContext *cx, HandleObject obj, HandleId id, MutableHandleObject objp)
+global_resolve(JSContext *cx, HandleObject obj, HandleId id, bool *resolvedp)
 {
 #ifdef LAZY_STANDARD_CLASSES
-    bool resolved;
-
-    if (!JS_ResolveStandardClass(cx, obj, id, &resolved))
+    if (!JS_ResolveStandardClass(cx, obj, id, resolvedp))
         return false;
-    if (resolved) {
-        objp.set(obj);
-        return true;
-    }
 #endif
-
     return true;
 }
 
 static const JSClass global_class = {
-    "global", JSCLASS_NEW_RESOLVE | JSCLASS_GLOBAL_FLAGS,
+    "global", JSCLASS_GLOBAL_FLAGS,
     JS_PropertyStub,  JS_DeletePropertyStub,
     JS_PropertyStub,  JS_StrictPropertyStub,
-    global_enumerate, (JSResolveOp) global_resolve,
+    global_enumerate, global_resolve,
     JS_ConvertStub,   nullptr,
     nullptr, nullptr, nullptr,
     JS_GlobalObjectTraceHook
@@ -5050,9 +4874,9 @@ static const JSJitInfo doFoo_methodinfo = {
 
 static const JSPropertySpec dom_props[] = {
     {"x",
-     JSPROP_SHARED | JSPROP_ENUMERATE | JSPROP_NATIVE_ACCESSORS,
-     { { (JSPropertyOp)dom_genericGetter, &dom_x_getterinfo } },
-     { { (JSStrictPropertyOp)dom_genericSetter, &dom_x_setterinfo } }
+     JSPROP_SHARED | JSPROP_ENUMERATE,
+     { { dom_genericGetter, &dom_x_getterinfo } },
+     { { dom_genericSetter, &dom_x_setterinfo } }
     },
     JS_PS_END
 };
@@ -5303,32 +5127,32 @@ ShellCloseAsmJSCacheEntryForRead(size_t serializedSize, const uint8_t *memory, i
     close(handle);
 }
 
-static bool
+static JS::AsmJSCacheResult
 ShellOpenAsmJSCacheEntryForWrite(HandleObject global, bool installed,
                                  const char16_t *begin, const char16_t *end,
                                  size_t serializedSize, uint8_t **memoryOut, intptr_t *handleOut)
 {
     if (!jsCachingEnabled || !jsCacheAsmJSPath)
-        return false;
+        return JS::AsmJSCache_Disabled_ShellFlags;
 
     // Create the cache directory if it doesn't already exist.
     struct stat dirStat;
     if (stat(jsCacheDir, &dirStat) == 0) {
         if (!(dirStat.st_mode & S_IFDIR))
-            return false;
+            return JS::AsmJSCache_InternalError;
     } else {
 #ifdef XP_WIN
         if (mkdir(jsCacheDir) != 0)
-            return false;
+            return JS::AsmJSCache_InternalError;
 #else
         if (mkdir(jsCacheDir, 0777) != 0)
-            return false;
+            return JS::AsmJSCache_InternalError;
 #endif
     }
 
     ScopedFileDesc fd(open(jsCacheAsmJSPath, O_CREAT|O_RDWR, 0660), ScopedFileDesc::WRITE_LOCK);
     if (fd == -1)
-        return false;
+        return JS::AsmJSCache_InternalError;
 
     // Include extra space for the asmJSCacheCookie.
     serializedSize += sizeof(uint32_t);
@@ -5336,14 +5160,14 @@ ShellOpenAsmJSCacheEntryForWrite(HandleObject global, bool installed,
     // Resize the file to the appropriate size after zeroing their contents.
 #ifdef XP_WIN
     if (chsize(fd, 0))
-        return false;
+        return JS::AsmJSCache_InternalError;
     if (chsize(fd, serializedSize))
-        return false;
+        return JS::AsmJSCache_InternalError;
 #else
     if (ftruncate(fd, 0))
-        return false;
+        return JS::AsmJSCache_InternalError;
     if (ftruncate(fd, serializedSize))
-        return false;
+        return JS::AsmJSCache_InternalError;
 #endif
 
     // Map the file into memory.
@@ -5352,16 +5176,16 @@ ShellOpenAsmJSCacheEntryForWrite(HandleObject global, bool installed,
     HANDLE fdOsHandle = (HANDLE)_get_osfhandle(fd);
     HANDLE fileMapping = CreateFileMapping(fdOsHandle, nullptr, PAGE_READWRITE, 0, 0, nullptr);
     if (!fileMapping)
-        return false;
+        return JS::AsmJSCache_InternalError;
 
     memory = MapViewOfFile(fileMapping, FILE_MAP_WRITE, 0, 0, 0);
     CloseHandle(fileMapping);
     if (!memory)
-        return false;
+        return JS::AsmJSCache_InternalError;
 #else
     memory = mmap(nullptr, serializedSize, PROT_WRITE, MAP_SHARED, fd, 0);
     if (memory == MAP_FAILED)
-        return false;
+        return JS::AsmJSCache_InternalError;
 #endif
 
     // The embedding added the cookie so strip it off of the buffer returned to
@@ -5369,7 +5193,7 @@ ShellOpenAsmJSCacheEntryForWrite(HandleObject global, bool installed,
     MOZ_ASSERT(*(uint32_t *)memory == 0);
     *memoryOut = (uint8_t *)memory + sizeof(uint32_t);
     *handleOut = fd.forget();
-    return true;
+    return JS::AsmJSCache_Success;
 }
 
 static void
@@ -6133,6 +5957,8 @@ main(int argc, char **argv, char **envp)
     JS_SetGCParameter(rt, JSGC_MODE, JSGC_MODE_INCREMENTAL);
     JS_SetGCParameterForThread(cx, JSGC_MAX_CODE_CACHE_BYTES, 16 * 1024 * 1024);
 
+    JS::SetLargeAllocationFailureCallback(rt, my_LargeAllocFailCallback, (void*)cx);
+
     // Set some parameters to allow incremental GC in low memory conditions,
     // as is done for the browser, except in more-deterministic builds or when
     // disabled by command line options.
@@ -6152,6 +5978,8 @@ main(int argc, char **argv, char **envp)
     if (OOM_printAllocationCount)
         printf("OOM max count: %u\n", OOM_counter);
 #endif
+
+    JS::SetLargeAllocationFailureCallback(rt, nullptr, nullptr);
 
     DestroyContext(cx, true);
 

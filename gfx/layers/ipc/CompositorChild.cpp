@@ -4,7 +4,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "CompositorChild.h"
+#include "mozilla/layers/CompositorChild.h"
 #include <stddef.h>                     // for size_t
 #include "ClientLayerManager.h"         // for ClientLayerManager
 #include "base/message_loop.h"          // for MessageLoop
@@ -89,8 +89,17 @@ CompositorChild::Create(Transport* aTransport, ProcessId aOtherProcess)
     NS_RUNTIMEABORT("Couldn't Open() Compositor channel.");
     return nullptr;
   }
+
   // We release this ref in ActorDestroy().
-  return sCompositor = child.forget().take();
+  sCompositor = child.forget().take();
+
+  int32_t width;
+  int32_t height;
+  sCompositor->SendGetTileSize(&width, &height);
+  gfxPlatform::GetPlatform()->SetTileSize(width, height);
+
+  // We release this ref in ActorDestroy().
+  return sCompositor;
 }
 
 /*static*/ CompositorChild*

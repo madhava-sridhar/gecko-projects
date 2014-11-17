@@ -65,18 +65,17 @@ public:
 class Telephony::EnumerationAck : public nsRunnable
 {
   nsRefPtr<Telephony> mTelephony;
-  nsString mType;
 
 public:
-  EnumerationAck(Telephony* aTelephony, const nsAString& aType)
-  : mTelephony(aTelephony), mType(aType)
+  explicit EnumerationAck(Telephony* aTelephony)
+  : mTelephony(aTelephony)
   {
     MOZ_ASSERT(mTelephony);
   }
 
   NS_IMETHOD Run()
   {
-    mTelephony->NotifyEvent(mType);
+    mTelephony->NotifyEvent(NS_LITERAL_STRING("ready"));
     return NS_OK;
   }
 };
@@ -468,11 +467,8 @@ Telephony::ConferenceGroup() const
 void
 Telephony::EventListenerAdded(nsIAtom* aType)
 {
-  if (aType == nsGkAtoms::oncallschanged) {
-    // Fire oncallschanged on the next tick if the calls array is ready.
-    EnqueueEnumerationAck(NS_LITERAL_STRING("callschanged"));
-  } else if (aType == nsGkAtoms::onready) {
-    EnqueueEnumerationAck(NS_LITERAL_STRING("ready"));
+  if (aType == nsGkAtoms::onready) {
+    EnqueueEnumerationAck();
   }
 }
 
@@ -493,6 +489,8 @@ Telephony::CallStateChanged(uint32_t aServiceId, uint32_t aCallIndex,
     modifiedCall->UpdateEmergency(aIsEmergency);
     modifiedCall->UpdateSwitchable(aIsSwitchable);
     modifiedCall->UpdateMergeable(aIsMergeable);
+    nsRefPtr<TelephonyCallId> id = modifiedCall->Id();
+    id->UpdateNumber(aNumber);
 
     if (modifiedCall->CallState() != aCallState) {
       if (aCallState == nsITelephonyService::CALL_STATE_DISCONNECTED) {
@@ -573,10 +571,6 @@ Telephony::EnumerateCallStateComplete()
     NS_WARNING("Failed to notify ready!");
   }
 
-  if (NS_FAILED(NotifyCallsChanged(nullptr))) {
-    NS_WARNING("Failed to notify calls changed!");
-  }
-
   if (NS_FAILED(mService->RegisterListener(mListener))) {
     NS_WARNING("Failed to register listener!");
   }
@@ -642,12 +636,8 @@ Telephony::NotifyError(uint32_t aServiceId,
                        int32_t aCallIndex,
                        const nsAString& aError)
 {
-  if (mCalls.IsEmpty()) {
-    NS_ERROR("No existing call!");
-    return NS_ERROR_UNEXPECTED;
-  }
-
-  nsRefPtr<TelephonyCall> callToNotify = GetCall(aServiceId, aCallIndex);
+  nsRefPtr<TelephonyCall> callToNotify =
+    GetCallFromEverywhere(aServiceId, aCallIndex);
   if (!callToNotify) {
     NS_ERROR("Don't call me with a bad call index!");
     return NS_ERROR_UNEXPECTED;
@@ -704,13 +694,13 @@ Telephony::DispatchCallEvent(const nsAString& aType,
 }
 
 void
-Telephony::EnqueueEnumerationAck(const nsAString& aType)
+Telephony::EnqueueEnumerationAck()
 {
   if (!mEnumerated) {
     return;
   }
 
-  nsCOMPtr<nsIRunnable> task = new EnumerationAck(this, aType);
+  nsCOMPtr<nsIRunnable> task = new EnumerationAck(this);
   if (NS_FAILED(NS_DispatchToCurrentThread(task))) {
     NS_WARNING("Failed to dispatch to current thread!");
   }

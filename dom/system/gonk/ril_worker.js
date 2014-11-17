@@ -215,6 +215,7 @@ const TELEPHONY_REQUESTS = [
   REQUEST_DIAL,
   REQUEST_DIAL_EMERGENCY_CALL,
   REQUEST_HANGUP,
+  REQUEST_HANGUP_FOREGROUND_RESUME_BACKGROUND,
   REQUEST_HANGUP_WAITING_OR_BACKGROUND,
   REQUEST_SEPARATE_CONNECTION,
   REQUEST_SWITCH_WAITING_OR_HOLDING_AND_ACTIVE,
@@ -1332,8 +1333,8 @@ RilObject.prototype = {
    *                RIL_PREFERRED_NETWORK_TYPE_TO_GECKO as its `type` attribute.
    */
   setPreferredNetworkType: function(options) {
-    let networkType = RIL_PREFERRED_NETWORK_TYPE_TO_GECKO.indexOf(options.type);
-    if (networkType < 0) {
+    let networkType = options.type;
+    if (networkType < 0 || networkType >= RIL_PREFERRED_NETWORK_TYPE_TO_GECKO.length) {
       options.errorMsg = GECKO_ERROR_INVALID_PARAMETER;
       this.sendChromeMessage(options);
       return;
@@ -1420,18 +1421,10 @@ RilObject.prototype = {
    * Set the roaming preference mode
    */
   setRoamingPreference: function(options) {
-    let roamingMode = CDMA_ROAMING_PREFERENCE_TO_GECKO.indexOf(options.mode);
-
-    if (roamingMode === -1) {
-      options.errorMsg = GECKO_ERROR_INVALID_PARAMETER;
-      this.sendChromeMessage(options);
-      return;
-    }
-
     let Buf = this.context.Buf;
     Buf.newParcel(REQUEST_CDMA_SET_ROAMING_PREFERENCE, options);
     Buf.writeInt32(1);
-    Buf.writeInt32(roamingMode);
+    Buf.writeInt32(options.mode);
     Buf.sendParcel();
   },
 
@@ -1762,30 +1755,42 @@ RilObject.prototype = {
     if (call.state === CALL_STATE_HOLDING) {
       this.sendHangUpBackgroundRequest();
     } else {
-      this.sendHangUpRequest(call.callIndex);
+      this.sendHangUpRequest(options);
     }
   },
 
-  sendHangUpRequest: function(callIndex) {
+  sendHangUpRequest: function(options) {
     this.telephonyRequestQueue.push(REQUEST_HANGUP, this.sendRilRequestHangUp,
-                                    callIndex);
+                                    options);
   },
 
-  sendRilRequestHangUp: function(callIndex) {
+  sendRilRequestHangUp: function(options) {
     let Buf = this.context.Buf;
-    Buf.newParcel(REQUEST_HANGUP);
+    Buf.newParcel(REQUEST_HANGUP, options);
     Buf.writeInt32(1);
-    Buf.writeInt32(callIndex);
+    Buf.writeInt32(options.callIndex);
     Buf.sendParcel();
   },
 
-  sendHangUpBackgroundRequest: function() {
-    this.telephonyRequestQueue.push(REQUEST_HANGUP_WAITING_OR_BACKGROUND,
-                                   this.sendRilRequestHangUpWaiting, null);
+  sendHangUpForegroundRequest: function(options) {
+    this.telephonyRequestQueue.push(REQUEST_HANGUP_FOREGROUND_RESUME_BACKGROUND,
+                                    this.sendRilRequestHangUpForeground,
+                                    options);
   },
 
-  sendRilRequestHangUpWaiting: function() {
-    this.context.Buf.simpleRequest(REQUEST_HANGUP_WAITING_OR_BACKGROUND);
+  sendRilRequestHangUpForeground: function(options) {
+    this.context.Buf.simpleRequest(REQUEST_HANGUP_FOREGROUND_RESUME_BACKGROUND,
+                                   options);
+  },
+
+  sendHangUpBackgroundRequest: function(options) {
+    this.telephonyRequestQueue.push(REQUEST_HANGUP_WAITING_OR_BACKGROUND,
+                                    this.sendRilRequestHangUpWaiting, options);
+  },
+
+  sendRilRequestHangUpWaiting: function(options) {
+    this.context.Buf.simpleRequest(REQUEST_HANGUP_WAITING_OR_BACKGROUND,
+                                   options);
   },
 
   /**
@@ -1959,6 +1964,27 @@ RilObject.prototype = {
     Buf.writeInt32(1);
     Buf.writeInt32(options.callIndex);
     Buf.sendParcel();
+  },
+
+  hangUpConference: function(options) {
+    if (this._isCdma) {
+      // In cdma, ril only maintains one call index.
+      let call = this.currentCalls[1];
+      if (!call) {
+        options.success = false;
+        options.errorMsg = GECKO_ERROR_GENERIC_FAILURE;
+        this.sendChromeMessage(options);
+        return;
+      }
+      call.hangUpLocal = true;
+      this.sendHangUpRequest(1);
+    } else {
+      if (this.currentConferenceState === CALL_STATE_ACTIVE) {
+        this.sendHangUpForegroundRequest(options);
+      } else {
+        this.sendHangUpBackgroundRequest(options);
+      }
+    }
   },
 
   holdConference: function() {
@@ -3912,9 +3938,11 @@ RilObject.prototype = {
   _processClassifiedCalls: function(removedCalls, remainedCalls, addedCalls,
                                     failCause) {
     // Handle removed calls.
+    // Only remove it from the map here. Notify callDisconnected later.
     for (let call of removedCalls) {
-      this._removeVoiceCall(call, call.hangUpLocal ?
-                            GECKO_CALL_ERROR_NORMAL_CALL_CLEARING : failCause);
+      delete this.currentCalls[call.callIndex];
+      call.failCause = call.hangUpLocal ? GECKO_CALL_ERROR_NORMAL_CALL_CLEARING
+                                        : failCause;
     }
 
     let changedCalls = new Set();
@@ -3939,6 +3967,8 @@ RilObject.prototype = {
       }
 
       oldCall.state = newCall.state;
+      oldCall.number =
+        this._formatInternationalNumber(newCall.number, newCall.toa);
       changedCalls.add(oldCall);
     }
 
@@ -3963,12 +3993,17 @@ RilObject.prototype = {
       }
     }
 
-    // Update audio state. We have to send the message before callstatechange
-    // to make sure that the audio state is ready first.
+    // Update audio state. We have to send this message before callStateChange
+    // and callDisconnected to make sure that the audio state is ready first.
     this.sendChromeMessage({
       rilMessageType: "audioStateChanged",
       state: this._detectAudioState()
     });
+
+    // Notify call disconnected.
+    for (let call of removedCalls) {
+      this._handleDisconnectedCall(call);
+    }
 
     // Notify call state change.
     for (let call of changedCalls) {
@@ -4015,23 +4050,21 @@ RilObject.prototype = {
     return AUDIO_STATE_IN_CALL;
   },
 
-  _addVoiceCall: function(newCall) {
-    // Format international numbers appropriately.
-    if (newCall.number && newCall.toa == TOA_INTERNATIONAL &&
-        newCall.number[0] != "+") {
-      newCall.number = "+" + newCall.number;
+  // Format international numbers appropriately.
+  _formatInternationalNumber: function(number, toa) {
+    if (number && toa == TOA_INTERNATIONAL && number[0] != "+") {
+      number = "+" + number;
     }
 
+    return number;
+  },
+
+  _addVoiceCall: function(newCall) {
+    newCall.number = this._formatInternationalNumber(newCall.number, newCall.toa);
     newCall.isOutgoing = !(newCall.state == CALL_STATE_INCOMING);
     newCall.isConference = false;
 
     this.currentCalls[newCall.callIndex] = newCall;
-  },
-
-  _removeVoiceCall: function(call, failCause) {
-    delete this.currentCalls[call.callIndex];
-    call.failCause = failCause;
-    this._handleDisconnectedCall(call);
   },
 
   _handleChangedCallState: function(changedCall) {
@@ -5430,26 +5463,19 @@ RilObject.prototype[REQUEST_GET_IMSI] = function REQUEST_GET_IMSI(length, option
   this.sendChromeMessage(options);
 };
 RilObject.prototype[REQUEST_HANGUP] = function REQUEST_HANGUP(length, options) {
-  if (options.rilRequestError) {
-    return;
-  }
+  options.success = options.rilRequestError === 0;
+  options.errorMsg = RIL_ERROR_TO_GECKO_ERROR[options.rilRequestError];
+  this.sendChromeMessage(options);
 
-  this.getCurrentCalls();
+  if (options.success) {
+    this.getCurrentCalls();
+  }
 };
 RilObject.prototype[REQUEST_HANGUP_WAITING_OR_BACKGROUND] = function REQUEST_HANGUP_WAITING_OR_BACKGROUND(length, options) {
-  if (options.rilRequestError) {
-    return;
-  }
-
-  this.getCurrentCalls();
+  RilObject.prototype[REQUEST_HANGUP].call(this, length, options);
 };
-// TODO Bug 1012599: This one is not used.
 RilObject.prototype[REQUEST_HANGUP_FOREGROUND_RESUME_BACKGROUND] = function REQUEST_HANGUP_FOREGROUND_RESUME_BACKGROUND(length, options) {
-  if (options.rilRequestError) {
-    return;
-  }
-
-  this.getCurrentCalls();
+  RilObject.prototype[REQUEST_HANGUP].call(this, length, options);
 };
 RilObject.prototype[REQUEST_SWITCH_WAITING_OR_HOLDING_AND_ACTIVE] = function REQUEST_SWITCH_WAITING_OR_HOLDING_AND_ACTIVE(length, options) {
   if (options.rilRequestError) {
@@ -5847,6 +5873,12 @@ RilObject.prototype[REQUEST_QUERY_CALL_WAITING] =
   options.success = (options.rilRequestError === 0);
   if (!options.success) {
     options.errorMsg = RIL_ERROR_TO_GECKO_ERROR[options.rilRequestError];
+
+    if (options.callback) {
+      // Prevent DataCloneError when sending chrome messages.
+      delete options.callback;
+    }
+
     this.sendChromeMessage(options);
     return;
   }
@@ -5867,6 +5899,12 @@ RilObject.prototype[REQUEST_SET_CALL_WAITING] = function REQUEST_SET_CALL_WAITIN
   options.success = (options.rilRequestError === 0);
   if (!options.success) {
     options.errorMsg = RIL_ERROR_TO_GECKO_ERROR[options.rilRequestError];
+
+    if (options.callback) {
+      // Prevent DataCloneError when sending chrome messages.
+      delete options.callback;
+    }
+
     this.sendChromeMessage(options);
     return;
   }
@@ -6265,8 +6303,7 @@ RilObject.prototype[REQUEST_GET_PREFERRED_NETWORK_TYPE] = function REQUEST_GET_P
     return;
   }
 
-  let networkType = this.context.Buf.readInt32List()[0];
-  options.type = RIL_PREFERRED_NETWORK_TYPE_TO_GECKO[networkType];
+  options.type = this.context.Buf.readInt32List()[0];
   this.sendChromeMessage(options);
 };
 RilObject.prototype[REQUEST_GET_NEIGHBORING_CELL_IDS] = function REQUEST_GET_NEIGHBORING_CELL_IDS(length, options) {
@@ -6403,8 +6440,7 @@ RilObject.prototype[REQUEST_CDMA_QUERY_ROAMING_PREFERENCE] = function REQUEST_CD
   if (options.rilRequestError) {
     options.errorMsg = RIL_ERROR_TO_GECKO_ERROR[options.rilRequestError];
   } else {
-    let mode = this.context.Buf.readInt32List();
-    options.mode = CDMA_ROAMING_PREFERENCE_TO_GECKO[mode[0]];
+    options.mode = this.context.Buf.readInt32List()[0];
   }
   this.sendChromeMessage(options);
 };
@@ -7844,6 +7880,12 @@ GsmPDUHelperObject.prototype = {
 
     msg.body = null;
     msg.data = null;
+
+    if (length <= 0) {
+      // No data to read.
+      return;
+    }
+
     switch (msg.encoding) {
       case PDU_DCS_MSG_CODING_7BITS_ALPHABET:
         // 7 bit encoding allows 140 octets, which means 160 characters
@@ -8486,7 +8528,7 @@ GsmPDUHelperObject.prototype = {
     switch (msg.encoding) {
       case PDU_DCS_MSG_CODING_7BITS_ALPHABET:
         msg.body = this.readSeptetsToString.call(bufAdapter,
-                                                 (length * 8 / 7), 0,
+                                                 Math.floor(length * 8 / 7), 0,
                                                  PDU_NL_IDENTIFIER_DEFAULT,
                                                  PDU_NL_IDENTIFIER_DEFAULT);
         if (msg.hasLanguageIndicator) {
@@ -8583,7 +8625,7 @@ GsmPDUHelperObject.prototype = {
         msg.body = "";
         for (let i = 0; i < numOfPages; i++) {
           body = this.readSeptetsToString.call(bufAdapter,
-                                               (pageLengths[i] * 8 / 7),
+                                               Math.floor(pageLengths[i] * 8 / 7),
                                                0,
                                                PDU_NL_IDENTIFIER_DEFAULT,
                                                PDU_NL_IDENTIFIER_DEFAULT);
@@ -8813,13 +8855,13 @@ GsmPDUHelperObject.prototype = {
     case 0:
       // GSM Default alphabet.
       resultString = this.readSeptetsToString(
-        ((len - 1) * 8 - spareBits) / 7, 0,
+        Math.floor(((len - 1) * 8 - spareBits) / 7), 0,
         PDU_NL_IDENTIFIER_DEFAULT,
         PDU_NL_IDENTIFIER_DEFAULT);
       break;
     case 1:
       // UCS2 encoded.
-      resultString = this.readUCS2String(len - 1);
+      resultString = this.context.ICCPDUHelper.readAlphaIdentifier(len - 1);
       break;
     default:
       // Not an available text coding.
@@ -11226,9 +11268,10 @@ StkProactiveCmdHelperObject.prototype = {
     };
 
     length--; // -1 for the codingScheme.
-    switch (text.codingScheme & 0x0f) {
+    switch (text.codingScheme & 0x0c) {
       case STK_TEXT_CODING_GSM_7BIT_PACKED:
-        text.textString = GsmPDUHelper.readSeptetsToString(length * 8 / 7, 0, 0, 0);
+        text.textString =
+          GsmPDUHelper.readSeptetsToString(Math.floor(length * 8 / 7), 0, 0, 0);
         break;
       case STK_TEXT_CODING_GSM_8BIT:
         text.textString =
@@ -12117,6 +12160,8 @@ ICCFileHelperObject.prototype = {
       case ICC_EF_OPL:
       case ICC_EF_PNN:
       case ICC_EF_GID1:
+      case ICC_EF_CPHS_INFO:
+      case ICC_EF_CPHS_MBN:
         return EF_PATH_MF_SIM + EF_PATH_DF_GSM;
       default:
         return null;
@@ -12143,6 +12188,12 @@ ICCFileHelperObject.prototype = {
       case ICC_EF_PNN:
       case ICC_EF_SMS:
       case ICC_EF_GID1:
+      // CPHS spec was provided in 1997 based on SIM requirement, there is no
+      // detailed info about how these ICC_EF_CPHS_XXX are allocated in USIM.
+      // What we can do now is to follow what has been done in AOSP to have file
+      // path equal to MF_SIM/DF_GSM.
+      case ICC_EF_CPHS_INFO:
+      case ICC_EF_CPHS_MBN:
         return EF_PATH_MF_SIM + EF_PATH_ADF_USIM;
       default:
         // The file ids in USIM phone book entries are decided by the
@@ -13068,7 +13119,18 @@ SimRecordHelperObject.prototype = {
   fetchSimRecords: function() {
     this.context.RIL.getIMSI();
     this.readAD();
-    this.readSST();
+    // CPHS was widely introduced in Europe during GSM(2G) era to provide easier
+    // access to carrier's core service like voicemail, call forwarding, manual
+    // PLMN selection, and etc.
+    // Addition EF like EF_CPHS_MBN, EF_CPHS_CPHS_CFF, EF_CPHS_VWI, etc are
+    // introduced to support these feature.
+    // In USIM, the replancement of these EFs are provided. (EF_MBDN, EF_MWIS, ...)
+    // However, some carriers in Europe still rely on these EFs.
+    this.readCphsInfo(() => this.readSST(),
+                      (aErrorMsg) => {
+                        this.context.debug("Failed to read CPHS_INFO: " + aErrorMsg);
+                        this.readSST();
+                      });
   },
 
   /**
@@ -13399,6 +13461,13 @@ SimRecordHelperObject.prototype = {
         this.readMBDN();
       } else {
         if (DEBUG) this.context.debug("MDN: MDN service is not available");
+
+        if (ICCUtilsHelper.isCphsServiceAvailable("MBN")) {
+          // read CPHS_MBN in advance if MBDN is not available.
+          this.readCphsMBN();
+        } else {
+          if (DEBUG) this.context.debug("CPHS_MBN: CPHS_MBN service is not available");
+        }
       }
 
       if (ICCUtilsHelper.isICCServiceAvailable("MWIS")) {
@@ -13471,6 +13540,15 @@ SimRecordHelperObject.prototype = {
       let RIL = this.context.RIL;
       let contact =
         this.context.ICCPDUHelper.readAlphaIdDiallingNumber(options.recordSize);
+      if ((!contact ||
+           ((!contact.alphaId || contact.alphaId == "") &&
+            (!contact.number || contact.number == ""))) &&
+          this.context.ICCUtilsHelper.isCphsServiceAvailable("MBN")) {
+        // read CPHS_MBN in advance if MBDN is invalid or empty.
+        this.readCphsMBN();
+        return;
+      }
+
       if (!contact ||
           (RIL.iccInfoPrivate.mbdn !== undefined &&
            RIL.iccInfoPrivate.mbdn === contact.number)) {
@@ -13889,13 +13967,10 @@ SimRecordHelperObject.prototype = {
       }
       Buf.readStringDelimiter(strLen);
 
-      if (pnnElement) {
-        pnn.push(pnnElement);
-      }
+      pnn.push(pnnElement);
 
       let RIL = this.context.RIL;
-      // Will ignore remaining records when got the contents of a record are all 0xff.
-      if (pnnElement && options.p1 < options.totalRecords) {
+      if (options.p1 < options.totalRecords) {
         ICCIOHelper.loadNextRecord(options);
       } else {
         if (DEBUG) {
@@ -14048,6 +14123,117 @@ SimRecordHelperObject.prototype = {
       callback: callback.bind(this)
     });
   },
+
+  /**
+   * Read CPHS Phase & Service Table from CPHS Info.
+   *
+   * @See  B.3.1.1 CPHS Information in CPHS Phase 2.
+   *
+   * @param onsuccess     Callback to be called when success.
+   * @param onerror       Callback to be called when error.
+   */
+  readCphsInfo: function(onsuccess, onerror) {
+    function callback() {
+      try {
+        let Buf = this.context.Buf;
+        let RIL = this.context.RIL;
+
+        let strLen = Buf.readInt32();
+        // Each octet is encoded into two chars.
+        let octetLen = strLen / 2;
+        let cphsInfo = this.context.GsmPDUHelper.readHexOctetArray(octetLen);
+        Buf.readStringDelimiter(strLen);
+        if (DEBUG) {
+          let str = "";
+          for (let i = 0; i < cphsInfo.length; i++) {
+            str += cphsInfo[i] + ", ";
+          }
+          this.context.debug("CPHS INFO: " + str);
+        }
+
+        /**
+         * CPHS INFORMATION
+         *
+         * Byte 1: CPHS Phase
+         * 01 phase 1
+         * 02 phase 2
+         * etc.
+         *
+         * Byte 2: CPHS Service Table
+         * +----+----+----+----+----+----+----+----+
+         * | b8 | b7 | b6 | b5 | b4 | b3 | b2 | b1 |
+         * +----+----+----+----+----+----+----+----+
+         * |   ONSF  |   MBN   |   SST   |   CSP   |
+         * | Phase 2 |   ALL   | Phase 1 |   All   |
+         * +----+----+----+----+----+----+----+----+
+         *
+         * Byte 3: CPHS Service Table continued
+         * +----+----+----+----+----+----+----+----+
+         * | b8 | b7 | b6 | b5 | b4 | b3 | b2 | b1 |
+         * +----+----+----+----+----+----+----+----+
+         * |   RFU   |   RFU   |   RFU   | INFO_NUM|
+         * |         |         |         | Phase 2 |
+         * +----+----+----+----+----+----+----+----+
+         */
+        let cphsPhase = cphsInfo[0];
+        if (cphsPhase == 1) {
+          // Clear 'Phase 2 only' services.
+          cphsInfo[1] &= 0x3F;
+          // We don't know whether Byte 3 is available in CPHS phase 1 or not.
+          // Add boundary check before accessing it.
+          if (cphsInfo.length > 2) {
+            cphsInfo[2] = 0x00;
+          }
+        } else if (cphsPhase == 2) {
+          // Clear 'Phase 1 only' services.
+          cphsInfo[1] &= 0xF3;
+        } else {
+          throw new Error("Unknown CPHS phase: " + cphsPhase);
+        }
+
+        RIL.iccInfoPrivate.cphsSt = cphsInfo.subarray(1);
+        onsuccess();
+      } catch(e) {
+        onerror(e.toString());
+      }
+    }
+
+    this.context.ICCIOHelper.loadTransparentEF({
+      fileId: ICC_EF_CPHS_INFO,
+      callback: callback.bind(this),
+      onerror: onerror
+    });
+  },
+
+  /**
+   * Read CPHS MBN. (Mailbox Numbers)
+   *
+   * @See B.4.2.2 Voice Message Retrieval and Indicator Clearing
+   */
+  readCphsMBN: function() {
+    function callback(options) {
+      let RIL = this.context.RIL;
+      let contact =
+        this.context.ICCPDUHelper.readAlphaIdDiallingNumber(options.recordSize);
+      if (!contact ||
+          (RIL.iccInfoPrivate.mbdn !== undefined &&
+           RIL.iccInfoPrivate.mbdn === contact.number)) {
+        return;
+      }
+      RIL.iccInfoPrivate.mbdn = contact.number;
+      if (DEBUG) {
+        this.context.debug("CPHS_MDN, alphaId=" + contact.alphaId +
+                           " number=" + contact.number);
+      }
+      contact.rilMessageType = "iccmbdn";
+      RIL.sendChromeMessage(contact);
+    }
+
+    this.context.ICCIOHelper.loadLinearFixedEF({
+      fileId: ICC_EF_CPHS_MBN,
+      callback: callback.bind(this)
+    });
+  }
 };
 
 function RuimRecordHelperObject(aContext) {
@@ -14629,8 +14815,8 @@ ICCUtilsHelperObject.prototype = {
        *
        * b1 = 0, service not allocated.
        *      1, service allocated.
-       * b2 = 0, service not activatd.
-       *      1, service allocated.
+       * b2 = 0, service not activated.
+       *      1, service activated.
        *
        * @see 3GPP TS 51.011 10.3.7.
        */
@@ -14656,8 +14842,6 @@ ICCUtilsHelperObject.prototype = {
        *
        * b1 = 0, service not avaiable.
        *      1, service available.
-       * b2 = 0, service not avaiable.
-       *      1, service available.
        *
        * @see 3GPP TS 31.102 4.2.8.
        */
@@ -14672,6 +14856,49 @@ ICCUtilsHelperObject.prototype = {
 
     return (serviceTable !== null) &&
            (index < serviceTable.length) &&
+           ((serviceTable[index] & bitmask) !== 0);
+  },
+
+  /**
+   * Get whether specificed CPHS service is available.
+   *
+   * @param geckoService
+   *        Service name like "MDN", etc.
+   *
+   * @return true if the service is enabled, false otherwise.
+   */
+  isCphsServiceAvailable: function(geckoService) {
+    let RIL = this.context.RIL;
+    let serviceTable = RIL.iccInfoPrivate.cphsSt;
+
+    if (!(serviceTable instanceof Uint8Array)) {
+      return false;
+    }
+
+    /**
+     * Service id is valid in 1..N, and 2 bits are used to code each service.
+     *
+     * +----+--  --+----+----+
+     * | b8 | ...  | b2 | b1 |
+     * +----+--  --+----+----+
+     *
+     * b1 = 0, service not allocated.
+     *      1, service allocated.
+     * b2 = 0, service not activated.
+     *      1, service activated.
+     *
+     * @See  B.3.1.1 CPHS Information in CPHS Phase 2.
+     */
+    let cphsService  = GECKO_ICC_SERVICES.cphs[geckoService];
+
+    if (!cphsService) {
+      return false;
+    }
+    cphsService -= 1;
+    let index = Math.floor(cphsService / 4);
+    let bitmask = 2 << ((cphsService % 4) << 1);
+
+    return (index < serviceTable.length) &&
            ((serviceTable[index] & bitmask) !== 0);
   },
 

@@ -108,7 +108,6 @@ browser.jar:
   skin/classic/browser/downloads/allDownloadsViewOverlay.css   (downloads/allDownloadsViewOverlay.css)
   skin/classic/browser/downloads/buttons.png          (downloads/buttons.png)
   skin/classic/browser/downloads/contentAreaDownloadsView.css  (downloads/contentAreaDownloadsView.css)
-  skin/classic/browser/downloads/download-glow.png    (downloads/download-glow.png)
   skin/classic/browser/downloads/download-glow-menuPanel.png (downloads/download-glow-menuPanel.png)
   skin/classic/browser/downloads/download-notification-finish.png (downloads/download-notification-finish.png)
   skin/classic/browser/downloads/download-notification-start.png (downloads/download-notification-start.png)
@@ -154,6 +153,7 @@ browser.jar:
 #endif
 * skin/classic/browser/preferences/preferences.css    (preferences/preferences.css)
 * skin/classic/browser/preferences/in-content/preferences.css (preferences/in-content/preferences.css)
+* skin/classic/browser/preferences/in-content/dialog.css      (preferences/in-content/dialog.css)
   skin/classic/browser/preferences/in-content/favicon.ico     (../shared/incontentprefs/favicon.ico)
   skin/classic/browser/preferences/in-content/icons.png       (../shared/incontentprefs/icons.png)
   skin/classic/browser/preferences/in-content/icons@2x.png    (../shared/incontentprefs/icons@2x.png)
@@ -187,6 +187,9 @@ browser.jar:
   skin/classic/browser/tabbrowser/tab-stroke-start.png      (tabbrowser/tab-stroke-start.png)
   skin/classic/browser/tabbrowser/tabDragIndicator.png      (tabbrowser/tabDragIndicator.png)
   skin/classic/browser/tabbrowser/tab-separator.png         (tabbrowser/tab-separator.png)
+
+  skin/classic/browser/tabbrowser/pendingpaint.png          (../shared/tabbrowser/pendingpaint.png)
+
   skin/classic/browser/tabview/edit-light.png         (tabview/edit-light.png)
   skin/classic/browser/tabview/search.png             (tabview/search.png)
   skin/classic/browser/tabview/stack-expander.png     (tabview/stack-expander.png)
@@ -196,6 +199,8 @@ browser.jar:
   skin/classic/browser/translating-16@2x.png          (../shared/translation/translating-16@2x.png)
   skin/classic/browser/translation-16.png             (../shared/translation/translation-16.png)
   skin/classic/browser/translation-16@2x.png          (../shared/translation/translation-16@2x.png)
+  skin/classic/browser/devedition/search.svg          (../shared/devedition/search.svg)
+  skin/classic/browser/devedition/urlbar-history-dropmarker.svg            (../shared/devedition/urlbar-history-dropmarker.svg)
 * skin/classic/browser/devtools/common.css            (../shared/devtools/common.css)
 * skin/classic/browser/devtools/dark-theme.css        (../shared/devtools/dark-theme.css)
 * skin/classic/browser/devtools/light-theme.css       (../shared/devtools/light-theme.css)
@@ -289,6 +294,8 @@ browser.jar:
   skin/classic/browser/devtools/debugger-step-over@2x.png (../shared/devtools/images/debugger-step-over@2x.png)
   skin/classic/browser/devtools/debugger-blackbox.png  (../shared/devtools/images/debugger-blackbox.png)
   skin/classic/browser/devtools/debugger-blackbox@2x.png  (../shared/devtools/images/debugger-blackbox@2x.png)
+  skin/classic/browser/devtools/debugger-prettyprint.png  (../shared/devtools/images/debugger-prettyprint.png)
+  skin/classic/browser/devtools/debugger-prettyprint@2x.png (../shared/devtools/images/debugger-prettyprint@2x.png)
   skin/classic/browser/devtools/debugger-toggleBreakpoints.png (../shared/devtools/images/debugger-toggleBreakpoints.png)
   skin/classic/browser/devtools/debugger-toggleBreakpoints@2x.png (../shared/devtools/images/debugger-toggleBreakpoints@2x.png)
   skin/classic/browser/devtools/tracer-icon.png        (../shared/devtools/images/tracer-icon.png)

@@ -449,7 +449,7 @@ js::FunctionHasResolveHook(const JSAtomState &atomState, PropertyName *name)
 }
 
 bool
-js::fun_resolve(JSContext *cx, HandleObject obj, HandleId id, MutableHandleObject objp)
+js::fun_resolve(JSContext *cx, HandleObject obj, HandleId id, bool *resolvedp)
 {
     if (!JSID_IS_ATOM(id))
         return true;
@@ -476,7 +476,8 @@ js::fun_resolve(JSContext *cx, HandleObject obj, HandleId id, MutableHandleObjec
 
         if (!ResolveInterpretedFunctionPrototype(cx, fun))
             return false;
-        objp.set(fun);
+
+        *resolvedp = true;
         return true;
     }
 
@@ -498,7 +499,8 @@ js::fun_resolve(JSContext *cx, HandleObject obj, HandleId id, MutableHandleObjec
                                   JSPROP_PERMANENT | JSPROP_READONLY)) {
             return false;
         }
-        objp.set(fun);
+
+        *resolvedp = true;
         return true;
     }
 
@@ -736,7 +738,7 @@ JSFunction::trace(JSTracer *trc)
             // self-hosted function which can be cloned over again. The latter
             // is stored in the first extended slot.
             if (IS_GC_MARKING_TRACER(trc) && !compartment()->hasBeenEntered() &&
-                !compartment()->debugMode() && !compartment()->isSelfHosting &&
+                !compartment()->isDebuggee() && !compartment()->isSelfHosting &&
                 u.i.s.script_->isRelazifiable() && (!isSelfHostedBuiltin() || isExtended()))
             {
                 relazify(trc);
@@ -868,10 +870,17 @@ CreateFunctionPrototype(JSContext *cx, JSProtoKey key)
                                                  SingletonObject));
     if (!tte)
         return nullptr;
+
+    bool succeeded;
     RootedFunction throwTypeError(cx, NewFunction(cx, tte, ThrowTypeError, 0,
                                                   JSFunction::NATIVE_FUN, self, js::NullPtr()));
-    if (!throwTypeError || !JSObject::preventExtensions(cx, throwTypeError))
+    if (!throwTypeError || !JSObject::preventExtensions(cx, throwTypeError, &succeeded))
         return nullptr;
+    if (!succeeded) {
+        JS_ReportErrorNumber(cx, js_GetErrorMessage, nullptr, JSMSG_CANT_CHANGE_EXTENSIBILITY);
+        return nullptr;
+    }
+
     self->setThrowTypeError(throwTypeError);
 
     return functionProto;
@@ -879,14 +888,14 @@ CreateFunctionPrototype(JSContext *cx, JSProtoKey key)
 
 const Class JSFunction::class_ = {
     js_Function_str,
-    JSCLASS_NEW_RESOLVE | JSCLASS_IMPLEMENTS_BARRIERS |
+    JSCLASS_IMPLEMENTS_BARRIERS |
     JSCLASS_HAS_CACHED_PROTO(JSProto_Function),
     JS_PropertyStub,         /* addProperty */
     JS_DeletePropertyStub,   /* delProperty */
     JS_PropertyStub,         /* getProperty */
     JS_StrictPropertyStub,   /* setProperty */
     fun_enumerate,
-    (JSResolveOp)js::fun_resolve,
+    js::fun_resolve,
     JS_ConvertStub,
     nullptr,                 /* finalize    */
     nullptr,                 /* call        */
@@ -929,7 +938,10 @@ js::FindBody(JSContext *cx, HandleFunction fun, HandleLinearString src, size_t *
     bool onward = true;
     // Skip arguments list.
     do {
-        switch (ts.getToken()) {
+        TokenKind tt;
+        if (!ts.getToken(&tt))
+            return false;
+        switch (tt) {
           case TOK_NAME:
           case TOK_YIELD:
             if (nest == 0)
@@ -942,18 +954,17 @@ js::FindBody(JSContext *cx, HandleFunction fun, HandleLinearString src, size_t *
             if (--nest == 0)
                 onward = false;
             break;
-          case TOK_ERROR:
-            // Must be memory.
-            return false;
           default:
             break;
         }
     } while (onward);
-    TokenKind tt = ts.getToken();
-    if (tt == TOK_ARROW)
-        tt = ts.getToken();
-    if (tt == TOK_ERROR)
+    TokenKind tt;
+    if (!ts.getToken(&tt))
         return false;
+    if (tt == TOK_ARROW) {
+        if (!ts.getToken(&tt))
+            return false;
+    }
     bool braced = tt == TOK_LC;
     MOZ_ASSERT_IF(fun->isExprClosure(), !braced);
     *bodyStart = ts.currentToken().pos.begin;
@@ -1489,7 +1500,7 @@ JSFunction::relazify(JSTracer *trc)
     JSScript *script = nonLazyScript();
     MOZ_ASSERT(script->isRelazifiable());
     MOZ_ASSERT(!compartment()->hasBeenEntered());
-    MOZ_ASSERT(!compartment()->debugMode());
+    MOZ_ASSERT(!compartment()->isDebuggee());
 
     // If the script's canonical function isn't lazy, we have to mark the
     // script. Otherwise, the following scenario would leave it unmarked
@@ -1653,12 +1664,9 @@ js_fun_bind(JSContext *cx, HandleObject target, HandleValue thisArg,
  * error was already reported.
  */
 static bool
-OnBadFormal(JSContext *cx, TokenKind tt)
+OnBadFormal(JSContext *cx)
 {
-    if (tt != TOK_ERROR)
-        JS_ReportErrorNumber(cx, js_GetErrorMessage, nullptr, JSMSG_BAD_FORMAL);
-    else
-        MOZ_ASSERT(cx->isExceptionPending());
+    JS_ReportErrorNumber(cx, js_GetErrorMessage, nullptr, JSMSG_BAD_FORMAL);
     return false;
 }
 
@@ -1799,13 +1807,12 @@ FunctionConstructor(JSContext *cx, unsigned argc, Value *vp, GeneratorKind gener
         bool yieldIsValidName = ts.versionNumber() < JSVERSION_1_7 && !isStarGenerator;
 
         /* The argument string may be empty or contain no tokens. */
-        TokenKind tt = ts.getToken();
+        TokenKind tt;
+        if (!ts.getToken(&tt))
+            return false;
         if (tt != TOK_EOF) {
             for (;;) {
-                /*
-                 * Check that it's a name.  This also implicitly guards against
-                 * TOK_ERROR, which was already reported.
-                 */
+                /* Check that it's a name. */
                 if (hasRest) {
                     ts.reportError(JSMSG_PARAMETER_AFTER_REST);
                     return false;
@@ -1817,16 +1824,16 @@ FunctionConstructor(JSContext *cx, unsigned argc, Value *vp, GeneratorKind gener
                 if (tt != TOK_NAME) {
                     if (tt == TOK_TRIPLEDOT) {
                         hasRest = true;
-                        tt = ts.getToken();
+                        if (!ts.getToken(&tt))
+                            return false;
                         if (tt == TOK_YIELD && yieldIsValidName)
                             tt = TOK_NAME;
                         if (tt != TOK_NAME) {
-                            if (tt != TOK_ERROR)
-                                ts.reportError(JSMSG_NO_REST_NAME);
+                            ts.reportError(JSMSG_NO_REST_NAME);
                             return false;
                         }
                     } else {
-                        return OnBadFormal(cx, tt);
+                        return OnBadFormal(cx);
                     }
                 }
 
@@ -1837,12 +1844,14 @@ FunctionConstructor(JSContext *cx, unsigned argc, Value *vp, GeneratorKind gener
                  * Get the next token.  Stop on end of stream.  Otherwise
                  * insist on a comma, get another name, and iterate.
                  */
-                tt = ts.getToken();
+                if (!ts.getToken(&tt))
+                    return false;
                 if (tt == TOK_EOF)
                     break;
                 if (tt != TOK_COMMA)
-                    return OnBadFormal(cx, tt);
-                tt = ts.getToken();
+                    return OnBadFormal(cx);
+                if (!ts.getToken(&tt))
+                    return false;
             }
         }
     }
@@ -1901,7 +1910,8 @@ FunctionConstructor(JSContext *cx, unsigned argc, Value *vp, GeneratorKind gener
     if (isStarGenerator)
         ok = frontend::CompileStarGeneratorBody(cx, &fun, options, formals, srcBuf);
     else
-        ok = frontend::CompileFunctionBody(cx, &fun, options, formals, srcBuf);
+        ok = frontend::CompileFunctionBody(cx, &fun, options, formals, srcBuf,
+                                           /* enclosingScope = */ NullPtr());
     args.rval().setObject(*fun);
     return ok;
 }
@@ -2054,7 +2064,7 @@ js::CloneFunctionObject(JSContext *cx, HandleFunction fun, HandleObject parent, 
     /*
      * Across compartments we have to clone the script for interpreted
      * functions. Cross-compartment cloning only happens via JSAPI
-     * (JS_CloneFunctionObject) which dynamically ensures that 'script' has
+     * (JS::CloneFunctionObject) which dynamically ensures that 'script' has
      * no enclosing lexical scope (only the global scope).
      */
     if (cloneRoot->isInterpreted() && !CloneFunctionScript(cx, fun, cloneRoot, newKindArg))

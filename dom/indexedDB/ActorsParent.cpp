@@ -5,7 +5,6 @@
 #include "ActorsParent.h"
 
 #include <algorithm>
-#include "CheckQuotaHelper.h"
 #include "FileInfo.h"
 #include "FileManager.h"
 #include "IDBObjectStore.h"
@@ -46,7 +45,6 @@
 #include "mozilla/dom/quota/FileStreams.h"
 #include "mozilla/dom/quota/OriginOrPatternString.h"
 #include "mozilla/dom/quota/QuotaManager.h"
-#include "mozilla/dom/quota/StoragePrivilege.h"
 #include "mozilla/dom/quota/UsageInfo.h"
 #include "mozilla/ipc/BackgroundParent.h"
 #include "mozilla/ipc/BackgroundUtils.h"
@@ -2207,6 +2205,14 @@ SetDefaultPragmas(mozIStorageConnection* aConnection)
     return rv;
   }
 
+  if (IndexedDatabaseManager::FullSynchronous()) {
+    rv = aConnection->ExecuteSimpleSQL(
+                             NS_LITERAL_CSTRING("PRAGMA synchronous = FULL;"));
+    if (NS_WARN_IF(NS_FAILED(rv))) {
+      return rv;
+    }
+  }
+
   return NS_OK;
 }
 
@@ -3885,7 +3891,8 @@ protected:
   nsCString mOrigin;
   nsCString mDatabaseId;
   State mState;
-  StoragePrivilege mStoragePrivilege;
+  bool mIsApp;
+  bool mHasUnlimStoragePerm;
   bool mEnforcingQuota;
   const bool mDeleting;
   bool mBlockedQuotaManager;
@@ -5928,6 +5935,12 @@ Factory::AllocPBackgroundIDBFactoryRequestParent(
 
   const PrincipalInfo& principalInfo = commonParams->principalInfo();
   if (NS_WARN_IF(principalInfo.type() == PrincipalInfo::TNullPrincipalInfo)) {
+    ASSERT_UNLESS_FUZZING();
+    return nullptr;
+  }
+
+  if (NS_WARN_IF(principalInfo.type() == PrincipalInfo::TSystemPrincipalInfo &&
+                 metadata.persistenceType() != PERSISTENCE_TYPE_PERSISTENT)) {
     ASSERT_UNLESS_FUZZING();
     return nullptr;
   }
@@ -8590,14 +8603,14 @@ Cursor::RecvContinue(const CursorRequestParams& aParams)
 FileManager::FileManager(PersistenceType aPersistenceType,
                          const nsACString& aGroup,
                          const nsACString& aOrigin,
-                         StoragePrivilege aPrivilege,
-                         const nsAString& aDatabaseName)
+                         const nsAString& aDatabaseName,
+                         bool aEnforcingQuota)
   : mPersistenceType(aPersistenceType)
   , mGroup(aGroup)
   , mOrigin(aOrigin)
-  , mPrivilege(aPrivilege)
   , mDatabaseName(aDatabaseName)
   , mLastFileId(0)
+  , mEnforcingQuota(aEnforcingQuota)
   , mInvalidated(false)
 { }
 
@@ -8721,16 +8734,15 @@ FileManager::Invalidate()
   {
   public:
     static PLDHashOperator
-    CopyToTArray(const uint64_t& aKey, FileInfo* aValue, void* aUserArg)
+    ClearDBRefs(const uint64_t& aKey, FileInfo*& aValue, void* aUserArg)
     {
       MOZ_ASSERT(aValue);
 
-      auto* array = static_cast<FallibleTArray<FileInfo*>*>(aUserArg);
-      MOZ_ASSERT(array);
+      if (aValue->LockedClearDBRefs()) {
+        return PL_DHASH_NEXT;
+      }
 
-      MOZ_ALWAYS_TRUE(array->AppendElement(aValue));
-
-      return PL_DHASH_NEXT;
+      return PL_DHASH_REMOVE;
     }
   };
 
@@ -8739,26 +8751,12 @@ FileManager::Invalidate()
     return NS_ERROR_UNEXPECTED;
   }
 
-  FallibleTArray<FileInfo*> fileInfos;
-  {
-    MutexAutoLock lock(IndexedDatabaseManager::FileMutex());
+  MutexAutoLock lock(IndexedDatabaseManager::FileMutex());
 
-    MOZ_ASSERT(!mInvalidated);
-    mInvalidated = true;
+  MOZ_ASSERT(!mInvalidated);
+  mInvalidated = true;
 
-    if (NS_WARN_IF(!fileInfos.SetCapacity(mFileInfos.Count()))) {
-      return NS_ERROR_OUT_OF_MEMORY;
-    }
-
-    mFileInfos.EnumerateRead(Helper::CopyToTArray, &fileInfos);
-  }
-
-  for (uint32_t count = fileInfos.Length(), index = 0; index < count; index++) {
-    FileInfo* fileInfo = fileInfos[index];
-    MOZ_ASSERT(fileInfo);
-
-    fileInfo->ClearDBRefs();
-  }
+  mFileInfos.Enumerate(Helper::ClearDBRefs, nullptr);
 
   return NS_OK;
 }
@@ -10436,7 +10434,8 @@ FactoryOp::FactoryOp(Factory* aFactory,
   , mContentParent(Move(aContentParent))
   , mCommonParams(aCommonParams)
   , mState(State_Initial)
-  , mStoragePrivilege(mozilla::dom::quota::Content)
+  , mIsApp(false)
+  , mHasUnlimStoragePerm(false)
   , mEnforcingQuota(true)
   , mDeleting(aDeleting)
   , mBlockedQuotaManager(false)
@@ -10682,11 +10681,14 @@ FactoryOp::CheckPermission(ContentParent* aContentParent,
     return NS_ERROR_DOM_INDEXEDDB_NOT_ALLOWED_ERR;
   }
 
+  PersistenceType persistenceType = mCommonParams.metadata().persistenceType();
+
   const PrincipalInfo& principalInfo = mCommonParams.principalInfo();
   MOZ_ASSERT(principalInfo.type() != PrincipalInfo::TNullPrincipalInfo);
 
   if (principalInfo.type() == PrincipalInfo::TSystemPrincipalInfo) {
     MOZ_ASSERT(mState == State_Initial);
+    MOZ_ASSERT(persistenceType == PERSISTENCE_TYPE_PERSISTENT);
 
     if (aContentParent) {
       // Check to make sure that the child process has access to the database it
@@ -10735,10 +10737,12 @@ FactoryOp::CheckPermission(ContentParent* aContentParent,
     }
 
     if (State_Initial == mState) {
-      QuotaManager::GetInfoForChrome(&mGroup, &mOrigin, &mStoragePrivilege,
-                                     nullptr);
-      MOZ_ASSERT(mStoragePrivilege == mozilla::dom::quota::Chrome);
-      mEnforcingQuota = false;
+      QuotaManager::GetInfoForChrome(&mGroup, &mOrigin, &mIsApp,
+                                     &mHasUnlimStoragePerm);
+
+      mEnforcingQuota =
+        QuotaManager::IsQuotaEnforced(persistenceType, mOrigin, mIsApp,
+                                      mHasUnlimStoragePerm);
     }
 
     *aPermission = PermissionRequestBase::kPermissionAllowed;
@@ -10756,13 +10760,11 @@ FactoryOp::CheckPermission(ContentParent* aContentParent,
 
   PermissionRequestBase::PermissionValue permission;
 
-  if (mCommonParams.metadata().persistenceType() ==
-        PERSISTENCE_TYPE_TEMPORARY) {
+  if (persistenceType == PERSISTENCE_TYPE_TEMPORARY) {
     // Temporary storage doesn't need to check the permission.
     permission = PermissionRequestBase::kPermissionAllowed;
   } else {
-    MOZ_ASSERT(mCommonParams.metadata().persistenceType() ==
-                 PERSISTENCE_TYPE_PERSISTENT);
+    MOZ_ASSERT(persistenceType == PERSISTENCE_TYPE_PERSISTENT);
 
 #ifdef MOZ_CHILD_PERMISSIONS
     if (aContentParent) {
@@ -10788,24 +10790,16 @@ FactoryOp::CheckPermission(ContentParent* aContentParent,
 
   if (permission != PermissionRequestBase::kPermissionDenied &&
       State_Initial == mState) {
-    rv = QuotaManager::GetInfoFromPrincipal(principal, &mGroup, &mOrigin,
-                                            &mStoragePrivilege, nullptr);
+    rv = QuotaManager::GetInfoFromPrincipal(principal, persistenceType, &mGroup,
+                                            &mOrigin, &mIsApp,
+                                            &mHasUnlimStoragePerm);
     if (NS_WARN_IF(NS_FAILED(rv))) {
       return rv;
     }
 
-    MOZ_ASSERT(mStoragePrivilege != mozilla::dom::quota::Chrome);
-  }
-
-  if (permission == PermissionRequestBase::kPermissionAllowed &&
-      mEnforcingQuota)
-  {
-    // If we're running from a window then we should check the quota permission
-    // as well.
-    uint32_t quotaPermission = CheckQuotaHelper::GetQuotaPermission(principal);
-    if (quotaPermission == nsIPermissionManager::ALLOW_ACTION) {
-      mEnforcingQuota = false;
-    }
+    mEnforcingQuota =
+      QuotaManager::IsQuotaEnforced(persistenceType, mOrigin, mIsApp,
+                                    mHasUnlimStoragePerm);
   }
 
   *aPermission = permission;
@@ -11210,7 +11204,8 @@ OpenDatabaseOp::DoDatabaseWork()
     quotaManager->EnsureOriginIsInitialized(persistenceType,
                                             mGroup,
                                             mOrigin,
-                                            mEnforcingQuota,
+                                            mIsApp,
+                                            mHasUnlimStoragePerm,
                                             getter_AddRefs(dbDirectory));
   if (NS_WARN_IF(NS_FAILED(rv))) {
     return rv;
@@ -11326,8 +11321,8 @@ OpenDatabaseOp::DoDatabaseWork()
     fileManager = new FileManager(persistenceType,
                                   mGroup,
                                   mOrigin,
-                                  mStoragePrivilege,
-                                  databaseName);
+                                  databaseName,
+                                  mEnforcingQuota);
 
     rv = fileManager->Init(fmDirectory, connection);
     if (NS_WARN_IF(NS_FAILED(rv))) {
@@ -12704,7 +12699,7 @@ VersionChangeOp::RunOnIOThread()
   if (exists) {
     int64_t fileSize;
 
-    if (mDeleteDatabaseOp->mStoragePrivilege != Chrome) {
+    if (mDeleteDatabaseOp->mEnforcingQuota) {
       rv = dbFile->GetFileSize(&fileSize);
       if (NS_WARN_IF(NS_FAILED(rv))) {
         return rv;
@@ -12716,7 +12711,7 @@ VersionChangeOp::RunOnIOThread()
       return rv;
     }
 
-    if (mDeleteDatabaseOp->mStoragePrivilege != Chrome) {
+    if (mDeleteDatabaseOp->mEnforcingQuota) {
       quotaManager->DecreaseUsageForOrigin(persistenceType,
                                            mDeleteDatabaseOp->mGroup,
                                            mDeleteDatabaseOp->mOrigin,
@@ -12781,7 +12776,7 @@ VersionChangeOp::RunOnIOThread()
 
     uint64_t usage = 0;
 
-    if (mDeleteDatabaseOp->mStoragePrivilege != Chrome) {
+    if (mDeleteDatabaseOp->mEnforcingQuota) {
       rv = FileManager::GetUsage(fmDirectory, &usage);
       if (NS_WARN_IF(NS_FAILED(rv))) {
         return rv;
@@ -12793,7 +12788,7 @@ VersionChangeOp::RunOnIOThread()
       return rv;
     }
 
-    if (mDeleteDatabaseOp->mStoragePrivilege != Chrome) {
+    if (mDeleteDatabaseOp->mEnforcingQuota) {
       quotaManager->DecreaseUsageForOrigin(persistenceType,
                                            mDeleteDatabaseOp->mGroup,
                                            mDeleteDatabaseOp->mOrigin,
@@ -14425,12 +14420,14 @@ ObjectStoreAddOrPutRequestOp::CopyFileData(nsIInputStream* aInputStream,
     }
   } while (true);
 
-  nsresult rv2 = aOutputStream->Flush();
-  if (NS_WARN_IF(NS_FAILED(rv2))) {
-    return NS_SUCCEEDED(rv) ? rv2 : rv;
+  if (NS_SUCCEEDED(rv)) {
+    rv = aOutputStream->Flush();
+    if (NS_WARN_IF(NS_FAILED(rv))) {
+      return rv;
+    }
   }
 
-  rv2 = aOutputStream->Close();
+  nsresult rv2 = aOutputStream->Close();
   if (NS_WARN_IF(NS_FAILED(rv2))) {
     return NS_SUCCEEDED(rv) ? rv2 : rv;
   }
@@ -14804,9 +14801,31 @@ ObjectStoreAddOrPutRequestOp::DoDatabaseWork(TransactionBase* aTransaction)
           }
           if (NS_WARN_IF(NS_FAILED(rv))) {
             // Try to remove the file if the copy failed.
-            if (NS_FAILED(diskFile->Remove(false))) {
-              NS_WARNING("Failed to remove file after copying failed!");
+            nsresult rv2;
+            int64_t fileSize;
+
+            if (mFileManager->EnforcingQuota()) {
+              rv2 = diskFile->GetFileSize(&fileSize);
+              if (NS_WARN_IF(NS_FAILED(rv2))) {
+                return rv;
+              }
             }
+
+            rv2 = diskFile->Remove(false);
+            if (NS_WARN_IF(NS_FAILED(rv2))) {
+              return rv;
+            }
+
+            if (mFileManager->EnforcingQuota()) {
+              QuotaManager* quotaManager = QuotaManager::Get();
+              MOZ_ASSERT(quotaManager);
+
+              quotaManager->DecreaseUsageForOrigin(mFileManager->Type(),
+                                                   mFileManager->Group(),
+                                                   mFileManager->Origin(),
+                                                   fileSize);
+            }
+
             return rv;
           }
 

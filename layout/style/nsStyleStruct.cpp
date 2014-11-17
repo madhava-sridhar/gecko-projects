@@ -1766,8 +1766,11 @@ nsStyleGradient::operator==(const nsStyleGradient& aOther) const
     return false;
 
   for (uint32_t i = 0; i < mStops.Length(); i++) {
-    if (mStops[i].mLocation != aOther.mStops[i].mLocation ||
-        mStops[i].mColor != aOther.mStops[i].mColor)
+    const auto& stop1 = mStops[i];
+    const auto& stop2 = aOther.mStops[i];
+    if (stop1.mLocation != stop2.mLocation ||
+        stop1.mIsInterpolationHint != stop2.mIsInterpolationHint ||
+        (!stop1.mIsInterpolationHint && stop1.mColor != stop2.mColor))
       return false;
   }
 
@@ -2674,8 +2677,19 @@ nsChangeHint nsStyleDisplay::CalcDifference(const nsStyleDisplay& aOther) const
       || (mFloats == NS_STYLE_FLOAT_NONE) != (aOther.mFloats == NS_STYLE_FLOAT_NONE)
       || mOverflowX != aOther.mOverflowX
       || mOverflowY != aOther.mOverflowY
+      || mScrollBehavior != aOther.mScrollBehavior
       || mResize != aOther.mResize)
     NS_UpdateHint(hint, nsChangeHint_ReconstructFrame);
+
+  /* Note: When mScrollBehavior is changed, the nsChangeHint_NeutralChange is
+   * not sufficient to enter nsCSSFrameConstructor::PropagateScrollToViewport.
+   * By using the same hint as used when the overflow css property changes,
+   * nsChangeHint_ReconstructFrame, PropagateScrollToViewport will be called.
+   *
+   * The scroll-behavior css property is not expected to change often (the
+   * CSSOM-View DOM methods are likely to be used in those cases); however,
+   * if this does become common perhaps a faster-path might be worth while.
+   */
 
   if ((mAppearance == NS_THEME_TEXTFIELD &&
        aOther.mAppearance != NS_THEME_TEXTFIELD) ||
@@ -2801,14 +2815,16 @@ nsChangeHint nsStyleDisplay::CalcDifference(const nsStyleDisplay& aOther) const
     }
   }
 
+  // Note that the HasTransformStyle() != aOther.HasTransformStyle() 
+  // test above handles relevant changes in the
+  // NS_STYLE_WILL_CHANGE_TRANSFORM bit, which in turn handles frame 
+  // reconstruction for changes in the containing block of 
+  // fixed-positioned elements.  Other than that, all changes to 
+  // 'will-change' can be handled by a repaint.
   uint8_t willChangeBitsChanged =
     mWillChangeBitField ^ aOther.mWillChangeBitField;
-  if (willChangeBitsChanged & NS_STYLE_WILL_CHANGE_STACKING_CONTEXT) {
+  if (willChangeBitsChanged) {
     NS_UpdateHint(hint, nsChangeHint_RepaintFrame);
-  }
-  if (willChangeBitsChanged & ~uint8_t(NS_STYLE_WILL_CHANGE_STACKING_CONTEXT)) {
-    // FIXME (Bug 974125): Don't reconstruct the frame
-    NS_UpdateHint(hint, nsChangeHint_ReconstructFrame);
   }
 
   // Note:  Our current behavior for handling changes to the
@@ -2846,8 +2862,7 @@ nsChangeHint nsStyleDisplay::CalcDifference(const nsStyleDisplay& aOther) const
        mAnimationDirectionCount != aOther.mAnimationDirectionCount ||
        mAnimationFillModeCount != aOther.mAnimationFillModeCount ||
        mAnimationPlayStateCount != aOther.mAnimationPlayStateCount ||
-       mAnimationIterationCountCount != aOther.mAnimationIterationCountCount ||
-       mScrollBehavior != aOther.mScrollBehavior)) {
+       mAnimationIterationCountCount != aOther.mAnimationIterationCountCount)) {
     NS_UpdateHint(hint, nsChangeHint_NeutralChange);
   }
 

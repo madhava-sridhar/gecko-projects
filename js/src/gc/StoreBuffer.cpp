@@ -26,6 +26,10 @@ StoreBuffer::SlotsEdge::mark(JSTracer *trc)
 {
     NativeObject *obj = object();
 
+    // Beware JSObject::swap exchanging a native object for a non-native one.
+    if (!obj->isNative())
+        return;
+
     if (IsInsideNursery(obj))
         return;
 
@@ -299,7 +303,7 @@ void
 StoreBuffer::setAboutToOverflow()
 {
     aboutToOverflow_ = true;
-    runtime_->requestInterrupt(JSRuntime::RequestInterruptMainThread);
+    runtime_->gc.requestMinorGC(JS::gcreason::FULL_STORE_BUFFER);
 }
 
 bool

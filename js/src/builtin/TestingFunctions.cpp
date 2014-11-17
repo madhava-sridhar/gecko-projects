@@ -39,7 +39,6 @@
 #include "vm/NativeObject-inl.h"
 
 using namespace js;
-using namespace JS;
 
 using mozilla::ArrayLength;
 using mozilla::Move;
@@ -251,12 +250,12 @@ GC(JSContext *cx, unsigned argc, jsval *vp)
     if (compartment)
         PrepareForDebugGC(cx->runtime());
     else
-        PrepareForFullGC(cx->runtime());
+        JS::PrepareForFullGC(cx->runtime());
 
     if (shrinking)
-        ShrinkingGC(cx->runtime(), gcreason::API);
+        JS::ShrinkingGC(cx->runtime(), JS::gcreason::API);
     else
-        GCForReason(cx->runtime(), gcreason::API);
+        JS::GCForReason(cx->runtime(), JS::gcreason::API);
 
     char buf[256] = { '\0' };
 #ifndef JS_MORE_DETERMINISTIC
@@ -278,7 +277,7 @@ MinorGC(JSContext *cx, unsigned argc, jsval *vp)
     if (args.get(0) == BooleanValue(true))
         cx->runtime()->gc.storeBuffer.setAboutToOverflow();
 
-    cx->minorGC(gcreason::API);
+    cx->minorGC(JS::gcreason::API);
 #endif
     args.rval().setUndefined();
     return true;
@@ -349,7 +348,7 @@ GCParameter(JSContext *cx, unsigned argc, Value *vp)
         return false;
     }
 
-    if (param == JSGC_MARK_STACK_LIMIT && IsIncrementalGCInProgress(cx->runtime())) {
+    if (param == JSGC_MARK_STACK_LIMIT && JS::IsIncrementalGCInProgress(cx->runtime())) {
         JS_ReportError(cx, "attempt to set markStackLimit while a GC is in progress");
         return false;
     }
@@ -629,16 +628,15 @@ GCSlice(JSContext *cx, unsigned argc, Value *vp)
         return false;
     }
 
-    bool limit = true;
-    uint32_t budget = 0;
+    SliceBudget budget;
     if (args.length() == 1) {
-        if (!ToUint32(cx, args[0], &budget))
+        uint32_t work = 0;
+        if (!ToUint32(cx, args[0], &work))
             return false;
-    } else {
-        limit = false;
+        budget = SliceBudget(WorkBudget(work));
     }
 
-    cx->runtime()->gc.gcDebugSlice(limit, budget);
+    cx->runtime()->gc.gcDebugSlice(budget);
     args.rval().setUndefined();
     return true;
 }
@@ -1186,13 +1184,13 @@ ShellObjectMetadataCallback(JSContext *cx, JSObject **pmetadata)
     createdIndex++;
 
     if (!JS_DefineProperty(cx, obj, "index", createdIndex, 0,
-                           JS_PropertyStub, JS_StrictPropertyStub))
+                           JS_STUBGETTER, JS_STUBSETTER))
     {
         return false;
     }
 
     if (!JS_DefineProperty(cx, obj, "stack", stack, 0,
-                           JS_PropertyStub, JS_StrictPropertyStub))
+                           JS_STUBGETTER, JS_STUBSETTER))
     {
         return false;
     }
@@ -1205,7 +1203,7 @@ ShellObjectMetadataCallback(JSContext *cx, JSObject **pmetadata)
             id = INT_TO_JSID(stackIndex);
             RootedObject callee(cx, iter.callee());
             if (!JS_DefinePropertyById(cx, stack, id, callee, 0,
-                                       JS_PropertyStub, JS_StrictPropertyStub))
+                                       JS_STUBGETTER, JS_STUBSETTER))
             {
                 return false;
             }
@@ -2018,7 +2016,8 @@ EvalReturningScope(JSContext *cx, unsigned argc, jsval *vp)
     CallArgs args = CallArgsFromVp(argc, vp);
 
     RootedString str(cx);
-    if (!JS_ConvertArguments(cx, args, "S", str.address()))
+    RootedObject global(cx);
+    if (!JS_ConvertArguments(cx, args, "S/o", str.address(), global.address()))
         return false;
 
     AutoStableStringChars strChars(cx);
@@ -2044,12 +2043,88 @@ EvalReturningScope(JSContext *cx, unsigned argc, jsval *vp)
     if (!JS::Compile(cx, JS::NullPtr(), options, srcBuf, &script))
         return false;
 
-    RootedObject global(cx, JS::CurrentGlobalOrNull(cx));
+    if (global) {
+        global = CheckedUnwrap(global);
+        if (!global) {
+            JS_ReportError(cx, "Permission denied to access global");
+            return false;
+        }
+        if (!global->is<GlobalObject>()) {
+            JS_ReportError(cx, "Argument must be a global object");
+            return false;
+        }
+    } else {
+        global = JS::CurrentGlobalOrNull(cx);
+    }
+
     RootedObject scope(cx);
-    if (!js::ExecuteInGlobalAndReturnScope(cx, global, script, &scope))
+
+    {
+        // If we're switching globals here, ExecuteInGlobalAndReturnScope will
+        // take care of cloning the script into that compartment before
+        // executing it.
+        AutoCompartment ac(cx, global);
+
+        if (!js::ExecuteInGlobalAndReturnScope(cx, global, script, &scope))
+            return false;
+    }
+
+    if (!cx->compartment()->wrap(cx, &scope))
         return false;
 
     args.rval().setObject(*scope);
+    return true;
+}
+
+static bool
+ShellCloneAndExecuteScript(JSContext *cx, unsigned argc, Value *vp)
+{
+    CallArgs args = CallArgsFromVp(argc, vp);
+
+    RootedString str(cx);
+    RootedObject global(cx);
+    if (!JS_ConvertArguments(cx, args, "So", str.address(), global.address()))
+        return false;
+
+    AutoStableStringChars strChars(cx);
+    if (!strChars.initTwoByte(cx, str))
+        return false;
+
+    mozilla::Range<const char16_t> chars = strChars.twoByteRange();
+    size_t srclen = chars.length();
+    const char16_t *src = chars.start().get();
+
+    JS::AutoFilename filename;
+    unsigned lineno;
+
+    DescribeScriptedCaller(cx, &filename, &lineno);
+
+    JS::CompileOptions options(cx);
+    options.setFileAndLine(filename.get(), lineno);
+    options.setNoScriptRval(true);
+    options.setCompileAndGo(false);
+
+    JS::SourceBufferHolder srcBuf(src, srclen, JS::SourceBufferHolder::NoOwnership);
+    RootedScript script(cx);
+    if (!JS::Compile(cx, JS::NullPtr(), options, srcBuf, &script))
+        return false;
+
+    global = CheckedUnwrap(global);
+    if (!global) {
+        JS_ReportError(cx, "Permission denied to access global");
+        return false;
+    }
+    if (!global->is<GlobalObject>()) {
+        JS_ReportError(cx, "Argument must be a global object");
+        return false;
+    }
+
+    AutoCompartment ac(cx, global);
+
+    if (!JS::CloneAndExecuteScript(cx, global, script))
+        return false;
+
+    args.rval().setUndefined();
     return true;
 }
 
@@ -2076,6 +2151,25 @@ ByteSize(JSContext *cx, unsigned argc, Value *vp)
         args.rval().set(NumberValue(node.size(mallocSizeOf)));
     else
         args.rval().setUndefined();
+    return true;
+}
+
+static bool
+SetImmutablePrototype(JSContext *cx, unsigned argc, Value *vp)
+{
+    CallArgs args = CallArgsFromVp(argc, vp);
+    if (!args.get(0).isObject()) {
+        JS_ReportError(cx, "setImmutablePrototype: object expected");
+        return false;
+    }
+
+    RootedObject obj(cx, &args[0].toObject());
+
+    bool succeeded;
+    if (!JSObject::setImmutablePrototype(cx, obj, &succeeded))
+        return false;
+
+    args.rval().setBoolean(succeeded);
     return true;
 }
 
@@ -2381,8 +2475,14 @@ gc::ZealModeHelpText),
 #endif
 
     JS_FN_HELP("evalReturningScope", EvalReturningScope, 1, 0,
-"evalReturningScope(scriptStr)",
-"  Evaluate the script in a new scope and return the scope."),
+"evalReturningScope(scriptStr, [global])",
+"  Evaluate the script in a new scope and return the scope.\n"
+"  If |global| is present, clone the script to |global| before executing."),
+
+    JS_FN_HELP("cloneAndExecuteScript", ShellCloneAndExecuteScript, 2, 0,
+"cloneAndExecuteScript(source, global)",
+"  Compile |source| in the current compartment, clone it into |global|'s\n"
+"  compartment, and run it there."),
 
     JS_FN_HELP("backtrace", DumpBacktrace, 1, 0,
 "backtrace()",
@@ -2400,6 +2500,14 @@ gc::ZealModeHelpText),
 "byteSize(value)",
 "  Return the size in bytes occupied by |value|, or |undefined| if value\n"
 "  is not allocated in memory.\n"),
+
+    JS_FN_HELP("setImmutablePrototype", SetImmutablePrototype, 1, 0,
+"setImmutablePrototype(obj)",
+"  Try to make obj's [[Prototype]] immutable, such that subsequent attempts to\n"
+"  change it will fail.  Return true if obj's [[Prototype]] was successfully made\n"
+"  immutable (or if it already was immutable), false otherwise.  Throws in case\n"
+"  of internal error, or if the operation doesn't even make sense (for example,\n"
+"  because the object is a revoked proxy)."),
 
     JS_FS_HELP_END
 };

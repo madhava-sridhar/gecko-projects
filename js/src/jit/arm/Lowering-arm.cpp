@@ -489,7 +489,7 @@ LIRGeneratorARM::visitAsmJSLoadHeap(MAsmJSLoadHeap *ins)
     LAllocation ptrAlloc;
 
     // For the ARM it is best to keep the 'ptr' in a register if a bounds check is needed.
-    if (ptr->isConstant() && ins->skipBoundsCheck()) {
+    if (ptr->isConstant() && !ins->needsBoundsCheck()) {
         int32_t ptrValue = ptr->toConstant()->value().toInt32();
         // A bounds check is only skipped for a positive index.
         MOZ_ASSERT(ptrValue >= 0);
@@ -507,7 +507,7 @@ LIRGeneratorARM::visitAsmJSStoreHeap(MAsmJSStoreHeap *ins)
     MOZ_ASSERT(ptr->type() == MIRType_Int32);
     LAllocation ptrAlloc;
 
-    if (ptr->isConstant() && ins->skipBoundsCheck()) {
+    if (ptr->isConstant() && !ins->needsBoundsCheck()) {
         MOZ_ASSERT(ptr->toConstant()->value().toInt32() >= 0);
         ptrAlloc = LAllocation(ptr->toConstant()->vp());
     } else
@@ -570,4 +570,69 @@ LIRGeneratorARM::visitSimdValueX4(MSimdValueX4 *ins)
     MOZ_CRASH("NYI");
 }
 
-//__aeabi_uidiv
+bool
+LIRGeneratorARM::visitAtomicTypedArrayElementBinop(MAtomicTypedArrayElementBinop *ins)
+{
+    MOZ_ASSERT(ins->arrayType() != Scalar::Uint8Clamped);
+    MOZ_ASSERT(ins->arrayType() != Scalar::Float32);
+    MOZ_ASSERT(ins->arrayType() != Scalar::Float64);
+
+    MOZ_ASSERT(ins->elements()->type() == MIRType_Elements);
+    MOZ_ASSERT(ins->index()->type() == MIRType_Int32);
+
+    const LUse elements = useRegister(ins->elements());
+    const LAllocation index = useRegisterOrConstant(ins->index());
+
+    // For most operations we don't need any temps because there are
+    // enough scratch registers.  tempDef2 is never needed on ARM.
+    //
+    // For a Uint32Array with a known double result we need a temp for
+    // the intermediate output, this is tempDef1.
+    //
+    // Optimization opportunity (bug 1077317): We can do better by
+    // allowing 'value' to remain as an imm32 if it is small enough to
+    // fit in an instruction.
+
+    LDefinition tempDef1 = LDefinition::BogusTemp();
+    LDefinition tempDef2 = LDefinition::BogusTemp();
+
+    const LAllocation value = useRegister(ins->value());
+    if (ins->arrayType() == Scalar::Uint32 && IsFloatingPointType(ins->type()))
+        tempDef1 = temp();
+
+    LAtomicTypedArrayElementBinop *lir =
+        new(alloc()) LAtomicTypedArrayElementBinop(elements, index, value, tempDef1, tempDef2);
+
+    return define(lir, ins);
+}
+
+bool
+LIRGeneratorARM::visitCompareExchangeTypedArrayElement(MCompareExchangeTypedArrayElement *ins)
+{
+    MOZ_ASSERT(ins->arrayType() != Scalar::Float32);
+    MOZ_ASSERT(ins->arrayType() != Scalar::Float64);
+
+    MOZ_ASSERT(ins->elements()->type() == MIRType_Elements);
+    MOZ_ASSERT(ins->index()->type() == MIRType_Int32);
+
+    const LUse elements = useRegister(ins->elements());
+    const LAllocation index = useRegisterOrConstant(ins->index());
+
+    // If the target is a floating register then we need a temp at the
+    // CodeGenerator level for creating the result.
+    //
+    // Optimization opportunity (bug 1077317): We could do better by
+    // allowing oldval to remain an immediate, if it is small enough
+    // to fit in an instruction.
+
+    const LAllocation newval = useRegister(ins->newval());
+    const LAllocation oldval = useRegister(ins->oldval());
+    LDefinition tempDef = LDefinition::BogusTemp();
+    if (ins->arrayType() == Scalar::Uint32 && IsFloatingPointType(ins->type()))
+        tempDef = temp();
+
+    LCompareExchangeTypedArrayElement *lir =
+        new(alloc()) LCompareExchangeTypedArrayElement(elements, index, oldval, newval, tempDef);
+
+    return define(lir, ins);
+}

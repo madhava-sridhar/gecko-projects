@@ -283,6 +283,16 @@ MInstruction::stealResumePoint(MInstruction *ins)
     resumePoint_->replaceInstruction(this);
 }
 
+void
+MInstruction::moveResumePointAsEntry()
+{
+    MOZ_ASSERT(isNop());
+    block()->clearEntryResumePoint();
+    block()->setEntryResumePoint(resumePoint_);
+    resumePoint_->resetInstruction();
+    resumePoint_ = nullptr;
+}
+
 static bool
 MaybeEmulatesUndefined(MDefinition *op)
 {
@@ -1265,14 +1275,14 @@ MPhi::foldsTernary()
     MTest *test = pred->lastIns()->toTest();
 
     // True branch may only dominate one edge of MPhi.
-    if (test->ifTrue()->dominates(block()->getPredecessor(0)) &&
+    if (test->ifTrue()->dominates(block()->getPredecessor(0)) ==
         test->ifTrue()->dominates(block()->getPredecessor(1)))
     {
         return nullptr;
     }
 
     // False branch may only dominate one edge of MPhi.
-    if (test->ifFalse()->dominates(block()->getPredecessor(0)) &&
+    if (test->ifFalse()->dominates(block()->getPredecessor(0)) ==
         test->ifFalse()->dominates(block()->getPredecessor(1)))
     {
         return nullptr;
@@ -1300,6 +1310,23 @@ MPhi::foldsTernary()
     MDefinition *testArg = (trueDef == c) ? falseDef : trueDef;
     if (testArg != test->input())
         return nullptr;
+
+    // This check should be a tautology, except that the constant might be the
+    // result of the removal of a branch.  In such case the domination scope of
+    // the block which is holding the constant might be incomplete. This
+    // condition is used to prevent doing this optimization based on incomplete
+    // information.
+    //
+    // As GVN removed a branch, it will update the dominations rules before
+    // trying to fold this MPhi again. Thus, this condition does not inhibit
+    // this optimization.
+    MBasicBlock *truePred = block()->getPredecessor(firstIsTrueBranch ? 0 : 1);
+    MBasicBlock *falsePred = block()->getPredecessor(firstIsTrueBranch ? 1 : 0);
+    if (!trueDef->block()->dominates(truePred) ||
+        !falseDef->block()->dominates(falsePred))
+    {
+        return nullptr;
+    }
 
     // If testArg is an int32 type we can:
     // - fold testArg ? testArg : 0 to testArg
@@ -1828,6 +1855,41 @@ MMinMax::trySpecializeFloat32(TempAllocator &alloc)
 
     specialization_ = MIRType_Float32;
     setResultType(MIRType_Float32);
+}
+
+MDefinition *
+MMinMax::foldsTo(TempAllocator &alloc)
+{
+    if (!lhs()->isConstant() && !rhs()->isConstant())
+        return this;
+
+    MDefinition *operand = lhs()->isConstant() ? rhs() : lhs();
+    MConstant *constant = lhs()->isConstant() ? lhs()->toConstant() : rhs()->toConstant();
+
+    if (operand->isToDouble() && operand->getOperand(0)->type() == MIRType_Int32) {
+        const js::Value &val = constant->value();
+
+        // min(int32, cte >= INT32_MAX) = int32
+        if (val.isDouble() && val.toDouble() >= INT32_MAX && !isMax()) {
+            MLimitedTruncate *limit =
+                MLimitedTruncate::New(alloc, operand->getOperand(0), MDefinition::NoTruncate);
+            block()->insertBefore(this, limit);
+            MToDouble *toDouble = MToDouble::New(alloc, limit);
+            block()->insertBefore(this, toDouble);
+            return toDouble;
+        }
+
+        // max(int32, cte <= INT32_MIN) = int32
+        if (val.isDouble() && val.toDouble() <= INT32_MIN && isMax()) {
+            MLimitedTruncate *limit =
+                MLimitedTruncate::New(alloc, operand->getOperand(0), MDefinition::NoTruncate);
+            block()->insertBefore(this, limit);
+            MToDouble *toDouble = MToDouble::New(alloc, limit);
+            block()->insertBefore(this, toDouble);
+            return toDouble;
+        }
+    }
+    return this;
 }
 
 bool
@@ -2976,13 +3038,94 @@ MCompare::tryFold(bool *result)
 }
 
 bool
-MCompare::evaluateConstantOperands(bool *result)
+MCompare::evaluateConstantOperands(TempAllocator &alloc, bool *result)
 {
     if (type() != MIRType_Boolean && type() != MIRType_Int32)
         return false;
 
     MDefinition *left = getOperand(0);
     MDefinition *right = getOperand(1);
+
+    if (compareType() == Compare_Double) {
+        // Optimize "MCompare MConstant (MToDouble SomethingInInt32Range).
+        // In most cases the MToDouble was added, because the constant is
+        // a double.
+        // e.g. v < 9007199254740991, where v is an int32 is always true.
+        if (!lhs()->isConstant() && !rhs()->isConstant())
+            return false;
+
+        MDefinition *operand = left->isConstant() ? right : left;
+        MConstant *constant = left->isConstant() ? left->toConstant() : right->toConstant();
+        MOZ_ASSERT(constant->value().isDouble());
+        double cte = constant->value().toDouble();
+
+        if (operand->isToDouble() && operand->getOperand(0)->type() == MIRType_Int32) {
+            bool replaced = false;
+            switch (jsop_) {
+              case JSOP_LT:
+                if (cte > INT32_MAX || cte < INT32_MIN) {
+                    *result = !((constant == lhs()) ^ (cte < INT32_MIN));
+                    replaced = true;
+                }
+                break;
+              case JSOP_LE:
+                if (constant == lhs()) {
+                    if (cte > INT32_MAX || cte <= INT32_MIN) {
+                        *result = (cte <= INT32_MIN);
+                        replaced = true;
+                    }
+                } else {
+                    if (cte >= INT32_MAX || cte < INT32_MIN) {
+                        *result = (cte >= INT32_MIN);
+                        replaced = true;
+                    }
+                }
+                break;
+              case JSOP_GT:
+                if (cte > INT32_MAX || cte < INT32_MIN) {
+                    *result = !((constant == rhs()) ^ (cte < INT32_MIN));
+                    replaced = true;
+                }
+                break;
+              case JSOP_GE:
+                if (constant == lhs()) {
+                    if (cte >= INT32_MAX || cte < INT32_MIN) {
+                        *result = (cte >= INT32_MAX);
+                        replaced = true;
+                    }
+                } else {
+                    if (cte > INT32_MAX || cte <= INT32_MIN) {
+                        *result = (cte <= INT32_MIN);
+                        replaced = true;
+                    }
+                }
+                break;
+              case JSOP_STRICTEQ: // Fall through.
+              case JSOP_EQ:
+                if (cte > INT32_MAX || cte < INT32_MIN) {
+                    *result = false;
+                    replaced = true;
+                }
+                break;
+              case JSOP_STRICTNE: // Fall through.
+              case JSOP_NE:
+                if (cte > INT32_MAX || cte < INT32_MIN) {
+                    *result = true;
+                    replaced = true;
+                }
+                break;
+              default:
+                MOZ_CRASH("Unexpected op.");
+            }
+            if (replaced) {
+                MLimitedTruncate *limit =
+                    MLimitedTruncate::New(alloc, operand->getOperand(0), MDefinition::NoTruncate);
+                limit->setGuardUnchecked();
+                block()->insertBefore(this, limit);
+                return true;
+            }
+        }
+    }
 
     if (!left->isConstant() || !right->isConstant())
         return false;
@@ -3092,7 +3235,7 @@ MCompare::foldsTo(TempAllocator &alloc)
 {
     bool result;
 
-    if (tryFold(&result) || evaluateConstantOperands(&result)) {
+    if (tryFold(&result) || evaluateConstantOperands(alloc, &result)) {
         if (type() == MIRType_Int32)
             return MConstant::New(alloc, Int32Value(result));
 

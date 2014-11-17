@@ -96,6 +96,12 @@ class CodeGeneratorARM : public CodeGeneratorShared
         cond = masm.testUndefined(cond, value);
         emitBranch(cond, ifTrue, ifFalse);
     }
+    void testObjectEmitBranch(Assembler::Condition cond, const ValueOperand &value,
+                              MBasicBlock *ifTrue, MBasicBlock *ifFalse)
+    {
+        cond = masm.testObject(cond, value);
+        emitBranch(cond, ifTrue, ifFalse);
+    }
 
     bool emitTableSwitchDispatch(MTableSwitch *mir, Register index, Register base);
 
@@ -175,6 +181,8 @@ class CodeGeneratorARM : public CodeGeneratorShared
     bool modICommon(MMod *mir, Register lhs, Register rhs, Register output, LSnapshot *snapshot,
                     Label &done);
 
+    void memoryBarrier(int barrier);
+
   public:
     CodeGeneratorARM(MIRGenerator *gen, LIRGraph *graph, MacroAssembler *masm);
 
@@ -205,6 +213,8 @@ class CodeGeneratorARM : public CodeGeneratorShared
     bool visitAsmJSPassStackArg(LAsmJSPassStackArg *ins);
 
     bool visitForkJoinGetSlice(LForkJoinGetSlice *ins);
+
+    bool visitMemoryBarrier(LMemoryBarrier *ins);
 
     bool generateInvalidateEpilogue();
 

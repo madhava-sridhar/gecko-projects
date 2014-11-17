@@ -385,6 +385,18 @@ this.PlacesUtils = {
   },
 
   /**
+   * Reverse a host based on the moz_places algorithm, that is reverse the host
+   * string and add a trailing period.  For example "google.com" becomes
+   * "moc.elgoog.".
+   *
+   * @param url
+   *        the URL to generate a rev host for.
+   * @return the reversed host string.
+   */
+  getReversedHost(url)
+    url.host.split("").reverse().join("") + ".",
+
+  /**
    * String-wraps a result node according to the rules of the specified
    * content type.
    * @param   aNode
@@ -944,7 +956,7 @@ this.PlacesUtils = {
    *        The container node to search through.
    * @returns true if the node contains uri nodes, false otherwise.
    */
-  hasChildURIs: function PU_hasChildURIs(aNode, aMultiple=false) {
+  hasChildURIs: function PU_hasChildURIs(aNode) {
     if (!this.nodeIsContainer(aNode))
       return false;
 
@@ -960,14 +972,11 @@ this.PlacesUtils = {
       root.containerOpen = true;
     }
 
-    let foundFirst = !aMultiple;
     let found = false;
     for (let i = 0; i < root.childCount && !found; i++) {
       let child = root.getChild(i);
-      if (this.nodeIsURI(child)) {
-        found = foundFirst;
-        foundFirst = true;
-      }
+      if (this.nodeIsURI(child))
+        found = true;
     }
 
     if (!wasOpen) {
@@ -1680,7 +1689,7 @@ this.PlacesUtils = {
 
 
     if (!aItemGuid)
-      aItemGuid = yield this.promiseItemGuid(PlacesUtils.placesRootId);
+      aItemGuid = this.bookmarks.rootGuid;
 
     let hasExcludeItemsCallback =
       aOptions.hasOwnProperty("excludeItemsCallback");

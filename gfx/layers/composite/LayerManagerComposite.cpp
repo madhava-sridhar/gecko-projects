@@ -876,7 +876,7 @@ LayerManagerComposite::ComputeRenderIntegrity()
 {
   // We only ever have incomplete rendering when progressive tiles are enabled.
   Layer* root = GetRoot();
-  if (!gfxPrefs::UseProgressiveTilePainting() || !root) {
+  if (!gfxPlatform::GetPlatform()->UseProgressivePaint() || !root) {
     return 1.f;
   }
 
@@ -907,7 +907,7 @@ LayerManagerComposite::ComputeRenderIntegrity()
     Layer* rootScrollable = rootScrollableLayers[0];
     const FrameMetrics& metrics = LayerMetricsWrapper::TopmostScrollableMetrics(rootScrollable);
     Matrix4x4 transform = rootScrollable->GetEffectiveTransform();
-    transform.PostScale(metrics.mResolution.scale, metrics.mResolution.scale, 1);
+    transform.PostScale(metrics.mPresShellResolution, metrics.mPresShellResolution, 1);
 
     // Clip the screen rect to the document bounds
     Rect documentBounds =

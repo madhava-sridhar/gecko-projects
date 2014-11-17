@@ -730,6 +730,8 @@ const KTableValue nsCSSProps::kAppearanceKTable[] = {
   eCSSKeyword__moz_win_exclude_glass,         NS_THEME_WIN_EXCLUDE_GLASS,
   eCSSKeyword__moz_mac_vibrancy_light,        NS_THEME_MAC_VIBRANCY_LIGHT,
   eCSSKeyword__moz_mac_vibrancy_dark,         NS_THEME_MAC_VIBRANCY_DARK,
+  eCSSKeyword__moz_mac_disclosure_button_open,   NS_THEME_MAC_DISCLOSURE_BUTTON_OPEN,
+  eCSSKeyword__moz_mac_disclosure_button_closed, NS_THEME_MAC_DISCLOSURE_BUTTON_CLOSED,
   eCSSKeyword_UNKNOWN,-1
 };
 
@@ -989,6 +991,39 @@ const KTableValue nsCSSProps::kControlCharacterVisibilityKTable[] = {
   eCSSKeyword_UNKNOWN,-1
 };
 
+const KTableValue nsCSSProps::kCounterRangeKTable[] = {
+  eCSSKeyword_infinite, NS_STYLE_COUNTER_RANGE_INFINITE,
+  eCSSKeyword_UNKNOWN, -1
+};
+
+const KTableValue nsCSSProps::kCounterSpeakAsKTable[] = {
+  eCSSKeyword_bullets, NS_STYLE_COUNTER_SPEAKAS_BULLETS,
+  eCSSKeyword_numbers, NS_STYLE_COUNTER_SPEAKAS_NUMBERS,
+  eCSSKeyword_words, NS_STYLE_COUNTER_SPEAKAS_WORDS,
+  eCSSKeyword_spell_out, NS_STYLE_COUNTER_SPEAKAS_SPELL_OUT,
+  eCSSKeyword_UNKNOWN, -1
+};
+
+const KTableValue nsCSSProps::kCounterSymbolsSystemKTable[] = {
+  eCSSKeyword_cyclic, NS_STYLE_COUNTER_SYSTEM_CYCLIC,
+  eCSSKeyword_numeric, NS_STYLE_COUNTER_SYSTEM_NUMERIC,
+  eCSSKeyword_alphabetic, NS_STYLE_COUNTER_SYSTEM_ALPHABETIC,
+  eCSSKeyword_symbolic, NS_STYLE_COUNTER_SYSTEM_SYMBOLIC,
+  eCSSKeyword_fixed, NS_STYLE_COUNTER_SYSTEM_FIXED,
+  eCSSKeyword_UNKNOWN, -1
+};
+
+const KTableValue nsCSSProps::kCounterSystemKTable[] = {
+  eCSSKeyword_cyclic, NS_STYLE_COUNTER_SYSTEM_CYCLIC,
+  eCSSKeyword_numeric, NS_STYLE_COUNTER_SYSTEM_NUMERIC,
+  eCSSKeyword_alphabetic, NS_STYLE_COUNTER_SYSTEM_ALPHABETIC,
+  eCSSKeyword_symbolic, NS_STYLE_COUNTER_SYSTEM_SYMBOLIC,
+  eCSSKeyword_additive, NS_STYLE_COUNTER_SYSTEM_ADDITIVE,
+  eCSSKeyword_fixed, NS_STYLE_COUNTER_SYSTEM_FIXED,
+  eCSSKeyword_extends, NS_STYLE_COUNTER_SYSTEM_EXTENDS,
+  eCSSKeyword_UNKNOWN, -1
+};
+
 const KTableValue nsCSSProps::kCursorKTable[] = {
   // CSS 2.0
   eCSSKeyword_auto, NS_STYLE_CURSOR_AUTO,
@@ -1146,6 +1181,13 @@ const KTableValue nsCSSProps::kFlexWrapKTable[] = {
   eCSSKeyword_nowrap,       NS_STYLE_FLEX_WRAP_NOWRAP,
   eCSSKeyword_wrap,         NS_STYLE_FLEX_WRAP_WRAP,
   eCSSKeyword_wrap_reverse, NS_STYLE_FLEX_WRAP_WRAP_REVERSE,
+  eCSSKeyword_UNKNOWN,-1
+};
+
+const KTableValue nsCSSProps::kHyphensKTable[] = {
+  eCSSKeyword_none, NS_STYLE_HYPHENS_NONE,
+  eCSSKeyword_manual, NS_STYLE_HYPHENS_MANUAL,
+  eCSSKeyword_auto, NS_STYLE_HYPHENS_AUTO,
   eCSSKeyword_UNKNOWN,-1
 };
 
@@ -1592,7 +1634,6 @@ const KTableValue nsCSSProps::kResizeKTable[] = {
 
 const KTableValue nsCSSProps::kScrollBehaviorKTable[] = {
   eCSSKeyword_auto,       NS_STYLE_SCROLL_BEHAVIOR_AUTO,
-  eCSSKeyword_instant,    NS_STYLE_SCROLL_BEHAVIOR_INSTANT,
   eCSSKeyword_smooth,     NS_STYLE_SCROLL_BEHAVIOR_SMOOTH,
   eCSSKeyword_UNKNOWN,-1
 };
@@ -1830,13 +1871,6 @@ const KTableValue nsCSSProps::kWritingModeKTable[] = {
   eCSSKeyword_UNKNOWN, -1
 };
 
-const KTableValue nsCSSProps::kHyphensKTable[] = {
-  eCSSKeyword_none, NS_STYLE_HYPHENS_NONE,
-  eCSSKeyword_manual, NS_STYLE_HYPHENS_MANUAL,
-  eCSSKeyword_auto, NS_STYLE_HYPHENS_AUTO,
-  eCSSKeyword_UNKNOWN,-1
-};
-
 // Specific keyword tables for XUL.properties
 const KTableValue nsCSSProps::kBoxAlignKTable[] = {
   eCSSKeyword_stretch,  NS_STYLE_BOX_ALIGN_STRETCH,
@@ -1998,39 +2032,6 @@ const KTableValue nsCSSProps::kColorInterpolationKTable[] = {
 const KTableValue nsCSSProps::kColumnFillKTable[] = {
   eCSSKeyword_auto, NS_STYLE_COLUMN_FILL_AUTO,
   eCSSKeyword_balance, NS_STYLE_COLUMN_FILL_BALANCE,
-  eCSSKeyword_UNKNOWN, -1
-};
-
-const KTableValue nsCSSProps::kCounterSystemKTable[] = {
-  eCSSKeyword_cyclic, NS_STYLE_COUNTER_SYSTEM_CYCLIC,
-  eCSSKeyword_numeric, NS_STYLE_COUNTER_SYSTEM_NUMERIC,
-  eCSSKeyword_alphabetic, NS_STYLE_COUNTER_SYSTEM_ALPHABETIC,
-  eCSSKeyword_symbolic, NS_STYLE_COUNTER_SYSTEM_SYMBOLIC,
-  eCSSKeyword_additive, NS_STYLE_COUNTER_SYSTEM_ADDITIVE,
-  eCSSKeyword_fixed, NS_STYLE_COUNTER_SYSTEM_FIXED,
-  eCSSKeyword_extends, NS_STYLE_COUNTER_SYSTEM_EXTENDS,
-  eCSSKeyword_UNKNOWN, -1
-};
-
-const KTableValue nsCSSProps::kCounterSymbolsSystemKTable[] = {
-  eCSSKeyword_cyclic, NS_STYLE_COUNTER_SYSTEM_CYCLIC,
-  eCSSKeyword_numeric, NS_STYLE_COUNTER_SYSTEM_NUMERIC,
-  eCSSKeyword_alphabetic, NS_STYLE_COUNTER_SYSTEM_ALPHABETIC,
-  eCSSKeyword_symbolic, NS_STYLE_COUNTER_SYSTEM_SYMBOLIC,
-  eCSSKeyword_fixed, NS_STYLE_COUNTER_SYSTEM_FIXED,
-  eCSSKeyword_UNKNOWN, -1
-};
-
-const KTableValue nsCSSProps::kCounterRangeKTable[] = {
-  eCSSKeyword_infinite, NS_STYLE_COUNTER_RANGE_INFINITE,
-  eCSSKeyword_UNKNOWN, -1
-};
-
-const KTableValue nsCSSProps::kCounterSpeakAsKTable[] = {
-  eCSSKeyword_bullets, NS_STYLE_COUNTER_SPEAKAS_BULLETS,
-  eCSSKeyword_numbers, NS_STYLE_COUNTER_SPEAKAS_NUMBERS,
-  eCSSKeyword_words, NS_STYLE_COUNTER_SPEAKAS_WORDS,
-  eCSSKeyword_spell_out, NS_STYLE_COUNTER_SPEAKAS_SPELL_OUT,
   eCSSKeyword_UNKNOWN, -1
 };
 

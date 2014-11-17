@@ -384,6 +384,13 @@ class StoreTypedArrayElementStaticPolicy : public StoreTypedArrayPolicy
     bool adjustInputs(TempAllocator &alloc, MInstruction *ins);
 };
 
+class StoreUnboxedObjectOrNullPolicy : public TypePolicy
+{
+  public:
+    EMPTY_DATA_;
+    bool adjustInputs(TempAllocator &alloc, MInstruction *def);
+};
+
 // Accepts integers and doubles. Everything else is boxed.
 class ClampPolicy : public BoxInputsPolicy
 {

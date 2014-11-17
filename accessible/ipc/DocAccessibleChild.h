@@ -22,7 +22,7 @@ class AccShowEvent;
 class DocAccessibleChild : public PDocAccessibleChild
 {
 public:
-  DocAccessibleChild(DocAccessible* aDoc) :
+  explicit DocAccessibleChild(DocAccessible* aDoc) :
     mDoc(aDoc)
   { MOZ_COUNT_CTOR(DocAccessibleChild); }
   ~DocAccessibleChild()
@@ -37,6 +37,18 @@ public:
    * Return the state for the accessible with given ID.
    */
   virtual bool RecvState(const uint64_t& aID, uint64_t* aState) MOZ_OVERRIDE;
+
+  /*
+   * Get the name for the accessible with given id.
+   */
+  virtual bool RecvName(const uint64_t& aID, nsString* aName) MOZ_OVERRIDE;
+
+  /*
+   * Get the description for the accessible with given id.
+   */
+  virtual bool RecvDescription(const uint64_t& aID, nsString* aDesc) MOZ_OVERRIDE;
+
+  virtual bool RecvAttributes(const uint64_t& aID, nsTArray<Attribute> *aAttributes) MOZ_OVERRIDE;
 
 private:
   DocAccessible* mDoc;

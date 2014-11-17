@@ -47,8 +47,14 @@ class BaselineFrame
         // See InterpreterFrame::PREV_UP_TO_DATE.
         PREV_UP_TO_DATE  = 1 << 5,
 
+        // Frame has execution observed by a Debugger.
+        //
+        // See comment above 'debugMode' in jscompartment.h for explanation of
+        // invariants of debuggee compartments, scripts, and frames.
+        DEBUGGEE         = 1 << 6,
+
         // Eval frame, see the "eval frames" comment.
-        EVAL             = 1 << 6,
+        EVAL             = 1 << 7,
 
         // Frame has profiler entry pushed.
         HAS_PUSHED_SPS_FRAME = 1 << 8,
@@ -168,12 +174,6 @@ class BaselineFrame
         return (Value *)this - (slot + 1);
     }
 
-    Value &unaliasedVar(uint32_t i, MaybeCheckAliasing checkAliasing = CHECK_ALIASING) const {
-        MOZ_ASSERT(i < script()->nfixedvars());
-        MOZ_ASSERT_IF(checkAliasing, !script()->varIsAliased(i));
-        return *valueSlot(i);
-    }
-
     Value &unaliasedFormal(unsigned i, MaybeCheckAliasing checkAliasing = CHECK_ALIASING) const {
         MOZ_ASSERT(i < numFormalArgs());
         MOZ_ASSERT_IF(checkAliasing, !script()->argsObjAliasesFormals() &&
@@ -188,11 +188,8 @@ class BaselineFrame
         return argv()[i];
     }
 
-    Value &unaliasedLocal(uint32_t i, MaybeCheckAliasing checkAliasing = CHECK_ALIASING) const {
+    Value &unaliasedLocal(uint32_t i) const {
         MOZ_ASSERT(i < script()->nfixed());
-#ifdef DEBUG
-        CheckLocalUnaliased(checkAliasing, script(), i);
-#endif
         return *valueSlot(i);
     }
 
@@ -275,6 +272,17 @@ class BaselineFrame
     }
     void setPrevUpToDate() {
         flags_ |= PREV_UP_TO_DATE;
+    }
+
+    bool isDebuggee() const {
+        return flags_ & DEBUGGEE;
+    }
+    void setIsDebuggee() {
+        flags_ |= DEBUGGEE;
+    }
+    void unsetIsDebuggee() {
+        MOZ_ASSERT(!script()->isDebuggee());
+        flags_ &= ~DEBUGGEE;
     }
 
     JSScript *evalScript() const {
@@ -362,10 +370,7 @@ class BaselineFrame
     bool isNonEvalFunctionFrame() const {
         return isFunctionFrame() && !isEvalFrame();
     }
-    bool isDebuggerFrame() const {
-        return false;
-    }
-    bool isGeneratorFrame() const {
+    bool isDebuggerEvalFrame() const {
         return false;
     }
 

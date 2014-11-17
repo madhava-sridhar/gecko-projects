@@ -13,7 +13,6 @@ import signal
 import subprocess
 import sys
 import tempfile
-from urlparse import urlparse
 import zipfile
 import mozinfo
 
@@ -21,11 +20,7 @@ __all__ = [
   "ZipFileReader",
   "addCommonOptions",
   "dumpLeakLog",
-  "isURL",
   "processLeakLog",
-  "replaceBackSlashes",
-  'KeyValueParseError',
-  'parseKeyValue',
   'systemMemory',
   'environment',
   'dumpScreen',
@@ -107,11 +102,6 @@ class ZipFileReader(object):
 
     for name in self._zipfile.namelist():
       self._extractname(name, path)
-
-def isURL(thing):
-  """Return True if |thing| looks like a URL."""
-  # We want to download URLs like http://... but not Windows paths like c:\...
-  return len(urlparse(thing).scheme) >= 2
 
 # Python does not provide strsignal() even in the very latest 3.x.
 # This is a reasonable fake.
@@ -378,30 +368,6 @@ def processLeakLog(leakLogFile, options):
       leakThreshold = leakThresholds.get(processType, 0)
       processSingleLeakFile(thisFile, processType, leakThreshold,
                             processType in ignoreMissingLeaks)
-
-def replaceBackSlashes(input):
-  return input.replace('\\', '/')
-
-class KeyValueParseError(Exception):
-  """error when parsing strings of serialized key-values"""
-  def __init__(self, msg, errors=()):
-    self.errors = errors
-    Exception.__init__(self, msg)
-
-def parseKeyValue(strings, separator='=', context='key, value: '):
-  """
-  parse string-serialized key-value pairs in the form of
-  `key = value`. Returns a list of 2-tuples.
-  Note that whitespace is not stripped.
-  """
-
-  # syntax check
-  missing = [string for string in strings if separator not in string]
-  if missing:
-    raise KeyValueParseError("Error: syntax error in %s" % (context,
-                                                            ','.join(missing)),
-                                                            errors=missing)
-  return [string.split(separator, 1) for string in strings]
 
 def systemMemory():
   """

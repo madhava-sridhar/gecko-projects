@@ -7,6 +7,7 @@
 #ifndef gc_Heap_h
 #define gc_Heap_h
 
+#include "mozilla/ArrayUtils.h"
 #include "mozilla/Atomics.h"
 #include "mozilla/Attributes.h"
 #include "mozilla/PodOperations.h"
@@ -36,6 +37,7 @@ struct Runtime;
 
 namespace js {
 
+class AutoLockGC;
 class FreeOp;
 
 #ifdef DEBUG
@@ -129,7 +131,9 @@ MapAllocToTraceKind(AllocKind kind)
         JSTRACE_SYMBOL,     /* FINALIZE_SYMBOL */
         JSTRACE_JITCODE,    /* FINALIZE_JITCODE */
     };
-    JS_STATIC_ASSERT(JS_ARRAY_LENGTH(map) == FINALIZE_LIMIT);
+
+    static_assert(MOZ_ARRAY_LENGTH(map) == FINALIZE_LIMIT,
+                  "AllocKind-to-TraceKind mapping must be in sync");
     return map[kind];
 }
 
@@ -628,6 +632,11 @@ struct ArenaHeader : public JS::shadow::ArenaHeader
     inline void unsetAllocDuringSweep();
 
     void unmarkAll();
+
+#ifdef JSGC_COMPACTING
+    size_t countUsedCells();
+    size_t countFreeCells();
+#endif
 };
 
 struct Arena
@@ -933,13 +942,14 @@ struct Chunk
         return info.numArenasFree != 0;
     }
 
-    inline void addToAvailableList(JS::Zone *zone);
+    inline void addToAvailableList(JSRuntime *rt);
     inline void insertToAvailableList(Chunk **insertPoint);
     inline void removeFromAvailableList();
 
-    ArenaHeader *allocateArena(JS::Zone *zone, AllocKind kind);
+    ArenaHeader *allocateArena(JSRuntime *rt, JS::Zone *zone, AllocKind kind,
+                               const AutoLockGC &lock);
 
-    void releaseArena(ArenaHeader *aheader);
+    void releaseArena(JSRuntime *rt, ArenaHeader *aheader, const AutoLockGC &lock);
     void recycleArena(ArenaHeader *aheader, SortedArenaList &dest, AllocKind thingKind,
                       size_t thingsPerArena);
 

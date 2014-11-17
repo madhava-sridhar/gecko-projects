@@ -413,13 +413,14 @@ class XrayWrapper : public Base {
                                  JS::AutoIdVector &props) const MOZ_OVERRIDE;
     virtual bool delete_(JSContext *cx, JS::Handle<JSObject*> wrapper,
                          JS::Handle<jsid> id, bool *bp) const MOZ_OVERRIDE;
-    virtual bool enumerate(JSContext *cx, JS::Handle<JSObject*> wrapper, JS::AutoIdVector &props) const MOZ_OVERRIDE;
-    virtual bool isExtensible(JSContext *cx, JS::Handle<JSObject*> wrapper, bool *extensible) const MOZ_OVERRIDE;
-    virtual bool preventExtensions(JSContext *cx, JS::Handle<JSObject*> wrapper) const MOZ_OVERRIDE;
     virtual bool getPrototypeOf(JSContext *cx, JS::HandleObject wrapper,
                                 JS::MutableHandleObject protop) const MOZ_OVERRIDE;
     virtual bool setPrototypeOf(JSContext *cx, JS::HandleObject wrapper,
                                 JS::HandleObject proto, bool *bp) const MOZ_OVERRIDE;
+    virtual bool setImmutablePrototype(JSContext *cx, JS::HandleObject wrapper,
+                                       bool *succeeded) const MOZ_OVERRIDE;
+    virtual bool preventExtensions(JSContext *cx, JS::Handle<JSObject*> wrapper, bool *succeeded) const MOZ_OVERRIDE;
+    virtual bool isExtensible(JSContext *cx, JS::Handle<JSObject*> wrapper, bool *extensible) const MOZ_OVERRIDE;
     virtual bool has(JSContext *cx, JS::Handle<JSObject*> wrapper, JS::Handle<jsid> id,
                      bool *bp) const MOZ_OVERRIDE;
     virtual bool get(JSContext *cx, JS::Handle<JSObject*> wrapper, JS::Handle<JSObject*> receiver,
@@ -438,6 +439,8 @@ class XrayWrapper : public Base {
                         bool *bp) const MOZ_OVERRIDE;
     virtual bool getOwnEnumerablePropertyKeys(JSContext *cx, JS::Handle<JSObject*> wrapper,
                                               JS::AutoIdVector &props) const MOZ_OVERRIDE;
+    virtual bool getEnumerablePropertyKeys(JSContext *cx, JS::Handle<JSObject*> wrapper,
+                                           JS::AutoIdVector &props) const MOZ_OVERRIDE;
     virtual bool iterate(JSContext *cx, JS::Handle<JSObject*> wrapper, unsigned flags,
                          JS::MutableHandle<JS::Value> vp) const MOZ_OVERRIDE;
 
@@ -471,8 +474,8 @@ class XrayWrapper : public Base {
     }
 
   protected:
-    bool enumerate(JSContext *cx, JS::Handle<JSObject*> wrapper, unsigned flags,
-                   JS::AutoIdVector &props) const;
+    bool getPropertyKeys(JSContext *cx, JS::Handle<JSObject*> wrapper, unsigned flags,
+                         JS::AutoIdVector &props) const;
 };
 
 #define PermissiveXrayXPCWN xpc::XrayWrapper<js::CrossCompartmentWrapper, xpc::XPCWrappedNativeXrayTraits>

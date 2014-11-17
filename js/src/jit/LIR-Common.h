@@ -157,6 +157,15 @@ class LSimdExtractElementBase : public LInstructionHelper<1, 1, 0>
     SimdLane lane() const {
         return mir_->toSimdExtractElement()->lane();
     }
+    const char *extraName() const {
+        switch (lane()) {
+          case LaneX: return "lane x";
+          case LaneY: return "lane y";
+          case LaneZ: return "lane z";
+          case LaneW: return "lane w";
+        }
+        return "unknown lane";
+    }
 };
 
 // Extracts an element from a given SIMD int32x4 lane.
@@ -197,6 +206,15 @@ class LSimdInsertElementBase : public LInstructionHelper<1, 2, 0>
     SimdLane lane() const {
         return mir_->toSimdInsertElement()->lane();
     }
+    const char *extraName() const {
+        switch (lane()) {
+          case LaneX: return "lane x";
+          case LaneY: return "lane y";
+          case LaneZ: return "lane z";
+          case LaneW: return "lane w";
+        }
+        return "unknown lane";
+    }
 };
 
 // Replace an element from a given SIMD int32x4 lane with a given value.
@@ -233,7 +251,7 @@ class LSimdSignMaskX4 : public LInstructionHelper<1, 1, 0>
 class LSimdSwizzleBase : public LInstructionHelper<1, 1, 0>
 {
   public:
-    LSimdSwizzleBase(const LAllocation &base)
+    explicit LSimdSwizzleBase(const LAllocation &base)
     {
         setOperand(0, base);
     }
@@ -257,7 +275,7 @@ class LSimdSwizzleI : public LSimdSwizzleBase
 {
   public:
     LIR_HEADER(SimdSwizzleI);
-    LSimdSwizzleI(const LAllocation &base) : LSimdSwizzleBase(base)
+    explicit LSimdSwizzleI(const LAllocation &base) : LSimdSwizzleBase(base)
     {}
 };
 // Shuffles a float32x4 into another float32x4 vector.
@@ -265,7 +283,7 @@ class LSimdSwizzleF : public LSimdSwizzleBase
 {
   public:
     LIR_HEADER(SimdSwizzleF);
-    LSimdSwizzleF(const LAllocation &base) : LSimdSwizzleBase(base)
+    explicit LSimdSwizzleF(const LAllocation &base) : LSimdSwizzleBase(base)
     {}
 };
 
@@ -727,6 +745,24 @@ class LNewObject : public LInstructionHelper<1, 0, 1>
 
     MNewObject *mir() const {
         return mir_->toNewObject();
+    }
+};
+
+class LNewTypedObject : public LInstructionHelper<1, 0, 1>
+{
+  public:
+    LIR_HEADER(NewTypedObject)
+
+    explicit LNewTypedObject(const LDefinition &temp) {
+        setTemp(0, temp);
+    }
+
+    const LDefinition *temp() {
+        return getTemp(0);
+    }
+
+    MNewTypedObject *mir() const {
+        return mir_->toNewTypedObject();
     }
 };
 
@@ -3667,6 +3703,22 @@ class LValueToString : public LInstructionHelper<1, BOX_PIECES, 1>
     }
 };
 
+// Convert a value to an object or null pointer.
+class LValueToObjectOrNull : public LInstructionHelper<1, BOX_PIECES, 0>
+{
+  public:
+    LIR_HEADER(ValueToObjectOrNull)
+
+    explicit LValueToObjectOrNull()
+    {}
+
+    static const size_t Input = 0;
+
+    const MToObjectOrNull *mir() {
+        return mir_->toToObjectOrNull();
+    }
+};
+
 class LInt32x4ToFloat32x4 : public LInstructionHelper<1, 1, 0>
 {
   public:
@@ -4197,20 +4249,6 @@ class LTypedObjectProto : public LCallInstructionHelper<1, 1, 1>
     }
 };
 
-// Load an unsized typed object's length.
-class LTypedObjectUnsizedLength : public LInstructionHelper<1, 1, 0>
-{
-  public:
-    LIR_HEADER(TypedObjectUnsizedLength)
-
-    LTypedObjectUnsizedLength(const LAllocation &object) {
-        setOperand(0, object);
-    }
-    const LAllocation *object() {
-        return getOperand(0);
-    }
-};
-
 // Load a typed object's elements vector.
 class LTypedObjectElements : public LInstructionHelper<1, 1, 0>
 {
@@ -4255,24 +4293,6 @@ class LSetTypedObjectOffset : public LInstructionHelper<0, 2, 2>
     }
     const LDefinition *temp1() {
         return getTemp(1);
-    }
-};
-
-// Check whether a typed object has a neutered owner buffer.
-class LNeuterCheck : public LInstructionHelper<0, 1, 1>
-{
-  public:
-    LIR_HEADER(NeuterCheck)
-
-    LNeuterCheck(const LAllocation &object, const LDefinition &temp) {
-        setOperand(0, object);
-        setTemp(0, temp);
-    }
-    const LAllocation *object() {
-        return getOperand(0);
-    }
-    const LDefinition *temp() {
-        return getTemp(0);
     }
 };
 
@@ -4457,6 +4477,48 @@ class LLoadElementT : public LInstructionHelper<1, 2, 0>
     }
 };
 
+class LLoadUnboxedPointerV : public LInstructionHelper<BOX_PIECES, 2, 0>
+{
+  public:
+    LIR_HEADER(LoadUnboxedPointerV)
+
+    LLoadUnboxedPointerV(const LAllocation &elements, const LAllocation &index) {
+        setOperand(0, elements);
+        setOperand(1, index);
+    }
+
+    const MLoadUnboxedObjectOrNull *mir() const {
+        return mir_->toLoadUnboxedObjectOrNull();
+    }
+    const LAllocation *elements() {
+        return getOperand(0);
+    }
+    const LAllocation *index() {
+        return getOperand(1);
+    }
+};
+
+class LLoadUnboxedPointerT : public LInstructionHelper<1, 2, 0>
+{
+  public:
+    LIR_HEADER(LoadUnboxedPointerT)
+
+    LLoadUnboxedPointerT(const LAllocation &elements, const LAllocation &index) {
+        setOperand(0, elements);
+        setOperand(1, index);
+    }
+
+    const MLoadUnboxedString *mir() const {
+        return mir_->toLoadUnboxedString();
+    }
+    const LAllocation *elements() {
+        return getOperand(0);
+    }
+    const LAllocation *index() {
+        return getOperand(1);
+    }
+};
+
 // Store a boxed value to a dense array's element vector.
 class LStoreElementV : public LInstructionHelper<0, 2 + BOX_PIECES, 0>
 {
@@ -4575,6 +4637,33 @@ class LStoreElementHoleT : public LInstructionHelper<0, 4, 0>
     }
     const LAllocation *value() {
         return getOperand(3);
+    }
+};
+
+class LStoreUnboxedPointer : public LInstructionHelper<0, 3, 0>
+{
+  public:
+    LIR_HEADER(StoreUnboxedPointer)
+
+    LStoreUnboxedPointer(LAllocation elements, LAllocation index, LAllocation value) {
+        setOperand(0, elements);
+        setOperand(1, index);
+        setOperand(2, value);
+    }
+
+    MDefinition *mir() {
+        MOZ_ASSERT(mir_->isStoreUnboxedObjectOrNull() || mir_->isStoreUnboxedString());
+        return mir_;
+    }
+
+    const LAllocation *elements() {
+        return getOperand(0);
+    }
+    const LAllocation *index() {
+        return getOperand(1);
+    }
+    const LAllocation *value() {
+        return getOperand(2);
     }
 };
 
@@ -4868,6 +4957,80 @@ class LStoreTypedArrayElementStatic : public LInstructionHelper<0, 2, 0>
     }
     const LAllocation *value() {
         return getOperand(1);
+    }
+};
+
+class LCompareExchangeTypedArrayElement : public LInstructionHelper<1, 4, 1>
+{
+  public:
+    LIR_HEADER(CompareExchangeTypedArrayElement)
+
+    LCompareExchangeTypedArrayElement(const LAllocation &elements, const LAllocation &index,
+                                      const LAllocation &oldval, const LAllocation &newval,
+                                      const LDefinition &temp)
+    {
+        setOperand(0, elements);
+        setOperand(1, index);
+        setOperand(2, oldval);
+        setOperand(3, newval);
+        setTemp(0, temp);
+    }
+
+    const LAllocation *elements() {
+        return getOperand(0);
+    }
+    const LAllocation *index() {
+        return getOperand(1);
+    }
+    const LAllocation *oldval() {
+        return getOperand(2);
+    }
+    const LAllocation *newval() {
+        return getOperand(3);
+    }
+    const LDefinition *temp() {
+        return getTemp(0);
+    }
+
+    const MCompareExchangeTypedArrayElement *mir() const {
+        return mir_->toCompareExchangeTypedArrayElement();
+    }
+};
+
+class LAtomicTypedArrayElementBinop : public LInstructionHelper<1, 3, 2>
+{
+  public:
+    LIR_HEADER(AtomicTypedArrayElementBinop)
+
+    LAtomicTypedArrayElementBinop(const LAllocation &elements, const LAllocation &index,
+                                  const LAllocation &value, const LDefinition &temp1,
+                                  const LDefinition &temp2)
+    {
+        setOperand(0, elements);
+        setOperand(1, index);
+        setOperand(2, value);
+        setTemp(0, temp1);
+        setTemp(1, temp2);
+    }
+
+    const LAllocation *elements() {
+        return getOperand(0);
+    }
+    const LAllocation *index() {
+        return getOperand(1);
+    }
+    const LAllocation *value() {
+        return getOperand(2);
+    }
+    const LDefinition *temp1() {
+        return getTemp(0);
+    }
+    const LDefinition *temp2() {
+        return getTemp(1);
+    }
+
+    const MAtomicTypedArrayElementBinop *mir() const {
+        return mir_->toAtomicTypedArrayElementBinop();
     }
 };
 
@@ -6275,6 +6438,26 @@ class LIsObject : public LInstructionHelper<1, BOX_PIECES, 0>
     }
 };
 
+class LIsObjectAndBranch : public LControlInstructionHelper<2, BOX_PIECES, 0>
+{
+  public:
+    LIR_HEADER(IsObjectAndBranch)
+
+    LIsObjectAndBranch(MBasicBlock *ifTrue, MBasicBlock *ifFalse) {
+        setSuccessor(0, ifTrue);
+        setSuccessor(1, ifFalse);
+    }
+
+    static const size_t Input = 0;
+
+    MBasicBlock *ifTrue() const {
+        return getSuccessor(0);
+    }
+    MBasicBlock *ifFalse() const {
+        return getSuccessor(1);
+    }
+};
+
 class LHaveSameClass : public LInstructionHelper<1, 2, 1>
 {
   public:
@@ -6625,6 +6808,30 @@ class LThrowUninitializedLexical : public LCallInstructionHelper<0, 0, 0>
 
     MLexicalCheck *mir() {
         return mir_->toLexicalCheck();
+    }
+};
+
+class LMemoryBarrier : public LInstructionHelper<0, 0, 0>
+{
+  private:
+    const int type_;
+
+  public:
+    LIR_HEADER(MemoryBarrier)
+
+    // The parameter 'type' is a bitwise 'or' of the barrier types needed,
+    // see AtomicOp.h.
+    explicit LMemoryBarrier(int type) : type_(type)
+    {
+        MOZ_ASSERT((type_ & ~MembarAllbits) == 0);
+    }
+
+    int type() const {
+        return type_;
+    }
+
+    const MMemoryBarrier *mir() const {
+        return mir_->toMemoryBarrier();
     }
 };
 

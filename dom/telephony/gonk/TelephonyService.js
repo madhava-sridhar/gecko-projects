@@ -22,6 +22,8 @@ const GONK_TELEPHONYSERVICE_CONTRACTID =
   "@mozilla.org/telephony/gonktelephonyservice;1";
 const GONK_TELEPHONYSERVICE_CID =
   Components.ID("{67d26434-d063-4d28-9f48-5b3189788155}");
+const MOBILECALLFORWARDINGOPTIONS_CID =
+  Components.ID("{79b5988b-9436-48d8-a652-88fa033f146c}");
 
 const NS_XPCOM_SHUTDOWN_OBSERVER_ID = "xpcom-shutdown";
 
@@ -31,7 +33,7 @@ const kPrefRilNumRadioInterfaces = "ril.numRadioInterfaces";
 const kPrefRilDebuggingEnabled = "ril.debugging.enabled";
 const kPrefDefaultServiceId = "dom.telephony.defaultServiceId";
 
-const nsIAudioManager = Ci.nsIAudioManager;
+const nsITelephonyAudioService = Ci.nsITelephonyAudioService;
 const nsITelephonyService = Ci.nsITelephonyService;
 
 const CALL_WAKELOCK_TIMEOUT = 5000;
@@ -42,12 +44,6 @@ const CDMA_SECOND_CALL_INDEX = 2;
 const DIAL_ERROR_INVALID_STATE_ERROR = "InvalidStateError";
 const DIAL_ERROR_OTHER_CONNECTION_IN_USE = "OtherConnectionInUse";
 const DIAL_ERROR_BAD_NUMBER = RIL.GECKO_CALL_ERROR_BAD_NUMBER;
-
-const AUDIO_STATE_NAME = [
-  "PHONE_STATE_NORMAL",
-  "PHONE_STATE_RINGTONE",
-  "PHONE_STATE_IN_CALL"
-];
 
 const DEFAULT_EMERGENCY_NUMBERS = ["112", "911"];
 
@@ -66,34 +62,6 @@ function debug(s) {
   dump("TelephonyService: " + s + "\n");
 }
 
-XPCOMUtils.defineLazyGetter(this, "gAudioManager", function getAudioManager() {
-  try {
-    return Cc["@mozilla.org/telephony/audiomanager;1"]
-             .getService(nsIAudioManager);
-  } catch (ex) {
-    //TODO on the phone this should not fall back as silently.
-
-    // Fake nsIAudioManager implementation so that we can run the telephony
-    // code in a non-Gonk build.
-    if (DEBUG) debug("Using fake audio manager.");
-    return {
-      microphoneMuted: false,
-      masterVolume: 1.0,
-      masterMuted: false,
-      phoneState: nsIAudioManager.PHONE_STATE_CURRENT,
-      _forceForUse: {},
-
-      setForceForUse: function(usage, force) {
-        this._forceForUse[usage] = force;
-      },
-
-      getForceForUse: function(usage) {
-        return this._forceForUse[usage] || nsIAudioManager.FORCE_NONE;
-      }
-    };
-  }
-});
-
 XPCOMUtils.defineLazyServiceGetter(this, "gRadioInterfaceLayer",
                                    "@mozilla.org/ril;1",
                                    "nsIRadioInterfaceLayer");
@@ -106,6 +74,10 @@ XPCOMUtils.defineLazyServiceGetter(this, "gSystemMessenger",
                                    "@mozilla.org/system-message-internal;1",
                                    "nsISystemMessagesInternal");
 
+XPCOMUtils.defineLazyServiceGetter(this, "gAudioService",
+                                   "@mozilla.org/telephony/audio-service;1",
+                                   "nsITelephonyAudioService");
+
 XPCOMUtils.defineLazyServiceGetter(this, "gGonkMobileConnectionService",
                                    "@mozilla.org/mobileconnection/mobileconnectionservice;1",
                                    "nsIGonkMobileConnectionService");
@@ -116,32 +88,28 @@ XPCOMUtils.defineLazyGetter(this, "gPhoneNumberUtils", function() {
   return ns.PhoneNumberUtils;
 });
 
-function MMIResult(aMmiServiceCode, aOptions) {
-  this.serviceCode = aMmiServiceCode;
-  this.statusMessage = aOptions.statusMessage;
-  this.additionalInformation = aOptions.additionalInformation;
+function MobileCallForwardingOptions(aOptions) {
+  for (let key in aOptions) {
+    this[key] = aOptions[key];
+  }
 }
-MMIResult.prototype = {
-  __exposedProps__ : {serviceCode: 'r',
-                      statusMessage: 'r',
-                      additionalInformation: 'r'},
-};
+MobileCallForwardingOptions.prototype = {
+  QueryInterface: XPCOMUtils.generateQI([Ci.nsIMobileCallForwardingOptions]),
+  classID: MOBILECALLFORWARDINGOPTIONS_CID,
+  classInfo: XPCOMUtils.generateCI({
+    classID:          MOBILECALLFORWARDINGOPTIONS_CID,
+    classDescription: "MobileCallForwardingOptions",
+    interfaces:       [Ci.nsIMobileCallForwardingOptions]
+  }),
 
-function CallForwardingOptions(aOptions) {
-  this.active = aOptions.active;
-  this.action = aOptions.action;
-  this.reason = aOptions.reason;
-  this.number = aOptions.number;
-  this.timeSeconds = aOptions.timeSeconds;
-  this.serviceClass = aOptions.serviceClass;
-}
-CallForwardingOptions.prototype = {
-  __exposedProps__ : {active: 'r',
-                      action: 'r',
-                      reason: 'r',
-                      number: 'r',
-                      timeSeconds: 'r',
-                      serviceClass: 'r'},
+  // nsIMobileForwardingOptions
+
+  active: false,
+  action: Ci.nsIMobileConnection.CALL_FORWARD_ACTION_UNKNOWN,
+  reason: Ci.nsIMobileConnection.CALL_FORWARD_REASON_UNKNOWN,
+  number: null,
+  timeSeconds: -1,
+  serviceClass: Ci.nsIMobileConnection.ICC_SERVICE_CLASS_NONE
 };
 
 function TelephonyService() {
@@ -281,25 +249,14 @@ TelephonyService.prototype = {
   _updateAudioState: function(aAudioState) {
     switch (aAudioState) {
       case RIL.AUDIO_STATE_NO_CALL:
-        gAudioManager.phoneState = nsIAudioManager.PHONE_STATE_NORMAL;
+        gAudioService.setPhoneState(nsITelephonyAudioService.PHONE_STATE_NORMAL);
         break;
-
       case RIL.AUDIO_STATE_INCOMING:
-        gAudioManager.phoneState = nsIAudioManager.PHONE_STATE_RINGTONE;
+        gAudioService.setPhoneState(nsITelephonyAudioService.PHONE_STATE_RINGTONE);
         break;
-
       case RIL.AUDIO_STATE_IN_CALL:
-        gAudioManager.phoneState = nsIAudioManager.PHONE_STATE_IN_CALL;
-        if (this.speakerEnabled) {
-          gAudioManager.setForceForUse(nsIAudioManager.USE_COMMUNICATION,
-                                       nsIAudioManager.FORCE_SPEAKER);
-        }
+        gAudioService.setPhoneState(nsITelephonyAudioService.PHONE_STATE_IN_CALL);
         break;
-    }
-
-    if (DEBUG) {
-      debug("Put audio system into " + AUDIO_STATE_NAME[aAudioState] + ": " +
-            aAudioState + ", result is: " + gAudioManager.phoneState);
     }
   },
 
@@ -338,7 +295,7 @@ TelephonyService.prototype = {
   },
 
   _rulesToCallForwardingOptions: function(aRules) {
-    return aRules.map(rule => new CallForwardingOptions(rule));
+    return aRules.map(rule => new MobileCallForwardingOptions(rule));
   },
 
   _updateDebugFlag: function() {
@@ -716,13 +673,36 @@ TelephonyService.prototype = {
         }
 
         if (response.additionalInformation != null) {
-          response.additionalInformation =
+          let callForwardingOptions =
             this._rulesToCallForwardingOptions(response.additionalInformation);
+          aCallback.notifyDialMMISuccessWithCallForwardingOptions(
+            response.statusMessage, callForwardingOptions.length, callForwardingOptions);
+          return;
         }
       }
 
-      let result = new MMIResult(mmiServiceCode, response);
-      aCallback.notifyDialMMISuccess(result);
+      // No additional information
+      if (response.additionalInformation == undefined) {
+        aCallback.notifyDialMMISuccess(response.statusMessage);
+        return;
+      }
+
+      // Additional information is an integer.
+      if (!isNaN(parseInt(response.additionalInformation, 10))) {
+        aCallback.notifyDialMMISuccessWithInteger(
+          response.statusMessage, response.additionalInformation);
+        return;
+      }
+
+      // Additional information is an array of strings.
+      let array = response.additionalInformation;
+      if (Array.isArray(array) && array.length > 0 && typeof array[0] === "string") {
+        aCallback.notifyDialMMISuccessWithStrings(response.statusMessage,
+                                                  array.length, array);
+        return;
+      }
+
+      aCallback.notifyDialMMISuccess(response.statusMessage);
     });
   },
 
@@ -1038,6 +1018,16 @@ TelephonyService.prototype = {
     });
   },
 
+  hangUpConference: function(aClientId, aCallback) {
+    this._sendToRilWorker(aClientId, "hangUpConference", null, response => {
+      if (!response.success) {
+        aCallback.notifyError(response.errorMsg);
+      } else {
+        aCallback.notifySuccess();
+      }
+    });
+  },
+
   holdConference: function(aClientId) {
     this._sendToRilWorker(aClientId, "holdConference");
   },
@@ -1059,28 +1049,19 @@ TelephonyService.prototype = {
   },
 
   get microphoneMuted() {
-    return gAudioManager.microphoneMuted;
+    return gAudioService.microphoneMuted;
   },
 
   set microphoneMuted(aMuted) {
-    if (aMuted == this.microphoneMuted) {
-      return;
-    }
-    gAudioManager.microphoneMuted = aMuted;
+    gAudioService.microphoneMuted = aMuted;
   },
 
   get speakerEnabled() {
-    let force = gAudioManager.getForceForUse(nsIAudioManager.USE_COMMUNICATION);
-    return (force == nsIAudioManager.FORCE_SPEAKER);
+    return gAudioService.speakerEnabled;
   },
 
   set speakerEnabled(aEnabled) {
-    if (aEnabled == this.speakerEnabled) {
-      return;
-    }
-    let force = aEnabled ? nsIAudioManager.FORCE_SPEAKER :
-                           nsIAudioManager.FORCE_NONE;
-    gAudioManager.setForceForUse(nsIAudioManager.USE_COMMUNICATION, force);
+    gAudioService.speakerEnabled = aEnabled;
   },
 
   /**
@@ -1106,6 +1087,7 @@ TelephonyService.prototype = {
 
     aCall.clientId = aClientId;
     aCall.state = nsITelephonyService.CALL_STATE_DISCONNECTED;
+    aCall.isEmergency = this._isEmergencyNumber(aCall.number);
     let duration = ("started" in aCall && typeof aCall.started == "number") ?
       new Date().getTime() - aCall.started : 0;
     let data = {
@@ -1215,8 +1197,9 @@ TelephonyService.prototype = {
     let call = this._currentCalls[aClientId][aCall.callIndex];
     if (call) {
       call.state = aCall.state;
+      call.number = aCall.number;
       call.isConference = aCall.isConference;
-      call.isEmergency = pick(aCall.isEmergency, call.isEmergency);
+      call.isEmergency = this._isEmergencyNumber(aCall.number);
       call.isSwitchable = pick(aCall.isSwitchable, call.isSwitchable);
       call.isMergeable = pick(aCall.isMergeable, call.isMergeable);
     } else {

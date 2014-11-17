@@ -150,7 +150,7 @@ class MainThreadFetchResolver MOZ_FINAL : public FetchDriverObserver
 
   NS_DECL_OWNINGTHREAD
 public:
-  MainThreadFetchResolver(Promise* aPromise);
+  explicit MainThreadFetchResolver(Promise* aPromise);
 
   void
   OnResponseAvailable(InternalResponse* aResponse) MOZ_OVERRIDE;

@@ -78,6 +78,7 @@ class nsDisplayList;
 class nsDisplayListBuilder;
 class nsPIDOMWindow;
 struct nsPoint;
+class nsINode;
 struct nsIntPoint;
 struct nsIntRect;
 struct nsRect;
@@ -138,9 +139,10 @@ typedef struct CapturingContentInfo {
   nsIContent* mContent;
 } CapturingContentInfo;
 
+// 79c0f49f-77f1-4cc5-80d1-6552e85ccb0c
 #define NS_IPRESSHELL_IID \
-		{ 0x42e9a352, 0x76f3, 0x4ba3, \
-		  { 0x94, 0x0b, 0x78, 0x9e, 0x58, 0x38, 0x73, 0x4f } }
+  { 0xa0a4b515, 0x0b91, 0x4f13, \
+    { 0xa0, 0x60, 0x4b, 0xfb, 0x35, 0x00, 0xdc, 0x00 } }
 
 // debug VerifyReflow flags
 #define VERIFY_REFLOW_ON                    0x01
@@ -537,6 +539,22 @@ public:
   virtual void NotifyCounterStylesAreDirty() = 0;
 
   /**
+   * Destroy the frames for aContent.  Note that this may destroy frames
+   * for an ancestor instead - aDestroyedFramesFor contains the content node
+   * where frames were actually destroyed (which should be used in the
+   * CreateFramesFor call).  The frame tree state will be captured before
+   * the frames are destroyed in the frame constructor.
+   */
+  virtual void DestroyFramesFor(nsIContent*  aContent,
+                                nsIContent** aDestroyedFramesFor) = 0;
+  /**
+   * Create new frames for aContent.  It will use the last captured layout
+   * history state captured in the frame constructor to restore the state
+   * in the new frame tree.
+   */
+  virtual void CreateFramesFor(nsIContent* aContent) = 0;
+
+  /**
    * Recreates the frames for a node
    */
   virtual nsresult RecreateFramesFor(nsIContent* aContent) = 0;
@@ -583,7 +601,7 @@ public:
    * be rendered to, but is suitable for measuring text and performing
    * other non-rendering operations. Guaranteed to return non-null.
    */
-  virtual already_AddRefed<nsRenderingContext> CreateReferenceRenderingContext() = 0;
+  virtual already_AddRefed<gfxContext> CreateReferenceRenderingContext() = 0;
 
   /**
    * Informs the pres shell that the document is now at the anchor with
@@ -865,6 +883,13 @@ public:
                                                         nsEventStatus* aStatus) = 0;
 
   /**
+   * Dispatch AfterKeyboardEvent with specific target.
+   */
+  virtual void DispatchAfterKeyboardEvent(nsINode* aTarget,
+                                          const mozilla::WidgetKeyboardEvent& aEvent,
+                                          bool aEmbeddedCancelled) = 0;
+
+  /**
     * Gets the current target event frame from the PresShell
     */
   virtual nsIFrame* GetEventTargetFrame() = 0;
@@ -1077,8 +1102,8 @@ public:
     RENDER_DRAWWINDOW_NOT_FLUSHING = 0x40
   };
   virtual nsresult RenderDocument(const nsRect& aRect, uint32_t aFlags,
-                                              nscolor aBackgroundColor,
-                                              gfxContext* aRenderedContext) = 0;
+                                  nscolor aBackgroundColor,
+                                  gfxContext* aRenderedContext) = 0;
 
   /**
    * Renders a node aNode to a surface and returns it. The aRegion may be used
@@ -1262,10 +1287,12 @@ public:
 
   static void DispatchGotOrLostPointerCaptureEvent(bool aIsGotCapture,
                                                    uint32_t aPointerId,
+                                                   uint16_t aPointerType,
                                                    nsIContent* aCaptureTarget);
   static void SetPointerCapturingContent(uint32_t aPointerId, nsIContent* aContent);
   static void ReleasePointerCapturingContent(uint32_t aPointerId, nsIContent* aContent);
   static nsIContent* GetPointerCapturingContent(uint32_t aPointerId);
+  static uint16_t GetPointerType(uint32_t aPointerId);
   
   // CheckPointerCaptureState checks cases, when got/lostpointercapture events should be fired.
   // Function returns true, if any of events was fired; false, if no one event was fired.
@@ -1399,6 +1426,8 @@ public:
     PAINT_LAYERS = 0x01,
     /* Composite layers to the window. */
     PAINT_COMPOSITE = 0x02,
+    /* Sync-decode images. */
+    PAINT_SYNC_DECODE_IMAGES = 0x04
   };
   virtual void Paint(nsView* aViewToPaint, const nsRegion& aDirtyRegion,
                      uint32_t aFlags) = 0;

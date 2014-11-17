@@ -529,6 +529,11 @@ EventStateManager::PreHandleEvent(nsPresContext* aPresContext,
   WheelTransaction::OnEvent(aEvent);
 
   switch (aEvent->message) {
+  case NS_CONTEXTMENU:
+    if (sIsPointerLocked) {
+      return NS_ERROR_DOM_INVALID_STATE_ERR;
+    }
+    break;
   case NS_MOUSE_BUTTON_DOWN: {
     switch (mouseEvent->button) {
     case WidgetMouseEvent::eLeftButton:
@@ -651,8 +656,12 @@ EventStateManager::PreHandleEvent(nsPresContext* aPresContext,
       }
     }
     // then fall through...
+  case NS_KEY_BEFORE_DOWN:
   case NS_KEY_DOWN:
+  case NS_KEY_AFTER_DOWN:
+  case NS_KEY_BEFORE_UP:
   case NS_KEY_UP:
+  case NS_KEY_AFTER_UP:
     {
       nsIContent* content = GetFocusedContent();
       if (content)
@@ -1273,8 +1282,11 @@ EventStateManager::CreateClickHoldTimer(nsPresContext* inPresContext,
                                         nsIFrame* inDownFrame,
                                         WidgetGUIEvent* inMouseDownEvent)
 {
-  if (!inMouseDownEvent->mFlags.mIsTrusted || IsRemoteTarget(mGestureDownContent))
+  if (!inMouseDownEvent->mFlags.mIsTrusted ||
+      IsRemoteTarget(mGestureDownContent) ||
+      sIsPointerLocked) {
     return;
+  }
 
   // just to be anal (er, safe)
   if (mClickHoldTimer) {
@@ -1356,7 +1368,7 @@ EventStateManager::sClickHoldCallback(nsITimer* aTimer, void* aESM)
 void
 EventStateManager::FireContextClick()
 {
-  if (!mGestureDownContent || !mPresContext) {
+  if (!mGestureDownContent || !mPresContext || sIsPointerLocked) {
     return;
   }
 
@@ -3163,7 +3175,9 @@ EventStateManager::PostHandleEvent(nsPresContext* aPresContext,
     GenerateDragDropEnterExit(presContext, aEvent->AsDragEvent());
     break;
 
+  case NS_KEY_BEFORE_UP:
   case NS_KEY_UP:
+  case NS_KEY_AFTER_UP:
     break;
 
   case NS_KEY_PRESS:

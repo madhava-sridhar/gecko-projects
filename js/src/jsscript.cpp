@@ -64,19 +64,25 @@ using mozilla::RotateLeft;
 typedef Rooted<GlobalObject *> RootedGlobalObject;
 
 /* static */ uint32_t
-Bindings::argumentsVarIndex(ExclusiveContext *cx, InternalBindingsHandle bindings)
+Bindings::argumentsVarIndex(ExclusiveContext *cx, InternalBindingsHandle bindings,
+                            uint32_t *unaliasedSlot)
 {
     HandlePropertyName arguments = cx->names().arguments;
     BindingIter bi(bindings);
     while (bi->name() != arguments)
         bi++;
-    return bi.frameIndex();
+
+    if (unaliasedSlot)
+        *unaliasedSlot = bi->aliased() ? UINT32_MAX : bi.frameIndex();
+
+    return bi.localIndex();
 }
 
 bool
 Bindings::initWithTemporaryStorage(ExclusiveContext *cx, InternalBindingsHandle self,
                                    uint32_t numArgs, uint32_t numVars,
                                    uint32_t numBodyLevelLexicals, uint32_t numBlockScoped,
+                                   uint32_t numUnaliasedVars, uint32_t numUnaliasedBodyLevelLexicals,
                                    Binding *bindingArray)
 {
     MOZ_ASSERT(!self->callObjShape_);
@@ -86,17 +92,22 @@ Bindings::initWithTemporaryStorage(ExclusiveContext *cx, InternalBindingsHandle 
     MOZ_ASSERT(numVars <= LOCALNO_LIMIT);
     MOZ_ASSERT(numBlockScoped <= LOCALNO_LIMIT);
     MOZ_ASSERT(numBodyLevelLexicals <= LOCALNO_LIMIT);
-    uint64_t totalSlots = uint64_t(numVars) +
-                          uint64_t(numBodyLevelLexicals) +
-                          uint64_t(numBlockScoped);
+    mozilla::DebugOnly<uint64_t> totalSlots = uint64_t(numVars) +
+                                              uint64_t(numBodyLevelLexicals) +
+                                              uint64_t(numBlockScoped);
     MOZ_ASSERT(totalSlots <= LOCALNO_LIMIT);
     MOZ_ASSERT(UINT32_MAX - numArgs >= totalSlots);
+
+    MOZ_ASSERT(numUnaliasedVars <= numVars);
+    MOZ_ASSERT(numUnaliasedBodyLevelLexicals <= numBodyLevelLexicals);
 
     self->bindingArrayAndFlag_ = uintptr_t(bindingArray) | TEMPORARY_STORAGE_BIT;
     self->numArgs_ = numArgs;
     self->numVars_ = numVars;
     self->numBodyLevelLexicals_ = numBodyLevelLexicals;
     self->numBlockScoped_ = numBlockScoped;
+    self->numUnaliasedVars_ = numUnaliasedVars;
+    self->numUnaliasedBodyLevelLexicals_ = numUnaliasedBodyLevelLexicals;
 
     // Get the initial shape to use when creating CallObjects for this script.
     // After creation, a CallObject's shape may change completely (via direct eval() or
@@ -118,12 +129,12 @@ Bindings::initWithTemporaryStorage(ExclusiveContext *cx, InternalBindingsHandle 
         if (bi->aliased()) {
             // Per ES6, lexical bindings cannot be accessed until
             // initialized. Remember the first aliased slot that is a
-            // body-level let, so that they may be initialized to sentinel
+            // body-level lexical, so that they may be initialized to sentinel
             // magic values.
             if (numBodyLevelLexicals > 0 &&
                 nslots < aliasedBodyLevelLexicalBegin &&
-                bi->kind() == Binding::VARIABLE &&
-                bi.frameIndex() >= numVars)
+                bi.isBodyLevelLexical() &&
+                bi.localIndex() >= numVars)
             {
                 aliasedBodyLevelLexicalBegin = nslots;
             }
@@ -215,7 +226,10 @@ Bindings::clone(JSContext *cx, InternalBindingsHandle self,
      * the source's bindingArray directly.
      */
     if (!initWithTemporaryStorage(cx, self, src.numArgs(), src.numVars(),
-                                  src.numBodyLevelLexicals(), src.numBlockScoped(),
+                                  src.numBodyLevelLexicals(),
+                                  src.numBlockScoped(),
+                                  src.numUnaliasedVars(),
+                                  src.numUnaliasedBodyLevelLexicals(),
                                   src.bindingArray()))
     {
         return false;
@@ -234,7 +248,9 @@ GCMethods<Bindings>::initial()
 template<XDRMode mode>
 static bool
 XDRScriptBindings(XDRState<mode> *xdr, LifoAllocScope &las, uint16_t numArgs, uint32_t numVars,
-                  uint16_t numBodyLevelLexicals, uint16_t numBlockScoped, HandleScript script)
+                  uint16_t numBodyLevelLexicals, uint16_t numBlockScoped,
+                  uint32_t numUnaliasedVars, uint16_t numUnaliasedBodyLevelLexicals,
+                  HandleScript script)
 {
     JSContext *cx = xdr->cx();
 
@@ -281,6 +297,7 @@ XDRScriptBindings(XDRState<mode> *xdr, LifoAllocScope &las, uint16_t numArgs, ui
         InternalBindingsHandle bindings(script, &script->bindings);
         if (!Bindings::initWithTemporaryStorage(cx, bindings, numArgs, numVars,
                                                 numBodyLevelLexicals, numBlockScoped,
+                                                numUnaliasedVars, numUnaliasedBodyLevelLexicals,
                                                 bindingArray))
         {
             return false;
@@ -583,7 +600,7 @@ js::XDRScript(XDRState<mode> *xdr, HandleObject enclosingScope, HandleScript enc
 
     uint32_t length, lineno, column, nslots, staticLevel;
     uint32_t natoms, nsrcnotes, i;
-    uint32_t nconsts, nobjects, nregexps, ntrynotes, nblockscopes;
+    uint32_t nconsts, nobjects, nregexps, ntrynotes, nblockscopes, nyieldoffsets;
     uint32_t prologLength, version;
     uint32_t funLength = 0;
     uint32_t nTypeSets = 0;
@@ -592,13 +609,15 @@ js::XDRScript(XDRState<mode> *xdr, HandleObject enclosingScope, HandleScript enc
     JSContext *cx = xdr->cx();
     RootedScript script(cx);
     natoms = nsrcnotes = 0;
-    nconsts = nobjects = nregexps = ntrynotes = nblockscopes = 0;
+    nconsts = nobjects = nregexps = ntrynotes = nblockscopes = nyieldoffsets = 0;
 
     /* XDR arguments and vars. */
     uint16_t nargs = 0;
     uint16_t nblocklocals = 0;
     uint16_t nbodylevellexicals = 0;
     uint32_t nvars = 0;
+    uint32_t nunaliasedvars = 0;
+    uint16_t nunaliasedbodylevellexicals = 0;
     if (mode == XDR_ENCODE) {
         script = scriptp.get();
         MOZ_ASSERT_IF(enclosingScript, enclosingScript->compartment() == script->compartment());
@@ -607,6 +626,8 @@ js::XDRScript(XDRState<mode> *xdr, HandleObject enclosingScope, HandleScript enc
         nblocklocals = script->bindings.numBlockScoped();
         nbodylevellexicals = script->bindings.numBodyLevelLexicals();
         nvars = script->bindings.numVars();
+        nunaliasedvars = script->bindings.numUnaliasedVars();
+        nunaliasedbodylevellexicals = script->bindings.numUnaliasedBodyLevelLexicals();
     }
     if (!xdr->codeUint16(&nargs))
         return false;
@@ -615,6 +636,10 @@ js::XDRScript(XDRState<mode> *xdr, HandleObject enclosingScope, HandleScript enc
     if (!xdr->codeUint16(&nbodylevellexicals))
         return false;
     if (!xdr->codeUint32(&nvars))
+        return false;
+    if (!xdr->codeUint32(&nunaliasedvars))
+        return false;
+    if (!xdr->codeUint16(&nunaliasedbodylevellexicals))
         return false;
 
     if (mode == XDR_ENCODE)
@@ -644,6 +669,8 @@ js::XDRScript(XDRState<mode> *xdr, HandleObject enclosingScope, HandleScript enc
             ntrynotes = script->trynotes()->length;
         if (script->hasBlockScopes())
             nblockscopes = script->blockScopes()->length;
+        if (script->hasYieldOffsets())
+            nyieldoffsets = script->yieldOffsets().length();
 
         nTypeSets = script->nTypeSets();
         funLength = script->funLength();
@@ -708,6 +735,8 @@ js::XDRScript(XDRState<mode> *xdr, HandleObject enclosingScope, HandleScript enc
         return false;
     if (!xdr->codeUint32(&nblockscopes))
         return false;
+    if (!xdr->codeUint32(&nyieldoffsets))
+        return false;
     if (!xdr->codeUint32(&nTypeSets))
         return false;
     if (!xdr->codeUint32(&funLength))
@@ -759,12 +788,13 @@ js::XDRScript(XDRState<mode> *xdr, HandleObject enclosingScope, HandleScript enc
 
     /* JSScript::partiallyInit assumes script->bindings is fully initialized. */
     LifoAllocScope las(&cx->tempLifoAlloc());
-    if (!XDRScriptBindings(xdr, las, nargs, nvars, nbodylevellexicals, nblocklocals, script))
+    if (!XDRScriptBindings(xdr, las, nargs, nvars, nbodylevellexicals, nblocklocals,
+                           nunaliasedvars, nunaliasedbodylevellexicals, script))
         return false;
 
     if (mode == XDR_DECODE) {
         if (!JSScript::partiallyInit(cx, script, nconsts, nobjects, nregexps, ntrynotes,
-                                     nblockscopes, nTypeSets))
+                                     nblockscopes, nyieldoffsets, nTypeSets))
         {
             return false;
         }
@@ -1051,6 +1081,12 @@ js::XDRScript(XDRState<mode> *xdr, HandleObject enclosingScope, HandleScript enc
         {
             return false;
         }
+    }
+
+    for (i = 0; i < nyieldoffsets; ++i) {
+        uint32_t *offset = &script->yieldOffsets()[i];
+        if (!xdr->codeUint32(offset))
+            return false;
     }
 
     if (scriptBits & (1 << HasLazyScript)) {
@@ -2339,7 +2375,7 @@ JS_STATIC_ASSERT(NO_PADDING_BETWEEN_ENTRIES(BlockScopeNote, uint32_t));
 
 static inline size_t
 ScriptDataSize(uint32_t nbindings, uint32_t nconsts, uint32_t nobjects, uint32_t nregexps,
-               uint32_t ntrynotes, uint32_t nblockscopes)
+               uint32_t ntrynotes, uint32_t nblockscopes, uint32_t nyieldoffsets)
 {
     size_t size = 0;
 
@@ -2353,6 +2389,8 @@ ScriptDataSize(uint32_t nbindings, uint32_t nconsts, uint32_t nobjects, uint32_t
         size += sizeof(TryNoteArray) + ntrynotes * sizeof(JSTryNote);
     if (nblockscopes != 0)
         size += sizeof(BlockScopeArray) + nblockscopes * sizeof(BlockScopeNote);
+    if (nyieldoffsets != 0)
+        size += sizeof(YieldOffsetArray) + nyieldoffsets * sizeof(uint32_t);
 
     if (nbindings != 0) {
 	// Make sure bindings are sufficiently aligned.
@@ -2429,10 +2467,10 @@ AllocScriptData(JS::Zone *zone, size_t size)
 /* static */ bool
 JSScript::partiallyInit(ExclusiveContext *cx, HandleScript script, uint32_t nconsts,
                         uint32_t nobjects, uint32_t nregexps, uint32_t ntrynotes,
-                        uint32_t nblockscopes, uint32_t nTypeSets)
+                        uint32_t nblockscopes, uint32_t nyieldoffsets, uint32_t nTypeSets)
 {
     size_t size = ScriptDataSize(script->bindings.count(), nconsts, nobjects, nregexps, ntrynotes,
-                                 nblockscopes);
+                                 nblockscopes, nyieldoffsets);
     script->data = AllocScriptData(script->zone(), size);
     if (size && !script->data)
         return false;
@@ -2461,6 +2499,12 @@ JSScript::partiallyInit(ExclusiveContext *cx, HandleScript script, uint32_t ncon
     if (nblockscopes != 0) {
         script->setHasArray(BLOCK_SCOPES);
         cursor += sizeof(BlockScopeArray);
+    }
+
+    YieldOffsetArray *yieldOffsets = nullptr;
+    if (nyieldoffsets != 0) {
+        yieldOffsets = reinterpret_cast<YieldOffsetArray *>(cursor);
+        cursor += sizeof(YieldOffsetArray);
     }
 
     if (nconsts != 0) {
@@ -2502,6 +2546,15 @@ JSScript::partiallyInit(ExclusiveContext *cx, HandleScript script, uint32_t ncon
         cursor += vectorSize;
     }
 
+    if (nyieldoffsets != 0) {
+        yieldOffsets->init(reinterpret_cast<uint32_t *>(cursor), nyieldoffsets);
+        size_t vectorSize = nyieldoffsets * sizeof(script->yieldOffsets()[0]);
+#ifdef DEBUG
+        memset(cursor, 0, vectorSize);
+#endif
+        cursor += vectorSize;
+    }
+
     if (script->bindings.count() != 0) {
 	// Make sure bindings are sufficiently aligned.
 	cursor = reinterpret_cast<uint8_t*>
@@ -2516,7 +2569,7 @@ JSScript::partiallyInit(ExclusiveContext *cx, HandleScript script, uint32_t ncon
 /* static */ bool
 JSScript::fullyInitTrivial(ExclusiveContext *cx, Handle<JSScript*> script)
 {
-    if (!partiallyInit(cx, script, 0, 0, 0, 0, 0, 0))
+    if (!partiallyInit(cx, script, 0, 0, 0, 0, 0, 0, 0))
         return false;
 
     SharedScriptData *ssd = SharedScriptData::new_(cx, 1, 1, 0);
@@ -2545,7 +2598,8 @@ JSScript::fullyInitFromEmitter(ExclusiveContext *cx, HandleScript script, Byteco
     uint32_t natoms = bce->atomIndices->count();
     if (!partiallyInit(cx, script,
                        bce->constList.length(), bce->objectList.length, bce->regexpList.length,
-                       bce->tryNoteList.length(), bce->blockScopeList.length(), bce->typesetCount))
+                       bce->tryNoteList.length(), bce->blockScopeList.length(),
+                       bce->yieldOffsetList.length(), bce->typesetCount))
     {
         return false;
     }
@@ -2608,6 +2662,8 @@ JSScript::fullyInitFromEmitter(ExclusiveContext *cx, HandleScript script, Byteco
         script->isGeneratorExp_ = funbox->inGenexpLambda;
         script->setGeneratorKind(funbox->generatorKind());
         script->setFunction(funbox->function());
+        if (bce->yieldOffsetList.length() != 0)
+            bce->yieldOffsetList.finish(script->yieldOffsets(), prologLength);
     }
 
     // The call to nfixed() depends on the above setFunction() call.
@@ -2642,7 +2698,7 @@ JSScript::sizeOfData(mozilla::MallocSizeOf mallocSizeOf) const
 size_t
 JSScript::sizeOfTypeScript(mozilla::MallocSizeOf mallocSizeOf) const
 {
-    return types->sizeOfIncludingThis(mallocSizeOf);
+    return types_->sizeOfIncludingThis(mallocSizeOf);
 }
 
 /*
@@ -2675,8 +2731,8 @@ JSScript::finalize(FreeOp *fop)
 
     fop->runtime()->spsProfiler.onScriptFinalized(this);
 
-    if (types)
-        types->destroy();
+    if (types_)
+        types_->destroy();
 
     jit::DestroyIonScripts(fop, this);
 
@@ -2792,10 +2848,7 @@ js::PCToLineNumber(unsigned startLine, jssrcnote *notes, jsbytecode *code, jsbyt
             break;
 
         if (type == SRC_COLSPAN) {
-            ptrdiff_t colspan = js_GetSrcNoteOffset(sn, 0);
-
-            if (colspan >= SN_COLSPAN_DOMAIN / 2)
-                colspan -= SN_COLSPAN_DOMAIN;
+            ptrdiff_t colspan = SN_OFFSET_TO_COLSPAN(js_GetSrcNoteOffset(sn, 0));
             MOZ_ASSERT(ptrdiff_t(column) + colspan >= 0);
             column += colspan;
         }
@@ -3262,7 +3315,7 @@ bool
 JSScript::incrementStepModeCount(JSContext *cx)
 {
     assertSameCompartment(cx, this);
-    MOZ_ASSERT(cx->compartment()->debugMode());
+    MOZ_ASSERT(cx->compartment()->isDebuggee());
 
     if (!ensureHasDebugScript(cx))
         return false;
@@ -3518,7 +3571,8 @@ js::SetFrameArgumentsObject(JSContext *cx, AbstractFramePtr frame,
      */
 
     InternalBindingsHandle bindings(script, &script->bindings);
-    const uint32_t var = Bindings::argumentsVarIndex(cx, bindings);
+    uint32_t unaliasedSlot;
+    const uint32_t var = Bindings::argumentsVarIndex(cx, bindings, &unaliasedSlot);
 
     if (script->varIsAliased(var)) {
         /*
@@ -3537,8 +3591,8 @@ js::SetFrameArgumentsObject(JSContext *cx, AbstractFramePtr frame,
         if (IsOptimizedPlaceholderMagicValue(frame.callObj().as<ScopeObject>().aliasedVar(ScopeCoordinate(pc))))
             frame.callObj().as<ScopeObject>().setAliasedVar(cx, ScopeCoordinate(pc), cx->names().arguments, ObjectValue(*argsobj));
     } else {
-        if (IsOptimizedPlaceholderMagicValue(frame.unaliasedLocal(var)))
-            frame.unaliasedLocal(var) = ObjectValue(*argsobj);
+        if (IsOptimizedPlaceholderMagicValue(frame.unaliasedLocal(unaliasedSlot)))
+            frame.unaliasedLocal(unaliasedSlot) = ObjectValue(*argsobj);
     }
 }
 

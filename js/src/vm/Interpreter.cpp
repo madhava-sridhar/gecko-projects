@@ -449,7 +449,7 @@ bool
 js::Invoke(JSContext *cx, CallArgs args, MaybeConstruct construct)
 {
     MOZ_ASSERT(args.length() <= ARGS_LENGTH_MAX);
-    MOZ_ASSERT(!cx->compartment()->activeAnalysis);
+    MOZ_ASSERT(!cx->zone()->types.activeAnalysis);
 
     /* Perform GC if necessary on exit from the function. */
     AutoGCIfNeeded gcIfNeeded(cx);
@@ -616,7 +616,10 @@ js::ExecuteKernel(JSContext *cx, HandleScript script, JSObject &scopeChainArg, c
                   ExecuteType type, AbstractFramePtr evalInFrame, Value *result)
 {
     MOZ_ASSERT_IF(evalInFrame, type == EXECUTE_DEBUG);
-    MOZ_ASSERT_IF(type == EXECUTE_GLOBAL, !scopeChainArg.is<ScopeObject>());
+    MOZ_ASSERT_IF(type == EXECUTE_GLOBAL,
+                  !scopeChainArg.is<ScopeObject>() ||
+                  (scopeChainArg.is<DynamicWithObject>() &&
+                   !scopeChainArg.as<DynamicWithObject>().isSyntactic()));
 #ifdef DEBUG
     if (thisv.isObject()) {
         RootedObject thisObj(cx, &thisv.toObject());
@@ -864,7 +867,7 @@ PopScope(JSContext *cx, ScopeIter &si)
 {
     switch (si.type()) {
       case ScopeIter::Block:
-        if (cx->compartment()->debugMode())
+        if (cx->compartment()->isDebuggee())
             DebugScopes::onPopBlock(cx, si);
         if (si.staticBlock().needsClone())
             si.frame().popBlock(cx);
@@ -1025,24 +1028,29 @@ HandleError(JSContext *cx, InterpreterRegs &regs)
   again:
     if (cx->isExceptionPending()) {
         /* Call debugger throw hooks. */
-        JSTrapStatus status = Debugger::onExceptionUnwind(cx, regs.fp());
-        switch (status) {
-          case JSTRAP_ERROR:
+        RootedValue exception(cx);
+        if (!cx->getPendingException(&exception))
             goto again;
 
-          case JSTRAP_CONTINUE:
-          case JSTRAP_THROW:
-            break;
+        if (!exception.isMagic(JS_GENERATOR_CLOSING)) {
+            JSTrapStatus status = Debugger::onExceptionUnwind(cx, regs.fp());
+            switch (status) {
+              case JSTRAP_ERROR:
+                goto again;
 
-          case JSTRAP_RETURN:
-            ForcedReturn(cx, si, regs);
-            return SuccessfulReturnContinuation;
+              case JSTRAP_CONTINUE:
+              case JSTRAP_THROW:
+                break;
 
-          default:
-            MOZ_CRASH("Bad Debugger::onExceptionUnwind status");
+              case JSTRAP_RETURN:
+                ForcedReturn(cx, si, regs);
+                return SuccessfulReturnContinuation;
+
+              default:
+                MOZ_CRASH("Bad Debugger::onExceptionUnwind status");
+            }
         }
 
-        RootedValue exception(cx);
         for (TryNoteIter tni(cx, regs); !tni.done(); ++tni) {
             JSTryNote *tn = *tni;
 
@@ -1124,6 +1132,7 @@ HandleError(JSContext *cx, InterpreterRegs &regs)
 #define PUSH_BOOLEAN(b)          REGS.sp++->setBoolean(b)
 #define PUSH_DOUBLE(d)           REGS.sp++->setDouble(d)
 #define PUSH_INT32(i)            REGS.sp++->setInt32(i)
+#define PUSH_SYMBOL(s)           REGS.sp++->setSymbol(s)
 #define PUSH_STRING(s)           do { REGS.sp++->setString(s); assertSameCompartmentDebugOnly(cx, REGS.sp[-1]); } while (0)
 #define PUSH_OBJECT(obj)         do { REGS.sp++->setObject(obj); assertSameCompartmentDebugOnly(cx, REGS.sp[-1]); } while (0)
 #define PUSH_OBJECT_OR_NULL(obj) do { REGS.sp++->setObjectOrNull(obj); assertSameCompartmentDebugOnly(cx, REGS.sp[-1]); } while (0)
@@ -1441,7 +1450,7 @@ Interpret(JSContext *cx, RunState &state)
     JS_END_MACRO
 
     gc::MaybeVerifyBarriers(cx, true);
-    MOZ_ASSERT(!cx->compartment()->activeAnalysis);
+    MOZ_ASSERT(!cx->zone()->types.activeAnalysis);
 
     InterpreterFrame *entryFrame = state.pushInterpreterFrame(cx);
     if (!entryFrame)
@@ -1477,33 +1486,11 @@ Interpret(JSContext *cx, RunState &state)
     RootedScript rootScript0(cx);
     DebugOnly<uint32_t> blockDepth;
 
-    if (MOZ_UNLIKELY(REGS.fp()->isGeneratorFrame())) {
-        MOZ_ASSERT(script->containsPC(REGS.pc));
-        MOZ_ASSERT(REGS.stackDepth() <= script->nslots());
-
-        /*
-         * To support generator_throw and to catch ignored exceptions,
-         * fail if cx->isExceptionPending() is true.
-         */
-        if (cx->isExceptionPending()) {
-            probes::EnterScript(cx, script, script->functionNonDelazifying(), REGS.fp());
-            goto error;
-        }
-    }
-
     /* State communicated between non-local jumps: */
     bool interpReturnOK;
 
-    if (!activation.entryFrame()->isGeneratorFrame()) {
-        if (!activation.entryFrame()->prologue(cx))
-            goto error;
-    } else {
-        if (!probes::EnterScript(cx, script, script->functionNonDelazifying(),
-                                 activation.entryFrame()))
-        {
-            goto error;
-        }
-    }
+    if (!activation.entryFrame()->prologue(cx))
+        goto error;
 
     switch (Debugger::onEnterFrame(cx, activation.entryFrame())) {
       case JSTRAP_CONTINUE:
@@ -1543,7 +1530,7 @@ CASE(EnableInterruptsPseudoOpcode)
         moreInterrupts = true;
     }
 
-    if (cx->compartment()->debugMode()) {
+    if (script->isDebuggee()) {
         if (script->stepModeEnabled()) {
             RootedValue rval(cx);
             JSTrapStatus status = JSTRAP_CONTINUE;
@@ -1601,7 +1588,6 @@ CASE(EnableInterruptsPseudoOpcode)
 /* Various 1-byte no-ops. */
 CASE(JSOP_NOP)
 CASE(JSOP_UNUSED2)
-CASE(JSOP_UNUSED45)
 CASE(JSOP_UNUSED46)
 CASE(JSOP_UNUSED47)
 CASE(JSOP_UNUSED48)
@@ -1611,6 +1597,7 @@ CASE(JSOP_UNUSED51)
 CASE(JSOP_UNUSED52)
 CASE(JSOP_UNUSED57)
 CASE(JSOP_UNUSED83)
+CASE(JSOP_UNUSED92)
 CASE(JSOP_UNUSED103)
 CASE(JSOP_UNUSED104)
 CASE(JSOP_UNUSED105)
@@ -1658,7 +1645,6 @@ CASE(JSOP_UNUSED190)
 CASE(JSOP_UNUSED191)
 CASE(JSOP_UNUSED192)
 CASE(JSOP_UNUSED196)
-CASE(JSOP_UNUSED208)
 CASE(JSOP_UNUSED209)
 CASE(JSOP_UNUSED210)
 CASE(JSOP_UNUSED211)
@@ -1712,6 +1698,9 @@ END_CASE(JSOP_LOOPENTRY)
 
 CASE(JSOP_LINENO)
 END_CASE(JSOP_LINENO)
+
+CASE(JSOP_FORCEINTERPRETER)
+END_CASE(JSOP_FORCEINTERPRETER)
 
 CASE(JSOP_UNDEFINED)
     PUSH_UNDEFINED();
@@ -2705,6 +2694,10 @@ CASE(JSOP_TOSTRING)
 }
 END_CASE(JSOP_TOSTRING)
 
+CASE(JSOP_SYMBOL)
+    PUSH_SYMBOL(cx->wellKnownSymbols().get(GET_UINT8(REGS.pc)));
+END_CASE(JSOP_SYMBOL)
+
 CASE(JSOP_OBJECT)
 {
     RootedNativeObject &ref = rootNativeObject0;
@@ -3120,14 +3113,6 @@ CASE(JSOP_NEWOBJECT)
 }
 END_CASE(JSOP_NEWOBJECT)
 
-CASE(JSOP_ENDINIT)
-{
-    /* FIXME remove JSOP_ENDINIT bug 588522 */
-    MOZ_ASSERT(REGS.stackDepth() >= 1);
-    MOZ_ASSERT(REGS.sp[-1].isObject() || REGS.sp[-1].isUndefined());
-}
-END_CASE(JSOP_ENDINIT)
-
 CASE(JSOP_MUTATEPROTO)
 {
     MOZ_ASSERT(REGS.stackDepth() >= 2);
@@ -3310,7 +3295,7 @@ END_CASE(JSOP_INSTANCEOF)
 CASE(JSOP_DEBUGGER)
 {
     RootedValue rval(cx);
-    switch (Debugger::onDebuggerStatement(cx, &rval)) {
+    switch (Debugger::onDebuggerStatement(cx, REGS.fp(), &rval)) {
       case JSTRAP_ERROR:
         goto error;
       case JSTRAP_CONTINUE:
@@ -3362,7 +3347,7 @@ CASE(JSOP_DEBUGLEAVEBLOCK)
     // FIXME: This opcode should not be necessary.  The debugger shouldn't need
     // help from bytecode to do its job.  See bug 927782.
 
-    if (MOZ_UNLIKELY(cx->compartment()->debugMode()))
+    if (MOZ_UNLIKELY(cx->compartment()->isDebuggee()))
         DebugScopes::onPopBlock(cx, REGS.fp(), REGS.pc);
 }
 END_CASE(JSOP_DEBUGLEAVEBLOCK)
@@ -3370,8 +3355,8 @@ END_CASE(JSOP_DEBUGLEAVEBLOCK)
 CASE(JSOP_GENERATOR)
 {
     MOZ_ASSERT(!cx->isExceptionPending());
-    REGS.fp()->initGeneratorFrame();
-    JSObject *obj = GeneratorObject::create(cx, REGS);
+    MOZ_ASSERT(REGS.stackDepth() == 0);
+    JSObject *obj = GeneratorObject::create(cx, REGS.fp());
     if (!obj)
         goto error;
     PUSH_OBJECT(*obj);
@@ -3386,7 +3371,7 @@ CASE(JSOP_INITIALYIELD)
     obj = &REGS.sp[-1].toObject();
     POP_RETURN_VALUE();
     MOZ_ASSERT(REGS.stackDepth() == 0);
-    if (!GeneratorObject::initialSuspend(cx, obj, REGS.fp(), REGS.pc + JSOP_INITIALYIELD_LENGTH))
+    if (!GeneratorObject::initialSuspend(cx, obj, REGS.fp(), REGS.pc))
         goto error;
     goto successful_return_continuation;
 }
@@ -3397,7 +3382,7 @@ CASE(JSOP_YIELD)
     MOZ_ASSERT(REGS.fp()->isNonEvalFunctionFrame());
     RootedObject &obj = rootObject0;
     obj = &REGS.sp[-1].toObject();
-    if (!GeneratorObject::normalSuspend(cx, obj, REGS.fp(), REGS.pc + JSOP_YIELD_LENGTH,
+    if (!GeneratorObject::normalSuspend(cx, obj, REGS.fp(), REGS.pc,
                                         REGS.spForStackDepth(0), REGS.stackDepth() - 2))
     {
         goto error;
@@ -3427,11 +3412,14 @@ CASE(JSOP_RESUME)
     ADVANCE_AND_DISPATCH(0);
 }
 
-CASE(JSOP_FINALYIELD)
-    REGS.fp()->setReturnValue(REGS.sp[-2]);
-    REGS.sp[-2] = REGS.sp[-1];
-    REGS.sp--;
-    /* FALL THROUGH */
+CASE(JSOP_DEBUGAFTERYIELD)
+{
+    // No-op in the interpreter, as GeneratorObject::resume takes care of
+    // fixing up InterpreterFrames.
+    MOZ_ASSERT_IF(REGS.fp()->script()->isDebuggee(), REGS.fp()->isDebuggee());
+}
+END_CASE(JSOP_DEBUGAFTERYIELD)
+
 CASE(JSOP_FINALYIELDRVAL)
 {
     RootedObject &gen = rootObject0;
@@ -3629,7 +3617,7 @@ js::Lambda(JSContext *cx, HandleFunction fun, HandleObject parent)
     if (!clone)
         return nullptr;
 
-    MOZ_ASSERT(clone->global() == clone->global());
+    MOZ_ASSERT(fun->global() == clone->global());
     return clone;
 }
 
@@ -3645,7 +3633,7 @@ js::LambdaArrow(JSContext *cx, HandleFunction fun, HandleObject parent, HandleVa
     MOZ_ASSERT(clone->as<JSFunction>().isArrow());
     clone->as<JSFunction>().setExtendedSlot(0, thisv);
 
-    MOZ_ASSERT(clone->global() == clone->global());
+    MOZ_ASSERT(fun->global() == clone->global());
     return clone;
 }
 
@@ -4074,7 +4062,7 @@ js::ReportUninitializedLexical(JSContext *cx, HandleScript script, jsbytecode *p
 
         // First search for a name among body-level lets.
         for (BindingIter bi(script); bi; bi++) {
-            if (bi->kind() != Binding::ARGUMENT && bi.frameIndex() == slot) {
+            if (bi->kind() != Binding::ARGUMENT && !bi->aliased() && bi.frameIndex() == slot) {
                 name = bi->name();
                 break;
             }

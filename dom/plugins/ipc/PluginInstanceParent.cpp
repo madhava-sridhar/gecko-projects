@@ -1684,6 +1684,11 @@ PluginInstanceParent::PluginWindowHookProc(HWND hWnd,
 void
 PluginInstanceParent::SubclassPluginWindow(HWND aWnd)
 {
+    if (XRE_GetProcessType() == GeckoProcessType_Content) {
+      mPluginHWND = aWnd; // now a remote window, we can't subclass this
+      mPluginWndProc = nullptr;
+      return;
+    }
     NS_ASSERTION(!(mPluginHWND && aWnd != mPluginHWND),
       "PluginInstanceParent::SubclassPluginWindow hwnd is not our window!");
 
@@ -1778,7 +1783,7 @@ PluginInstanceParent::SharedSurfaceSetWindow(const NPWindow* aWindow,
     mSharedSize = newPort;
 
     base::SharedMemoryHandle handle;
-    if (NS_FAILED(mSharedSurfaceDib.ShareToProcess(mParent->ChildProcessHandle(), &handle)))
+    if (NS_FAILED(mSharedSurfaceDib.ShareToProcess(OtherProcess(), &handle)))
       return false;
 
     aRemoteWindow.surfaceHandle = handle;
@@ -1849,7 +1854,10 @@ PluginInstanceParent::AnswerPluginFocusChange(const bool& gotFocus)
     // focus. We forward the event down to widget so the dom/focus manager can
     // be updated.
 #if defined(OS_WIN)
-    ::SendMessage(mPluginHWND, gOOPPPluginFocusEvent, gotFocus ? 1 : 0, 0);
+    // XXX This needs to go to PuppetWidget. bug ???
+    if (XRE_GetProcessType() == GeckoProcessType_Default) {
+      ::SendMessage(mPluginHWND, gOOPPPluginFocusEvent, gotFocus ? 1 : 0, 0);
+    }
     return true;
 #else
     NS_NOTREACHED("PluginInstanceParent::AnswerPluginFocusChange not implemented!");

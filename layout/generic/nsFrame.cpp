@@ -1339,7 +1339,12 @@ nsFrame::GetLogicalBaseline(WritingMode aWritingMode) const
 {
   NS_ASSERTION(!NS_SUBTREE_DIRTY(this),
                "frame must not be dirty");
-  // Default to the bottom margin edge, per CSS2.1's definition of the
+  // Baseline for inverted line content is the top (block-start) margin edge,
+  // as the frame is in effect "flipped" for alignment purposes.
+  if (aWritingMode.IsLineInverted()) {
+    return -GetLogicalUsedMargin(aWritingMode).BStart(aWritingMode);
+  }
+  // Otherwise, the bottom margin edge, per CSS2.1's definition of the
   // 'baseline' value of 'vertical-align'.
   return BSize(aWritingMode) +
          GetLogicalUsedMargin(aWritingMode).BEnd(aWritingMode);
@@ -1850,9 +1855,9 @@ WrapPreserve3DListInternal(nsIFrame* aFrame, nsDisplayListBuilder *aBuilder,
 }
 
 static bool
-IsScrollFrameActive(nsIScrollableFrame* aScrollableFrame)
+IsScrollFrameActive(nsDisplayListBuilder* aBuilder, nsIScrollableFrame* aScrollableFrame)
 {
-  return aScrollableFrame && aScrollableFrame->IsScrollingActive();
+  return aScrollableFrame && aScrollableFrame->IsScrollingActive(aBuilder);
 }
 
 static nsresult
@@ -1930,6 +1935,10 @@ nsIFrame::BuildDisplayListForStackingContext(nsDisplayListBuilder* aBuilder,
     return;
   }
 
+  if (disp->mWillChangeBitField != 0) {
+    aBuilder->AddToWillChangeBudget(this, GetSize());
+  }
+
   nsRect dirtyRect = aDirtyRect;
 
   bool inTransform = aBuilder->IsInTransform();
@@ -1974,7 +1983,8 @@ nsIFrame::BuildDisplayListForStackingContext(nsDisplayListBuilder* aBuilder,
   bool useOpacity = HasVisualOpacity() && !nsSVGUtils::CanOptimizeOpacity(this);
   bool useBlendMode = disp->mMixBlendMode != NS_STYLE_BLEND_NORMAL;
   bool useStickyPosition = disp->mPosition == NS_STYLE_POSITION_STICKY &&
-    IsScrollFrameActive(nsLayoutUtils::GetNearestScrollableFrame(GetParent(),
+    IsScrollFrameActive(aBuilder,
+                        nsLayoutUtils::GetNearestScrollableFrame(GetParent(),
                         nsLayoutUtils::SCROLLABLE_SAME_DOC |
                         nsLayoutUtils::SCROLLABLE_INCLUDE_HIDDEN));
 
@@ -3795,9 +3805,13 @@ nsFrame::GetCursor(const nsPoint& aPoint,
     // If this is editable, I-beam cursor is better for most elements.
     aCursor.mCursor =
       (mContent && mContent->IsEditable())
-      ? GetWritingMode().IsVertical()
-        ? NS_STYLE_CURSOR_VERTICAL_TEXT : NS_STYLE_CURSOR_TEXT
-      : NS_STYLE_CURSOR_DEFAULT;
+      ? NS_STYLE_CURSOR_TEXT : NS_STYLE_CURSOR_DEFAULT;
+  }
+  if (NS_STYLE_CURSOR_TEXT == aCursor.mCursor &&
+      GetWritingMode().IsVertical()) {
+    // Per CSS UI spec, UA may treat value 'text' as
+    // 'vertical-text' for vertical text.
+    aCursor.mCursor = NS_STYLE_CURSOR_VERTICAL_TEXT;
   }
 
   return NS_OK;
@@ -4065,12 +4079,12 @@ nsFrame::ComputeSize(nsRenderingContext *aRenderingContext,
                      const LogicalSize& aMargin,
                      const LogicalSize& aBorder,
                      const LogicalSize& aPadding,
-                     uint32_t aFlags)
+                     ComputeSizeFlags aFlags)
 {
   LogicalSize result = ComputeAutoSize(aRenderingContext, aWM,
                                        aCBSize, aAvailableISize,
                                        aMargin, aBorder, aPadding,
-                                       aFlags & eShrinkWrap);
+                                       aFlags & ComputeSizeFlags::eShrinkWrap);
   LogicalSize boxSizingAdjust(aWM);
   const nsStylePosition *stylePos = StylePosition();
 
@@ -5391,7 +5405,7 @@ nsFrame::IsFrameTreeTooDeep(const nsHTMLReflowState& aReflowState,
     ClearOverflowRects();
     aMetrics.ClearSize();
     aMetrics.SetBlockStartAscent(0);
-    aMetrics.mCarriedOutBottomMargin.Zero();
+    aMetrics.mCarriedOutBEndMargin.Zero();
     aMetrics.mOverflowAreas.Clear();
 
     if (GetNextInFlow()) {
@@ -6909,8 +6923,12 @@ nsIFrame::GetFrameFromDirection(nsDirection aDirection, bool aVisual,
       frameTraversal->Prev();
 
     traversedFrame = frameTraversal->CurrentItem();
-    if (!traversedFrame)
+
+    // Skip anonymous elements
+    if (!traversedFrame ||
+        traversedFrame->GetContent()->IsRootOfNativeAnonymousSubtree())
       return NS_ERROR_FAILURE;
+
     traversedFrame->IsSelectable(&selectable, nullptr);
   } // while (!selectable)
 
@@ -8386,7 +8404,7 @@ nsFrame::BoxReflow(nsBoxLayoutState&        aState,
                       reflowState.ComputedLogicalBorderPadding().Size(wm) -
                         reflowState.ComputedLogicalPadding().Size(wm),
                       reflowState.ComputedLogicalPadding().Size(wm),
-                      false).Height(wm));
+                      ComputeSizeFlags::eDefault).Height(wm));
       }
     }
 
