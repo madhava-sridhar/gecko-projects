@@ -5,8 +5,9 @@
 
 #include "mozilla/dom/FetchDriver.h"
 
+#include "nsIAsyncInputStream.h"
+#include "nsIAsyncOutputStream.h"
 #include "nsIHttpHeaderVisitor.h"
-#include "nsIMultiplexInputStream.h"
 #include "nsIScriptSecurityManager.h"
 #include "nsIHttpChannel.h"
 #include "nsIUploadChannel2.h"
@@ -17,7 +18,6 @@
 #include "nsNetUtil.h"
 #include "nsStringStream.h"
 
-#include "mozilla/dom/BlobSet.h"
 #include "mozilla/dom/File.h"
 #include "mozilla/dom/workers/Workers.h"
 
@@ -33,7 +33,6 @@ NS_IMPL_ISUPPORTS(FetchDriver, nsIStreamListener)
 FetchDriver::FetchDriver(InternalRequest* aRequest, nsIPrincipal* aPrincipal)
   : mPrincipal(aPrincipal)
   , mRequest(aRequest)
-  , mResponseBody(new BlobSet())
   , mFetchRecursionCount(0)
 {
 }
@@ -496,6 +495,7 @@ NS_IMETHODIMP
 FetchDriver::OnStartRequest(nsIRequest* aRequest,
                             nsISupports* aContext)
 {
+  MOZ_ASSERT(!mPipeOutputStream);
   nsresult requestStatus;
   aRequest->GetStatus(&requestStatus);
   if (NS_WARN_IF(NS_FAILED(requestStatus))) {
@@ -530,24 +530,30 @@ FetchDriver::OnStartRequest(nsIRequest* aRequest,
 
   mResponse = BeginAndGetFilteredResponse(response);
 
-  return NS_OK;
-}
-
-/* static */ NS_METHOD
-FetchDriver::StreamReaderFunc(nsIInputStream* aInputStream,
-                              void* aClosure,
-                              const char* aFragment,
-                              uint32_t aToOffset,
-                              uint32_t aCount,
-                              uint32_t* aWriteCount)
-{
-  FetchDriver* driver = static_cast<FetchDriver*>(aClosure);
-
-  nsresult rv = driver->mResponseBody->AppendVoidPtr(aFragment, aCount);
-  if (NS_SUCCEEDED(rv)) {
-    *aWriteCount = aCount;
+  // We open a pipe so that we can immediately set the pipe's read end as the
+  // response's body. Setting the segment size to UINT32_MAX means that the
+  // pipe has infinite space, which seems odd, but this is effectively what
+  // other APIs like XHR do anyway, since the entire response has to be read.
+  // The difference is that in XHR it is immediately converted to text or
+  // ArrayBuffer or similar, while in Fetch, we pass around streams until JS
+  // requests another type.
+  nsCOMPtr<nsIAsyncInputStream> pipeInputStream;
+  rv = NS_NewPipe2(getter_AddRefs(pipeInputStream),
+                   getter_AddRefs(mPipeOutputStream),
+                   true, /* non blocking input (read) end */
+                   false, /* blocking write end. Since pipe size is infinite, this won't freeze the main thread. */
+                   0, /* default segment size */
+                   UINT32_MAX /* infinite pipe */);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    FailWithNetworkError();
+    // Cancel request.
+    return rv;
   }
-  return rv;
+
+  nsCOMPtr<nsIInputStream> cast = do_QueryInterface(pipeInputStream);
+  mResponse->SetBody(cast);
+
+  return NS_OK;
 }
 
 NS_IMETHODIMP
@@ -559,10 +565,13 @@ FetchDriver::OnDataAvailable(nsIRequest* aRequest,
 {
   uint32_t aRead;
   MOZ_ASSERT(mResponse);
+  MOZ_ASSERT(mPipeOutputStream);
 
-  nsresult rv = aInputStream->ReadSegments(FetchDriver::StreamReaderFunc,
-                                           static_cast<void*>(this),
+  NS_WARNING("About to write to output, might block");
+  nsresult rv = aInputStream->ReadSegments(NS_CopySegmentToStream,
+                                           mPipeOutputStream,
                                            aCount, &aRead);
+  NS_WARNING("Wrote to output.");
   return rv;
 }
 
@@ -571,36 +580,12 @@ FetchDriver::OnStopRequest(nsIRequest* aRequest,
                            nsISupports* aContext,
                            nsresult aStatusCode)
 {
+  MOZ_ASSERT(mPipeOutputStream);
+  mPipeOutputStream->Close();
+
   if (NS_FAILED(aStatusCode)) {
     return FailWithNetworkError();
   }
-
-  MOZ_ASSERT(mResponse);
-  nsCOMPtr<nsIChannel> chan = do_QueryInterface(aRequest);
-  MOZ_ASSERT(chan);
-  nsCString contentType;
-  chan->GetContentType(contentType);
-
-  nsTArray<nsRefPtr<FileImpl>>& blobImpls = mResponseBody->GetBlobImpls();
-  nsCOMPtr<nsIMultiplexInputStream> stream =
-    do_CreateInstance("@mozilla.org/io/multiplex-input-stream;1");
-  NS_ENSURE_TRUE(stream, NS_ERROR_FAILURE);
-
-  nsresult rv;
-  uint32_t i;
-  for (i = 0; i < blobImpls.Length(); i++) {
-    nsCOMPtr<nsIInputStream> scratchStream;
-    FileImpl* blobImpl = blobImpls.ElementAt(i).get();
-
-    rv = blobImpl->GetInternalStream(getter_AddRefs(scratchStream));
-    NS_ENSURE_SUCCESS(rv, rv);
-
-    rv = stream->AppendStream(scratchStream);
-    NS_ENSURE_SUCCESS(rv, rv);
-  }
-
-  nsCOMPtr<nsIInputStream> inputStream = do_QueryInterface(stream);
-  mResponse->SetBody(inputStream);
 
   ContinueHttpFetchAfterNetworkFetch();
   return NS_OK;

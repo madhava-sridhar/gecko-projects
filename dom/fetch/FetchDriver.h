@@ -48,7 +48,7 @@ private:
   nsCOMPtr<nsIPrincipal> mPrincipal;
   nsRefPtr<InternalRequest> mRequest;
   nsRefPtr<InternalResponse> mResponse;
-  nsAutoPtr<BlobSet> mResponseBody;
+  nsCOMPtr<nsIAsyncOutputStream> mPipeOutputStream;
   nsRefPtr<FetchDriverObserver> mObserver;
   uint32_t mFetchRecursionCount;
 
@@ -73,14 +73,6 @@ private:
   void BeginResponse(InternalResponse* aResponse);
   nsresult FailWithNetworkError();
   nsresult SucceedWithResponse();
-
-  static NS_METHOD
-  StreamReaderFunc(nsIInputStream* aInputStream,
-                              void* aClosure,
-                              const char* aFragment,
-                              uint32_t aToOffset,
-                              uint32_t aCount,
-                              uint32_t* aWriteCount);
 };
 
 } // namespace dom
