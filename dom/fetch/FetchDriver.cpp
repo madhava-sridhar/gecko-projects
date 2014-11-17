@@ -380,19 +380,13 @@ FetchDriver::HttpNetworkFetch()
 
     nsCOMPtr<nsIInputStream> bodyStream;
     mRequest->GetBody(getter_AddRefs(bodyStream));
-    if (!bodyStream) {
-      nsresult rv = NS_NewCStringInputStream(getter_AddRefs(bodyStream),
-                                             EmptyCString());
+    if (bodyStream) {
+      nsCString method;
+      mRequest->GetMethod(method);
+      rv = uploadChan->ExplicitSetUploadStream(bodyStream, contentType, -1, method, false /* aStreamHasHeaders */);
       if (NS_WARN_IF(NS_FAILED(rv))) {
         return rv;
       }
-    }
-
-    nsCString method;
-    mRequest->GetMethod(method);
-    rv = uploadChan->ExplicitSetUploadStream(bodyStream, contentType, -1, method, false /* aStreamHasHeaders */);
-    if (NS_WARN_IF(NS_FAILED(rv))) {
-      return rv;
     }
   }
   return chan->AsyncOpen(this, nullptr);
