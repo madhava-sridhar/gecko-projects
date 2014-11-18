@@ -26,13 +26,9 @@ using mozilla::unused;
 using mozilla::void_t;
 using mozilla::ipc::PFileDescriptorSetParent;
 
-CacheStorageParent::CacheStorageParent(Namespace aNamespace,
-                                       const nsACString& aOrigin,
-                                       const nsACString& aBaseDomain)
-  : mNamespace(aNamespace)
-  , mOrigin(aOrigin)
-  , mBaseDomain(aBaseDomain)
-  , mManager(Manager::ForOrigin(aOrigin, aBaseDomain))
+CacheStorageParent::CacheStorageParent(const CacheInitData& aInitData)
+  : mInitData(aInitData)
+  , mManager(Manager::ForOrigin(aInitData))
 {
   MOZ_ASSERT(mManager);
 }
@@ -55,14 +51,15 @@ CacheStorageParent::RecvMatch(const RequestId& aRequestId,
                               const PCacheRequest& aRequest,
                               const PCacheQueryParams& aParams)
 {
-  mManager->StorageMatch(this, aRequestId, mNamespace, aRequest, aParams);
+  mManager->StorageMatch(this, aRequestId, mInitData.namespaceEnum(), aRequest,
+                         aParams);
   return true;
 }
 
 bool
 CacheStorageParent::RecvHas(const RequestId& aRequestId, const nsString& aKey)
 {
-  mManager->StorageHas(this, aRequestId, mNamespace, aKey);
+  mManager->StorageHas(this, aRequestId, mInitData.namespaceEnum(), aKey);
   return true;
 }
 
@@ -70,7 +67,7 @@ bool
 CacheStorageParent::RecvOpen(const RequestId& aRequestId,
                                const nsString& aKey)
 {
-  mManager->StorageOpen(this, aRequestId, mNamespace, aKey);
+  mManager->StorageOpen(this, aRequestId, mInitData.namespaceEnum(), aKey);
   return true;
 }
 
@@ -78,14 +75,14 @@ bool
 CacheStorageParent::RecvDelete(const RequestId& aRequestId,
                                const nsString& aKey)
 {
-  mManager->StorageDelete(this, aRequestId, mNamespace, aKey);
+  mManager->StorageDelete(this, aRequestId, mInitData.namespaceEnum(), aKey);
   return true;
 }
 
 bool
 CacheStorageParent::RecvKeys(const RequestId& aRequestId)
 {
-  mManager->StorageKeys(this, aRequestId, mNamespace);
+  mManager->StorageKeys(this, aRequestId, mInitData.namespaceEnum());
   return true;
 }
 
@@ -136,7 +133,7 @@ CacheStorageParent::OnStorageOpen(RequestId aRequestId, nsresult aRv,
     return;
   }
 
-  CacheParent* actor = new CacheParent(mOrigin, mBaseDomain, aCacheId);
+  CacheParent* actor = new CacheParent(mInitData, aCacheId);
   PCacheParent* base = Manager()->SendPCacheConstructor(actor);
   actor = static_cast<CacheParent*>(base);
   unused << SendOpenResponse(aRequestId, aRv, actor);

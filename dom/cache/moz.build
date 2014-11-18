@@ -51,6 +51,7 @@ SOURCES += [
 ]
 
 IPDL_SOURCES += [
+    'CacheInitData.ipdlh',
     'PCache.ipdl',
     'PCacheStorage.ipdl',
     'PCacheStreamControl.ipdl',

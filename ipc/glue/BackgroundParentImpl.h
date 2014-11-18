@@ -68,9 +68,7 @@ protected:
                                   MOZ_OVERRIDE;
 
   virtual mozilla::dom::cache::PCacheStorageParent*
-  AllocPCacheStorageParent(const Namespace& aNamespace,
-                           const nsCString& aOrigin,
-                           const nsCString& aBaseDomain) MOZ_OVERRIDE;
+  AllocPCacheStorageParent(const CacheInitData& aInitData) MOZ_OVERRIDE;
 
   virtual bool
   DeallocPCacheStorageParent(mozilla::dom::cache::PCacheStorageParent* aActor) MOZ_OVERRIDE;

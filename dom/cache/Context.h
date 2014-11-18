@@ -22,6 +22,7 @@ namespace dom {
 namespace cache {
 
 class Action;
+class CacheInitData;
 
 class Context MOZ_FINAL
 {
@@ -38,8 +39,8 @@ public:
     NS_INLINE_DECL_REFCOUNTING(mozilla::dom::cache::Context::Listener)
   };
 
-  Context(Listener* aListener, const nsACString& aOrigin,
-          const nsACString& aBaseDomain, Action* aQuotaIOThreadAction);
+  Context(Listener* aListener, const CacheInitData& aInitData,
+          Action* aQuotaIOThreadAction);
 
   // Execute given action on the target once the quota manager has been
   // initialized.

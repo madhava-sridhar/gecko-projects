@@ -26,11 +26,10 @@ using mozilla::void_t;
 using mozilla::ipc::FileDescriptorSetParent;
 using mozilla::ipc::PFileDescriptorSetParent;
 
-CacheParent::CacheParent(const nsACString& aOrigin,
-                         const nsACString& aBaseDomain,
+CacheParent::CacheParent(const CacheInitData& aInitData,
                          CacheId aCacheId)
   : mCacheId(aCacheId)
-  , mManager(Manager::ForOrigin(aOrigin, aBaseDomain))
+  , mManager(Manager::ForOrigin(aInitData))
 {
   MOZ_ASSERT(mManager);
   mManager->AddRefCacheId(mCacheId);

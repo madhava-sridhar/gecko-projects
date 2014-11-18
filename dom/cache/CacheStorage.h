@@ -8,6 +8,7 @@
 #define mozilla_dom_cache_CacheStorage_h
 
 #include "mozilla/dom/CacheBinding.h"
+#include "mozilla/dom/cache/CacheInitData.h"
 #include "mozilla/dom/cache/CacheStorageChildListener.h"
 #include "mozilla/dom/cache/Types.h"
 #include "mozilla/dom/cache/TypeUtils.h"
@@ -49,7 +50,8 @@ class CacheStorage MOZ_FINAL : public nsIIPCBackgroundChildCreateCallback
 public:
   CacheStorage(Namespace aNamespace, nsISupports* aOwner,
                nsIGlobalObject* aGlobal, const nsACString& aOrigin,
-               const nsACString& aBaseDomain);
+               const nsACString& aQuotaGroup, bool aIsApp,
+               bool aHasUnlimStoragePerm);
 
   // webidl interface methods
   already_AddRefed<Promise> Match(const RequestOrScalarValueString& aRequest,
@@ -94,12 +96,10 @@ private:
   RequestId AddRequestPromise(Promise* aPromise, ErrorResult& aRv);
   already_AddRefed<Promise> RemoveRequestPromise(RequestId aRequestId);
 
-  const Namespace mNamespace;
+  const CacheInitData mInitData;
   // TODO: remove separate mOwner
   nsCOMPtr<nsISupports> mOwner;
   nsCOMPtr<nsIGlobalObject> mGlobal;
-  const nsCString mOrigin;
-  const nsCString mBaseDomain;
   CacheStorageChild* mActor;
   nsTArray<nsRefPtr<Promise>> mRequestPromises;
 

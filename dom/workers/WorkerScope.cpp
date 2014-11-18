@@ -121,7 +121,9 @@ WorkerGlobalScope::Caches()
     MOZ_ASSERT(mWorkerPrivate);
     NS_ConvertUTF16toUTF8 origin(mWorkerPrivate->GetLocationInfo().mOrigin);
     mCacheStorage = new CacheStorage(cache::DEFAULT_NAMESPACE, ToSupports(this),
-                                     this, origin, mWorkerPrivate->Domain());
+                                     this, origin, mWorkerPrivate->QuotaGroup(),
+                                     mWorkerPrivate->IsApp(),
+                                     mWorkerPrivate->HasUnlimStoragePerm());
   }
 
   nsRefPtr<CacheStorage> ref = mCacheStorage;

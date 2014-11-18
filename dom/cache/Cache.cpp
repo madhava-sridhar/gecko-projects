@@ -37,13 +37,9 @@ NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(Cache)
   NS_INTERFACE_MAP_ENTRY(nsISupports)
 NS_INTERFACE_MAP_END
 
-Cache::Cache(nsISupports* aOwner, nsIGlobalObject* aGlobal,
-             const nsACString& aOrigin, const nsACString& aBaseDomain,
-             PCacheChild* aActor)
+Cache::Cache(nsISupports* aOwner, nsIGlobalObject* aGlobal, PCacheChild* aActor)
   : mOwner(aOwner)
   , mGlobal(aGlobal)
-  , mOrigin(aOrigin)
-  , mBaseDomain(aBaseDomain)
   , mActor(static_cast<CacheChild*>(aActor))
 {
   MOZ_ASSERT(mActor);

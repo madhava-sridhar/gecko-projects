@@ -23,6 +23,7 @@
 
 namespace {
 
+using mozilla::dom::cache::CacheInitData;
 using mozilla::dom::cache::DBSchema;
 using mozilla::dom::cache::FileUtils;
 using mozilla::dom::cache::SyncDBAction;
@@ -30,8 +31,8 @@ using mozilla::dom::cache::SyncDBAction;
 class SetupAction MOZ_FINAL : public SyncDBAction
 {
 public:
-  SetupAction(const nsACString& aOrigin, const nsACString& aBaseDomain)
-    : SyncDBAction(DBAction::Create, aOrigin, aBaseDomain)
+  SetupAction(const CacheInitData& aInitData)
+    : SyncDBAction(DBAction::Create, aInitData)
   { }
 
   virtual nsresult
@@ -86,14 +87,13 @@ public:
     return *sFactory;
   }
 
-  already_AddRefed<Manager> GetOrCreate(const nsACString& aOrigin,
-                                        const nsACString& aBaseDomain)
+  already_AddRefed<Manager> GetOrCreate(const CacheInitData& aInitData)
   {
     mozilla::ipc::AssertIsOnBackgroundThread();
 
-    nsRefPtr<Manager> ref = Get(aOrigin);
+    nsRefPtr<Manager> ref = Get(aInitData.origin());
     if (!ref) {
-      ref = new Manager(aOrigin, aBaseDomain);
+      ref = new Manager(aInitData);
       mManagerList.AppendElement(ref);
     }
 
@@ -140,8 +140,7 @@ class Manager::BaseAction : public SyncDBAction
 {
 protected:
   BaseAction(Manager* aManager, ListenerId aListenerId, RequestId aRequestId)
-    : SyncDBAction(DBAction::Existing, aManager->Origin(),
-                   aManager->BaseDomain())
+    : SyncDBAction(DBAction::Existing, aManager->mInitData)
     , mManager(aManager)
     , mListenerId(aListenerId)
     , mRequestId (aRequestId)
@@ -209,8 +208,7 @@ class Manager::DeleteOrphanedCacheAction MOZ_FINAL : public SyncDBAction
 {
 public:
   DeleteOrphanedCacheAction(Manager* aManager, CacheId aCacheId)
-    : SyncDBAction(DBAction::Existing, aManager->Origin(),
-                   aManager->BaseDomain())
+    : SyncDBAction(DBAction::Existing, aManager->mInitData)
     , mManager(aManager)
     , mCacheId(aCacheId)
   { }
@@ -274,8 +272,7 @@ public:
     }
 
     nsCOMPtr<nsIInputStream> stream;
-    rv = FileUtils::BodyOpen(mManager->Origin(), mManager->BaseDomain(),
-                             aDBDir, mResponse.mBodyId,
+    rv = FileUtils::BodyOpen(mManager->mInitData, aDBDir, mResponse.mBodyId,
                              getter_AddRefs(stream));
     if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
     if (NS_WARN_IF(!stream)) { return NS_ERROR_FILE_NOT_FOUND; }
@@ -341,8 +338,8 @@ public:
       }
 
       nsCOMPtr<nsIInputStream> stream;
-      rv = FileUtils::BodyOpen(mManager->Origin(), mManager->BaseDomain(),
-                               aDBDir, mSavedResponses[i].mBodyId,
+      rv = FileUtils::BodyOpen(mManager->mInitData, aDBDir,
+                               mSavedResponses[i].mBodyId,
                                getter_AddRefs(stream));
       if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
       if (NS_WARN_IF(!stream)) { return NS_ERROR_FILE_NOT_FOUND; }
@@ -384,7 +381,7 @@ public:
                  nsIInputStream* aRequestBodyStream,
                  const PCacheResponse& aResponse,
                  nsIInputStream* aResponseBodyStream)
-    : DBAction(DBAction::Existing, aManager->Origin(), aManager->BaseDomain())
+    : DBAction(DBAction::Existing, aManager->mInitData)
     , mManager(aManager)
     , mListenerId(aListenerId)
     , mRequestId(aRequestId)
@@ -558,8 +555,7 @@ private:
       return NS_OK;
     }
 
-    nsresult rv = FileUtils::BodyStartWriteStream(mManager->Origin(),
-                                                  mManager->BaseDomain(),
+    nsresult rv = FileUtils::BodyStartWriteStream(mManager->mInitData,
                                                   mDBDir,
                                                   aSource,
                                                   this,
@@ -716,8 +712,8 @@ public:
       }
 
       nsCOMPtr<nsIInputStream> stream;
-      rv = FileUtils::BodyOpen(mManager->Origin(), mManager->BaseDomain(),
-                               aDBDir, mSavedRequests[i].mBodyId,
+      rv = FileUtils::BodyOpen(mManager->mInitData, aDBDir,
+                               mSavedRequests[i].mBodyId,
                                getter_AddRefs(stream));
       if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
       if (NS_WARN_IF(!stream)) { return NS_ERROR_FILE_NOT_FOUND; }
@@ -779,9 +775,8 @@ public:
     }
 
     nsCOMPtr<nsIInputStream> stream;
-    rv = FileUtils::BodyOpen(mManager->Origin(), mManager->BaseDomain(),
-                             aDBDir, mSavedResponse.mBodyId,
-                             getter_AddRefs(stream));
+    rv = FileUtils::BodyOpen(mManager->mInitData, aDBDir,
+                             mSavedResponse.mBodyId, getter_AddRefs(stream));
     if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
     if (NS_WARN_IF(!stream)) { return NS_ERROR_FILE_NOT_FOUND; }
 
@@ -1125,10 +1120,10 @@ Manager::StreamList::~StreamList()
 
 // static
 already_AddRefed<Manager>
-Manager::ForOrigin(const nsACString& aOrigin, const nsACString& aBaseDomain)
+Manager::ForOrigin(const CacheInitData& aInitData)
 {
   mozilla::ipc::AssertIsOnBackgroundThread();
-  return Factory::Instance().GetOrCreate(aOrigin, aBaseDomain);
+  return Factory::Instance().GetOrCreate(aInitData);
 }
 
 // static
@@ -1216,7 +1211,7 @@ Manager::Shutdown()
   if (!mContext) {
     nsRefPtr<ShutdownObserver> so = ShutdownObserver::Instance();
     if (so) {
-      so->RemoveOrigin(mOrigin);
+      so->RemoveOrigin(mInitData.origin());
     }
 
   // Otherwise, cancel the context and note complete when it cleans up
@@ -1421,14 +1416,13 @@ Manager::RemoveContext(Context* aContext)
   if (mShuttingDown) {
     nsRefPtr<ShutdownObserver> so = ShutdownObserver::Instance();
     if (so) {
-      so->RemoveOrigin(mOrigin);
+      so->RemoveOrigin(mInitData.origin());
     }
   }
 }
 
-Manager::Manager(const nsACString& aOrigin, const nsACString& aBaseDomain)
-  : mOrigin(aOrigin)
-  , mBaseDomain(aBaseDomain)
+Manager::Manager(const CacheInitData& aInitData)
+  : mInitData(aInitData)
   , mContext(nullptr)
   , mShuttingDown(false)
 {
@@ -1440,7 +1434,7 @@ Manager::Manager(const nsACString& aOrigin, const nsACString& aBaseDomain)
 
   nsRefPtr<ShutdownObserver> so = ShutdownObserver::Instance();
   if (so) {
-    so->AddOrigin(mOrigin);
+    so->AddOrigin(mInitData.origin());
   } else {
     Shutdown();
   }
@@ -1460,8 +1454,8 @@ Manager::CurrentContext()
   NS_ASSERT_OWNINGTHREAD(Context::Listener);
   if (!mContext) {
     MOZ_ASSERT(!mShuttingDown);
-    nsRefPtr<Action> setupAction = new SetupAction(mOrigin, mBaseDomain);
-    mContext = new Context(this, mOrigin, mBaseDomain, setupAction);
+    nsRefPtr<Action> setupAction = new SetupAction(mInitData);
+    mContext = new Context(this, mInitData, setupAction);
   }
   return mContext;
 }

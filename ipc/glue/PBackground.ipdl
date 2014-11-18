@@ -12,10 +12,10 @@ include protocol PCacheStreamControl;
 include protocol PMessagePort;
 
 include DOMTypes;
+include CacheInitData;
 
 using struct mozilla::void_t
   from "ipc/IPCMessageUtils.h";
-using mozilla::dom::cache::Namespace from "mozilla/dom/cache/Types.h";
 
 namespace mozilla {
 namespace dom {
@@ -49,7 +49,7 @@ parent:
 
   PBackgroundIDBFactory(OptionalWindowId optionalWindowId);
 
-  PCacheStorage(Namespace namespaceEnum, nsCString origin, nsCString baseDomain);
+  PCacheStorage(CacheInitData initData);
 
   PMessagePort();
 

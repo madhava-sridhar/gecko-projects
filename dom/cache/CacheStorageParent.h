@@ -7,6 +7,7 @@
 #ifndef mozilla_dom_cache_CacheStorageParent_h
 #define mozilla_dom_cache_CacheStorageParent_h
 
+#include "mozilla/dom/cache/CacheInitData.h"
 #include "mozilla/dom/cache/PCacheStorageParent.h"
 #include "mozilla/dom/cache/Manager.h"
 #include "mozilla/dom/cache/Types.h"
@@ -21,8 +22,7 @@ class CacheStorageParent MOZ_FINAL : public PCacheStorageParent
                                    , public Manager::Listener
 {
 public:
-  CacheStorageParent(Namespace aNamespace, const nsACString& aOrigin,
-                     const nsACString& mBaseDomain);
+  CacheStorageParent(const CacheInitData& aInitData);
   virtual ~CacheStorageParent();
 
   // PCacheStorageParent methods
@@ -57,9 +57,7 @@ private:
                       Manager::StreamList* aStreamList,
                       PCacheReadStream* aReadStreamOut);
 
-  const Namespace mNamespace;
-  const nsCString mOrigin;
-  const nsCString mBaseDomain;
+  const CacheInitData mInitData;
   nsRefPtr<mozilla::dom::cache::Manager> mManager;
 };
 

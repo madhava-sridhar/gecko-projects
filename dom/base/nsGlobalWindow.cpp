@@ -10843,19 +10843,28 @@ nsGlobalWindow::GetInterface(JSContext* aCx, nsIJSID* aIID,
 already_AddRefed<CacheStorage>
 nsGlobalWindow::Caches()
 {
+  using mozilla::dom::quota::QuotaManager;
+  using mozilla::dom::quota::PERSISTENCE_TYPE_PERSISTENT;
+
   if (!mCacheStorage) {
     nsAutoCString origin;
-    nsAutoCString baseDomain;
+    nsAutoCString quotaGroup;
+    bool isApp;
+    bool hasUnlimStoragePerm;
     nsCOMPtr<nsIPrincipal> principal = GetPrincipal();
     if (!principal ||
-        NS_FAILED(principal->GetOrigin(getter_Copies(origin))) ||
-        NS_FAILED(principal->GetBaseDomain(baseDomain))) {
+        NS_FAILED(QuotaManager::GetInfoFromPrincipal(principal,
+                                                     PERSISTENCE_TYPE_PERSISTENT,
+                                                     &origin, &quotaGroup,
+                                                     &isApp, &hasUnlimStoragePerm))) {
       origin.AssignLiteral("null");
-      baseDomain.AssignLiteral("");
+      quotaGroup.AssignLiteral("");
+      isApp = false;
+      hasUnlimStoragePerm = false;
     }
     mCacheStorage = new CacheStorage(cache::DEFAULT_NAMESPACE,
                                      ToSupports(this), this, origin,
-                                     baseDomain);
+                                     quotaGroup, isApp, hasUnlimStoragePerm);
   }
 
   nsRefPtr<CacheStorage> ref = mCacheStorage;

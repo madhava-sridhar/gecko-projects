@@ -216,11 +216,9 @@ BackgroundParentImpl::DeallocPFileDescriptorSetParent(
 }
 
 PCacheStorageParent*
-BackgroundParentImpl::AllocPCacheStorageParent(const Namespace& aNamespace,
-                                               const nsCString& aOrigin,
-                                               const nsCString& aBaseDomain)
+BackgroundParentImpl::AllocPCacheStorageParent(const CacheInitData& aInitData)
 {
-  return new CacheStorageParent(aNamespace, aOrigin, aBaseDomain);
+  return new CacheStorageParent(aInitData);
 }
 
 bool

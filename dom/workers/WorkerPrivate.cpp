@@ -54,6 +54,7 @@
 #include "mozilla/dom/ScriptSettings.h"
 #include "mozilla/dom/StructuredClone.h"
 #include "mozilla/dom/WorkerBinding.h"
+#include "mozilla/dom/quota/QuotaManager.h"
 #include "mozilla/Preferences.h"
 #include "nsAlgorithm.h"
 #include "nsContentUtils.h"
@@ -104,6 +105,8 @@
 
 using namespace mozilla;
 using namespace mozilla::dom;
+using mozilla::dom::quota::QuotaManager;
+using mozilla::dom::quota::PERSISTENCE_TYPE_PERSISTENT;
 USING_WORKERS_NAMESPACE
 
 MOZ_DEFINE_MALLOC_SIZE_OF(JsWorkerMallocSizeOf)
@@ -3567,6 +3570,17 @@ WorkerPrivateParent<Derived>::SetPrincipal(nsIPrincipal* aPrincipal)
     (appStatus == nsIPrincipal::APP_STATUS_CERTIFIED ||
      appStatus == nsIPrincipal::APP_STATUS_PRIVILEGED);
   mLoadInfo.mIsInCertifiedApp = (appStatus == nsIPrincipal::APP_STATUS_CERTIFIED);
+
+  nsAutoCString origin;
+  nsresult rv = QuotaManager::GetInfoFromPrincipal(aPrincipal,
+                                                   PERSISTENCE_TYPE_PERSISTENT,
+                                                   &origin,
+                                                   &mLoadInfo.mQuotaGroup,
+                                                   &mLoadInfo.mIsApp,
+                                                   &mLoadInfo.mHasUnlimStoragePerm);
+  if (NS_FAILED(rv)) {
+    MOZ_CRASH("Failed to get quota info from principal.");
+  }
 }
 
 template <class Derived>

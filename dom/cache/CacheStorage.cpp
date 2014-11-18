@@ -45,18 +45,19 @@ CacheStorage::CacheStorage(Namespace aNamespace,
                            nsISupports* aOwner,
                            nsIGlobalObject* aGlobal,
                            const nsACString& aOrigin,
-                           const nsACString& aBaseDomain)
-  : mNamespace(aNamespace)
+                           const nsACString& aQuotaGroup,
+                           bool aIsApp, bool aHasUnlimStoragePerm)
+  : mInitData(aNamespace, nsCString(aOrigin), nsCString(aQuotaGroup),
+              aIsApp, aHasUnlimStoragePerm)
   , mOwner(aOwner)
   , mGlobal(aGlobal)
-  , mOrigin(aOrigin)
-  , mBaseDomain(aBaseDomain)
   , mActor(nullptr)
   , mFailedActor(false)
 {
   MOZ_ASSERT(mGlobal);
 
-  if (mOrigin.EqualsLiteral("null") || mBaseDomain.EqualsLiteral("")) {
+  if (mInitData.origin().EqualsLiteral("null") ||
+      mInitData.quotaGroup().EqualsLiteral("")) {
     ActorFailed();
     return;
   }
@@ -277,8 +278,7 @@ CacheStorage::ActorCreated(PBackgroundChild* aActor)
   }
 
   PCacheStorageChild* constructedActor =
-    aActor->SendPCacheStorageConstructor(newActor, mNamespace, mOrigin,
-                                         mBaseDomain);
+    aActor->SendPCacheStorageConstructor(newActor, mInitData);
 
   if (NS_WARN_IF(!constructedActor)) {
     ActorFailed();
@@ -425,8 +425,7 @@ CacheStorage::RecvOpenResponse(RequestId aRequestId, nsresult aRv,
     return;
   }
 
-  nsRefPtr<Cache> cache = new Cache(mOwner, mGlobal, mOrigin, mBaseDomain,
-                                    aActor);
+  nsRefPtr<Cache> cache = new Cache(mOwner, mGlobal, aActor);
   promise->MaybeResolve(cache);
 }
 

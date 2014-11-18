@@ -8,6 +8,7 @@
 
 #include "mozilla/DebugOnly.h"
 #include "mozilla/dom/cache/Action.h"
+#include "mozilla/dom/cache/CacheInitData.h"
 #include "mozilla/dom/quota/OriginOrPatternString.h"
 #include "mozilla/dom/quota/QuotaManager.h"
 #include "nsIFile.h"
@@ -74,13 +75,11 @@ class Context::QuotaInitRunnable MOZ_FINAL : public nsIRunnable
 {
 public:
   QuotaInitRunnable(Context* aContext,
-                    const nsACString& aOrigin,
-                    const nsACString& aBaseDomain,
+                    const CacheInitData& aInitData,
                     const nsACString& aQuotaId,
                     Action* aQuotaIOThreadAction)
     : mContext(aContext)
-    , mOrigin(aOrigin)
-    , mBaseDomain(aBaseDomain)
+    , mInitData(aInitData)
     , mQuotaId(aQuotaId)
     , mQuotaIOThreadAction(aQuotaIOThreadAction)
     , mInitiatingThread(NS_GetCurrentThread())
@@ -145,8 +144,7 @@ private:
   }
 
   nsRefPtr<Context> mContext;
-  const nsCString mOrigin;
-  const nsCString mBaseDomain;
+  const CacheInitData mInitData;
   const nsCString mQuotaId;
   nsRefPtr<Action> mQuotaIOThreadAction;
   nsCOMPtr<nsIThread> mInitiatingThread;
@@ -177,7 +175,7 @@ Context::QuotaInitRunnable::Run()
         return NS_OK;
       }
       mState = STATE_WAIT_FOR_OPEN_ALLOWED;
-      rv = qm->WaitForOpenAllowed(OriginOrPatternString::FromOrigin(mOrigin),
+      rv = qm->WaitForOpenAllowed(OriginOrPatternString::FromOrigin(mInitData.origin()),
                                   Nullable<PersistenceType>(PERSISTENCE_TYPE_PERSISTENT),
                                   mQuotaId, this);
       if (NS_FAILED(rv)) {
@@ -200,12 +198,11 @@ Context::QuotaInitRunnable::Run()
       // TODO: MOZ_ASSERT(NS_GetCurrentThread() == QuotaManager::Get()->IOThread());
       qm = QuotaManager::Get();
       MOZ_ASSERT(qm);
-      // TODO: get real app and unlimited storage permission flags
       rv = qm->EnsureOriginIsInitialized(PERSISTENCE_TYPE_PERSISTENT,
-                                         mBaseDomain,
-                                         mOrigin,
-                                         false, // aIsApp
-                                         false, // aUnlimStoragePerm
+                                         mInitData.quotaGroup(),
+                                         mInitData.origin(),
+                                         mInitData.isApp(),
+                                         mInitData.hasUnlimStoragePerm(),
                                          getter_AddRefs(mQuotaDir));
       if (NS_FAILED(rv)) {
         Resolve(rv);
@@ -422,17 +419,17 @@ Context::ActionRunnable::Run()
   return NS_OK;
 }
 
-Context::Context(Listener* aListener, const nsACString& aOrigin,
-                 const nsACString& aBaseDomain, Action* aQuotaIOThreadAction)
+Context::Context(Listener* aListener, const CacheInitData& aInitData,
+                 Action* aQuotaIOThreadAction)
   : mListener(aListener)
-  , mOrigin(aOrigin)
+  , mOrigin(aInitData.origin())
   , mState(STATE_CONTEXT_INIT)
 {
   MOZ_ASSERT(mListener);
 
   nsRefPtr<QuotaInitRunnable> runnable =
-    new QuotaInitRunnable(this, aOrigin, aBaseDomain,
-                          NS_LITERAL_CSTRING("Cache"), aQuotaIOThreadAction);
+    new QuotaInitRunnable(this, aInitData, NS_LITERAL_CSTRING("Cache"),
+                          aQuotaIOThreadAction);
   nsresult rv = runnable->Dispatch();
   if (NS_FAILED(rv)) {
     MOZ_CRASH("Failed to dispatch QuotaInitRunnable.");

@@ -7,6 +7,7 @@
 #ifndef mozilla_dom_cache_Manager_h
 #define mozilla_dom_cache_Manager_h
 
+#include "mozilla/dom/cache/CacheInitData.h"
 #include "mozilla/dom/cache/Context.h"
 #include "mozilla/dom/cache/PCacheStreamControlParent.h"
 #include "mozilla/dom/cache/Types.h"
@@ -113,8 +114,7 @@ public:
                                const nsTArray<nsString>& aKeys) { }
   };
 
-  static already_AddRefed<Manager> ForOrigin(const nsACString& aOrigin,
-                                             const nsACString& aBaseDomain);
+  static already_AddRefed<Manager> ForOrigin(const CacheInitData& aInitData);
   static already_AddRefed<Manager> ForExistingOrigin(const nsACString& aOrigin);
 
   void RemoveListener(Listener* aListener);
@@ -154,8 +154,7 @@ public:
   void StorageKeys(Listener* aListener, RequestId aRequestId,
                    Namespace aNamespace);
 
-  const nsCString& Origin() const { return mOrigin; }
-  const nsCString& BaseDomain() const { return mBaseDomain; }
+  const nsCString& Origin() const { return mInitData.origin(); }
 
   // Context::Listener methods
   virtual void RemoveContext(Context* aContext) MOZ_OVERRIDE;
@@ -180,7 +179,7 @@ private:
 
   typedef uintptr_t ListenerId;
 
-  Manager(const nsACString& aOrigin, const nsACString& aBaseDomain);
+  Manager(const CacheInitData& aInitData);
   ~Manager();
   Context* CurrentContext();
 
@@ -195,8 +194,7 @@ private:
   bool SetBodyIdOrphanedIfRefed(const nsID& aBodyId);
   void NoteOrphanedBodyIdList(const nsTArray<nsID>& aDeletedBodyIdList);
 
-  const nsCString mOrigin;
-  const nsCString mBaseDomain;
+  const CacheInitData mInitData;
   nsCOMPtr<nsIThread> mIOThread;
   nsTArray<Listener*> mListeners;
   nsTArray<StreamList*> mStreamLists;

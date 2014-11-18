@@ -78,9 +78,7 @@ protected:
   DeallocPFileDescriptorSetChild(PFileDescriptorSetChild* aActor) MOZ_OVERRIDE;
 
   virtual mozilla::dom::cache::PCacheStorageChild*
-  AllocPCacheStorageChild(const Namespace& aNamespace,
-                          const nsCString& aOrigin,
-                          const nsCString& aBaseDomain) MOZ_OVERRIDE;
+  AllocPCacheStorageChild(const CacheInitData& aInitData) MOZ_OVERRIDE;
 
   virtual bool
   DeallocPCacheStorageChild(mozilla::dom::cache::PCacheStorageChild* aActor) MOZ_OVERRIDE;

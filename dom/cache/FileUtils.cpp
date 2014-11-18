@@ -5,6 +5,8 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "mozilla/dom/cache/FileUtils.h"
+
+#include "mozilla/dom/cache/CacheInitData.h"
 #include "mozilla/dom/quota/FileStreams.h"
 #include "mozilla/unused.h"
 #include "nsIFile.h"
@@ -137,8 +139,7 @@ FileUtils::BodyIdToFile(nsIFile* aBaseDir, const nsID& aId,
 
 // static
 nsresult
-FileUtils::BodyStartWriteStream(const nsACString& aOrigin,
-                                const nsACString& aBaseDomain,
+FileUtils::BodyStartWriteStream(const CacheInitData& aInitData,
                                 nsIFile* aBaseDir, nsIInputStream* aSource,
                                 void* aClosure,
                                 nsAsyncCopyCallbackFun aCallback, nsID* aIdOut,
@@ -179,7 +180,8 @@ FileUtils::BodyStartWriteStream(const nsACString& aOrigin,
 
   nsCOMPtr<nsIOutputStream> fileStream =
     FileOutputStream::Create(PERSISTENCE_TYPE_PERSISTENT,
-                             aBaseDomain, aOrigin, tmpFile);
+                             aInitData.quotaGroup(), aInitData.origin(),
+                             tmpFile);
   if (NS_WARN_IF(!fileStream)) { return NS_ERROR_UNEXPECTED; }
 
   // By default we would prefer to just use ReadSegments to copy buffers.
@@ -268,9 +270,8 @@ FileUtils::BodyFinalizeWrite(nsIFile* aBaseDir, const nsID& aId)
 
 // static
 nsresult
-FileUtils::BodyOpen(const nsACString& aOrigin, const nsACString& aBaseDomain,
-                    nsIFile* aBaseDir, const nsID& aId,
-                    nsIInputStream** aStreamOut)
+FileUtils::BodyOpen(const CacheInitData& aInitData, nsIFile* aBaseDir,
+                    const nsID& aId, nsIInputStream** aStreamOut)
 {
   MOZ_ASSERT(aBaseDir);
   MOZ_ASSERT(aStreamOut);
@@ -286,8 +287,8 @@ FileUtils::BodyOpen(const nsACString& aOrigin, const nsACString& aBaseDomain,
   if (NS_WARN_IF(!exists)) { return NS_ERROR_FILE_NOT_FOUND; }
 
   nsCOMPtr<nsIInputStream> fileStream =
-    FileInputStream::Create(PERSISTENCE_TYPE_PERSISTENT, aBaseDomain, aOrigin,
-                            finalFile);
+    FileInputStream::Create(PERSISTENCE_TYPE_PERSISTENT, aInitData.quotaGroup(),
+                            aInitData.origin(), finalFile);
   if (NS_WARN_IF(!fileStream)) { return NS_ERROR_UNEXPECTED; }
 
   fileStream.forget(aStreamOut);
@@ -297,8 +298,7 @@ FileUtils::BodyOpen(const nsACString& aOrigin, const nsACString& aBaseDomain,
 
 // static
 nsresult
-FileUtils::BodyStartReadStream(const nsACString& aOrigin,
-                               const nsACString& aBaseDomain,
+FileUtils::BodyStartReadStream(const CacheInitData& aInitData,
                                nsIFile* aBaseDir,
                                const nsID& aId, nsIOutputStream* aDest,
                                void* aClosure,
@@ -322,8 +322,8 @@ FileUtils::BodyStartReadStream(const nsACString& aOrigin,
   if (NS_WARN_IF(!exists)) { return NS_ERROR_FILE_NOT_FOUND; }
 
   nsCOMPtr<nsIInputStream> fileStream =
-    FileInputStream::Create(PERSISTENCE_TYPE_PERSISTENT, aBaseDomain, aOrigin,
-                            finalFile);
+    FileInputStream::Create(PERSISTENCE_TYPE_PERSISTENT, aInitData.quotaGroup(),
+                            aInitData.origin(), finalFile);
   if (NS_WARN_IF(!fileStream)) { return NS_ERROR_UNEXPECTED; }
 
   rv = NS_AsyncCopy(fileStream, aDest, NS_GetCurrentThread(),

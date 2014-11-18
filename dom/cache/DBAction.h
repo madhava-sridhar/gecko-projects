@@ -8,6 +8,7 @@
 #define mozilla_dom_cache_DBAction_h
 
 #include "mozilla/dom/cache/Action.h"
+#include "mozilla/dom/cache/CacheInitData.h"
 #include "nsString.h"
 
 class mozIStorageConnection;
@@ -26,8 +27,7 @@ protected:
     Create
   };
 
-  DBAction(Mode aMode, const nsACString& aOrigin,
-           const nsACString& aBaseDomain);
+  DBAction(Mode aMode, const CacheInitData& aInitData);
 
   // Just as the resolver must be ref'd until cancel or resolve, you may also
   // ref the DB connection.  The connection can only be referenced from the
@@ -44,15 +44,13 @@ private:
   nsresult OpenConnection(nsIFile* aQuotaDir, mozIStorageConnection** aConnOut);
 
   const Mode mMode;
-  const nsCString mOrigin;
-  const nsCString mBaseDomain;
+  const CacheInitData mInitData;
 };
 
 class SyncDBAction : public DBAction
 {
 protected:
-  SyncDBAction(Mode aMode, const nsACString& aOrigin,
-               const nsACString& aBaseDomain);
+  SyncDBAction(Mode aMode, const CacheInitData& aInitData);
 
   virtual ~SyncDBAction() { }
 

@@ -21,11 +21,9 @@ namespace cache {
 using mozilla::dom::quota::PERSISTENCE_TYPE_PERSISTENT;
 using mozilla::dom::quota::PersistenceType;
 
-DBAction::DBAction(Mode aMode, const nsACString& aOrigin,
-                   const nsACString& aBaseDomain)
+DBAction::DBAction(Mode aMode, const CacheInitData& aInitData)
   : mMode(aMode)
-  , mOrigin(aOrigin)
-  , mBaseDomain(aBaseDomain)
+  , mInitData(aInitData)
 {
 }
 
@@ -98,9 +96,10 @@ DBAction::OpenConnection(nsIFile* aDBDir, mozIStorageConnection** aConnOut)
   nsAutoCString type;
   PersistenceTypeToText(PERSISTENCE_TYPE_PERSISTENT, type);
 
-  rv = dbFileUrl->SetQuery(NS_LITERAL_CSTRING("persistenceType=") + type +
-                           NS_LITERAL_CSTRING("&group=") + mBaseDomain +
-                           NS_LITERAL_CSTRING("&origin=") + mOrigin);
+  rv = dbFileUrl->SetQuery(
+    NS_LITERAL_CSTRING("persistenceType=") + type +
+    NS_LITERAL_CSTRING("&group=") + mInitData.quotaGroup() +
+    NS_LITERAL_CSTRING("&origin=") + mInitData.origin());
   if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 
   nsCOMPtr<mozIStorageService> ss =
@@ -131,9 +130,8 @@ DBAction::OpenConnection(nsIFile* aDBDir, mozIStorageConnection** aConnOut)
   return rv;
 }
 
-SyncDBAction::SyncDBAction(Mode aMode, const nsACString& aOrigin,
-                           const nsACString& aBaseDomain)
-  : DBAction(aMode, aOrigin, aBaseDomain)
+SyncDBAction::SyncDBAction(Mode aMode, const CacheInitData& aInitData)
+  : DBAction(aMode, aInitData)
 {
 }
 

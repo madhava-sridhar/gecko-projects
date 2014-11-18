@@ -18,6 +18,7 @@ namespace mozilla {
 namespace dom {
 namespace cache {
 
+class CacheInitData;
 class CacheDBConnection;
 struct SavedResponse;
 struct StreamHolder;
@@ -26,8 +27,7 @@ class CacheParent MOZ_FINAL : public PCacheParent
                             , public Manager::Listener
 {
 public:
-  CacheParent(const nsACString& aOrigin, const nsACString& aBaseDomain,
-              CacheId aCacheId);
+  CacheParent(const CacheInitData& aInitData, CacheId aCacheId);
   virtual ~CacheParent();
   virtual void ActorDestroy(ActorDestroyReason aReason) MOZ_OVERRIDE;
 
