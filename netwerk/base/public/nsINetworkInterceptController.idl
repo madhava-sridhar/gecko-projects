@@ -62,7 +62,7 @@ interface nsIInterceptedChannel : nsISupports
  * request should be intercepted before any network request is initiated.
  */
 
-[scriptable, uuid(f4f7a081-3948-4033-8767-58171e36b395)]
+[scriptable, uuid(69150b77-b561-43a2-bfba-7301dd5a35d0)]
 interface nsINetworkInterceptController : nsISupports
 {
     /**
@@ -70,8 +70,9 @@ interface nsINetworkInterceptController : nsISupports
      * requests until specifically instructed to do so.
      *
      * @param aURI the URI being requested by a channel
+     * @param aIsNavigate True if the request is for a navigation, false for a fetch.
      */
-    bool shouldPrepareForIntercept(in nsIURI aURI);
+    bool shouldPrepareForIntercept(in nsIURI aURI, in bool aIsNavigate);
 
     /**
      * Notification when a given intercepted channel is prepared to accept a synthesized

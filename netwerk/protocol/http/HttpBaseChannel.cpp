@@ -1839,7 +1839,9 @@ HttpBaseChannel::ShouldIntercept()
   GetCallback(controller);
   bool shouldIntercept = false;
   if (controller && !mForceNoIntercept) {
-    nsresult rv = controller->ShouldPrepareForIntercept(mURI, &shouldIntercept);
+    nsresult rv = controller->ShouldPrepareForIntercept(mURI, 
+                                                        mLoadFlags & nsIChannel::LOAD_DOCUMENT_URI,
+                                                        &shouldIntercept);
     NS_ENSURE_SUCCESS(rv, false);
   }
   return shouldIntercept;

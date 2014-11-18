@@ -3158,20 +3158,39 @@ nsDocument::SetApplicationCache(nsIApplicationCache *aApplicationCache)
 }
 
 NS_IMETHODIMP
-nsDocument::ShouldPrepareForIntercept(nsIURI* aURI, bool* aShouldIntercept)
+nsDocument::ShouldPrepareForIntercept(nsIURI* aURI, bool aIsNavigate, bool* aShouldIntercept)
 {
     nsCOMPtr<nsIServiceWorkerManager> swm = mozilla::services::GetServiceWorkerManager();
     if (!swm) {
         *aShouldIntercept = false;
         return NS_OK;
     }
+
+    if (aIsNavigate) {
+      return swm->IsAvailableForURI(aURI, aShouldIntercept);
+    }
+
     return swm->IsControlled(this, aShouldIntercept);
 }
 
 NS_IMETHODIMP
 nsDocument::ChannelIntercepted(nsIInterceptedChannel* aChannel)
 {
+    // Ideally this should just be set as a flag on nsIInterceptedChannel, but
+    // let's try it out first.
+    nsCOMPtr<nsIChannel> internalChannel;
+    nsresult rv = aChannel->GetChannel(getter_AddRefs(internalChannel));
+    NS_ENSURE_SUCCESS(rv, rv);
+
+    uint32_t loadFlags;
+    rv = internalChannel->GetLoadFlags(&loadFlags);
+    NS_ENSURE_SUCCESS(rv, rv);
+
     nsCOMPtr<nsIServiceWorkerManager> swm = mozilla::services::GetServiceWorkerManager();
+    if (loadFlags & nsIChannel::LOAD_DOCUMENT_URI) {
+      return swm->DispatchFetchEvent(nullptr, aChannel);
+    }
+
     return swm->DispatchFetchEvent(this, aChannel);
 }
 

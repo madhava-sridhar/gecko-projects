@@ -82,6 +82,7 @@ class FinishResponse : public nsRunnable {
   NS_IMETHOD
   Run()
   {
+    NS_WARNING(__PRETTY_FUNCTION__);
     AssertIsOnMainThread();
     nsresult rv = mChannel->FinishSynthesizedResponse();
     NS_WARN_IF_FALSE(NS_SUCCEEDED(rv), "Failed to finish synthesized response");
@@ -149,24 +150,26 @@ public:
 void
 RespondWithHandler::ResolvedCallback(JSContext* aCx, JS::Handle<JS::Value> aValue)
 {
+  NS_WARNING(__PRETTY_FUNCTION__);
   AutoCancel autoCancel(this);
 
-  if (!aValue.isObject()) {
+  if (NS_WARN_IF(!aValue.isObject())) {
     return;
   }
 
   nsRefPtr<Response> response;
   nsresult rv = UNWRAP_OBJECT(Response, &aValue.toObject(), response);
-  if (NS_FAILED(rv)) {
+  if (NS_WARN_IF(NS_FAILED(rv))) {
     return;
   }
 
   nsCOMPtr<nsIInputStream> body;
   response->GetBody(getter_AddRefs(body));
+  MOZ_ASSERT(body);
 
   nsCOMPtr<nsIOutputStream> responseBody;
   rv = mInterceptedChannel->GetResponseBody(getter_AddRefs(responseBody));
-  if (NS_FAILED(rv)) {
+  if (NS_WARN_IF(NS_FAILED(rv))) {
     return;
   }
 
@@ -175,7 +178,7 @@ RespondWithHandler::ResolvedCallback(JSContext* aCx, JS::Handle<JS::Value> aValu
   nsCOMPtr<nsIEventTarget> stsThread = do_GetService(NS_SOCKETTRANSPORTSERVICE_CONTRACTID, &rv);
   rv = NS_AsyncCopy(body, responseBody, stsThread, NS_ASYNCCOPY_VIA_READSEGMENTS, 4096,
                     RespondWithCopyComplete, closure.forget());
-  if (NS_FAILED(rv)) {
+  if (NS_WARN_IF(NS_FAILED(rv))) {
     return;
   }
 
@@ -230,6 +233,8 @@ FetchEvent::RespondWith(Promise& aPromise, ErrorResult& aRv)
 already_AddRefed<ServiceWorkerClient>
 FetchEvent::Client()
 {
+  // FIXME(nsm): Should client be null if windowId is 0 in the case of
+  // navigation. Or should it be the current document?
   if (!mClient) {
     mClient = new ServiceWorkerClient(GetParentObject(), mWindowId);
   }

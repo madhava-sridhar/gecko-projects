@@ -237,7 +237,7 @@ InterceptedChannelContent::SynthesizeHeader(const nsACString& aName, const nsACS
 NS_IMETHODIMP
 InterceptedChannelContent::FinishSynthesizedResponse()
 {
-  if (!mChannel) {
+  if (NS_WARN_IF(!mChannel)) {
     return NS_ERROR_NOT_AVAILABLE;
   }
 
@@ -245,7 +245,7 @@ InterceptedChannelContent::FinishSynthesizedResponse()
 
   nsresult rv = nsInputStreamPump::Create(getter_AddRefs(mStoragePump), mSynthesizedInput,
                                           int64_t(-1), int64_t(-1), 0, 0, true);
-  if (NS_FAILED(rv)) {
+  if (NS_WARN_IF(NS_FAILED(rv))) {
     mSynthesizedInput->Close();
     return rv;
   }

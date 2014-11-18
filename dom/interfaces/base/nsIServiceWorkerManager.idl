@@ -18,7 +18,7 @@ interface nsIServiceWorkerUnregisterCallback : nsISupports
   [noscript] void UnregisterFailed();
 };
 
-[builtinclass, uuid(dfd97cef-3bda-4e59-b1d2-6c8ba361e993)]
+[builtinclass, uuid(464882c8-81c0-4620-b9c4-44c12085b65b)]
 interface nsIServiceWorkerManager : nsISupports
 {
   /**
@@ -49,6 +49,9 @@ interface nsIServiceWorkerManager : nsISupports
 
   // Remove ready pending Promise
   void removeReadyPromise(in nsIDOMWindow aWindow);
+
+  // Returns true if a ServiceWorker is available for the scope of aURI.
+  bool isAvailableForURI(in nsIURI aURI);
 
   // Returns true if a given document is currently controlled by a ServiceWorker
   bool isControlled(in nsIDocument aDocument);

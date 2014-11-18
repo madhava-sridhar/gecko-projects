@@ -238,6 +238,10 @@ public:
     MOZ_ASSERT(aWorkerPrivate);
   }
 
+  ~LifecycleEventWorkerRunnable()
+  {
+  }
+
   bool
   WorkerRun(JSContext* aCx, WorkerPrivate* aWorkerPrivate) MOZ_OVERRIDE
   {
@@ -495,6 +499,7 @@ public:
                                   getter_AddRefs(serviceWorker));
 
     if (NS_WARN_IF(NS_FAILED(rv))) {
+      domainInfo->mSetOfScopesBeingUpdated.Remove(mRegistration->mScope);
       Fail(NS_ERROR_DOM_ABORT_ERR);
       return rv;
     }
@@ -508,6 +513,7 @@ public:
     AutoSafeJSContext cx;
     bool ok = r->Dispatch(cx);
     if (!ok) {
+      domainInfo->mSetOfScopesBeingUpdated.Remove(mRegistration->mScope);
       Fail(NS_ERROR_DOM_ABORT_ERR);
       return rv;
     }
@@ -924,6 +930,7 @@ public:
   void
   ResolvedCallback(JSContext* aCx, JS::Handle<JS::Value> aValue) MOZ_OVERRIDE
   {
+    NS_WARNING(__PRETTY_FUNCTION__);
     WorkerPrivate* workerPrivate = GetCurrentThreadWorkerPrivate();
     MOZ_ASSERT(workerPrivate);
     workerPrivate->AssertIsOnWorkerThread();
@@ -935,6 +942,7 @@ public:
   void
   RejectedCallback(JSContext* aCx, JS::Handle<JS::Value> aValue) MOZ_OVERRIDE
   {
+    NS_WARNING(__PRETTY_FUNCTION__);
     WorkerPrivate* workerPrivate = GetCurrentThreadWorkerPrivate();
     MOZ_ASSERT(workerPrivate);
     workerPrivate->AssertIsOnWorkerThread();
@@ -973,12 +981,15 @@ LifecycleEventWorkerRunnable::DispatchLifecycleEvent(JSContext* aCx, WorkerPriva
   nsRefPtr<Promise> waitUntilPromise;
 
   nsresult rv = target->DispatchDOMEvent(nullptr, event, nullptr, nullptr);
+  NS_WARNING("Dispatched install/activate");
 
   nsCOMPtr<nsIGlobalObject> sgo = aWorkerPrivate->GlobalScope();
   WidgetEvent* internalEvent = event->GetInternalNSEvent();
   if (NS_SUCCEEDED(rv) && !internalEvent->mFlags.mExceptionHasBeenRisen) {
+  NS_WARNING("No error raised");
     waitUntilPromise = event->GetPromise();
     if (!waitUntilPromise) {
+  NS_WARNING("No waitUntil called");
       ErrorResult result;
       waitUntilPromise =
         Promise::Resolve(sgo,
@@ -995,6 +1006,7 @@ LifecycleEventWorkerRunnable::DispatchLifecycleEvent(JSContext* aCx, WorkerPriva
     // logic.
     waitUntilPromise = Promise::Reject(sgo, aCx,
                                        JS::UndefinedHandleValue, result);
+  NS_WARNING("Immediately erroring");
     if (NS_WARN_IF(result.Failed())) {
       return true;
     }
@@ -2067,6 +2079,7 @@ class FetchEventRunnable : public WorkerRunnable {
   bool
   WorkerRun(JSContext* aCx, WorkerPrivate* aWorkerPrivate)
   {
+    NS_WARNING(__PRETTY_FUNCTION__);
     MOZ_ASSERT(aWorkerPrivate);
     return DispatchFetchEvent(aCx, aWorkerPrivate);
   }
@@ -2116,7 +2129,7 @@ private:
 
     ErrorResult rv;
     nsRefPtr<Request> request = Request::Constructor(globalObj, requestInfo, reqInit, rv);
-    if (rv.Failed()) {
+    if (NS_WARN_IF(rv.Failed())) {
       return false;
     }
 
@@ -2129,7 +2142,7 @@ private:
     init.mIsReload.Construct(mIsReload);
     nsRefPtr<FetchEvent> event =
         FetchEvent::Constructor(globalObj, NS_LITERAL_STRING("fetch"), init, rv);
-    if (rv.Failed()) {
+    if (NS_WARN_IF(rv.Failed())) {
       return false;
     }
 
@@ -2138,7 +2151,8 @@ private:
 
     nsRefPtr<EventTarget> target = do_QueryObject(aWorkerPrivate->GlobalScope());
     nsresult rv2 = target->DispatchDOMEvent(nullptr, event, nullptr, nullptr);
-    if (NS_FAILED(rv2) || !event->WaitToRespond()) {
+    if (NS_WARN_IF(NS_FAILED(rv2)) || !event->WaitToRespond()) {
+      NS_WARNING("Do not have to wait to respond");
       nsCOMPtr<nsIRunnable> runnable = new ResumeRequest(mInterceptedChannel);
       NS_DispatchToMainThread(runnable);
     }
@@ -2150,12 +2164,39 @@ NS_IMETHODIMP
 ServiceWorkerManager::DispatchFetchEvent(nsIDocument* aDoc, nsIInterceptedChannel* aChannel)
 {
   nsCOMPtr<nsISupports> serviceWorker;
-  nsresult rv = GetDocumentController(aDoc->GetWindow(), getter_AddRefs(serviceWorker));
+  nsresult rv;
+  // FIXME(nsm): We may actually need a valid doc and an additional flag saying
+  // it's a navigate so we can extract a window id.
+  uint64_t windowId = 0;
+
+  if (aDoc) {
+    rv = GetDocumentController(aDoc->GetWindow(), getter_AddRefs(serviceWorker));
+    windowId = aDoc->GetInnerWindow()->WindowID();
+  } else {
+    nsCOMPtr<nsIChannel> internalChannel;
+    rv = aChannel->GetChannel(getter_AddRefs(internalChannel));
+    NS_ENSURE_SUCCESS(rv, rv);
+
+    nsCOMPtr<nsIURI> uri;
+    rv = internalChannel->GetURI(getter_AddRefs(uri));
+    NS_ENSURE_SUCCESS(rv, rv);
+
+    nsRefPtr<ServiceWorkerRegistrationInfo> registration =
+      GetServiceWorkerRegistrationInfo(uri);
+    // This should only happen if IsAvailableForURI() returned true.
+    MOZ_ASSERT(registration);
+    MOZ_ASSERT(registration->mActiveWorker);
+
+    nsRefPtr<ServiceWorker> sw;
+    rv = CreateServiceWorker(registration->mActiveWorker->GetScriptSpec(),
+                             registration->mScope,
+                             getter_AddRefs(sw));
+    serviceWorker = sw.forget();
+  }
+
   if (NS_WARN_IF(NS_FAILED(rv))) {
     return rv;
   }
-
-  uint64_t windowId = aDoc->GetInnerWindow()->WindowID();
 
   nsRefPtr<ServiceWorker> sw = static_cast<ServiceWorker*>(serviceWorker.get());
   nsMainThreadPtrHandle<nsIInterceptedChannel> handle(
@@ -2169,6 +2210,21 @@ ServiceWorkerManager::DispatchFetchEvent(nsIDocument* aDoc, nsIInterceptedChanne
   AutoSafeJSContext cx;
   if (!event->Dispatch(cx)) {
     return NS_ERROR_FAILURE;
+  }
+
+  NS_IF_ADDREF(serviceWorker);
+
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+ServiceWorkerManager::IsAvailableForURI(nsIURI* aURI, bool* aIsAvailable)
+{
+  nsRefPtr<ServiceWorkerRegistrationInfo> registration =
+    GetServiceWorkerRegistrationInfo(aURI);
+  *aIsAvailable = !!registration;
+  if (registration && !registration->mActiveWorker) {
+    *aIsAvailable = false;
   }
 
   return NS_OK;
@@ -2227,6 +2283,7 @@ ServiceWorkerManager::GetDocumentController(nsIDOMWindow* aWindow, nsISupports**
   }
 
   nsRefPtr<ServiceWorker> serviceWorker;
+  fprintf(stderr, "--- NSM Calling CreateServiceWorkerForWindow with window %p\n", window.get());
   rv = CreateServiceWorkerForWindow(window,
                                     registration->mActiveWorker->GetScriptSpec(),
                                     registration->mScope,
@@ -2301,7 +2358,7 @@ ServiceWorkerManager::CreateServiceWorker(const nsACString& aScriptSpec,
   AutoSafeJSContext cx;
 
   nsRefPtr<ServiceWorker> serviceWorker;
-  RuntimeService* rs = RuntimeService::GetService();
+  RuntimeService* rs = RuntimeService::GetOrCreateService();
   if (!rs) {
     return NS_ERROR_FAILURE;
   }
