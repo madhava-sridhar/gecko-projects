@@ -55,7 +55,7 @@ public:
     NoteClosed();
   }
 
-  virtual void NoteClosed() MOZ_OVERRIDE
+  virtual void NoteClosedOnWorkerThread() MOZ_OVERRIDE
   {
     if (mClosed) {
       return;
@@ -66,7 +66,7 @@ public:
     mControl->NoteClosed(mId);
   }
 
-  virtual void Forget() MOZ_OVERRIDE
+  virtual void ForgetOnWorkerThread() MOZ_OVERRIDE
   {
     if (mClosed) {
       return;
@@ -123,7 +123,7 @@ public:
     NoteClosed();
   }
 
-  virtual void NoteClosed() MOZ_OVERRIDE
+  virtual void NoteClosedOnWorkerThread() MOZ_OVERRIDE
   {
     if (mClosed) {
       return;
@@ -136,7 +136,7 @@ public:
     mControl = nullptr;
   }
 
-  virtual void Forget() MOZ_OVERRIDE
+  virtual void ForgetOnWorkerThread() MOZ_OVERRIDE
   {
     if (mClosed) {
       return;
@@ -195,6 +195,42 @@ using mozilla::ipc::FileDescriptorSetParent;
 using mozilla::ipc::InputStreamParams;
 using mozilla::ipc::OptionalFileDescriptorSet;
 using mozilla::ipc::PFileDescriptorSetChild;
+
+class ReadStream::NoteClosedRunnable MOZ_FINAL : public nsCancelableRunnable
+{
+public:
+  NoteClosedRunnable(ReadStream* aStream)
+    : mStream(aStream)
+  { }
+
+  NS_IMETHOD Run()
+  {
+    mStream->NoteClosedOnWorkerThread();
+    return NS_OK;
+  }
+private:
+  ~NoteClosedRunnable() { }
+
+  nsRefPtr<ReadStream> mStream;
+};
+
+class ReadStream::ForgetRunnable MOZ_FINAL : public nsCancelableRunnable
+{
+public:
+  ForgetRunnable(ReadStream* aStream)
+    : mStream(aStream)
+  { }
+
+  NS_IMETHOD Run()
+  {
+    mStream->ForgetOnWorkerThread();
+    return NS_OK;
+  }
+private:
+  ~ForgetRunnable() { }
+
+  nsRefPtr<ReadStream> mStream;
+};
 
 NS_IMPL_ISUPPORTS(mozilla::dom::cache::ReadStream, nsIInputStream,
                                                    ReadStream);
@@ -321,6 +357,7 @@ ReadStream::MatchId(const nsID& aId)
 ReadStream::ReadStream(const nsID& aId, nsIInputStream* aStream)
   : mId(aId)
   , mStream(aStream)
+  , mThread(NS_GetCurrentThread())
   , mClosed(false)
 {
   MOZ_ASSERT(mStream);
@@ -328,6 +365,44 @@ ReadStream::ReadStream(const nsID& aId, nsIInputStream* aStream)
 
 ReadStream::~ReadStream()
 {
+}
+
+void
+ReadStream::NoteClosed()
+{
+  if (mClosed) {
+    return;
+  }
+
+  if (NS_GetCurrentThread() == mThread) {
+    NoteClosedOnWorkerThread();
+    return;
+  }
+
+  nsCOMPtr<nsIRunnable> runnable = new NoteClosedRunnable(this);
+  nsresult rv = mThread->Dispatch(runnable, nsIThread::DISPATCH_NORMAL);
+  if (NS_FAILED(rv)) {
+    NS_WARNING("Failed to dispatch Cache ReadStream NoteClosed() runnable.");
+  }
+}
+
+void
+ReadStream::Forget()
+{
+  if (mClosed) {
+    return;
+  }
+
+  if (NS_GetCurrentThread() == mThread) {
+    ForgetOnWorkerThread();
+    return;
+  }
+
+  nsCOMPtr<nsIRunnable> runnable = new ForgetRunnable(this);
+  nsresult rv = mThread->Dispatch(runnable, nsIThread::DISPATCH_NORMAL);
+  if (NS_FAILED(rv)) {
+    NS_WARNING("Failed to dispatch Cache ReadStream Forget() runnable.");
+  }
 }
 
 NS_IMETHODIMP

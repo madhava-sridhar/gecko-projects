@@ -14,6 +14,7 @@
 #include "nsIInputStream.h"
 #include "nsISupportsImpl.h"
 
+class nsIThread;
 template<class T> class nsTArray;
 
 namespace mozilla {
@@ -54,8 +55,11 @@ protected:
   ReadStream(const nsID& aId, nsIInputStream* aStream);
   virtual ~ReadStream();
 
-  virtual void NoteClosed()=0;
-  virtual void Forget()=0;
+  void NoteClosed();
+  void Forget();
+
+  virtual void NoteClosedOnWorkerThread()=0;
+  virtual void ForgetOnWorkerThread()=0;
   virtual void SerializeControl(PCacheReadStream* aReadStreamOut)=0;
 
   virtual void
@@ -64,9 +68,13 @@ protected:
 
   const nsID mId;
   nsCOMPtr<nsIInputStream> mStream;
+  nsCOMPtr<nsIThread> mThread;
   bool mClosed;
 
 public:
+  class NoteClosedRunnable;
+  class ForgetRunnable;
+
   NS_DECLARE_STATIC_IID_ACCESSOR(NS_DOM_CACHE_IID);
 
   NS_DECL_THREADSAFE_ISUPPORTS
