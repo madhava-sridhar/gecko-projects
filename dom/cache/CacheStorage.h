@@ -8,7 +8,6 @@
 #define mozilla_dom_cache_CacheStorage_h
 
 #include "mozilla/dom/CacheBinding.h"
-#include "mozilla/dom/cache/CacheInitData.h"
 #include "mozilla/dom/cache/CacheStorageChildListener.h"
 #include "mozilla/dom/cache/Types.h"
 #include "mozilla/dom/cache/TypeUtils.h"
@@ -96,10 +95,16 @@ private:
   RequestId AddRequestPromise(Promise* aPromise, ErrorResult& aRv);
   already_AddRefed<Promise> RemoveRequestPromise(RequestId aRequestId);
 
-  const CacheInitData mInitData;
+  // Would like to use CacheInitData here, but we cannot because
+  // its an IPC struct which breaks webidl by including windows.h.
+  const Namespace mNamespace;
   // TODO: remove separate mOwner
   nsCOMPtr<nsISupports> mOwner;
   nsCOMPtr<nsIGlobalObject> mGlobal;
+  const nsCString mOrigin;
+  const nsCString mQuotaGroup;
+  const bool mIsApp;
+  const bool mHasUnlimStoragePerm;
   CacheStorageChild* mActor;
   nsTArray<nsRefPtr<Promise>> mRequestPromises;
 

@@ -11,6 +11,7 @@
 #include "mozilla/dom/Promise.h"
 #include "mozilla/dom/Response.h"
 #include "mozilla/dom/cache/Cache.h"
+#include "mozilla/dom/cache/CacheInitData.h"
 #include "mozilla/dom/cache/CacheStorageChild.h"
 #include "mozilla/dom/cache/PCacheChild.h"
 #include "mozilla/dom/cache/ReadStream.h"
@@ -47,17 +48,19 @@ CacheStorage::CacheStorage(Namespace aNamespace,
                            const nsACString& aOrigin,
                            const nsACString& aQuotaGroup,
                            bool aIsApp, bool aHasUnlimStoragePerm)
-  : mInitData(aNamespace, nsCString(aOrigin), nsCString(aQuotaGroup),
-              aIsApp, aHasUnlimStoragePerm)
+  : mNamespace(aNamespace)
   , mOwner(aOwner)
   , mGlobal(aGlobal)
+  , mOrigin(aOrigin)
+  , mQuotaGroup(aQuotaGroup)
+  , mIsApp(aIsApp)
+  , mHasUnlimStoragePerm(aHasUnlimStoragePerm)
   , mActor(nullptr)
   , mFailedActor(false)
 {
   MOZ_ASSERT(mGlobal);
 
-  if (mInitData.origin().EqualsLiteral("null") ||
-      mInitData.quotaGroup().EqualsLiteral("")) {
+  if (mOrigin.EqualsLiteral("null") || mQuotaGroup.EqualsLiteral("")) {
     ActorFailed();
     return;
   }
@@ -277,8 +280,10 @@ CacheStorage::ActorCreated(PBackgroundChild* aActor)
     return;
   }
 
+  CacheInitData initData(mNamespace, mOrigin, mQuotaGroup,
+                         mIsApp, mHasUnlimStoragePerm);
   PCacheStorageChild* constructedActor =
-    aActor->SendPCacheStorageConstructor(newActor, mInitData);
+    aActor->SendPCacheStorageConstructor(newActor, initData);
 
   if (NS_WARN_IF(!constructedActor)) {
     ActorFailed();
