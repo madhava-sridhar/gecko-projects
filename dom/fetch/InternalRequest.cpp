@@ -7,6 +7,9 @@
 
 #include "nsIContentPolicy.h"
 #include "nsIDocument.h"
+#include "nsIInputStreamTee.h"
+#include "nsIOutputStream.h"
+#include "nsIPipe.h"
 
 #include "mozilla/ErrorResult.h"
 #include "mozilla/dom/ScriptSettings.h"
@@ -16,6 +19,52 @@
 
 namespace mozilla {
 namespace dom {
+
+InternalRequest::InternalRequest(InternalRequest& aOther)
+  : mMethod(aOther.mMethod)
+  , mURL(aOther.mURL)
+  , mHeaders(new InternalHeaders(*aOther.mHeaders))
+  , mContext(aOther.mContext)
+  , mOrigin(aOther.mOrigin)
+  , mContextFrameType(aOther.mContextFrameType)
+  , mReferrerType(aOther.mReferrerType)
+  , mReferrerURL(aOther.mReferrerURL)
+  , mMode(aOther.mMode)
+  , mCredentialsMode(aOther.mCredentialsMode)
+  , mResponseTainting(aOther.mResponseTainting)
+  , mRedirectCount(aOther.mRedirectCount)
+  , mAuthenticationFlag(aOther.mAuthenticationFlag)
+  , mForceOriginHeader(aOther.mForceOriginHeader)
+  , mManualRedirect(aOther.mManualRedirect)
+  , mPreserveContentCodings(aOther.mPreserveContentCodings)
+  , mSameOriginDataURL(aOther.mSameOriginDataURL)
+  , mSandboxedStorageAreaURLs(aOther.mSandboxedStorageAreaURLs)
+  , mSkipServiceWorker(aOther.mSkipServiceWorker)
+  , mSynchronous(aOther.mSynchronous)
+  , mUnsafeRequest(aOther.mUnsafeRequest)
+  , mUseURLCredentials(aOther.mUseURLCredentials)
+{
+  if (!aOther.mBodyStream) {
+    return;
+  }
+
+  // TODO: Replace body stream Tee once cloneable streams available (bug 1100398)
+  nsCOMPtr<nsIInputStream> pipeReader;
+  nsCOMPtr<nsIOutputStream> pipeWriter;
+  nsresult rv = NS_NewPipe(getter_AddRefs(pipeReader),
+                           getter_AddRefs(pipeWriter));
+  if (NS_WARN_IF(NS_FAILED(rv))) { return; }
+
+  nsCOMPtr<nsIInputStream> tee;
+  rv = NS_NewInputStreamTee(getter_AddRefs(tee), aOther.mBodyStream,
+                            pipeWriter);
+  if (NS_WARN_IF(NS_FAILED(rv))) { return; }
+
+  // The pipe reader can get stalled if the tee is not being read.  Give the
+  // tee to the cloned stream as its more likely to be used first.
+  aOther.mBodyStream.swap(pipeReader);
+  mBodyStream.swap(tee);
+}
 
 // The global is used to extract the principal.
 already_AddRefed<InternalRequest>

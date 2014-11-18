@@ -78,32 +78,7 @@ public:
   {
   }
 
-  explicit InternalRequest(const InternalRequest& aOther)
-    : mMethod(aOther.mMethod)
-    , mURL(aOther.mURL)
-    , mHeaders(aOther.mHeaders)
-    , mBodyStream(aOther.mBodyStream)
-    , mContext(aOther.mContext)
-    , mOrigin(aOther.mOrigin)
-    , mContextFrameType(aOther.mContextFrameType)
-    , mReferrerType(aOther.mReferrerType)
-    , mReferrerURL(aOther.mReferrerURL)
-    , mMode(aOther.mMode)
-    , mCredentialsMode(aOther.mCredentialsMode)
-    , mResponseTainting(aOther.mResponseTainting)
-    , mRedirectCount(aOther.mRedirectCount)
-    , mAuthenticationFlag(aOther.mAuthenticationFlag)
-    , mForceOriginHeader(aOther.mForceOriginHeader)
-    , mManualRedirect(aOther.mManualRedirect)
-    , mPreserveContentCodings(aOther.mPreserveContentCodings)
-    , mSameOriginDataURL(aOther.mSameOriginDataURL)
-    , mSandboxedStorageAreaURLs(aOther.mSandboxedStorageAreaURLs)
-    , mSkipServiceWorker(aOther.mSkipServiceWorker)
-    , mSynchronous(aOther.mSynchronous)
-    , mUnsafeRequest(aOther.mUnsafeRequest)
-    , mUseURLCredentials(aOther.mUseURLCredentials)
-  {
-  }
+  explicit InternalRequest(InternalRequest& aOther);
 
   void
   GetMethod(nsCString& aMethod) const

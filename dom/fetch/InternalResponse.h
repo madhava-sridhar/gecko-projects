@@ -25,6 +25,8 @@ public:
 
   InternalResponse(uint16_t aStatus, const nsACString& aStatusText);
 
+  already_AddRefed<InternalResponse> Clone();
+
   static already_AddRefed<InternalResponse>
   NetworkError()
   {
@@ -115,7 +117,7 @@ private:
 
   // Used to create filtered responses.
   // Does not copy headers.
-  explicit InternalResponse(const InternalResponse& aOther);
+  explicit InternalResponse(InternalResponse& aOther);
 
   ResponseType mType;
   nsCString mTerminationReason;

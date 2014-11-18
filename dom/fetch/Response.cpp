@@ -139,7 +139,8 @@ already_AddRefed<Response>
 Response::Clone()
 {
   nsCOMPtr<nsIGlobalObject> global = do_QueryInterface(mOwner);
-  nsRefPtr<Response> response = new Response(global, mInternalResponse);
+  nsRefPtr<InternalResponse> ir = mInternalResponse->Clone();
+  nsRefPtr<Response> response = new Response(global, ir);
   return response.forget();
 }
 
