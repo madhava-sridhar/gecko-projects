@@ -43,14 +43,11 @@ caches.open('snafu').then(function(openCache) {
   var response = args[1];
   ok(response instanceof Response, 'value should be a Response');
   is(response.status, 200, 'Response status should be 200');
-  dump("### ### got first match, start second put\n");
   return Promise.all([snafu, snafu.put('./cachekey2', response)]);
 }).then(function(args) {
   var snafu = args[0]
-  dump("### ### second put done, start second match\n");
   return snafu.match('./cachekey2');
 }).then(function(response) {
-  dump("### ### got second match\n");
   return response.text().then(function(v) {
     is(v, "Hello world", "Response body should match original");
   });
