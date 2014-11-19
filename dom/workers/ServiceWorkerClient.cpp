@@ -9,6 +9,7 @@
 #include "mozilla/dom/MessageEvent.h"
 #include "nsGlobalWindow.h"
 #include "WorkerPrivate.h"
+#include "WorkerStructuredClone.h"
 
 #include "mozilla/dom/ServiceWorkerClientBinding.h"
 
@@ -38,16 +39,19 @@ class ServiceWorkerClientPostMessageRunnable MOZ_FINAL : public nsRunnable
 {
   uint64_t mId;
   JSAutoStructuredCloneBuffer mBuffer;
-  nsTArray<nsCOMPtr<nsISupports>> mClonedObjects;
+  WorkerStructuredCloneClosure mClosure;
 
 public:
-  ServiceWorkerClientPostMessageRunnable(uint64_t aId,
-                                         JSAutoStructuredCloneBuffer&& aData,
-                                         nsTArray<nsCOMPtr<nsISupports>>& aClonedObjects)
-    : mId(aId),
-      mBuffer(Move(aData))
+  ServiceWorkerClientPostMessageRunnable(uint64_t aId) : mId(aId)
+  { }
+
+  bool
+  Write(JSContext* aCx, JS::Handle<JS::Value> aValue,
+        JS::Handle<JS::Value> aTransferredValue,
+        const JSStructuredCloneCallbacks* aCallbacks)
   {
-    mClonedObjects.SwapElements(aClonedObjects);
+    return mBuffer.write(aCx, aValue, aTransferredValue, aCallbacks,
+                         &mClosure);
   }
 
   NS_IMETHOD
@@ -73,9 +77,9 @@ private:
     AssertIsOnMainThread();
 
     // Release reference to objects that were AddRef'd for
-    // cloning into worker when array goes out of scope.
-    nsTArray<nsCOMPtr<nsISupports>> clonedObjects;
-    clonedObjects.SwapElements(mClonedObjects);
+    // cloning into the ServiceWorkerClient when array goes out of scope.
+    WorkerStructuredCloneClosure closure;
+    closure.mClonedObjects.SwapElements(mClosure.mClonedObjects);
 
     JS::Rooted<JS::Value> messageData(aCx);
     if (!mBuffer.read(aCx, &messageData,
@@ -143,14 +147,9 @@ ServiceWorkerClient::PostMessage(JSContext* aCx, JS::Handle<JS::Value> aMessage,
 
   nsTArray<nsCOMPtr<nsISupports>> clonedObjects;
 
-  JSAutoStructuredCloneBuffer buffer;
-  if (!buffer.write(aCx, aMessage, transferable, callbacks, &clonedObjects)) {
-    aRv.Throw(NS_ERROR_DOM_DATA_CLONE_ERR);
-    return;
-  }
-
   nsRefPtr<ServiceWorkerClientPostMessageRunnable> runnable =
-    new ServiceWorkerClientPostMessageRunnable(mId, Move(buffer), clonedObjects);
+    new ServiceWorkerClientPostMessageRunnable(mId);
+  runnable->Write(aCx, aMessage, transferable, callbacks);
   nsresult rv = NS_DispatchToMainThread(runnable);
   if (NS_FAILED(rv)) {
     aRv.Throw(NS_ERROR_FAILURE);
