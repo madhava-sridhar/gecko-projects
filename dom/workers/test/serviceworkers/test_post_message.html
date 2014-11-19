@@ -15,10 +15,19 @@
 <pre id="test"></pre>
 <script class="testbody" type="text/javascript">
   var magic_value = "MAGIC_VALUE_123";
+  var registration;
   function start() {
     return navigator.serviceWorker.register("message_posting_worker.js",
-                                            { scope: "./sw_clients/" });
+                                            { scope: "./sw_clients/" })
+      .then((swr) => registration = swr);
   }
+
+  function unregister() {
+    return registration.unregister().then(function(result) {
+      ok(result, "Unregister should return true.");
+    });
+  }
+
 
   function testPostMessage(swr) {
     var p = new Promise(function(res, rej) {
@@ -36,16 +45,21 @@
       }
     });
 
-    var w;
-    setTimeout(function() {
-      w = window.open("sw_clients/service_worker_controlled.html");
-    }, 100);
-    return p.then(() => w.close());
+    var content = document.getElementById("content");
+    ok(content, "Parent exists.");
+
+    iframe = document.createElement("iframe");
+    iframe.setAttribute('src', "sw_clients/service_worker_controlled.html");
+    content.appendChild(iframe);
+
+    return p.then(() => content.removeChild(iframe));
   }
 
   function runTest() {
     start()
-      .then(testPostMessage).catch(function(e) {
+      .then(testPostMessage)
+      .then(unregister)
+      .catch(function(e) {
         ok(false, "Some test failed with error " + e);
       }).then(SimpleTest.finish);
   }

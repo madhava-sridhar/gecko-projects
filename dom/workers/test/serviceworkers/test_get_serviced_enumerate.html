@@ -19,18 +19,39 @@
   var results = [];
 
   function start() {
-  dump("~*~*~*~*~*~*~*~*~*~*~ About to register\n");
+    dump("~*~*~*~*~*~*~*~*~*~*~ About to register\n");
     return navigator.serviceWorker.register("get_serviced_worker_enumerate.js",
-                                            { scope: "./sw_clients/" }).then((swr) => registration = swr);
+                                            { scope: "./sw_clients/" })
+      .then((swr) => registration = swr);
   }
 
-  function openWindow() {
+  function closeAndUnregister() {
+    var content = document.getElementById("content");
+    ok(content, "Parent exists.");
+
+    while (opened.length) {
+      content.removeChild(opened.pop());
+    }
+
+    return registration.unregister().then(function(result) {
+      ok(result, "Unregister should return true.");
+    });
+  }
+
+  function openClient() {
     var p = new Promise(function(res, rej) {
-      var w = window.open("sw_clients/service_worker_controlled.html");
+
+      var content = document.getElementById("content");
+      ok(content, "Parent exists.");
+
+      var iframe = document.createElement("iframe");
+      iframe.setAttribute('src', "sw_clients/service_worker_controlled.html");
+
+      content.appendChild(iframe);
+
       window.onmessage = function(e) {
         if (e.data === "READY") {
-          opened.push(w);
-  dump("~*~*~*~*~*~*~*~*~*~*~ Opened window is ready\n");
+          opened.push(iframe);
           res();
         }
       }
@@ -41,12 +62,9 @@
   function testGetServiced() {
     var count = 0;
     return new Promise(function (res, rej) {
-      ok(registration.active, "Registration has active ServiceWorker");
-      var isCorrectWorker = registration.active.scriptURL.match(/enumerate.js$/);
-      ok(isCorrectWorker, "Active ServiceWorker must be get_serviced_worker_enumerate.js");
-      if (!isCorrectWorker) {
-        opened.forEach((w) => w.close());
-        rej();
+      if (!registration.active) {
+        ok(false, "Did not have active worker");
+        res();
         return;
       }
       registration.active.postMessage("getServiced");
@@ -66,16 +84,13 @@
 
   function runTest() {
     start()
-      .then(openWindow).then(openWindow)
-      .then(openWindow).then(openWindow)
+      .then(openClient).then(openClient)
+      .then(openClient).then(openClient)
       .then(testGetServiced)
-      .then(function(e) {
-        while (opened.length) {
-          opened.pop().close();
-        }
-        SimpleTest.finish();
-      }).catch(function(e) {
+      .then(closeAndUnregister)
+      .catch(function(e) {
         ok(false, "Some test failed with error " + e);
+      }).then(function() {
         SimpleTest.finish();
       });
   }

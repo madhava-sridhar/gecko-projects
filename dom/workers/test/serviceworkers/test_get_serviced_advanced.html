@@ -19,14 +19,33 @@
 
   function start() {
     return navigator.serviceWorker.register("get_serviced_worker_advanced.js",
-                                            { scope: "./sw_clients/" }).then((swr) => registration = swr);
+                                            { scope: "./sw_clients/" })
+      .then((swr) => registration = swr);
+  }
+
+  function closeAndUnregister() {
+    var content = document.getElementById("content");
+    ok(content, "Parent exists.");
+
+    while (opened.length) {
+      content.removeChild(opened.pop());
+    }
+
+    return registration.unregister().then(function(result) {
+      ok(result, "Unregister should return true.");
+    });
   }
 
   function testGetServiced() {
     var p = new Promise(function(res, rej) {
       window.onmessage = function(e) {
         if (e.data === "READY") {
-          opened.push(w);
+          if (!registration.active) {
+            ok(false, "Did not have active worker");
+            return Promise.resolve();
+          }
+
+          opened.push(iframe);
           registration.active.postMessage("getServiced");
         } else if (e.data === opened.length) {
           ok(true, "getServiced returned the correct value.");
@@ -38,16 +57,24 @@
         }
       }
     });
-    var w;
-    setTimeout(function() {
-      w = window.open("sw_clients/service_worker_controlled.html");
-    }, 100);
+
+    var content = document.getElementById("content");
+    ok(content, "Parent exists.");
+
+    var iframe = document.createElement("iframe");
+    iframe.setAttribute('src', "sw_clients/service_worker_controlled.html");
+    content.appendChild(iframe);
+
     return p;
   }
 
   function removeAndTest() {
-    opened.pop().close();
-    opened.pop().close();
+    var content = document.getElementById("content");
+    ok(content, "Parent exists.");
+
+    content.removeChild(opened.pop());
+    content.removeChild(opened.pop());
+
     return testGetServiced();
   }
 
@@ -57,13 +84,10 @@
       .then(testGetServiced)
       .then(testGetServiced)
       .then(removeAndTest)
-      .then(function(e) {
-        while (opened.length) {
-          opened.pop().close();
-        }
-        SimpleTest.finish();
-      }).catch(function(e) {
+      .then(closeAndUnregister)
+      .catch(function(e) {
         ok(false, "Some test failed with error " + e);
+      }).then(function() {
         SimpleTest.finish();
       });
   }

@@ -48,7 +48,14 @@
 
   function start() {
     return navigator.serviceWorker.register("message_posting_worker.js",
-                                            { scope: "./sw_clients/" }).then((swr) => registration = swr);
+                                            { scope: "./sw_clients/" })
+      .then((swr) => registration = swr);
+  }
+
+  function unregister() {
+    return registration.unregister().then(function(result) {
+      ok(result, "Unregister should return true.");
+    });
   }
 
   function testPostMessageObject(obj, test) {
@@ -62,8 +69,14 @@
       }
     });
 
-    var w = window.open("sw_clients/service_worker_controlled.html");
-    return p.then(() => w.close());
+    var content = document.getElementById("content");
+    ok(content, "Parent exists.");
+
+    iframe = document.createElement("iframe");
+    iframe.setAttribute('src', "sw_clients/service_worker_controlled.html");
+    content.appendChild(iframe);
+
+    return p.then(() => content.removeChild(iframe));
   }
 
   function runTest() {
@@ -71,9 +84,10 @@
       .then(testPostMessageObject.bind(this, base[0], equals))
       .then(testPostMessageObject.bind(this, base[1], equals))
       .then(testPostMessageObject.bind(this, base[2], equals))
-    //  .then(testPostMessageObject.bind(this, blob, blob_equals))
-    //  .then(testPostMessageObject.bind(this, file, file_equals))
-      //.then(testPostMessageObject.bind(this, obj, obj_equals))
+      .then(testPostMessageObject.bind(this, blob, blob_equals))
+      .then(testPostMessageObject.bind(this, file, file_equals))
+      .then(testPostMessageObject.bind(this, obj, obj_equals))
+      .then(unregister)
       .catch(function(e) {
         ok(false, "Some test failed with error " + e);
       }).then(SimpleTest.finish);
