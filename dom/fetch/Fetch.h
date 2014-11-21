@@ -6,14 +6,19 @@
 #ifndef mozilla_dom_Fetch_h
 #define mozilla_dom_Fetch_h
 
+#include "nsIStreamLoader.h"
+
 #include "nsCOMPtr.h"
 #include "nsError.h"
+#include "nsProxyRelease.h"
 #include "nsString.h"
+
 #include "mozilla/ErrorResult.h"
 #include "mozilla/dom/RequestBinding.h"
+#include "mozilla/dom/workers/bindings/WorkerFeature.h"
 
-class nsIGlobalObject;
-class nsIInputStream;
+class nsIInputStreamPump;
+class nsIOutputStream;
 class nsIGlobalObject;
 
 namespace mozilla {
@@ -54,6 +59,41 @@ ExtractByteStreamFromBody(const ArrayBufferOrArrayBufferViewOrBlobOrScalarValueS
                           nsIInputStream** aStream,
                           nsCString& aContentType);
 
+template <class Derived> class FetchBodyFeature;
+
+/*
+ * FetchBody's body consumption uses nsIInputStreamPump to read from the
+ * underlying stream to a block of memory, which is then adopted by
+ * ContinueConsumeBody() and converted to the right type based on the JS
+ * function called.
+ *
+ * Use of the nsIInputStreamPump complicates things on the worker thread.
+ * The solution used here is similar to WebSockets.
+ * The difference is that we are only interested in completion and not data
+ * events, and nsIInputStreamPump can only deliver completion on the main thread.
+ *
+ * Before starting the pump on the main thread, we addref the FetchBody to keep
+ * it alive. Then we add a feature, to track the status of the worker.
+ *
+ * ContinueConsumeBody() is the function that cleans things up in both success
+ * and error conditions and so all callers call it with the appropriate status.
+ *
+ * Once the read is initiated on the main thread there are two possibilities.
+ *
+ * 1) Pump finishes before worker has finished Running.
+ *    In this case we adopt the data and dispatch a runnable to the worker,
+ *    which derefs FetchBody and removes the feature and resolves the Promise.
+ *
+ * 2) Pump still working while worker has stopped Running.
+ *    The feature is Notify()ed and ContinueConsumeBody() is called with
+ *    NS_BINDING_ABORTED. We first Cancel() the pump using a sync runnable to
+ *    ensure that mFetchBody remains alive (since mConsumeBodyPump is strongly
+ *    held by it) until pump->Cancel() is called. OnStreamComplete() will not
+ *    do anything if the error code is NS_BINDING_ABORTED, so we don't have to
+ *    worry about keeping anything alive.
+ *
+ * The pump is always released on the main thread.
+ */
 template <class Derived>
 class FetchBody {
 public:
@@ -90,12 +130,27 @@ public:
     return ConsumeBody(CONSUME_TEXT, aRv);
   }
 
+  // Utility public methods accessed by various runnables.
   void
-  TryFinishConsumeBody();
+  BeginConsumeBodyMainThread();
+
+  void
+  ContinueConsumeBody(nsresult aStatus, uint32_t aLength, uint8_t* aResult);
+
+  void
+  CancelPump();
+
+  // Always set whenever the FetchBody is created on the worker thread.
+  workers::WorkerPrivate* mWorkerPrivate;
+
+  // Set when consuming the body is attempted on a worker.
+  // Unset when consumption is done/aborted.
+  nsAutoPtr<FetchBodyFeature<Derived>> mFeature;
 
 protected:
-  FetchBody()
-    : mBodyUsed(false)
+  FetchBody();
+
+  virtual ~FetchBody()
   {
   }
 
@@ -118,22 +173,46 @@ private:
     return static_cast<Derived*>(const_cast<FetchBody*>(this));
   }
 
-  void
-  FinishConsumeBody();
+  nsresult
+  BeginConsumeBody();
 
   already_AddRefed<Promise>
   ConsumeBody(ConsumeType aType, ErrorResult& aRv);
 
+  bool
+  AddRefObject();
+
+  void
+  ReleaseObject();
+
+  bool
+  RegisterFeature();
+
+  void
+  UnregisterFeature();
+
+  bool
+  IsOnTargetThread()
+  {
+    return NS_IsMainThread() == !mWorkerPrivate;
+  }
+
+  void
+  AssertIsOnTargetThread()
+  {
+    MOZ_ASSERT(IsOnTargetThread());
+  }
+
+  // Only ever set once, always on target thread.
   bool mBodyUsed;
   nsCString mMimeType;
 
-  // If the body stream is not yet available, the consume body algorithm will
-  // initialize this promise, then wait for the stream to be available, and
-  // resolve this Promise with the contents.
-  //
-  // The first call to ConsumeBody() sets these, subsequent calls are rejected.
-  nsRefPtr<Promise> mDelayedConsumePromise;
-  ConsumeType mDelayedConsumeType;
+  // Only touched on target thread.
+  ConsumeType mConsumeType;
+  nsRefPtr<Promise> mConsumePromise;
+  bool mReadDone;
+
+  nsMainThreadPtrHandle<nsIInputStreamPump> mConsumeBodyPump;
 };
 
 } // namespace dom
