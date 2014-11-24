@@ -7,9 +7,10 @@
 
 #include "nsIAsyncInputStream.h"
 #include "nsIAsyncOutputStream.h"
+#include "nsIHttpChannel.h"
 #include "nsIHttpHeaderVisitor.h"
 #include "nsIScriptSecurityManager.h"
-#include "nsIHttpChannel.h"
+#include "nsIThreadRetargetableRequest.h"
 #include "nsIUploadChannel2.h"
 
 #include "nsContentPolicyUtils.h"
@@ -547,6 +548,14 @@ FetchDriver::OnStartRequest(nsIRequest* aRequest,
   nsCOMPtr<nsIInputStream> cast = do_QueryInterface(pipeInputStream);
   mResponse->SetBody(cast);
 
+  // Try to retarget off main thread.
+  nsCOMPtr<nsIEventTarget> sts = do_GetService(NS_STREAMTRANSPORTSERVICE_CONTRACTID);
+  if (sts) {
+    nsCOMPtr<nsIThreadRetargetableRequest> rr = do_QueryInterface(aRequest);
+    if (rr) {
+      rr->RetargetDeliveryTo(sts);
+    }
+  }
   return NS_OK;
 }
 
@@ -561,11 +570,9 @@ FetchDriver::OnDataAvailable(nsIRequest* aRequest,
   MOZ_ASSERT(mResponse);
   MOZ_ASSERT(mPipeOutputStream);
 
-  NS_WARNING("About to write to output, might block");
   nsresult rv = aInputStream->ReadSegments(NS_CopySegmentToStream,
                                            mPipeOutputStream,
                                            aCount, &aRead);
-  NS_WARNING("Wrote to output.");
   return rv;
 }
 
