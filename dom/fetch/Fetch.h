@@ -131,7 +131,7 @@ public:
   }
 
   // Utility public methods accessed by various runnables.
-  void
+  nsresult
   BeginConsumeBodyMainThread();
 
   void

@@ -10,6 +10,7 @@
 #include "nsIInputStreamPump.h"
 #include "nsIStreamLoader.h"
 #include "nsIStringStream.h"
+#include "nsIThreadRetargetableRequest.h"
 #include "nsIUnicodeDecoder.h"
 #include "nsIUnicodeEncoder.h"
 
@@ -976,7 +977,7 @@ FetchBody<Derived>::BeginConsumeBody()
 }
 
 template <class Derived>
-void
+nsresult
 FetchBody<Derived>::BeginConsumeBodyMainThread()
 {
   AssertIsOnMainThread();
@@ -985,34 +986,45 @@ FetchBody<Derived>::BeginConsumeBodyMainThread()
   nsCOMPtr<nsIInputStream> stream;
   DerivedClass()->GetBody(getter_AddRefs(stream));
   if (!stream) {
-    return;
+    NS_WARNING("Could not get stream");
+    return NS_ERROR_FAILURE;
   }
 
   nsCOMPtr<nsIInputStreamPump> pump;
   rv = NS_NewInputStreamPump(getter_AddRefs(pump),
                              stream);
   if (NS_WARN_IF(NS_FAILED(rv))) {
-    return;
+    return rv;
   }
 
   nsRefPtr<ConsumeBodyDoneObserver<Derived>> p = new ConsumeBodyDoneObserver<Derived>(this);
   nsCOMPtr<nsIStreamLoader> loader;
   rv = NS_NewStreamLoader(getter_AddRefs(loader), p);
   if (NS_WARN_IF(NS_FAILED(rv))) {
-    return;
+    return rv;
   }
 
-  // FIXME(Nsm): Retarget to target thread!
   rv = pump->AsyncRead(loader, nullptr);
   if (NS_WARN_IF(NS_FAILED(rv))) {
-    return;
+    return rv;
   }
 
   autoReject.DontFail();
   // Now that everything succeeded, we can assign the pump to a pointer that
   // stays alive for the lifetime of the FetchBody.
   mConsumeBodyPump = new nsMainThreadPtrHolder<nsIInputStreamPump>(pump);
-  return;
+
+  // Try to retarget, otherwise fall back to main thread.
+  nsCOMPtr<nsIThreadRetargetableRequest> rr = do_QueryInterface(pump);
+  if (rr) {
+    nsCOMPtr<nsIEventTarget> sts = do_GetService(NS_STREAMTRANSPORTSERVICE_CONTRACTID);
+    rv = rr->RetargetDeliveryTo(sts);
+    if (NS_WARN_IF(NS_FAILED(rv))) {
+      NS_WARNING("Retargeting failed");
+    }
+  }
+
+  return NS_OK;
 }
 
 template <class Derived>
