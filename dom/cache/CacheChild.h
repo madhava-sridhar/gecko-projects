@@ -36,9 +36,6 @@ public:
   RecvMatchAllResponse(const RequestId& requestId, const nsresult& aRv,
                        const nsTArray<PCacheResponse>& responses) MOZ_OVERRIDE;
   virtual bool
-  RecvAddResponse(const RequestId& requestId, const nsresult& aRv) MOZ_OVERRIDE;
-
-  virtual bool
   RecvAddAllResponse(const RequestId& requestId,
                      const nsresult& aRv) MOZ_OVERRIDE;
   virtual bool

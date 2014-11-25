@@ -22,16 +22,14 @@ protocol PCache
 parent:
   Match(RequestId requestId, PCacheRequest request, PCacheQueryParams params);
   MatchAll(RequestId requestId, PCacheRequestOrVoid request, PCacheQueryParams params);
-  Add(RequestId requestId, PCacheRequest request);
   AddAll(RequestId requestId, PCacheRequest[] requests);
-  Put(RequestId requestId, PCacheRequest request, PCacheResponse response);
+  Put(RequestId requestId, CacheRequestResponse aPut);
   Delete(RequestId requestId, PCacheRequest request, PCacheQueryParams params);
   Keys(RequestId requestId, PCacheRequestOrVoid request, PCacheQueryParams params);
 
 child:
   MatchResponse(RequestId requestId, nsresult aRv, PCacheResponseOrVoid aResponse);
   MatchAllResponse(RequestId requestId, nsresult aRv, PCacheResponse[] responses);
-  AddResponse(RequestId requestId, nsresult aRv);
   AddAllResponse(RequestId requestId, nsresult aRv);
   PutResponse(RequestId requestId, nsresult aRv);
   DeleteResponse(RequestId requestId, nsresult aRv, bool success);

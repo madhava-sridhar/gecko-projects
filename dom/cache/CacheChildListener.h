@@ -37,9 +37,6 @@ public:
   RecvMatchAllResponse(RequestId aRequestId, nsresult aRv,
                        const nsTArray<PCacheResponse>& aResponses)=0;
   virtual void
-  RecvAddResponse(RequestId aRequestId, nsresult aRv)=0;
-
-  virtual void
   RecvAddAllResponse(RequestId aRequestId, nsresult aRv)=0;
 
   virtual void

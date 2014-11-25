@@ -214,6 +214,12 @@ public:
     aOrigin.Assign(mOrigin);
   }
 
+  void
+  SetOrigin(const nsACString& aOrigin)
+  {
+    mOrigin = aOrigin;
+  }
+
   bool
   SameOriginDataURL() const
   {

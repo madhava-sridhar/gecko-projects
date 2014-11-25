@@ -112,7 +112,7 @@ CacheStorage::Match(const RequestOrScalarValueString& aRequest,
   }
 
   PCacheRequest request;
-  ToPCacheRequest(request, aRequest, false, aRv);
+  ToPCacheRequest(request, aRequest, IgnoreBody, PassThroughReferrer, aRv);
   if (NS_WARN_IF(aRv.Failed())) {
     nsRefPtr<Promise> unused = RemoveRequestPromise(requestId);
     return nullptr;
@@ -301,7 +301,8 @@ CacheStorage::ActorCreated(PBackgroundChild* aActor)
       {
         PCacheRequest request;
         ErrorResult rv;
-        ToPCacheRequest(request, entry.mRequest, false, rv);
+        ToPCacheRequest(request, entry.mRequest, IgnoreBody,
+                        PassThroughReferrer, rv);
         if (NS_WARN_IF(rv.Failed())) {
           nsRefPtr<Promise> promise = RemoveRequestPromise(requestId);
           if (promise) {
@@ -430,7 +431,7 @@ CacheStorage::RecvOpenResponse(RequestId aRequestId, nsresult aRv,
     return;
   }
 
-  nsRefPtr<Cache> cache = new Cache(mOwner, mGlobal, aActor);
+  nsRefPtr<Cache> cache = new Cache(mOwner, mGlobal, mOrigin, aActor);
   promise->MaybeResolve(cache);
 }
 
@@ -476,6 +477,12 @@ nsIGlobalObject*
 CacheStorage::GetGlobalObject() const
 {
   return mGlobal;
+}
+
+const nsACString&
+CacheStorage::Origin() const
+{
+  return mOrigin;
 }
 
 #ifdef DEBUG

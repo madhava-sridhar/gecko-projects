@@ -77,6 +77,12 @@ union PCacheResponseOrVoid
   PCacheResponse;
 };
 
+struct CacheRequestResponse
+{
+  PCacheRequest request;
+  PCacheResponse response;
+};
+
 } // namespace cache
 } // namespace dom
 } // namespace mozilla

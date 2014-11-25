@@ -745,6 +745,9 @@ DBSchema::MatchByVaryHeader(mozIStorageConnection* aConn,
 
   nsRefPtr<InternalHeaders> queryHeaders = new InternalHeaders(aRequest.headers());
 
+  // Assume the vary headers match until we find a conflict
+  bool varyHeadersMatch = true;
+
   for (uint32_t i = 0; i < varyValues.Length(); ++i) {
     if (varyValues[i].EqualsLiteral("*")) {
       continue;
@@ -759,12 +762,12 @@ DBSchema::MatchByVaryHeader(mozIStorageConnection* aConn,
     if (errorResult.Failed()) { return errorResult.ErrorCode(); };
 
     if (queryValue != cachedValue) {
-      *aSuccessOut = false;
-      return rv;
+      varyHeadersMatch = false;
+      break;
     }
   }
 
-  *aSuccessOut = true;
+  *aSuccessOut = varyHeadersMatch;
   return rv;
 }
 

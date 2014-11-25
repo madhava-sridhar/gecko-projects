@@ -372,26 +372,36 @@ protected:
   nsTArray<SavedResponse> mSavedResponses;
 };
 
-class Manager::CachePutAction MOZ_FINAL : public DBAction
+class Manager::CachePutAllAction MOZ_FINAL : public DBAction
 {
 public:
-  CachePutAction(Manager* aManager, ListenerId aListenerId,
-                 RequestId aRequestId, CacheId aCacheId,
-                 const PCacheRequest& aRequest,
-                 nsIInputStream* aRequestBodyStream,
-                 const PCacheResponse& aResponse,
-                 nsIInputStream* aResponseBodyStream)
+  CachePutAllAction(Manager* aManager, ListenerId aListenerId,
+                    RequestId aRequestId, CacheId aCacheId,
+                    const nsTArray<CacheRequestResponse>& aPutList,
+                    const nsTArray<nsCOMPtr<nsIInputStream>>& aRequestStreamList,
+                    const nsTArray<nsCOMPtr<nsIInputStream>>& aResponseStreamList)
     : DBAction(DBAction::Existing, aManager->mInitData)
     , mManager(aManager)
     , mListenerId(aListenerId)
     , mRequestId(aRequestId)
     , mCacheId(aCacheId)
-    , mRequest(aRequest)
-    , mRequestBodyStream(aRequestBodyStream)
-    , mResponse(aResponse)
-    , mResponseBodyStream(aResponseBodyStream)
+    , mList(aPutList.Length())
     , mExpectedAsyncCopyCompletions(0)
-  { }
+  {
+    MOZ_ASSERT(aPutList.Length() == aRequestStreamList.Length());
+    MOZ_ASSERT(aPutList.Length() == aResponseStreamList.Length());
+
+    for (uint32_t i = 0; i < aPutList.Length(); ++i) {
+      Entry* entry = mList.AppendElement();
+      entry->mRequest = aPutList[i].request();
+      entry->mRequestStream = aRequestStreamList[i];
+      entry->mResponse = aPutList[i].response();
+      entry->mResponseStream = aResponseStreamList[i];
+
+      mExpectedAsyncCopyCompletions += entry->mRequestStream ? 1 : 0;
+      mExpectedAsyncCopyCompletions += entry->mResponseStream ? 1 : 0;
+    }
+  }
 
   virtual void
   RunWithDBOnTarget(Resolver* aResolver, nsIFile* aDBDir,
@@ -408,30 +418,31 @@ public:
     mDBDir = aDBDir;
     mConn = aConn;
 
-    mExpectedAsyncCopyCompletions = mRequestBodyStream ? 1 : 0;
-    mExpectedAsyncCopyCompletions += mResponseBodyStream ? 1 : 0;
-
     if (mExpectedAsyncCopyCompletions < 1) {
       mExpectedAsyncCopyCompletions = 1;
       OnAsyncCopyComplete(NS_OK);
       return;
     }
 
-    nsresult rv = StartStreamCopy(mRequestBodyStream, &mRequestBodyId,
-                                  getter_AddRefs(mRequestBodyCopyContext));
-    if (NS_WARN_IF(NS_FAILED(rv))) {
-      DoResolve(rv);
-      return;
-    }
+    nsresult rv = NS_OK;
+    for (uint32_t i = 0; i < mList.Length(); ++i) {
+      rv = StartStreamCopy(mList[i].mRequestStream,
+                           &mList[i].mRequestBodyId,
+                           getter_AddRefs(mList[i].mRequestCopyContext));
+      if (NS_WARN_IF(NS_FAILED(rv))) {
+        CancelAllStreamCopying();
+        DoResolve(rv);
+        return;
+      }
 
-    rv = StartStreamCopy(mResponseBodyStream, &mResponseBodyId,
-                         getter_AddRefs(mResponseBodyCopyContext));
-    if (NS_WARN_IF(NS_FAILED(rv))) {
-      CancelStreamCopy(mRequestBodyStream, mRequestBodyCopyContext,
-                       mRequestBodyId);
-      mRequestBodyCopyContext = nullptr;
-      DoResolve(rv);
-      return;
+      rv = StartStreamCopy(mList[i].mResponseStream,
+                           &mList[i].mResponseBodyId,
+                           getter_AddRefs(mList[i].mResponseCopyContext));
+      if (NS_WARN_IF(NS_FAILED(rv))) {
+        CancelAllStreamCopying();
+        DoResolve(rv);
+        return;
+      }
     }
   }
 
@@ -457,38 +468,38 @@ public:
       return;
     }
 
-    mRequestBodyCopyContext = nullptr;
-    mResponseBodyCopyContext = nullptr;
-
-    nsresult rv = NS_OK;
-
-    if (mRequestBodyStream) {
-      rv = FileUtils::BodyFinalizeWrite(mDBDir, mRequestBodyId);
-      if (NS_WARN_IF(NS_FAILED(rv))) {
-        DoResolve(rv);
-        return;
-      }
-    }
-
-    if (mResponseBodyStream) {
-      rv = FileUtils::BodyFinalizeWrite(mDBDir, mResponseBodyId);
-      if (NS_WARN_IF(NS_FAILED(rv))) {
-        DoResolve(rv);
-        return;
-      }
-    }
-
     mozStorageTransaction trans(mConn, false,
                                 mozIStorageConnection::TRANSACTION_IMMEDIATE);
 
-    rv = DBSchema::CachePut(mConn, mCacheId, mRequest,
-                            mRequestBodyStream ? &mRequestBodyId : nullptr,
-                            mResponse,
-                            mResponseBodyStream ? &mResponseBodyId : nullptr,
-                            mDeletedBodyIdList);
-    if (NS_WARN_IF(NS_FAILED(rv))) {
-      DoResolve(rv);
-      return;
+    nsresult rv = NS_OK;
+    for (uint32_t i = 0; i < mList.Length(); ++i) {
+      Entry& e = mList[i];
+      if (e.mRequestStream) {
+        e.mRequestCopyContext = nullptr;
+        rv = FileUtils::BodyFinalizeWrite(mDBDir, e.mRequestBodyId);
+        if (NS_WARN_IF(NS_FAILED(rv))) {
+          DoResolve(rv);
+          return;
+        }
+      }
+      if (e.mResponseStream) {
+        e.mResponseCopyContext = nullptr;
+        rv = FileUtils::BodyFinalizeWrite(mDBDir, e.mResponseBodyId);
+        if (NS_WARN_IF(NS_FAILED(rv))) {
+          DoResolve(rv);
+          return;
+        }
+      }
+
+      rv = DBSchema::CachePut(mConn, mCacheId, e.mRequest,
+                              e.mRequestStream ? &e.mRequestBodyId : nullptr,
+                              e.mResponse,
+                              e.mResponseStream ? &e.mResponseBodyId : nullptr,
+                              mDeletedBodyIdList);
+      if (NS_WARN_IF(NS_FAILED(rv))) {
+        DoResolve(rv);
+        return;
+      }
     }
 
     rv = trans.Commit();
@@ -505,8 +516,10 @@ public:
   {
     NS_ASSERT_OWNINGTHREAD(Action);
 
-    mRequestBodyStream = nullptr;
-    mResponseBodyStream = nullptr;
+    for (uint32_t i = 0; i < mList.Length(); ++i) {
+      mList[i].mRequestStream = nullptr;
+      mList[i].mResponseStream = nullptr;
+    }
 
     mManager->NoteOrphanedBodyIdList(mDeletedBodyIdList);
 
@@ -515,22 +528,13 @@ public:
     if (!listener) {
       return;
     }
-    if (NS_FAILED(aRv)) {
-      listener->OnCachePut(mRequestId, aRv);
-    } else {
-      listener->OnCachePut(mRequestId, aRv);
-    }
+    listener->OnCachePutAll(mRequestId, aRv);
   }
 
   virtual void
   CancelOnTarget() MOZ_OVERRIDE
   {
-    CancelStreamCopy(mRequestBodyStream, mRequestBodyCopyContext,
-                     mRequestBodyId);
-    mRequestBodyCopyContext = nullptr;
-    CancelStreamCopy(mResponseBodyStream, mResponseBodyCopyContext,
-                     mResponseBodyId);
-    mResponseBodyCopyContext = nullptr;
+    CancelAllStreamCopying();
     mConn = nullptr;
     mResolver = nullptr;
   }
@@ -541,7 +545,7 @@ public:
   }
 
 private:
-  virtual ~CachePutAction() { }
+  virtual ~CachePutAllAction() { }
 
   nsresult
   StartStreamCopy(nsIInputStream* aSource, nsID* aIdOut,
@@ -568,6 +572,24 @@ private:
   }
 
   void
+  CancelAllStreamCopying()
+  {
+    for (uint32_t i = 0; i < mList.Length(); ++i) {
+      Entry& e = mList[i];
+      if (e.mRequestStream && e.mRequestCopyContext) {
+        CancelStreamCopy(e.mRequestStream, e.mRequestCopyContext,
+                         e.mRequestBodyId);
+        e.mRequestCopyContext = nullptr;
+      }
+      if (e.mResponseStream && e.mResponseCopyContext) {
+        CancelStreamCopy(e.mResponseStream, e.mResponseCopyContext,
+                         e.mResponseBodyId);
+        e.mResponseCopyContext = nullptr;
+      }
+    }
+  }
+
+  void
   CancelStreamCopy(nsIInputStream* aSource, nsISupports* aCopyContext,
                    const nsID& aId)
   {
@@ -581,7 +603,7 @@ private:
   AsyncCopyCompleteFunc(void* aClosure, nsresult aRv)
   {
     MOZ_ASSERT(aClosure);
-    CachePutAction* action = static_cast<CachePutAction*>(aClosure);
+    CachePutAllAction* action = static_cast<CachePutAllAction*>(aClosure);
     action->OnAsyncCopyComplete(aRv);
   }
 
@@ -589,42 +611,43 @@ private:
   DoResolve(nsresult aRv)
   {
     if (NS_FAILED(aRv)) {
-      CancelStreamCopy(mRequestBodyStream, mRequestBodyCopyContext,
-                       mRequestBodyId);
-      CancelStreamCopy(mResponseBodyStream, mResponseBodyCopyContext,
-                       mResponseBodyId);
+      CancelAllStreamCopying();
     }
 
     mConn = nullptr;
-    mRequestBodyCopyContext = nullptr;
-    mResponseBodyCopyContext = nullptr;
 
     nsRefPtr<Resolver> resolver;
     mResolver.swap(resolver);
 
     if (resolver) {
-      // This can trigger self desctruction if a self-ref is not held by the
+      // This can trigger self destruction if a self-ref is not held by the
       // caller.
       resolver->Resolve(aRv);
     }
   }
 
+  struct Entry
+  {
+    PCacheRequest mRequest;
+    nsCOMPtr<nsIInputStream> mRequestStream;
+    nsID mRequestBodyId;
+    nsCOMPtr<nsISupports> mRequestCopyContext;
+
+    PCacheResponse mResponse;
+    nsCOMPtr<nsIInputStream> mResponseStream;
+    nsID mResponseBodyId;
+    nsCOMPtr<nsISupports> mResponseCopyContext;
+  };
+
   nsRefPtr<Manager> mManager;
   const ListenerId mListenerId;
   const RequestId mRequestId;
   const CacheId mCacheId;
-  const PCacheRequest mRequest;
-  nsCOMPtr<nsIInputStream> mRequestBodyStream;
-  const PCacheResponse mResponse;
-  nsCOMPtr<nsIInputStream> mResponseBodyStream;
+  nsTArray<Entry> mList;
   nsRefPtr<Resolver> mResolver;
   nsCOMPtr<nsIFile> mDBDir;
   nsCOMPtr<mozIStorageConnection> mConn;
   uint32_t mExpectedAsyncCopyCompletions;
-  nsID mRequestBodyId;
-  nsCOMPtr<nsISupports> mRequestBodyCopyContext;
-  nsID mResponseBodyId;
-  nsCOMPtr<nsISupports> mResponseBodyCopyContext;
   nsTArray<nsID> mDeletedBodyIdList;
 };
 
@@ -1261,23 +1284,22 @@ Manager::CacheMatchAll(Listener* aListener, RequestId aRequestId,
 }
 
 void
-Manager::CachePut(Listener* aListener, RequestId aRequestId, CacheId aCacheId,
-                  const PCacheRequest& aRequest,
-                  nsIInputStream* aRequestBodyStream,
-                  const PCacheResponse& aResponse,
-                  nsIInputStream* aResponseBodyStream)
+Manager::CachePutAll(Listener* aListener, RequestId aRequestId, CacheId aCacheId,
+                     const nsTArray<CacheRequestResponse>& aPutList,
+                     const nsTArray<nsCOMPtr<nsIInputStream>>& aRequestStreamList,
+                     const nsTArray<nsCOMPtr<nsIInputStream>>& aResponseStreamList)
 {
   NS_ASSERT_OWNINGTHREAD(Context::Listener);
   MOZ_ASSERT(aListener);
   if (mShuttingDown) {
-    aListener->OnCachePut(aRequestId, NS_ERROR_ILLEGAL_DURING_SHUTDOWN);
+    aListener->OnCachePutAll(aRequestId, NS_ERROR_ILLEGAL_DURING_SHUTDOWN);
     return;
   }
   ListenerId listenerId = SaveListener(aListener);
-  nsRefPtr<Action> action = new CachePutAction(this, listenerId, aRequestId,
-                                               aCacheId,
-                                               aRequest, aRequestBodyStream,
-                                               aResponse, aResponseBodyStream);
+  nsRefPtr<Action> action = new CachePutAllAction(this, listenerId, aRequestId,
+                                                  aCacheId, aPutList,
+                                                  aRequestStreamList,
+                                                  aResponseStreamList);
   CurrentContext()->Dispatch(mIOThread, action);
 }
 

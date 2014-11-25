@@ -24,6 +24,7 @@ namespace mozilla {
 namespace dom {
 namespace cache {
 
+class CacheRequestResponse;
 class PCacheQueryParams;
 class PCacheRequest;
 class PCacheRequestOrVoid;
@@ -94,7 +95,7 @@ public:
     virtual void OnCacheMatchAll(RequestId aRequestId, nsresult aRv,
                                  const nsTArray<SavedResponse>& aSavedResponses,
                                  StreamList* aStreamList) { }
-    virtual void OnCachePut(RequestId aRequestId, nsresult aRv) { }
+    virtual void OnCachePutAll(RequestId aRequestId, nsresult aRv) { }
     virtual void OnCacheDelete(RequestId aRequestId, nsresult aRv,
                                bool aSuccess) { }
     virtual void OnCacheKeys(RequestId aRequestId, nsresult aRv,
@@ -130,11 +131,10 @@ public:
   void CacheMatchAll(Listener* aListener, RequestId aRequestId,
                      CacheId aCacheId, const PCacheRequestOrVoid& aRequestOrVoid,
                      const PCacheQueryParams& aParams);
-  void CachePut(Listener* aListener, RequestId aRequestId, CacheId aCacheId,
-                const PCacheRequest& aRequest,
-                nsIInputStream* aRequestBodyStream,
-                const PCacheResponse& aResponse,
-                nsIInputStream* aResponseBodyStream);
+  void CachePutAll(Listener* aListener, RequestId aRequestId, CacheId aCacheId,
+                   const nsTArray<CacheRequestResponse>& aPutList,
+                   const nsTArray<nsCOMPtr<nsIInputStream>>& aRequestStreamList,
+                   const nsTArray<nsCOMPtr<nsIInputStream>>& aResponseStreamList);
   void CacheDelete(Listener* aListener, RequestId aRequestId,
                    CacheId aCacheId, const PCacheRequest& aRequest,
                    const PCacheQueryParams& aParams);
@@ -167,7 +167,7 @@ private:
 
   class CacheMatchAction;
   class CacheMatchAllAction;
-  class CachePutAction;
+  class CachePutAllAction;
   class CacheDeleteAction;
   class CacheKeysAction;
 

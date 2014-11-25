@@ -116,8 +116,9 @@ using mozilla::ipc::OptionalFileDescriptorSet;
 
 void
 TypeUtils::ToPCacheRequest(PCacheRequest& aOut,
-                           const RequestOrScalarValueString& aIn, bool aReadBody,
-                           ErrorResult& aRv)
+                           const RequestOrScalarValueString& aIn,
+                           BodyAction aBodyAction,
+                           ReferrerAction aReferrerAction, ErrorResult& aRv)
 {
   AutoJSAPI jsapi;
   jsapi.Init(GetGlobalObject());
@@ -127,13 +128,14 @@ TypeUtils::ToPCacheRequest(PCacheRequest& aOut,
 
   GlobalObject global(cx, jsGlobal);
 
-  ToPCacheRequest(global, aOut, aIn, aReadBody, aRv);
+  ToPCacheRequest(global, aOut, aIn, aBodyAction, aReferrerAction, aRv);
 }
 
 void
 TypeUtils::ToPCacheRequest(PCacheRequest& aOut,
                            const OwningRequestOrScalarValueString& aIn,
-                           bool aReadBody, ErrorResult& aRv)
+                           BodyAction aBodyAction,
+                           ReferrerAction aReferrerAction, ErrorResult& aRv)
 {
   AutoJSAPI jsapi;
   jsapi.Init(GetGlobalObject());
@@ -143,13 +145,15 @@ TypeUtils::ToPCacheRequest(PCacheRequest& aOut,
 
   GlobalObject global(cx, jsGlobal);
 
-  return ToPCacheRequest(global, aOut, aIn, aReadBody, aRv);
+  return ToPCacheRequest(global, aOut, aIn, aBodyAction, aReferrerAction, aRv);
 }
 
 void
 TypeUtils::ToPCacheRequestOrVoid(PCacheRequestOrVoid& aOut,
                                  const Optional<RequestOrScalarValueString>& aIn,
-                                 bool aReadBody, ErrorResult& aRv)
+                                 BodyAction aBodyAction,
+                                 ReferrerAction aReferrerAction,
+                                 ErrorResult& aRv)
 {
   AutoJSAPI jsapi;
   jsapi.Init(GetGlobalObject());
@@ -159,12 +163,14 @@ TypeUtils::ToPCacheRequestOrVoid(PCacheRequestOrVoid& aOut,
 
   GlobalObject global(cx, jsGlobal);
 
-  return ToPCacheRequestOrVoid(global, aOut, aIn, aReadBody, aRv);
+  return ToPCacheRequestOrVoid(global, aOut, aIn, aBodyAction, aReferrerAction,
+                               aRv);
 }
 
 void
 TypeUtils::ToPCacheRequest(PCacheRequest& aOut, Request& aIn,
-                           bool aReadBody, ErrorResult& aRv)
+                           BodyAction aBodyAction,
+                           ReferrerAction aReferrerAction, ErrorResult& aRv)
 {
   aIn.GetMethod(aOut.method());
   aIn.GetUrl(aOut.url());
@@ -174,13 +180,24 @@ TypeUtils::ToPCacheRequest(PCacheRequest& aOut, Request& aIn,
   if (aRv.Failed()) {
     return;
   }
+  // TODO: wrong scheme should trigger different behavior in Match vs Put, etc.
   if (!schemeValid) {
     NS_NAMED_LITERAL_STRING(label, "Request");
     aRv.ThrowTypeError(MSG_INVALID_URL_SCHEME, &label, &aOut.url());
     return;
   }
 
-  aIn.GetReferrer(aOut.referrer());
+  nsRefPtr<InternalRequest> internalRequest = aIn.GetInternalRequest();
+
+  if (aReferrerAction == ExpandReferrer &&
+      internalRequest->ReferrerIsClient()) {
+    nsAutoCString referrer;
+    GetRequestReferrer(GetGlobalObject(), internalRequest, referrer);
+    aOut.referrer() = NS_ConvertUTF8toUTF16(referrer);
+  } else {
+    aIn.GetReferrer(aOut.referrer());
+  }
+
   nsRefPtr<InternalHeaders> headers = aIn.GetInternalHeaders();
   MOZ_ASSERT(headers);
   headers->GetPHeaders(aOut.headers());
@@ -188,7 +205,7 @@ TypeUtils::ToPCacheRequest(PCacheRequest& aOut, Request& aIn,
   aOut.mode() = aIn.Mode();
   aOut.credentials() = aIn.Credentials();
 
-  if (!aReadBody) {
+  if (aBodyAction == IgnoreBody) {
     aOut.body() = void_t();
     return;
   }
@@ -198,10 +215,7 @@ TypeUtils::ToPCacheRequest(PCacheRequest& aOut, Request& aIn,
     return;
   }
 
-  nsRefPtr<InternalRequest> internalRequest = aIn.GetInternalRequest();
-  MOZ_ASSERT(internalRequest);
   nsCOMPtr<nsIInputStream> stream;
-
   internalRequest->GetBody(getter_AddRefs(stream));
   if (stream) {
     aIn.SetBodyUsed();
@@ -218,10 +232,11 @@ void
 TypeUtils::ToPCacheRequest(const GlobalObject& aGlobal,
                            PCacheRequest& aOut,
                            const RequestOrScalarValueString& aIn,
-                           bool aReadBody, ErrorResult& aRv)
+                           BodyAction aBodyAction, ReferrerAction aReferrerAction,
+                           ErrorResult& aRv)
 {
   if (aIn.IsRequest()) {
-    ToPCacheRequest(aOut, aIn.GetAsRequest(), aReadBody, aRv);
+    ToPCacheRequest(aOut, aIn.GetAsRequest(), aBodyAction, aReferrerAction, aRv);
     return;
   }
 
@@ -230,20 +245,24 @@ TypeUtils::ToPCacheRequest(const GlobalObject& aGlobal,
   if (NS_WARN_IF(aRv.Failed())) {
     return;
   }
-  ToPCacheRequest(aOut, *request, aReadBody, aRv);
+  ToPCacheRequest(aOut, *request, aBodyAction, aReferrerAction, aRv);
 }
 
 void
-TypeUtils::ToPCacheRequestOrVoid(const GlobalObject& aGlobal, PCacheRequestOrVoid& aOut,
+TypeUtils::ToPCacheRequestOrVoid(const GlobalObject& aGlobal,
+                                 PCacheRequestOrVoid& aOut,
                                  const Optional<RequestOrScalarValueString>& aIn,
-                                 bool aReadBody, ErrorResult& aRv)
+                                 BodyAction aBodyAction,
+                                 ReferrerAction aReferrerAction,
+                                 ErrorResult& aRv)
 {
   if (!aIn.WasPassed()) {
     aOut = void_t();
     return;
   }
   PCacheRequest request;
-  ToPCacheRequest(aGlobal, request, aIn.Value(), aReadBody, aRv);
+  ToPCacheRequest(aGlobal, request, aIn.Value(), aBodyAction, aReferrerAction,
+                  aRv);
   if (aRv.Failed()) {
     return;
   }
@@ -253,10 +272,12 @@ TypeUtils::ToPCacheRequestOrVoid(const GlobalObject& aGlobal, PCacheRequestOrVoi
 void
 TypeUtils::ToPCacheRequest(const GlobalObject& aGlobal, PCacheRequest& aOut,
                            const OwningRequestOrScalarValueString& aIn,
-                           bool aReadBody, ErrorResult& aRv)
+                           BodyAction aBodyAction,
+                           ReferrerAction aReferrerAction, ErrorResult& aRv)
 {
   if (aIn.IsRequest()) {
-    ToPCacheRequest(aOut, aIn.GetAsRequest(), aReadBody, aRv);
+    ToPCacheRequest(aOut, aIn.GetAsRequest(), aBodyAction, aReferrerAction,
+                    aRv);
     return;
   }
 
@@ -270,15 +291,18 @@ TypeUtils::ToPCacheRequest(const GlobalObject& aGlobal, PCacheRequest& aOut,
   if (NS_WARN_IF(aRv.Failed())) {
     return;
   }
-  ToPCacheRequest(aOut, *request, aReadBody, aRv);
+  ToPCacheRequest(aOut, *request, aBodyAction, aReferrerAction, aRv);
 }
 
 void
-TypeUtils::ToPCacheResponse(PCacheResponse& aOut, Response& aIn,
-                            ErrorResult& aRv)
+TypeUtils::ToPCacheResponseWithoutBody(PCacheResponse& aOut,
+                                       InternalResponse& aIn, ErrorResult& aRv)
 {
   aOut.type() = aIn.Type();
-  aIn.GetUrl(aOut.url());
+
+  nsAutoCString url;
+  aIn.GetUrl(url);
+  aOut.url() = NS_ConvertUTF8toUTF16(url);
 
   if (aOut.url() != EmptyString()) {
     bool schemeValid;
@@ -286,6 +310,7 @@ TypeUtils::ToPCacheResponse(PCacheResponse& aOut, Response& aIn,
     if (aRv.Failed()) {
       return;
     }
+    // TODO: wrong scheme should trigger different behavior in Match vs Put, etc.
     if (!schemeValid) {
       NS_NAMED_LITERAL_STRING(label, "Response");
       aRv.ThrowTypeError(MSG_INVALID_URL_SCHEME, &label, &aOut.url());
@@ -293,17 +318,24 @@ TypeUtils::ToPCacheResponse(PCacheResponse& aOut, Response& aIn,
     }
   }
 
-  aOut.status() = aIn.Status();
-  aIn.GetStatusText(aOut.statusText());
-  nsRefPtr<InternalHeaders> headers = aIn.GetInternalHeaders();
+  aOut.status() = aIn.GetStatus();
+  aOut.statusText() = aIn.GetStatusText();
+  nsRefPtr<InternalHeaders> headers = aIn.Headers();
   MOZ_ASSERT(headers);
   headers->GetPHeaders(aOut.headers());
   aOut.headersGuard() = headers->Guard();
+}
 
+void
+TypeUtils::ToPCacheResponse(PCacheResponse& aOut, Response& aIn, ErrorResult& aRv)
+{
   if (aIn.BodyUsed()) {
     aRv.ThrowTypeError(MSG_REQUEST_BODY_CONSUMED_ERROR);
     return;
   }
+
+  nsRefPtr<InternalResponse> ir = aIn.GetInternalResponse();
+  ToPCacheResponseWithoutBody(aOut, *ir, aRv);
 
   nsCOMPtr<nsIInputStream> stream;
   aIn.GetBody(getter_AddRefs(stream));
@@ -387,11 +419,12 @@ TypeUtils::ToResponse(const PCacheResponse& aIn)
   return ref.forget();
 }
 
-already_AddRefed<Request>
-TypeUtils::ToRequest(const PCacheRequest& aIn)
+already_AddRefed<InternalRequest>
+TypeUtils::ToInternalRequest(const PCacheRequest& aIn)
 {
   nsRefPtr<InternalRequest> internalRequest = new InternalRequest();
 
+  internalRequest->SetOrigin(Origin());
   internalRequest->SetMethod(aIn.method());
   internalRequest->SetURL(NS_ConvertUTF16toUTF8(aIn.url()));
   internalRequest->SetReferrer(NS_ConvertUTF16toUTF8(aIn.referrer()));
@@ -409,6 +442,13 @@ TypeUtils::ToRequest(const PCacheRequest& aIn)
 
   internalRequest->SetBody(stream);
 
+  return internalRequest.forget();
+}
+
+already_AddRefed<Request>
+TypeUtils::ToRequest(const PCacheRequest& aIn)
+{
+  nsRefPtr<InternalRequest> internalRequest = ToInternalRequest(aIn);
   nsRefPtr<Request> request = new Request(GetGlobalObject(), internalRequest);
   return request.forget();
 }

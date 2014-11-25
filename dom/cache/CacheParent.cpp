@@ -38,12 +38,17 @@ CacheParent::CacheParent(const CacheInitData& aInitData,
 CacheParent::~CacheParent()
 {
   MOZ_ASSERT(!mManager);
+  MOZ_ASSERT(mFetchPutList.IsEmpty());
 }
 
 void
 CacheParent::ActorDestroy(ActorDestroyReason aReason)
 {
   MOZ_ASSERT(mManager);
+  for (uint32_t i = 0; i < mFetchPutList.Length(); ++i) {
+    mFetchPutList[i]->ClearListener();
+  }
+  mFetchPutList.Clear();
   mManager->RemoveListener(this);
   mManager->ReleaseCacheId(mCacheId);
   mManager = nullptr;
@@ -70,35 +75,49 @@ CacheParent::RecvMatchAll(const RequestId& aRequestId,
 }
 
 bool
-CacheParent::RecvAdd(const RequestId& aRequestId, const PCacheRequest& aRequest)
-{
-  unused << SendAddResponse(aRequestId, NS_ERROR_NOT_IMPLEMENTED);
-  return true;
-}
-
-bool
 CacheParent::RecvAddAll(const RequestId& aRequestId,
                         const nsTArray<PCacheRequest>& aRequests)
 {
-  nsTArray<PCacheResponse> responses;
-  unused << SendAddAllResponse(aRequestId, NS_ERROR_NOT_IMPLEMENTED);
+  nsTArray<nsCOMPtr<nsIInputStream>> requestStreams;
+  for (uint32_t i = 0; i < aRequests.Length(); ++i) {
+    requestStreams.AppendElement(DeserializeCacheStream(aRequests[i].body()));
+  }
+
+  nsRefPtr<FetchPut> fetchPut;
+  nsresult rv = FetchPut::Create(this, mManager, aRequestId, mCacheId,
+                                 aRequests, requestStreams,
+                                 getter_AddRefs(fetchPut));
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    unused << SendAddAllResponse(aRequestId, rv);
+    return true;
+  }
+
+  mFetchPutList.AppendElement(fetchPut.forget());
+
   return true;
 }
 
 bool
-CacheParent::RecvPut(const RequestId& aRequestId, const PCacheRequest& aRequest,
-                     const PCacheResponse& aResponse)
+CacheParent::RecvPut(const RequestId& aRequestId,
+                     const CacheRequestResponse& aPut)
 {
   MOZ_ASSERT(mManager);
 
-  nsCOMPtr<nsIInputStream> requestStream =
-    DeserializeCacheStream(aRequest.body());
+  nsTArray<CacheRequestResponse> putList(1);
+  putList.AppendElement(aPut);
 
-  nsCOMPtr<nsIInputStream> responseStream =
-    DeserializeCacheStream(aResponse.body());
+  nsTArray<nsCOMPtr<nsIInputStream>> requestStreamList(1);
+  nsTArray<nsCOMPtr<nsIInputStream>> responseStreamList(1);
 
-  mManager->CachePut(this, aRequestId, mCacheId, aRequest, requestStream,
-                     aResponse, responseStream);
+  requestStreamList.AppendElement(
+    DeserializeCacheStream(aPut.request().body()));
+  responseStreamList.AppendElement(
+    DeserializeCacheStream(aPut.response().body()));
+
+
+  mManager->CachePutAll(this, aRequestId, mCacheId, putList, requestStreamList,
+                        responseStreamList);
+
   return true;
 }
 
@@ -182,10 +201,9 @@ CacheParent::OnCacheMatchAll(RequestId aRequestId, nsresult aRv,
 }
 
 void
-CacheParent::OnCachePut(RequestId aRequestId, nsresult aRv)
+CacheParent::OnCachePutAll(RequestId aRequestId, nsresult aRv)
 {
   unused << SendPutResponse(aRequestId, aRv);
-  return;
 }
 
 void
@@ -219,6 +237,14 @@ CacheParent::OnCacheKeys(RequestId aRequestId, nsresult aRv,
   }
 
   unused << SendKeysResponse(aRequestId, aRv, requests);
+}
+
+void
+CacheParent::OnFetchPut(FetchPut* aFetchPut, RequestId aRequestId, nsresult aRv)
+{
+  aFetchPut->ClearListener();
+  mFetchPutList.RemoveElement(aFetchPut);
+  unused << SendAddAllResponse(aRequestId, aRv);
 }
 
 Manager::StreamControl*

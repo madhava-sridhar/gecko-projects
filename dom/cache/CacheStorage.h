@@ -85,6 +85,7 @@ public:
 
   // TypeUtils method
   virtual nsIGlobalObject* GetGlobalObject() const MOZ_OVERRIDE;
+  virtual const nsACString& Origin() const MOZ_OVERRIDE;
 #ifdef DEBUG
   virtual void AssertOwningThread() const MOZ_OVERRIDE;
 #endif

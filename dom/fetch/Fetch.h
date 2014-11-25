@@ -34,7 +34,7 @@ FetchRequest(nsIGlobalObject* aGlobal, const RequestOrScalarValueString& aInput,
              const RequestInit& aInit, ErrorResult& aRv);
 
 nsresult
-GetRequestReferrer(nsIGlobalObject* aGlobal, const InternalRequest* aRequest, nsCString& aReferrer);
+GetRequestReferrer(nsIGlobalObject* aGlobal, const InternalRequest* aRequest, nsACString& aReferrer);
 
 /*
  * Creates an nsIInputStream based on the fetch specifications 'extract a byte

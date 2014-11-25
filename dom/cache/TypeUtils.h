@@ -21,6 +21,7 @@ namespace dom {
 class OwningRequestOrScalarValueString;
 struct QueryParams;
 class InternalRequest;
+class InternalResponse;
 class Request;
 class RequestOrScalarValueString;
 class Response;
@@ -39,32 +40,52 @@ class PCacheStreamControlChild;
 class TypeUtils
 {
 protected:
+  enum BodyAction
+  {
+    IgnoreBody,
+    ReadBody
+  };
+
+  enum ReferrerAction
+  {
+    PassThroughReferrer,
+    ExpandReferrer
+  };
+
   virtual ~TypeUtils() { }
   virtual nsIGlobalObject* GetGlobalObject() const=0;
+  virtual const nsACString& Origin() const=0;
 #ifdef DEBUG
   virtual void AssertOwningThread() const=0;
 #else
-  inline void AssertOwningThread() { }
+  inline void AssertOwningThread() const { }
 #endif
 
   void
   ToPCacheRequest(PCacheRequest& aOut,
-                  const RequestOrScalarValueString& aIn, bool aReadBody,
-                  ErrorResult& aRv);
+                  const RequestOrScalarValueString& aIn, BodyAction aBodyAction,
+                  ReferrerAction aReferrerAction, ErrorResult& aRv);
 
   void
   ToPCacheRequest(PCacheRequest& aOut,
                   const OwningRequestOrScalarValueString& aIn,
-                  bool aReadBody, ErrorResult& aRv);
+                  BodyAction aBodyAction, ReferrerAction aReferrerAction,
+                  ErrorResult& aRv);
 
   void
   ToPCacheRequestOrVoid(PCacheRequestOrVoid& aOut,
                         const Optional<RequestOrScalarValueString>& aIn,
-                        bool aReadBody, ErrorResult& aRv);
+                        BodyAction aBodyAction,
+                        ReferrerAction aReferrerAction,
+                        ErrorResult& aRv);
 
   void
-  ToPCacheRequest(PCacheRequest& aOut, Request& aIn, bool aReadBody,
-                  ErrorResult& aRv);
+  ToPCacheRequest(PCacheRequest& aOut, Request& aIn, BodyAction aBodyAction,
+                  ReferrerAction aReferrerAction, ErrorResult& aRv);
+
+  void
+  ToPCacheResponseWithoutBody(PCacheResponse& aOut, InternalResponse& aIn,
+                              ErrorResult& aRv);
 
   void
   ToPCacheResponse(PCacheResponse& aOut, Response& aIn, ErrorResult& aRv);
@@ -75,6 +96,9 @@ protected:
   already_AddRefed<Response>
   ToResponse(const PCacheResponse& aIn);
 
+  already_AddRefed<InternalRequest>
+  ToInternalRequest(const PCacheRequest& aIn);
+
   already_AddRefed<Request>
   ToRequest(const PCacheRequest& aIn);
 
@@ -84,19 +108,21 @@ protected:
 private:
   void
   ToPCacheRequest(const GlobalObject& aGlobal, PCacheRequest& aOut,
-                  const RequestOrScalarValueString& aIn, bool aReadBody,
-                  ErrorResult& aRv);
+                  const RequestOrScalarValueString& aIn, BodyAction aBodyAction,
+                  ReferrerAction aReferrerAction, ErrorResult& aRv);
 
   void
   ToPCacheRequestOrVoid(const GlobalObject& aGlobal,
                         PCacheRequestOrVoid& aOut,
                         const Optional<RequestOrScalarValueString>& aIn,
-                        bool aReadBody, ErrorResult& aRv);
+                        BodyAction aBodyAction, ReferrerAction aReferrerAction,
+                        ErrorResult& aRv);
 
   void
   ToPCacheRequest(const GlobalObject& aGlobal, PCacheRequest& aOut,
                   const OwningRequestOrScalarValueString& aIn,
-                  bool aReadBody, ErrorResult& aRv);
+                  BodyAction aBodyAction, ReferrerAction aReferrerAction,
+                  ErrorResult& aRv);
 
   void
   SerializeCacheStream(nsIInputStream* aStream, PCacheReadStreamOrVoid* aStreamOut,

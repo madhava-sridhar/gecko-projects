@@ -21,12 +21,57 @@
 #include "nsIGlobalObject.h"
 #include "nsNetUtil.h"
 
+namespace {
+
+using mozilla::ErrorResult;
+using mozilla::dom::MSG_INVALID_REQUEST_METHOD;
+using mozilla::dom::OwningRequestOrScalarValueString;
+using mozilla::dom::Request;
+using mozilla::dom::RequestOrScalarValueString;
+
+static bool
+IsValidPutRequestMethod(const Request& aRequest, ErrorResult& aRv)
+{
+  nsAutoCString method;
+  aRequest.GetMethod(method);
+  bool valid = method.LowerCaseEqualsLiteral("get");
+  if (!valid) {
+    NS_ConvertUTF8toUTF16 label(method);
+    aRv.ThrowTypeError(MSG_INVALID_REQUEST_METHOD, &label);
+  }
+  return valid;
+}
+
+static bool
+IsValidPutRequestMethod(const RequestOrScalarValueString& aRequest,
+                        ErrorResult& aRv)
+{
+  if (!aRequest.IsRequest()) {
+    return true;
+  }
+  return IsValidPutRequestMethod(aRequest.GetAsRequest(), aRv);
+}
+
+static bool
+IsValidPutRequestMethod(const OwningRequestOrScalarValueString& aRequest,
+                        ErrorResult& aRv)
+{
+  if (!aRequest.IsRequest()) {
+    return true;
+  }
+  return IsValidPutRequestMethod(*aRequest.GetAsRequest().get(), aRv);
+}
+
+} // anonymous namespace
+
 namespace mozilla {
 namespace dom {
 namespace cache {
 
 using mozilla::ErrorResult;
 using mozilla::unused;
+using mozilla::dom::workers::GetCurrentThreadWorkerPrivate;
+using mozilla::dom::workers::WorkerPrivate;
 
 NS_IMPL_CYCLE_COLLECTING_ADDREF(mozilla::dom::cache::Cache);
 NS_IMPL_CYCLE_COLLECTING_RELEASE(mozilla::dom::cache::Cache);
@@ -37,9 +82,11 @@ NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(Cache)
   NS_INTERFACE_MAP_ENTRY(nsISupports)
 NS_INTERFACE_MAP_END
 
-Cache::Cache(nsISupports* aOwner, nsIGlobalObject* aGlobal, PCacheChild* aActor)
+Cache::Cache(nsISupports* aOwner, nsIGlobalObject* aGlobal,
+             const nsACString& aOrigin, PCacheChild* aActor)
   : mOwner(aOwner)
   , mGlobal(aGlobal)
+  , mOrigin(aOrigin)
   , mActor(static_cast<CacheChild*>(aActor))
 {
   MOZ_ASSERT(mActor);
@@ -58,7 +105,7 @@ Cache::Match(const RequestOrScalarValueString& aRequest,
   }
 
   PCacheRequest request;
-  ToPCacheRequest(request, aRequest, false, aRv);
+  ToPCacheRequest(request, aRequest, IgnoreBody, PassThroughReferrer, aRv);
   if (aRv.Failed()) {
     return nullptr;
   }
@@ -85,7 +132,8 @@ Cache::MatchAll(const Optional<RequestOrScalarValueString>& aRequest,
   }
 
   PCacheRequestOrVoid request;
-  ToPCacheRequestOrVoid(request, aRequest, false, aRv);
+  ToPCacheRequestOrVoid(request, aRequest, IgnoreBody, PassThroughReferrer,
+                        aRv);
   if (aRv.Failed()) {
     return nullptr;
   }
@@ -105,14 +153,8 @@ Cache::Add(const RequestOrScalarValueString& aRequest, ErrorResult& aRv)
 {
   MOZ_ASSERT(mActor);
 
-  if (aRequest.IsRequest()) {
-    nsAutoCString method;
-    aRequest.GetAsRequest().GetMethod(method);
-    if (!method.LowerCaseEqualsLiteral("get")) {
-      NS_ConvertUTF8toUTF16 label(method);
-      aRv.ThrowTypeError(MSG_INVALID_REQUEST_METHOD, &label);
-      return nullptr;
-    }
+  if (!IsValidPutRequestMethod(aRequest, aRv)) {
+    return nullptr;
   }
 
   nsRefPtr<Promise> promise = Promise::Create(mGlobal, aRv);
@@ -120,17 +162,19 @@ Cache::Add(const RequestOrScalarValueString& aRequest, ErrorResult& aRv)
     return nullptr;
   }
 
-  PCacheRequest request;
-  ToPCacheRequest(request, aRequest, true, aRv);
+
+  nsTArray<PCacheRequest> requests(1);
+  PCacheRequest* request = requests.AppendElement();
+  ToPCacheRequest(*request, aRequest, ReadBody, ExpandReferrer, aRv);
   if (aRv.Failed()) {
     return nullptr;
   }
 
   RequestId requestId = AddRequestPromise(promise, aRv);
 
-  unused << mActor->SendAdd(requestId, request);
+  unused << mActor->SendAddAll(requestId, requests);
 
-  CleanupChildFds(request.body());
+  CleanupChildFds(request->body());
 
   return promise.forget();
 }
@@ -146,31 +190,33 @@ Cache::AddAll(const Sequence<OwningRequestOrScalarValueString>& aRequests,
     return nullptr;
   }
 
+  // Be careful not to early exist after this point to avoid leaking
+  // file descriptor resources from stream serialization.
+
   nsTArray<PCacheRequest> requests;
   for(uint32_t i = 0; i < aRequests.Length(); ++i) {
-    if (aRequests[i].IsRequest()) {
-      nsAutoCString method;
-      aRequests[i].GetAsRequest().get()->GetMethod(method);
-      if (!method.LowerCaseEqualsLiteral("get")) {
-        NS_ConvertUTF8toUTF16 label(method);
-        aRv.ThrowTypeError(MSG_INVALID_REQUEST_METHOD, &label);
-        return nullptr;
-      }
+    if (!IsValidPutRequestMethod(aRequests[i], aRv)) {
+      break;
     }
 
     PCacheRequest* request = requests.AppendElement();
-    ToPCacheRequest(*request, aRequests[i], true, aRv);
+    ToPCacheRequest(*request, aRequests[i], ReadBody, ExpandReferrer, aRv);
     if (aRv.Failed()) {
-      return nullptr;
+      break;
     }
   }
 
-  RequestId requestId = AddRequestPromise(promise, aRv);
-
-  unused << mActor->SendAddAll(requestId, requests);
+  if (!aRv.Failed()) {
+    RequestId requestId = AddRequestPromise(promise, aRv);
+    unused << mActor->SendAddAll(requestId, requests);
+  }
 
   for (uint32_t i = 0; i < requests.Length(); ++i) {
     CleanupChildFds(requests[i].body());
+  }
+
+  if (aRv.Failed()) {
+    return nullptr;
   }
 
   return promise.forget();
@@ -182,14 +228,8 @@ Cache::Put(const RequestOrScalarValueString& aRequest, Response& aResponse,
 {
   MOZ_ASSERT(mActor);
 
-  if (aRequest.IsRequest()) {
-    nsAutoCString method;
-    aRequest.GetAsRequest().GetMethod(method);
-    if (!method.LowerCaseEqualsLiteral("get")) {
-      NS_ConvertUTF8toUTF16 label(method);
-      aRv.ThrowTypeError(MSG_INVALID_REQUEST_METHOD, &label);
-      return nullptr;
-    }
+  if (!IsValidPutRequestMethod(aRequest, aRv)) {
+    return nullptr;
   }
 
   nsRefPtr<Promise> promise = Promise::Create(mGlobal, aRv);
@@ -197,24 +237,29 @@ Cache::Put(const RequestOrScalarValueString& aRequest, Response& aResponse,
     return nullptr;
   }
 
-  PCacheRequest request;
-  ToPCacheRequest(request, aRequest, true, aRv);
+  CacheRequestResponse put;
+
+  // Be careful not to early exist after this point to avoid leaking
+  // file descriptor resources from stream serialization.
+
+  ToPCacheRequest(put.request(), aRequest, ReadBody, PassThroughReferrer, aRv);
+
+  if (!aRv.Failed()) {
+    ToPCacheResponse(put.response(), aResponse, aRv);
+  }
+
+  if (!aRv.Failed()) {
+    RequestId requestId = AddRequestPromise(promise, aRv);
+
+    unused << mActor->SendPut(requestId, put);
+  }
+
+  CleanupChildFds(put.request().body());
+  CleanupChildFds(put.response().body());
+
   if (aRv.Failed()) {
     return nullptr;
   }
-
-  PCacheResponse response;
-  ToPCacheResponse(response, aResponse, aRv);
-  if (aRv.Failed()) {
-    return nullptr;
-  }
-
-  RequestId requestId = AddRequestPromise(promise, aRv);
-
-  unused << mActor->SendPut(requestId, request, response);
-
-  CleanupChildFds(request.body());
-  CleanupChildFds(response.body());
 
   return promise.forget();
 }
@@ -231,7 +276,7 @@ Cache::Delete(const RequestOrScalarValueString& aRequest,
   }
 
   PCacheRequest request;
-  ToPCacheRequest(request, aRequest, false, aRv);
+  ToPCacheRequest(request, aRequest, IgnoreBody, PassThroughReferrer, aRv);
   if (aRv.Failed()) {
     return nullptr;
   }
@@ -258,7 +303,8 @@ Cache::Keys(const Optional<RequestOrScalarValueString>& aRequest,
   }
 
   PCacheRequestOrVoid request;
-  ToPCacheRequestOrVoid(request, aRequest, false, aRv);
+  ToPCacheRequestOrVoid(request, aRequest, IgnoreBody, PassThroughReferrer,
+                        aRv);
   if (aRv.Failed()) {
     return nullptr;
   }
@@ -368,22 +414,6 @@ Cache::RecvMatchAllResponse(RequestId aRequestId, nsresult aRv,
 }
 
 void
-Cache::RecvAddResponse(RequestId aRequestId, nsresult aRv)
-{
-  nsRefPtr<Promise> promise = RemoveRequestPromise(aRequestId);
-  if (NS_WARN_IF(!promise)) {
-    return;
-  }
-
-  if (NS_FAILED(aRv)) {
-    promise->MaybeReject(aRv);
-    return;
-  }
-
-  promise->MaybeResolve(JS::UndefinedHandleValue);
-}
-
-void
 Cache::RecvAddAllResponse(RequestId aRequestId, nsresult aRv)
 {
   nsRefPtr<Promise> promise = RemoveRequestPromise(aRequestId);
@@ -457,6 +487,12 @@ nsIGlobalObject*
 Cache::GetGlobalObject() const
 {
   return mGlobal;
+}
+
+const nsACString&
+Cache::Origin() const
+{
+  return mOrigin;
 }
 
 #ifdef DEBUG

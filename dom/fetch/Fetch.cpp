@@ -398,7 +398,7 @@ WorkerFetchResolver::OnResponseEnd()
 // The actual referrer policy and stripping is dealt with by HttpBaseChannel,
 // this always returns the full API referrer URL of the relevant global.
 nsresult
-GetRequestReferrer(nsIGlobalObject* aGlobal, const InternalRequest* aRequest, nsCString& aReferrer)
+GetRequestReferrer(nsIGlobalObject* aGlobal, const InternalRequest* aRequest, nsACString& aReferrer)
 {
   if (aRequest->ReferrerIsURL()) {
     aReferrer = aRequest->ReferrerAsURL();

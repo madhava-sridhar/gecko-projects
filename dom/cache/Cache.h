@@ -43,7 +43,8 @@ class Cache MOZ_FINAL : public nsISupports
                       , public TypeUtils
 {
 public:
-  Cache(nsISupports* aOwner, nsIGlobalObject* aGlobal, PCacheChild* aActor);
+  Cache(nsISupports* aOwner, nsIGlobalObject* aGlobal,
+        const nsACString& aOrigin, PCacheChild* aActor);
 
   // webidl interface methods
   already_AddRefed<Promise>
@@ -82,8 +83,6 @@ public:
   RecvMatchAllResponse(RequestId aRequestId, nsresult aRv,
                        const nsTArray<PCacheResponse>& aResponses) MOZ_OVERRIDE;
   virtual void
-  RecvAddResponse(RequestId aRequestId, nsresult aRv) MOZ_OVERRIDE;
-  virtual void
   RecvAddAllResponse(RequestId aRequestId, nsresult aRv) MOZ_OVERRIDE;
   virtual void
   RecvPutResponse(RequestId aRequestId, nsresult aRv) MOZ_OVERRIDE;
@@ -96,7 +95,10 @@ public:
                    const nsTArray<PCacheRequest>& aRequests) MOZ_OVERRIDE;
 
   // TypeUtils methods
-  virtual nsIGlobalObject* GetGlobalObject() const MOZ_OVERRIDE;
+  virtual nsIGlobalObject*
+  GetGlobalObject() const MOZ_OVERRIDE;
+  const nsACString& Origin() const MOZ_OVERRIDE;
+
 #ifdef DEBUG
   virtual void AssertOwningThread() const MOZ_OVERRIDE;
 #endif
@@ -111,6 +113,7 @@ private:
   // TODO: remove separate mOwner
   nsCOMPtr<nsISupports> mOwner;
   nsCOMPtr<nsIGlobalObject> mGlobal;
+  const nsCString mOrigin;
   CacheChild* mActor;
   nsTArray<nsRefPtr<Promise>> mRequestPromises;
 

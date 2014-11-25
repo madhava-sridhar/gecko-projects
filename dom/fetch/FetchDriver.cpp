@@ -382,8 +382,11 @@ FetchDriver::HttpNetworkFetch()
     nsCOMPtr<nsIInputStream> bodyStream;
     mRequest->GetBody(getter_AddRefs(bodyStream));
     if (!bodyStream) {
-      NS_WARNING("InternalRequest body input stream was null.");
-      return NS_ERROR_FAILURE;
+      nsresult rv = NS_NewCStringInputStream(getter_AddRefs(bodyStream),
+                                             EmptyCString());
+      if (NS_WARN_IF(NS_FAILED(rv))) {
+        return rv;
+      }
     }
 
     nsCString method;

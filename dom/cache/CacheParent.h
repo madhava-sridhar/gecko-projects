@@ -7,6 +7,7 @@
 #ifndef mozilla_dom_cache_CacheParent_h
 #define mozilla_dom_cache_CacheParent_h
 
+#include "mozilla/dom/cache/FetchPut.h"
 #include "mozilla/dom/cache/Manager.h"
 #include "mozilla/dom/cache/PCacheParent.h"
 #include "mozilla/dom/cache/Types.h"
@@ -25,6 +26,7 @@ struct StreamHolder;
 
 class CacheParent MOZ_FINAL : public PCacheParent
                             , public Manager::Listener
+                            , public FetchPut::Listener
 {
 public:
   CacheParent(const CacheInitData& aInitData, CacheId aCacheId);
@@ -39,14 +41,10 @@ public:
   RecvMatchAll(const RequestId& aRequestId, const PCacheRequestOrVoid& aRequest,
                const PCacheQueryParams& aParams) MOZ_OVERRIDE;
   virtual bool
-  RecvAdd(const RequestId& aRequestId,
-          const PCacheRequest& aRequest) MOZ_OVERRIDE;
-  virtual bool
   RecvAddAll(const RequestId& aRequestId,
              const nsTArray<PCacheRequest>& aRequests) MOZ_OVERRIDE;
   virtual bool
-  RecvPut(const RequestId& aRequestId, const PCacheRequest& aRequest,
-          const PCacheResponse& aResponse) MOZ_OVERRIDE;
+  RecvPut(const RequestId& aRequestId, const CacheRequestResponse& aPut);
   virtual bool
   RecvDelete(const RequestId& aRequestId, const PCacheRequest& aRequest,
              const PCacheQueryParams& aParams) MOZ_OVERRIDE;
@@ -61,12 +59,16 @@ public:
   virtual void OnCacheMatchAll(RequestId aRequestId, nsresult aRv,
                                const nsTArray<SavedResponse>& aSavedResponses,
                                Manager::StreamList* aStreamList) MOZ_OVERRIDE;
-  virtual void OnCachePut(RequestId aRequestId, nsresult aRv) MOZ_OVERRIDE;
+  virtual void OnCachePutAll(RequestId aRequestId, nsresult aRv) MOZ_OVERRIDE;
   virtual void OnCacheDelete(RequestId aRequestId, nsresult aRv,
                              bool aSuccess) MOZ_OVERRIDE;
   virtual void OnCacheKeys(RequestId aRequestId, nsresult aRv,
                            const nsTArray<SavedRequest>& aSavedRequests,
                            Manager::StreamList* aStreamList) MOZ_OVERRIDE;
+
+  // FetchPut::Listener methods
+  virtual void OnFetchPut(FetchPut* aFetchPut, RequestId aRequestId,
+                          nsresult aRv) MOZ_OVERRIDE;
 
 private:
   Manager::StreamControl*
@@ -79,6 +81,7 @@ private:
 
   const CacheId mCacheId;
   nsRefPtr<mozilla::dom::cache::Manager> mManager;
+  nsTArray<nsRefPtr<FetchPut>> mFetchPutList;
 };
 
 } // namespace cache

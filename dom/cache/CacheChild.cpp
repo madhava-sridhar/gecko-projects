@@ -65,14 +65,6 @@ CacheChild::RecvMatchAllResponse(const RequestId& requestId, const nsresult& aRv
 }
 
 bool
-CacheChild::RecvAddResponse(const RequestId& requestId, const nsresult& aRv)
-{
-  MOZ_ASSERT(mListener);
-  mListener->RecvAddResponse(requestId, aRv);
-  return true;
-}
-
-bool
 CacheChild::RecvAddAllResponse(const RequestId& requestId, const nsresult& aRv)
 {
   MOZ_ASSERT(mListener);
