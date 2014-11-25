@@ -166,6 +166,12 @@ public:
     mMode = aMode;
   }
 
+  RequestCredentials
+  GetCredentialsMode() const
+  {
+    return mCredentialsMode;
+  }
+
   void
   SetCredentialsMode(RequestCredentials aCredentialsMode)
   {
