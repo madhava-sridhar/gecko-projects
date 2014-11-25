@@ -120,10 +120,9 @@ WorkerGlobalScope::Caches()
   if (!mCacheStorage) {
     MOZ_ASSERT(mWorkerPrivate);
     NS_ConvertUTF16toUTF8 origin(mWorkerPrivate->GetLocationInfo().mOrigin);
+    // TODO: fix quota info
     mCacheStorage = new CacheStorage(cache::DEFAULT_NAMESPACE, ToSupports(this),
-                                     this, origin, mWorkerPrivate->QuotaGroup(),
-                                     mWorkerPrivate->IsApp(),
-                                     mWorkerPrivate->HasUnlimStoragePerm());
+                                     this, origin, origin, false, false);
   }
 
   nsRefPtr<CacheStorage> ref = mCacheStorage;
