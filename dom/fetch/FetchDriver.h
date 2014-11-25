@@ -10,6 +10,7 @@
 #include "nsIStreamListener.h"
 #include "nsRefPtr.h"
 
+class nsIAsyncOutputStream;
 class nsIPrincipal;
 class nsPIDOMWindow;
 
