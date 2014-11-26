@@ -6,6 +6,7 @@
 #ifndef mozilla_dom_Fetch_h
 #define mozilla_dom_Fetch_h
 
+#include "nsIInputStreamPump.h"
 #include "nsIStreamLoader.h"
 
 #include "nsCOMPtr.h"
@@ -17,7 +18,6 @@
 #include "mozilla/dom/RequestBinding.h"
 #include "mozilla/dom/workers/bindings/WorkerFeature.h"
 
-class nsIInputStreamPump;
 class nsIOutputStream;
 class nsIGlobalObject;
 

@@ -7,7 +7,6 @@
 
 #include "nsIDocument.h"
 #include "nsIGlobalObject.h"
-#include "nsIInputStreamPump.h"
 #include "nsIStreamLoader.h"
 #include "nsIStringStream.h"
 #include "nsIThreadRetargetableRequest.h"
