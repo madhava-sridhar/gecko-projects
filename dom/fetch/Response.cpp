@@ -31,8 +31,7 @@ NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(Response)
 NS_INTERFACE_MAP_END
 
 Response::Response(nsIGlobalObject* aGlobal, InternalResponse* aInternalResponse)
-  : FetchBody<Response>()
-  , mOwner(aGlobal)
+  : mOwner(aGlobal)
   , mInternalResponse(aInternalResponse)
 {
 }
