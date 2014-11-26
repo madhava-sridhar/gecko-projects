@@ -158,6 +158,7 @@ public:
     nsCOMPtr<nsIChannel> mChannel;
 
     nsCString mDomain;
+    nsCString mQuotaGroup;
 
     bool mEvalAllowed;
     bool mReportCSPViolations;
@@ -165,11 +166,14 @@ public:
     bool mPrincipalIsSystem;
     bool mIsInPrivilegedApp;
     bool mIsInCertifiedApp;
+    bool mIsApp;
+    bool mHasUnlimStoragePerm;
 
     LoadInfo()
     : mEvalAllowed(false), mReportCSPViolations(false),
       mXHRParamsAllowed(false), mPrincipalIsSystem(false),
-      mIsInPrivilegedApp(false), mIsInCertifiedApp(false)
+      mIsInPrivilegedApp(false), mIsInCertifiedApp(false),
+      mIsApp(false), mHasUnlimStoragePerm(false)
     { }
 
     void
@@ -515,6 +519,12 @@ public:
     return mLoadInfo.mDomain;
   }
 
+  const nsCString&
+  QuotaGroup() const
+  {
+    return mLoadInfo.mQuotaGroup;
+  }
+
   nsIURI*
   GetBaseURI() const
   {
@@ -577,6 +587,18 @@ public:
   IsInCertifiedApp() const
   {
     return mLoadInfo.mIsInCertifiedApp;
+  }
+
+  bool
+  IsApp() const
+  {
+    return mLoadInfo.mIsApp;
+  }
+
+  bool
+  HasUnlimStoragePerm() const
+  {
+    return mLoadInfo.mHasUnlimStoragePerm;
   }
 
   already_AddRefed<nsIChannel>
