@@ -3570,17 +3570,6 @@ WorkerPrivateParent<Derived>::SetPrincipal(nsIPrincipal* aPrincipal)
     (appStatus == nsIPrincipal::APP_STATUS_CERTIFIED ||
      appStatus == nsIPrincipal::APP_STATUS_PRIVILEGED);
   mLoadInfo.mIsInCertifiedApp = (appStatus == nsIPrincipal::APP_STATUS_CERTIFIED);
-
-  nsAutoCString origin;
-  nsresult rv = QuotaManager::GetInfoFromPrincipal(aPrincipal,
-                                                   PERSISTENCE_TYPE_PERSISTENT,
-                                                   &origin,
-                                                   &mLoadInfo.mQuotaGroup,
-                                                   &mLoadInfo.mIsApp,
-                                                   &mLoadInfo.mHasUnlimStoragePerm);
-  if (NS_FAILED(rv)) {
-    MOZ_CRASH("Failed to get quota info from principal.");
-  }
 }
 
 template <class Derived>
