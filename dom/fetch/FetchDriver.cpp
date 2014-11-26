@@ -322,7 +322,7 @@ FetchDriver::HttpFetch(bool aCORSFlag, bool aCORSPreflightFlag, bool aAuthentica
   // spec.
   bool useCredentials = false;
   if (mRequest->GetCredentialsMode() == RequestCredentials::Include ||
-      mRequest->GetCredentialsMode() == RequestCredentials::Same_origin && !aCORSFlag) {
+      (mRequest->GetCredentialsMode() == RequestCredentials::Same_origin && !aCORSFlag)) {
     useCredentials = true;
   }
 
