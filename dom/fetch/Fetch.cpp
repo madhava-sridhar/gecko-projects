@@ -24,7 +24,6 @@
 #include "mozilla/dom/FetchDriver.h"
 #include "mozilla/dom/File.h"
 #include "mozilla/dom/Headers.h"
-#include "mozilla/dom/Promise.h"
 #include "mozilla/dom/PromiseWorkerProxy.h"
 #include "mozilla/dom/Request.h"
 #include "mozilla/dom/Response.h"

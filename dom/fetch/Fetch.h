@@ -15,6 +15,7 @@
 #include "nsString.h"
 
 #include "mozilla/ErrorResult.h"
+#include "mozilla/dom/Promise.h"
 #include "mozilla/dom/RequestBinding.h"
 #include "mozilla/dom/workers/bindings/WorkerFeature.h"
 
