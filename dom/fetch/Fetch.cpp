@@ -1181,14 +1181,6 @@ FetchBody<Derived>::ConsumeBody(ConsumeType aType, ErrorResult& aRv)
   return promise.forget();
 }
 
-template
-already_AddRefed<Promise>
-FetchBody<Request>::ConsumeBody(ConsumeType aType, ErrorResult& aRv);
-
-template
-already_AddRefed<Promise>
-FetchBody<Response>::ConsumeBody(ConsumeType aType, ErrorResult& aRv);
-
 template <class Derived>
 void
 FetchBody<Derived>::SetMimeType(ErrorResult& aRv)
@@ -1209,12 +1201,7 @@ FetchBody<Derived>::SetMimeType(ErrorResult& aRv)
   }
 }
 
-template
-void
-FetchBody<Request>::SetMimeType(ErrorResult& aRv);
-
-template
-void
-FetchBody<Response>::SetMimeType(ErrorResult& aRv);
+template class FetchBody<Request>;
+template class FetchBody<Response>;
 } // namespace dom
 } // namespace mozilla
