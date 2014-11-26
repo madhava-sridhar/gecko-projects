@@ -125,6 +125,7 @@ public:
   // The scriptURL for the registration. This may be completely different from
   // the URLs of the following three workers.
   nsCString mScriptSpec;
+  nsCOMPtr<nsIPrincipal> mPrincipal;
 
   nsRefPtr<ServiceWorkerInfo> mActiveWorker;
   nsRefPtr<ServiceWorkerInfo> mWaitingWorker;
@@ -136,7 +137,7 @@ public:
   bool mPendingUninstall;
   bool mWaitingToActivate;
 
-  explicit ServiceWorkerRegistrationInfo(const nsACString& aScope);
+  explicit ServiceWorkerRegistrationInfo(const nsACString& aScope, nsIPrincipal* aPrincipal);
 
   already_AddRefed<ServiceWorkerInfo>
   Newest()
@@ -328,10 +329,10 @@ public:
     }
 
     ServiceWorkerRegistrationInfo*
-    CreateNewRegistration(const nsCString& aScope)
+    CreateNewRegistration(const nsCString& aScope, nsIPrincipal* aPrincipal)
     {
       ServiceWorkerRegistrationInfo* registration =
-        new ServiceWorkerRegistrationInfo(aScope);
+        new ServiceWorkerRegistrationInfo(aScope, aPrincipal);
       // From now on ownership of registration is with
       // mServiceWorkerRegistrationInfos.
       mServiceWorkerRegistrationInfos.Put(aScope, registration);
@@ -404,6 +405,7 @@ private:
   NS_IMETHOD
   CreateServiceWorker(const nsACString& aScriptSpec,
                       const nsACString& aScope,
+                      nsIPrincipal* aPrincipal,
                       ServiceWorker** aServiceWorker);
 
   static PLDHashOperator

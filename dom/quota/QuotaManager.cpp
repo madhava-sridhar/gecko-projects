@@ -2492,8 +2492,10 @@ QuotaManager::GetInfoFromPrincipal(nsIPrincipal* aPrincipal,
     return NS_ERROR_FAILURE;
   }
 
+  // JAR prefix will assert in case of unknown app id.
   nsCString jarPrefix;
-  if (aGroup || aOrigin) {
+  if (aPrincipal->GetAppStatus() != nsIPrincipal::APP_STATUS_NOT_INSTALLED &&
+      (aGroup || aOrigin)) {
     rv = aPrincipal->GetJarPrefix(jarPrefix);
     NS_ENSURE_SUCCESS(rv, rv);
   }
