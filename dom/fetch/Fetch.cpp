@@ -31,6 +31,7 @@
 #include "mozilla/dom/URLSearchParams.h"
 #include "mozilla/dom/WorkerScope.h"
 #include "mozilla/dom/workers/Workers.h"
+#include "mozilla/dom/workers/bindings/WorkerFeature.h"
 
 #include "InternalResponse.h"
 // dom/workers

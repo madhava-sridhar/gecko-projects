@@ -930,7 +930,6 @@ public:
   void
   ResolvedCallback(JSContext* aCx, JS::Handle<JS::Value> aValue) MOZ_OVERRIDE
   {
-    NS_WARNING(__PRETTY_FUNCTION__);
     WorkerPrivate* workerPrivate = GetCurrentThreadWorkerPrivate();
     MOZ_ASSERT(workerPrivate);
     workerPrivate->AssertIsOnWorkerThread();
@@ -942,7 +941,6 @@ public:
   void
   RejectedCallback(JSContext* aCx, JS::Handle<JS::Value> aValue) MOZ_OVERRIDE
   {
-    NS_WARNING(__PRETTY_FUNCTION__);
     WorkerPrivate* workerPrivate = GetCurrentThreadWorkerPrivate();
     MOZ_ASSERT(workerPrivate);
     workerPrivate->AssertIsOnWorkerThread();
@@ -2079,7 +2077,6 @@ class FetchEventRunnable : public WorkerRunnable {
   bool
   WorkerRun(JSContext* aCx, WorkerPrivate* aWorkerPrivate)
   {
-    NS_WARNING(__PRETTY_FUNCTION__);
     MOZ_ASSERT(aWorkerPrivate);
     return DispatchFetchEvent(aCx, aWorkerPrivate);
   }

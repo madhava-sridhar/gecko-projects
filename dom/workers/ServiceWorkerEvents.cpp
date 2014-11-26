@@ -82,7 +82,6 @@ class FinishResponse : public nsRunnable {
   NS_IMETHOD
   Run()
   {
-    NS_WARNING(__PRETTY_FUNCTION__);
     AssertIsOnMainThread();
     nsresult rv = mChannel->FinishSynthesizedResponse();
     NS_WARN_IF_FALSE(NS_SUCCEEDED(rv), "Failed to finish synthesized response");
@@ -150,7 +149,6 @@ public:
 void
 RespondWithHandler::ResolvedCallback(JSContext* aCx, JS::Handle<JS::Value> aValue)
 {
-  NS_WARNING(__PRETTY_FUNCTION__);
   AutoCancel autoCancel(this);
 
   if (NS_WARN_IF(!aValue.isObject())) {

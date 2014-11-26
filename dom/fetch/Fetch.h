@@ -17,7 +17,6 @@
 #include "mozilla/ErrorResult.h"
 #include "mozilla/dom/Promise.h"
 #include "mozilla/dom/RequestBinding.h"
-#include "mozilla/dom/workers/bindings/WorkerFeature.h"
 
 class nsIOutputStream;
 class nsIGlobalObject;
@@ -146,7 +145,7 @@ public:
 
   // Set when consuming the body is attempted on a worker.
   // Unset when consumption is done/aborted.
-  nsAutoPtr<FetchBodyFeature<Derived>> mFeature;
+  FetchBodyFeature<Derived>* mFeature;
 
 protected:
   FetchBody();
