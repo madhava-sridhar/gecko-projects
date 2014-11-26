@@ -19,6 +19,7 @@
 #include "nsDataHandler.h"
 #include "nsHostObjectProtocolHandler.h"
 #include "nsNetUtil.h"
+#include "nsStreamUtils.h"
 #include "nsStringStream.h"
 
 #include "mozilla/dom/File.h"
