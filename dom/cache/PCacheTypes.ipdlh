@@ -52,6 +52,7 @@ struct PCacheRequest
   RequestMode mode;
   RequestCredentials credentials;
   PCacheReadStreamOrVoid body;
+  uint32_t context;
 };
 
 union PCacheRequestOrVoid

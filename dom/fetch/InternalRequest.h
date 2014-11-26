@@ -196,6 +196,12 @@ public:
     return mContext;
   }
 
+  void
+  SetContext(nsContentPolicyType aContext)
+  {
+    mContext = aContext;
+  }
+
   bool
   UnsafeRequest() const
   {

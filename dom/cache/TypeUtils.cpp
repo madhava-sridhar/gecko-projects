@@ -204,6 +204,7 @@ TypeUtils::ToPCacheRequest(PCacheRequest& aOut, Request& aIn,
   aOut.headersGuard() = headers->Guard();
   aOut.mode() = aIn.Mode();
   aOut.credentials() = aIn.Credentials();
+  aOut.context() = internalRequest->GetContext();
 
   if (aBodyAction == IgnoreBody) {
     aOut.body() = void_t();
@@ -430,6 +431,7 @@ TypeUtils::ToInternalRequest(const PCacheRequest& aIn)
   internalRequest->SetReferrer(NS_ConvertUTF16toUTF8(aIn.referrer()));
   internalRequest->SetMode(aIn.mode());
   internalRequest->SetCredentialsMode(aIn.credentials());
+  internalRequest->SetContext(aIn.context());
 
   nsRefPtr<InternalHeaders> internalHeaders =
     new InternalHeaders(aIn.headers(), aIn.headersGuard());
