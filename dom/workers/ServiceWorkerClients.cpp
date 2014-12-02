@@ -45,7 +45,7 @@ namespace {
 // keeping the worker alive.
 class PromiseHolder MOZ_FINAL : public WorkerFeature
 {
-  friend class GetServicedRunnable;
+  friend class GetAllRunnable;
 
   NS_INLINE_DECL_THREADSAFE_REFCOUNTING(PromiseHolder)
 
@@ -188,13 +188,13 @@ private:
 
 };
 
-class GetServicedRunnable MOZ_FINAL : public nsRunnable
+class GetAllRunnable MOZ_FINAL : public nsRunnable
 {
   WorkerPrivate* mWorkerPrivate;
   nsRefPtr<PromiseHolder> mPromiseHolder;
   nsCString mScope;
 public:
-  GetServicedRunnable(WorkerPrivate* aWorkerPrivate,
+  GetAllRunnable(WorkerPrivate* aWorkerPrivate,
                       PromiseHolder* aPromiseHolder,
                       const nsCString& aScope)
     : mWorkerPrivate(aWorkerPrivate),
@@ -219,7 +219,7 @@ public:
     nsRefPtr<ServiceWorkerManager> swm = ServiceWorkerManager::GetInstance();
     nsAutoPtr<nsTArray<uint64_t>> result(new nsTArray<uint64_t>());
 
-    swm->GetServicedClients(mScope, result);
+    swm->GetAllClientsForServiceWorker(mScope, result);
     nsRefPtr<ResolvePromiseWorkerRunnable> r =
       new ResolvePromiseWorkerRunnable(mWorkerPrivate, mPromiseHolder, result);
 
@@ -244,7 +244,8 @@ public:
 } // anonymous namespace
 
 already_AddRefed<Promise>
-ServiceWorkerClients::GetServiced(ErrorResult& aRv)
+ServiceWorkerClients::GetAll(const ServiceWorkerClientQueryParams& aParams,
+                             ErrorResult& aRv)
 {
   WorkerPrivate* workerPrivate = GetCurrentThreadWorkerPrivate();
   MOZ_ASSERT(workerPrivate);
@@ -252,6 +253,12 @@ ServiceWorkerClients::GetServiced(ErrorResult& aRv)
 
   DOMString scope;
   mWorkerScope->GetScope(scope);
+
+  // Bug 1058311. Don't support uncontrolled for now.
+  if (aParams.mIncludeUncontrolled) {
+    aRv.Throw(NS_ERROR_DOM_NOT_SUPPORTED_ERR);
+    return nullptr;
+  }
 
   nsRefPtr<Promise> promise = Promise::Create(mWorkerScope, aRv);
   if (NS_WARN_IF(aRv.Failed())) {
@@ -265,28 +272,15 @@ ServiceWorkerClients::GetServiced(ErrorResult& aRv)
     return promise.forget();
   }
 
-  nsRefPtr<GetServicedRunnable> r =
-    new GetServicedRunnable(workerPrivate,
-                            promiseHolder,
-                            NS_ConvertUTF16toUTF8(scope));
+  nsRefPtr<GetAllRunnable> r =
+    new GetAllRunnable(workerPrivate, promiseHolder,
+                       NS_ConvertUTF16toUTF8(scope));
   nsresult rv = NS_DispatchToMainThread(r);
 
   if (NS_WARN_IF(NS_FAILED(rv))) {
     promise->MaybeReject(NS_ERROR_NOT_AVAILABLE);
   }
 
-  return promise.forget();
-}
-
-// FIXME(catalinb): Bug 1045257 - Implement ReloadAll
-already_AddRefed<Promise>
-ServiceWorkerClients::ReloadAll(ErrorResult& aRv)
-{
-  nsRefPtr<Promise> promise = Promise::Create(mWorkerScope, aRv);
-  if (NS_WARN_IF(aRv.Failed())) {
-    return nullptr;
-  }
-  promise->MaybeReject(NS_ERROR_NOT_AVAILABLE);
   return promise.forget();
 }
 

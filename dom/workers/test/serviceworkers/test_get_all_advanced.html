@@ -5,7 +5,7 @@
 <!DOCTYPE HTML>
 <html>
 <head>
-  <title>Bug 982726 - test get_serviced </title>
+  <title>Bug 982726 - test get_all </title>
   <script type="text/javascript" src="/tests/SimpleTest/SimpleTest.js"></script>
   <link rel="stylesheet" type="text/css" href="/tests/SimpleTest/test.css" />
 </head>
@@ -14,13 +14,12 @@
 <div id="content" style="display: none"></div>
 <pre id="test"></pre>
 <script class="testbody" type="text/javascript">
-  var registration;
+  // Spec change: get_serviced -> get_all in bug 1058311.
   var opened = [];
-  var results = [];
+  var registration;
 
   function start() {
-    dump("~*~*~*~*~*~*~*~*~*~*~ About to register\n");
-    return navigator.serviceWorker.register("get_serviced_worker_enumerate.js",
+    return navigator.serviceWorker.register("get_all_worker_advanced.js",
                                             { scope: "./sw_clients/" })
       .then((swr) => registration = swr);
   }
@@ -38,55 +37,54 @@
     });
   }
 
-  function openClient() {
+  function testGetAll() {
     var p = new Promise(function(res, rej) {
-
-      var content = document.getElementById("content");
-      ok(content, "Parent exists.");
-
-      var iframe = document.createElement("iframe");
-      iframe.setAttribute('src', "sw_clients/service_worker_controlled.html");
-
-      content.appendChild(iframe);
-
       window.onmessage = function(e) {
         if (e.data === "READY") {
+          if (!registration.active) {
+            ok(false, "Did not have active worker");
+            return Promise.resolve();
+          }
+
           opened.push(iframe);
+          registration.active.postMessage("getAll");
+        } else if (e.data === opened.length) {
+          ok(true, "getAll returned the correct value.");
+          res();
+        } else {
+          ok(false, "Wrong value. Expected: " + opened.length +
+                    ", got: " + e.data);
           res();
         }
       }
     });
+
+    var content = document.getElementById("content");
+    ok(content, "Parent exists.");
+
+    var iframe = document.createElement("iframe");
+    iframe.setAttribute('src', "sw_clients/service_worker_controlled.html");
+    content.appendChild(iframe);
+
     return p;
   }
 
-  function testGetServiced() {
-    var count = 0;
-    return new Promise(function (res, rej) {
-      if (!registration.active) {
-        ok(false, "Did not have active worker");
-        res();
-        return;
-      }
-      registration.active.postMessage("getServiced");
-      // wait for response
-      window.onmessage = function(msg) {
-        results[msg.data] = "ok";
-        count = count + 1;
-        if (count == opened.length) {
-          for (i = 0; i < count; i++) {
-            ok(results[i] == "ok", "Client received the message.");
-          }
-          res();
-        }
-      }
-    });
+  function removeAndTest() {
+    var content = document.getElementById("content");
+    ok(content, "Parent exists.");
+
+    content.removeChild(opened.pop());
+    content.removeChild(opened.pop());
+
+    return testGetAll();
   }
 
   function runTest() {
     start()
-      .then(openClient).then(openClient)
-      .then(openClient).then(openClient)
-      .then(testGetServiced)
+      .then(testGetAll)
+      .then(testGetAll)
+      .then(testGetAll)
+      .then(removeAndTest)
       .then(closeAndUnregister)
       .catch(function(e) {
         ok(false, "Some test failed with error " + e);

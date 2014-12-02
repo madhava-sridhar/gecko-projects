@@ -18,6 +18,7 @@ class ErrorResult;
 namespace dom {
 
 class Promise;
+struct ServiceWorkerClientQueryParams;
 
 namespace workers {
 
@@ -30,8 +31,9 @@ public:
 
   ServiceWorkerClients(ServiceWorkerGlobalScope* aWorkerScope);
 
-  already_AddRefed<Promise> GetServiced(ErrorResult& aRv);
-  already_AddRefed<Promise> ReloadAll(ErrorResult& aRv);
+  already_AddRefed<Promise>
+  GetAll(const ServiceWorkerClientQueryParams& aParams,
+         ErrorResult& aRv);
 
   JSObject* WrapObject(JSContext* aCx) MOZ_OVERRIDE;
 

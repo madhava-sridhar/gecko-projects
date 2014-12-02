@@ -11,9 +11,14 @@
 [Exposed=ServiceWorker]
 interface ServiceWorkerClients {
   // A list of client objects, identifiable by ID, that correspond to windows
-  // (or workers) that are "controlled" by this SW
+  // or workers that are controlled or can be controlled by this SW.
   [Throws]
-  Promise<sequence<ServiceWorkerClient>?> getServiced();
-  [Throws]
-  Promise<any> reloadAll();
+  Promise<sequence<ServiceWorkerClient>?> getAll(optional ServiceWorkerClientQueryParams options);
+};
+
+dictionary ServiceWorkerClientQueryParams {
+  // This can be the subject of a change.
+  // https://github.com/slightlyoff/ServiceWorker/issues/428
+  // https://github.com/slightlyoff/ServiceWorker/issues/414
+  boolean includeUncontrolled = false;
 };

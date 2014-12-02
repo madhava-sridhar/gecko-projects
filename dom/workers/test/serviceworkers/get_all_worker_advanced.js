@@ -3,7 +3,7 @@ onmessage = function(e) {
     dump("ERROR: message has no data.\n");
   }
 
-  self.clients.getServiced().then(function(res) {
+  self.clients.getAll().then(function(res) {
     if (res.length === 0) {
       dump("ERROR: no client is currently being controlled.\n");
     }
