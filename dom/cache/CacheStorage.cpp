@@ -20,6 +20,7 @@
 #include "mozilla/ipc/PBackgroundChild.h"
 #include "mozilla/ipc/PBackgroundSharedTypes.h"
 #include "nsIGlobalObject.h"
+#include "nsIScriptSecurityManager.h"
 #include "WorkerPrivate.h"
 
 namespace mozilla {
@@ -65,7 +66,20 @@ CacheStorage::CreateOnMainThread(Namespace aNamespace,
   }
 
   if (nullPrincipal) {
-    NS_WARNING("CacheStorage is not supported on this principal.");
+    NS_WARNING("CacheStorage not supported on null principal.");
+    aRv.Throw(NS_ERROR_FAILURE);
+    return nullptr;
+  }
+
+  bool unknownAppId;
+  rv = aPrincipal->GetUnknownAppId(&unknownAppId);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    aRv.Throw(rv);
+    return nullptr;
+  }
+
+  if (unknownAppId) {
+    NS_WARNING("CacheStorage not supported on principal with unknown appId.");
     aRv.Throw(NS_ERROR_FAILURE);
     return nullptr;
   }
@@ -102,7 +116,15 @@ CacheStorage::CreateOnWorker(Namespace aNamespace,
 
   const PrincipalInfo& principalInfo = aWorkerPrivate->GetPrincipalInfo();
   if (principalInfo.type() == PrincipalInfo::TNullPrincipalInfo) {
-    NS_WARNING("CacheStorage is not supported on this principal.");
+    NS_WARNING("CacheStorage not supported on null principal.");
+    aRv.Throw(NS_ERROR_FAILURE);
+    return nullptr;
+  }
+
+  if (principalInfo.type() == PrincipalInfo::TContentPrincipalInfo &&
+      principalInfo.get_ContentPrincipalInfo().appId() ==
+      nsIScriptSecurityManager::UNKNOWN_APP_ID) {
+    NS_WARNING("CacheStorage not supported on principal with unknown appId.");
     aRv.Throw(NS_ERROR_FAILURE);
     return nullptr;
   }
