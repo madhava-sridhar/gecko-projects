@@ -7,6 +7,7 @@
 #include "mozilla/dom/cache/ShutdownObserver.h"
 
 #include "mozilla/dom/cache/Manager.h"
+#include "mozilla/dom/cache/ManagerId.h"
 #include "mozilla/ipc/BackgroundParent.h"
 #include "mozilla/Services.h"
 #include "nsIObserverService.h"
@@ -43,7 +44,7 @@ ShutdownObserver::Instance()
 }
 
 nsresult
-ShutdownObserver::AddOrigin(const nsACString& aOrigin)
+ShutdownObserver::AddManagerId(ManagerId* aManagerId)
 {
   mozilla::ipc::AssertIsOnBackgroundThread();
 
@@ -52,9 +53,8 @@ ShutdownObserver::AddOrigin(const nsACString& aOrigin)
   }
 
   nsCOMPtr<nsIRunnable> runnable =
-    NS_NewRunnableMethodWithArg<nsCString>(this,
-                                           &ShutdownObserver::AddOriginOnMainThread,
-                                           nsCString(aOrigin));
+    NS_NewRunnableMethodWithArg<nsRefPtr<ManagerId>>(
+      this, &ShutdownObserver::AddManagerIdOnMainThread, aManagerId);
 
   DebugOnly<nsresult> rv =
     NS_DispatchToMainThread(runnable, nsIThread::DISPATCH_NORMAL);
@@ -65,14 +65,13 @@ ShutdownObserver::AddOrigin(const nsACString& aOrigin)
 }
 
 void
-ShutdownObserver::RemoveOrigin(const nsACString& aOrigin)
+ShutdownObserver::RemoveManagerId(ManagerId* aManagerId)
 {
   mozilla::ipc::AssertIsOnBackgroundThread();
 
   nsCOMPtr<nsIRunnable> runnable =
-    NS_NewRunnableMethodWithArg<nsCString>(this,
-                                           &ShutdownObserver::RemoveOriginOnMainThread,
-                                           nsCString(aOrigin));
+    NS_NewRunnableMethodWithArg<nsRefPtr<ManagerId>>(
+      this, &ShutdownObserver::RemoveManagerIdOnMainThread, aManagerId);
 
   DebugOnly<nsresult> rv =
     NS_DispatchToMainThread(runnable, nsIThread::DISPATCH_NORMAL);
@@ -117,23 +116,28 @@ ShutdownObserver::InitOnMainThread()
 }
 
 void
-ShutdownObserver::AddOriginOnMainThread(const nsACString& aOrigin)
+ShutdownObserver::AddManagerIdOnMainThread(ManagerId* aManagerId)
 {
   MOZ_ASSERT(NS_IsMainThread());
 
-  if (!mOrigins.Contains(aOrigin)) {
-    mOrigins.AppendElement(aOrigin);
+  for (uint32_t i = 0; i < mManagerIds.Length(); ++i) {
+    if (*mManagerIds[i] == *aManagerId) {
+      return;
+    }
   }
+  mManagerIds.AppendElement(aManagerId);
 }
 
 void
-ShutdownObserver::RemoveOriginOnMainThread(const nsACString& aOrigin)
+ShutdownObserver::RemoveManagerIdOnMainThread(ManagerId* aManagerId)
 {
   MOZ_ASSERT(NS_IsMainThread());
 
-  size_t index = mOrigins.IndexOf(aOrigin);
-  if (index != nsTArray<nsCString>::NoIndex) {
-    mOrigins.RemoveElementAt(index);
+  for (uint32_t i = 0; i < mManagerIds.Length(); ++i) {
+    if (*mManagerIds[i] == *aManagerId) {
+      mManagerIds.RemoveElementAt(i);
+      return;
+    }
   }
 }
 
@@ -144,8 +148,8 @@ ShutdownObserver::StartShutdownOnBgThread()
 
   mShuttingDown = true;
 
-  for (uint32_t i = 0; i < mOriginsInProcess.Length(); ++i) {
-    nsRefPtr<Manager> manager = Manager::ForExistingOrigin(mOriginsInProcess[i]);
+  for (uint32_t i = 0; i < mManagerIdsInProcess.Length(); ++i) {
+    nsRefPtr<Manager> manager = Manager::Get(mManagerIdsInProcess[i]);
     if (manager) {
       manager->Shutdown();
     }
@@ -172,7 +176,7 @@ ShutdownObserver::DoShutdown()
   }
 
   // Copy origins to separate array to process to avoid races
-  mOriginsInProcess = mOrigins;
+  mManagerIdsInProcess = mManagerIds;
 
   // Send shutdown notification to origin managers
   nsCOMPtr<nsIRunnable> runnable =
@@ -184,7 +188,7 @@ ShutdownObserver::DoShutdown()
   runnable = nullptr;
 
   // Wait for managers to shutdown
-  while (!mOrigins.IsEmpty()) {
+  while (!mManagerIds.IsEmpty()) {
     if (!NS_ProcessNextEvent()) {
       NS_WARNING("Something bad happened!");
       break;

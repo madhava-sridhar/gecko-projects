@@ -183,7 +183,6 @@
 #include "mozilla/dom/MessagePortBinding.h"
 #include "mozilla/dom/indexedDB/IDBFactory.h"
 #include "mozilla/dom/Promise.h"
-#include "mozilla/dom/quota/QuotaManager.h"
 #include "mozilla/dom/Request.h"
 #include "mozilla/dom/Response.h"
 
@@ -10841,30 +10840,14 @@ nsGlobalWindow::GetInterface(JSContext* aCx, nsIJSID* aIID,
 }
 
 already_AddRefed<CacheStorage>
-nsGlobalWindow::Caches()
+nsGlobalWindow::GetCaches(ErrorResult& aRv)
 {
-  using mozilla::dom::quota::QuotaManager;
-  using mozilla::dom::quota::PERSISTENCE_TYPE_PERSISTENT;
-
   if (!mCacheStorage) {
-    nsAutoCString origin;
-    nsAutoCString quotaGroup;
-    bool isApp;
-    bool hasUnlimStoragePerm;
-    nsCOMPtr<nsIPrincipal> principal = GetPrincipal();
-    if (!principal ||
-        NS_FAILED(QuotaManager::GetInfoFromPrincipal(principal,
-                                                     PERSISTENCE_TYPE_PERSISTENT,
-                                                     &origin, &quotaGroup,
-                                                     &isApp, &hasUnlimStoragePerm))) {
-      origin.AssignLiteral("null");
-      quotaGroup.AssignLiteral("");
-      isApp = false;
-      hasUnlimStoragePerm = false;
+    mCacheStorage = CacheStorage::CreateOnMainThread(cache::DEFAULT_NAMESPACE,
+                                                   this, GetPrincipal(), aRv);
+    if (aRv.Failed()) {
+      return nullptr;
     }
-    mCacheStorage = new CacheStorage(cache::DEFAULT_NAMESPACE,
-                                     ToSupports(this), this, origin,
-                                     quotaGroup, isApp, hasUnlimStoragePerm);
   }
 
   nsRefPtr<CacheStorage> ref = mCacheStorage;

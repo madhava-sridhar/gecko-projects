@@ -22,7 +22,7 @@ namespace dom {
 namespace cache {
 
 class Action;
-class CacheInitData;
+class ManagerId;
 
 class Context MOZ_FINAL
 {
@@ -39,7 +39,7 @@ public:
     NS_INLINE_DECL_REFCOUNTING(mozilla::dom::cache::Context::Listener)
   };
 
-  Context(Listener* aListener, const CacheInitData& aInitData,
+  Context(Listener* aListener, ManagerId* aManagerId,
           Action* aQuotaIOThreadAction);
 
   // Execute given action on the target once the quota manager has been
@@ -80,13 +80,13 @@ private:
 
   ~Context();
   void DispatchAction(nsIEventTarget* aTarget, Action* aAction);
-  void OnQuotaInit(nsresult aRv, nsIFile* aQuotaDir);
+  void OnQuotaInit(nsresult aRv, const QuotaInfo& aQuotaInfo);
   void OnActionRunnableComplete(ActionRunnable* const aAction);
 
   nsRefPtr<Listener> mListener;
-  const nsCString mOrigin;
+  nsRefPtr<ManagerId> mManagerId;
   State mState;
-  nsCOMPtr<nsIFile> mQuotaDir;
+  QuotaInfo mQuotaInfo;
   nsTArray<PendingAction> mPendingActions;
 
   // weak refs since ~ActionRunnable() removes itself from this list

@@ -136,7 +136,7 @@ public:
         const RequestInit& aInit,
         ErrorResult& aRv);
 
-  already_AddRefed<mozilla::dom::cache::CacheStorage> Caches();
+  already_AddRefed<cache::CacheStorage> GetCaches(ErrorResult& aRv);
 };
 
 class DedicatedWorkerGlobalScope MOZ_FINAL : public WorkerGlobalScope

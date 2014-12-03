@@ -2,6 +2,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+include PBackgroundSharedTypes;
+
 using mozilla::dom::cache::Namespace from "mozilla/dom/cache/Types.h";
 
 namespace mozilla {
@@ -14,10 +16,7 @@ namespace cache {
 struct CacheInitData
 {
   Namespace namespaceEnum;
-  nsCString origin;
-  nsCString quotaGroup;
-  bool isApp;
-  bool hasUnlimStoragePerm;
+  PrincipalInfo principalInfo;
 };
 
 } // namespace cache

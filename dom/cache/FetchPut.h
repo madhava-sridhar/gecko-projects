@@ -50,7 +50,7 @@ public:
   };
 
   static nsresult
-  Create(Listener* aListener, Manager* mManager,
+  Create(Listener* aListener, Manager* aManager,
          RequestId aRequestId, CacheId aCacheId,
          const nsTArray<PCacheRequest>& aRequests,
          const nsTArray<nsCOMPtr<nsIInputStream>>& aRequestStreams,
@@ -102,7 +102,6 @@ private:
   virtual void AssertOwningThread() const MOZ_OVERRIDE;
 #endif
 
-  // TODO remove ref counting on owner since its an actor
   Listener* mListener;
   nsRefPtr<Manager> mManager;
   const RequestId mRequestId;

@@ -31,6 +31,7 @@ function workerTestExec(script) {
   var worker = new Worker('worker_wrapper.js');
   worker.onmessage = function(event) {
     if (event.data.type == 'finish') {
+      SpecialPowers.forceGC();
       SimpleTest.finish();
 
     } else if (event.data.type == 'status') {

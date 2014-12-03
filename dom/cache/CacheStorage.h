@@ -26,13 +26,16 @@ class ErrorResult;
 
 namespace ipc {
   class IProtocol;
+  class PrincipalInfo;
 }
 
 namespace dom {
 
 class Promise;
-//struct QueryParams;
-//class RequestOrScalarValueString;
+
+namespace workers {
+  class WorkerPrivate;
+}
 
 namespace cache {
 
@@ -47,10 +50,13 @@ class CacheStorage MOZ_FINAL : public nsIIPCBackgroundChildCreateCallback
   typedef mozilla::ipc::PBackgroundChild PBackgroundChild;
 
 public:
-  CacheStorage(Namespace aNamespace, nsISupports* aOwner,
-               nsIGlobalObject* aGlobal, const nsACString& aOrigin,
-               const nsACString& aQuotaGroup, bool aIsApp,
-               bool aHasUnlimStoragePerm);
+  static already_AddRefed<CacheStorage>
+  CreateOnMainThread(Namespace aNamespace, nsIGlobalObject* aGlobal,
+                     nsIPrincipal* aPrincipal, ErrorResult& aRv);
+
+  static already_AddRefed<CacheStorage>
+  CreateOnWorker(Namespace aNamespace, nsIGlobalObject* aGlobal,
+                 workers::WorkerPrivate* aWorkerPrivate, ErrorResult& aRv);
 
   // webidl interface methods
   already_AddRefed<Promise> Match(const RequestOrScalarValueString& aRequest,
@@ -91,6 +97,9 @@ public:
 #endif
 
 private:
+  CacheStorage(Namespace aNamespace,
+               nsIGlobalObject* aGlobal, const nsACString& aOrigin,
+               const mozilla::ipc::PrincipalInfo& aPrincipalInfo);
   virtual ~CacheStorage();
 
   RequestId AddRequestPromise(Promise* aPromise, ErrorResult& aRv);
@@ -99,13 +108,9 @@ private:
   // Would like to use CacheInitData here, but we cannot because
   // its an IPC struct which breaks webidl by including windows.h.
   const Namespace mNamespace;
-  // TODO: remove separate mOwner
-  nsCOMPtr<nsISupports> mOwner;
   nsCOMPtr<nsIGlobalObject> mGlobal;
   const nsCString mOrigin;
-  const nsCString mQuotaGroup;
-  const bool mIsApp;
-  const bool mHasUnlimStoragePerm;
+  UniquePtr<mozilla::ipc::PrincipalInfo> mPrincipalInfo;
   CacheStorageChild* mActor;
   nsTArray<nsRefPtr<Promise>> mRequestPromises;
 

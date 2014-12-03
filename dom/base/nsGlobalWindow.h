@@ -860,7 +860,7 @@ protected:
 public:
   void Alert(mozilla::ErrorResult& aError);
   void Alert(const nsAString& aMessage, mozilla::ErrorResult& aError);
-  already_AddRefed<mozilla::dom::cache::CacheStorage> Caches();
+  already_AddRefed<mozilla::dom::cache::CacheStorage> GetCaches(mozilla::ErrorResult& aRv);
   bool Confirm(const nsAString& aMessage, mozilla::ErrorResult& aError);
   already_AddRefed<mozilla::dom::Promise> Fetch(const mozilla::dom::RequestOrScalarValueString& aInput,
                                                 const mozilla::dom::RequestInit& aInit,

@@ -19,8 +19,6 @@ namespace mozilla {
 namespace dom {
 namespace cache {
 
-class CacheInitData;
-
 class FileUtils MOZ_FINAL
 {
 public:
@@ -39,7 +37,7 @@ public:
                nsIFile** aBodyFileOut);
 
   static nsresult
-  BodyStartWriteStream(const CacheInitData& aInitData, nsIFile* aBaseDir,
+  BodyStartWriteStream(const QuotaInfo& aQuotaInfo, nsIFile* aBaseDir,
                        nsIInputStream* aSource, void* aClosure,
                        nsAsyncCopyCallbackFun aCallback, nsID* aIdOut,
                        nsISupports** aCopyContextOut);
@@ -52,16 +50,8 @@ public:
   BodyFinalizeWrite(nsIFile* aBaseDir, const nsID& aId);
 
   static nsresult
-  BodyOpen(const CacheInitData& aInitData, nsIFile* aBaseDir, const nsID& aId,
+  BodyOpen(const QuotaInfo& aQuotaInfo, nsIFile* aBaseDir, const nsID& aId,
            nsIInputStream** aStreamOut);
-
-  static nsresult
-  BodyStartReadStream(const CacheInitData& aInitData, nsIFile* aBaseDir,
-                      const nsID& aId, nsIOutputStream* aDest, void* aClosure,
-                      nsAsyncCopyCallbackFun aCallback,
-                      nsISupports** aCopyContextOut);
-
-  static void BodyCancelRead(nsISupports* aCopyContext);
 
   static nsresult
   BodyDeleteFiles(nsIFile* aBaseDir, const nsTArray<nsID>& aIdList);

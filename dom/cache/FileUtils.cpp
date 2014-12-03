@@ -6,7 +6,6 @@
 
 #include "mozilla/dom/cache/FileUtils.h"
 
-#include "mozilla/dom/cache/CacheInitData.h"
 #include "mozilla/dom/quota/FileStreams.h"
 #include "mozilla/unused.h"
 #include "nsIFile.h"
@@ -139,7 +138,7 @@ FileUtils::BodyIdToFile(nsIFile* aBaseDir, const nsID& aId,
 
 // static
 nsresult
-FileUtils::BodyStartWriteStream(const CacheInitData& aInitData,
+FileUtils::BodyStartWriteStream(const QuotaInfo& aQuotaInfo,
                                 nsIFile* aBaseDir, nsIInputStream* aSource,
                                 void* aClosure,
                                 nsAsyncCopyCallbackFun aCallback, nsID* aIdOut,
@@ -178,10 +177,10 @@ FileUtils::BodyStartWriteStream(const CacheInitData& aInitData,
   if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
   if (NS_WARN_IF(exists)) { return NS_ERROR_FILE_ALREADY_EXISTS; }
 
+  // TODO: use default storage
   nsCOMPtr<nsIOutputStream> fileStream =
-    FileOutputStream::Create(PERSISTENCE_TYPE_PERSISTENT,
-                             aInitData.quotaGroup(), aInitData.origin(),
-                             tmpFile);
+    FileOutputStream::Create(PERSISTENCE_TYPE_PERSISTENT, aQuotaInfo.mGroup,
+                             aQuotaInfo.mOrigin, tmpFile);
   if (NS_WARN_IF(!fileStream)) { return NS_ERROR_UNEXPECTED; }
 
   // By default we would prefer to just use ReadSegments to copy buffers.
@@ -199,6 +198,8 @@ FileUtils::BodyStartWriteStream(const CacheInitData& aInitData,
     fileStream = buffered.forget();
     mode = NS_ASYNCCOPY_VIA_WRITESEGMENTS;
   }
+
+  // TODO: we should be able to auto-close now...
 
   // Note, we cannot auto-close the source stream here because some of
   // our source streams must be closed on the PBackground worker thread.
@@ -270,7 +271,7 @@ FileUtils::BodyFinalizeWrite(nsIFile* aBaseDir, const nsID& aId)
 
 // static
 nsresult
-FileUtils::BodyOpen(const CacheInitData& aInitData, nsIFile* aBaseDir,
+FileUtils::BodyOpen(const QuotaInfo& aQuotaInfo, nsIFile* aBaseDir,
                     const nsID& aId, nsIInputStream** aStreamOut)
 {
   MOZ_ASSERT(aBaseDir);
@@ -286,67 +287,15 @@ FileUtils::BodyOpen(const CacheInitData& aInitData, nsIFile* aBaseDir,
   if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
   if (NS_WARN_IF(!exists)) { return NS_ERROR_FILE_NOT_FOUND; }
 
+  // TODO: use default storage
   nsCOMPtr<nsIInputStream> fileStream =
-    FileInputStream::Create(PERSISTENCE_TYPE_PERSISTENT, aInitData.quotaGroup(),
-                            aInitData.origin(), finalFile);
+    FileInputStream::Create(PERSISTENCE_TYPE_PERSISTENT, aQuotaInfo.mGroup,
+                            aQuotaInfo.mOrigin, finalFile);
   if (NS_WARN_IF(!fileStream)) { return NS_ERROR_UNEXPECTED; }
 
   fileStream.forget(aStreamOut);
 
   return rv;
-}
-
-// static
-nsresult
-FileUtils::BodyStartReadStream(const CacheInitData& aInitData,
-                               nsIFile* aBaseDir,
-                               const nsID& aId, nsIOutputStream* aDest,
-                               void* aClosure,
-                               nsAsyncCopyCallbackFun aCallback,
-                               nsISupports** aCopyContextOut)
-{
-  MOZ_ASSERT(aBaseDir);
-  MOZ_ASSERT(aDest);
-  MOZ_ASSERT(aClosure);
-  MOZ_ASSERT(aCallback);
-  MOZ_ASSERT(aCopyContextOut);
-
-  nsCOMPtr<nsIFile> finalFile;
-  nsresult rv = BodyIdToFile(aBaseDir, aId, BODY_FILE_FINAL,
-                             getter_AddRefs(finalFile));
-  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
-
-  bool exists;
-  rv = finalFile->Exists(&exists);
-  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
-  if (NS_WARN_IF(!exists)) { return NS_ERROR_FILE_NOT_FOUND; }
-
-  nsCOMPtr<nsIInputStream> fileStream =
-    FileInputStream::Create(PERSISTENCE_TYPE_PERSISTENT, aInitData.quotaGroup(),
-                            aInitData.origin(), finalFile);
-  if (NS_WARN_IF(!fileStream)) { return NS_ERROR_UNEXPECTED; }
-
-  rv = NS_AsyncCopy(fileStream, aDest, NS_GetCurrentThread(),
-                    NS_ASYNCCOPY_VIA_READSEGMENTS,
-                    4096, // chunk size
-                    aCallback, aClosure,
-                    true, true, // close streams
-                    aCopyContextOut);
-  if (NS_WARN_IF(NS_FAILED(rv))) {
-    fileStream->Close();
-    return rv;
-  }
-
-  return rv;
-}
-
-// static
-void
-FileUtils::BodyCancelRead(nsISupports* aCopyContext)
-{
-  MOZ_ASSERT(aCopyContext);
-  nsresult rv = NS_CancelAsyncCopy(aCopyContext, NS_ERROR_ABORT);
-  unused << NS_WARN_IF(NS_FAILED(rv));
 }
 
 // static

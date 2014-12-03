@@ -8,16 +8,18 @@
 
 #include "mozilla/DebugOnly.h"
 #include "mozilla/dom/cache/Action.h"
-#include "mozilla/dom/cache/CacheInitData.h"
+#include "mozilla/dom/cache/ManagerId.h"
 #include "mozilla/dom/quota/OriginOrPatternString.h"
 #include "mozilla/dom/quota/QuotaManager.h"
 #include "nsIFile.h"
+#include "nsIPrincipal.h"
 #include "nsIRunnable.h"
 #include "nsThreadUtils.h"
 
 namespace {
 
 using mozilla::dom::Nullable;
+using mozilla::dom::cache::QuotaInfo;
 using mozilla::dom::quota::OriginOrPatternString;
 using mozilla::dom::quota::QuotaManager;
 using mozilla::dom::quota::PERSISTENCE_TYPE_PERSISTENT;
@@ -26,17 +28,15 @@ using mozilla::dom::quota::PersistenceType;
 class QuotaReleaseRunnable MOZ_FINAL : public nsIRunnable
 {
 public:
-  QuotaReleaseRunnable(const nsACString& aOrigin, const nsACString& aQuotaId)
-    : mOrigin(aOrigin)
+  QuotaReleaseRunnable(const QuotaInfo& aQuotaInfo, const nsACString& aQuotaId)
+    : mQuotaInfo(aQuotaInfo)
     , mQuotaId(aQuotaId)
-  {
-  }
+  { }
 
 private:
-  ~QuotaReleaseRunnable()
-  {}
+  ~QuotaReleaseRunnable() { }
 
-  const nsCString mOrigin;
+  const QuotaInfo mQuotaInfo;
   const nsCString mQuotaId;
 
 public:
@@ -52,7 +52,7 @@ QuotaReleaseRunnable::Run()
   MOZ_ASSERT(NS_IsMainThread());
   QuotaManager* qm = QuotaManager::Get();
   MOZ_ASSERT(qm);
-  qm->AllowNextSynchronizedOp(OriginOrPatternString::FromOrigin(mOrigin),
+  qm->AllowNextSynchronizedOp(OriginOrPatternString::FromOrigin(mQuotaInfo.mOrigin),
                               Nullable<PersistenceType>(PERSISTENCE_TYPE_PERSISTENT),
                               mQuotaId);
   return NS_OK;
@@ -75,11 +75,11 @@ class Context::QuotaInitRunnable MOZ_FINAL : public nsIRunnable
 {
 public:
   QuotaInitRunnable(Context* aContext,
-                    const CacheInitData& aInitData,
+                    ManagerId* aManagerId,
                     const nsACString& aQuotaId,
                     Action* aQuotaIOThreadAction)
     : mContext(aContext)
-    , mInitData(aInitData)
+    , mManagerId(aManagerId)
     , mQuotaId(aQuotaId)
     , mQuotaIOThreadAction(aQuotaIOThreadAction)
     , mInitiatingThread(NS_GetCurrentThread())
@@ -87,6 +87,7 @@ public:
     , mResult(NS_OK)
   {
     MOZ_ASSERT(mContext);
+    MOZ_ASSERT(mManagerId);
     MOZ_ASSERT(mInitiatingThread);
   }
 
@@ -144,13 +145,13 @@ private:
   }
 
   nsRefPtr<Context> mContext;
-  const CacheInitData mInitData;
+  nsRefPtr<ManagerId> mManagerId;
   const nsCString mQuotaId;
   nsRefPtr<Action> mQuotaIOThreadAction;
   nsCOMPtr<nsIThread> mInitiatingThread;
   State mState;
   nsresult mResult;
-  nsCOMPtr<nsIFile> mQuotaDir;
+  QuotaInfo mQuotaInfo;
 
 public:
   NS_DECL_ISUPPORTS_INHERITED
@@ -163,19 +164,31 @@ NS_IMPL_ISUPPORTS_INHERITED(mozilla::dom::cache::Context::QuotaInitRunnable,
 NS_IMETHODIMP
 Context::QuotaInitRunnable::Run()
 {
-  QuotaManager* qm;
-  nsresult rv;
-
   switch(mState) {
     case STATE_CALL_WAIT_FOR_OPEN_ALLOWED:
+    {
       MOZ_ASSERT(NS_IsMainThread());
-      qm = QuotaManager::GetOrCreate();
+      QuotaManager* qm = QuotaManager::GetOrCreate();
       if (!qm) {
         Resolve(NS_ERROR_FAILURE);
         return NS_OK;
       }
+
+      nsCOMPtr<nsIPrincipal> principal = mManagerId->Principal();
+      nsresult rv = qm->GetInfoFromPrincipal(principal,
+                                             PERSISTENCE_TYPE_PERSISTENT,
+                                             &mQuotaInfo.mGroup,
+                                             &mQuotaInfo.mOrigin,
+                                             &mQuotaInfo.mIsApp,
+                                             &mQuotaInfo.mHasUnlimStoragePerm);
+      if (NS_WARN_IF(NS_FAILED(rv))) {
+        Resolve(rv);
+        return NS_OK;
+      }
+
       mState = STATE_WAIT_FOR_OPEN_ALLOWED;
-      rv = qm->WaitForOpenAllowed(OriginOrPatternString::FromOrigin(mInitData.origin()),
+      // TODO: use default storage instead of persistent
+      rv = qm->WaitForOpenAllowed(OriginOrPatternString::FromOrigin(mQuotaInfo.mOrigin),
                                   Nullable<PersistenceType>(PERSISTENCE_TYPE_PERSISTENT),
                                   mQuotaId, this);
       if (NS_FAILED(rv)) {
@@ -183,58 +196,66 @@ Context::QuotaInitRunnable::Run()
         return NS_OK;
       }
       break;
+    }
     case STATE_WAIT_FOR_OPEN_ALLOWED:
+    {
       MOZ_ASSERT(NS_IsMainThread());
-      qm = QuotaManager::Get();
+      QuotaManager* qm = QuotaManager::Get();
       MOZ_ASSERT(qm);
       mState = STATE_ENSURE_ORIGIN_INITIALIZED;
-      rv = qm->IOThread()->Dispatch(this, nsIThread::DISPATCH_NORMAL);
+      nsresult rv = qm->IOThread()->Dispatch(this, nsIThread::DISPATCH_NORMAL);
       if (NS_WARN_IF(NS_FAILED(rv))) {
         Resolve(rv);
         return NS_OK;
       }
       break;
+    }
     case STATE_ENSURE_ORIGIN_INITIALIZED:
-      // TODO: MOZ_ASSERT(NS_GetCurrentThread() == QuotaManager::Get()->IOThread());
-      qm = QuotaManager::Get();
+    {
+      // Can't assert quota IO thread because its an idle thread that can get
+      // recreated.
+      QuotaManager* qm = QuotaManager::Get();
       MOZ_ASSERT(qm);
-      rv = qm->EnsureOriginIsInitialized(PERSISTENCE_TYPE_PERSISTENT,
-                                         mInitData.quotaGroup(),
-                                         mInitData.origin(),
-                                         mInitData.isApp(),
-                                         mInitData.hasUnlimStoragePerm(),
-                                         getter_AddRefs(mQuotaDir));
+      nsresult rv = qm->EnsureOriginIsInitialized(PERSISTENCE_TYPE_PERSISTENT,
+                                                  mQuotaInfo.mGroup,
+                                                  mQuotaInfo.mOrigin,
+                                                  mQuotaInfo.mIsApp,
+                                                  mQuotaInfo.mHasUnlimStoragePerm,
+                                                  getter_AddRefs(mQuotaInfo.mDir));
       if (NS_FAILED(rv)) {
         Resolve(rv);
         return NS_OK;
       }
+
       mState = STATE_RUNNING;
-      if (mQuotaIOThreadAction) {
-        nsCOMPtr<nsIFile> quotaDir;
-        rv = mQuotaDir->Clone(getter_AddRefs(quotaDir));
-        if (NS_FAILED(rv)) {
-          Resolve(rv);
-          return NS_OK;
-        }
-        mQuotaIOThreadAction->RunOnTarget(this, quotaDir);
-      } else {
+
+      if (!mQuotaIOThreadAction) {
         Resolve(NS_OK);
+        return NS_OK;
       }
+
+      mQuotaIOThreadAction->RunOnTarget(this, mQuotaInfo);
+
       break;
+    }
     case STATE_COMPLETING:
+    {
       NS_ASSERT_OWNINGTHREAD(Action::Resolver);
       if (mQuotaIOThreadAction) {
         mQuotaIOThreadAction->CompleteOnInitiatingThread(mResult);
       }
-      mContext->OnQuotaInit(mResult, mQuotaDir);
+      mContext->OnQuotaInit(mResult, mQuotaInfo);
       mState = STATE_COMPLETE;
       // Explicitly cleanup here as the destructor could fire on any of
       // the threads we have bounced through.
       Clear();
       break;
+    }
     default:
+    {
       MOZ_CRASH("unexpected state in QuotaInitRunnable");
       break;
+    }
   }
 
   return NS_OK;
@@ -245,11 +266,11 @@ class Context::ActionRunnable MOZ_FINAL : public nsIRunnable
 {
 public:
   ActionRunnable(Context* aContext, nsIEventTarget* aTarget, Action* aAction,
-                 nsIFile* aQuotaDir)
+                 const QuotaInfo& aQuotaInfo)
     : mContext(aContext)
     , mTarget(aTarget)
     , mAction(aAction)
-    , mQuotaDir(aQuotaDir)
+    , mQuotaInfo(aQuotaInfo)
     , mInitiatingThread(NS_GetCurrentThread())
     , mState(STATE_INIT)
     , mCanceled(false)
@@ -258,7 +279,7 @@ public:
     MOZ_ASSERT(mContext);
     MOZ_ASSERT(mTarget);
     MOZ_ASSERT(mAction);
-    MOZ_ASSERT(mQuotaDir);
+    MOZ_ASSERT(mQuotaInfo.mDir);
     MOZ_ASSERT(mInitiatingThread);
   }
 
@@ -353,7 +374,7 @@ private:
   nsRefPtr<Context> mContext;
   nsCOMPtr<nsIEventTarget> mTarget;
   nsRefPtr<Action> mAction;
-  nsCOMPtr<nsIFile> mQuotaDir;
+  const QuotaInfo mQuotaInfo;
   nsCOMPtr<nsIThread> mInitiatingThread;
   State mState;
   bool mCanceled;
@@ -383,7 +404,7 @@ Context::ActionRunnable::Run()
         break;
       }
       mState = STATE_RUNNING;
-      mAction->RunOnTarget(this, mQuotaDir);
+      mAction->RunOnTarget(this, mQuotaInfo);
       break;
     case STATE_RUNNING:
       MOZ_ASSERT(NS_GetCurrentThread() == mTarget);
@@ -419,16 +440,17 @@ Context::ActionRunnable::Run()
   return NS_OK;
 }
 
-Context::Context(Listener* aListener, const CacheInitData& aInitData,
+Context::Context(Listener* aListener, ManagerId* aManagerId,
                  Action* aQuotaIOThreadAction)
   : mListener(aListener)
-  , mOrigin(aInitData.origin())
+  , mManagerId(aManagerId)
   , mState(STATE_CONTEXT_INIT)
 {
   MOZ_ASSERT(mListener);
+  MOZ_ASSERT(mManagerId);
 
   nsRefPtr<QuotaInitRunnable> runnable =
-    new QuotaInitRunnable(this, aInitData, NS_LITERAL_CSTRING("Cache"),
+    new QuotaInitRunnable(this, mManagerId, NS_LITERAL_CSTRING("Cache"),
                           aQuotaIOThreadAction);
   nsresult rv = runnable->Dispatch();
   if (NS_FAILED(rv)) {
@@ -490,7 +512,7 @@ Context::~Context()
 
   // Unlock the quota dir as we go out of scope.
   nsCOMPtr<nsIRunnable> runnable =
-    new QuotaReleaseRunnable(mOrigin, NS_LITERAL_CSTRING("Cache"));
+    new QuotaReleaseRunnable(mQuotaInfo, NS_LITERAL_CSTRING("Cache"));
   nsresult rv = NS_DispatchToMainThread(runnable, nsIThread::DISPATCH_NORMAL);
   if (NS_FAILED(rv)) {
     MOZ_CRASH("Failed to dispatch QuotaReleaseRunnable to main thread.");
@@ -504,24 +526,17 @@ Context::DispatchAction(nsIEventTarget* aTarget, Action* aAction)
 {
   NS_ASSERT_OWNINGTHREAD(Context);
 
-  nsCOMPtr<nsIFile> quotaDir;
-  nsresult rv = mQuotaDir->Clone(getter_AddRefs(quotaDir));
-  if (NS_WARN_IF(NS_FAILED(rv))) {
-    aAction->CompleteOnInitiatingThread(rv);
-    return;
-  }
-
   nsRefPtr<ActionRunnable> runnable =
-    new ActionRunnable(this, aTarget, aAction, quotaDir);
+    new ActionRunnable(this, aTarget, aAction, mQuotaInfo);
   mActionRunnables.AppendElement(runnable);
-  rv = runnable->Dispatch();
+  nsresult rv = runnable->Dispatch();
   if (NS_FAILED(rv)) {
     MOZ_CRASH("Failed to dispatch ActionRunnable to target thread.");
   }
 }
 
 void
-Context::OnQuotaInit(nsresult aRv, nsIFile* aQuotaDir)
+Context::OnQuotaInit(nsresult aRv, const QuotaInfo& aQuotaInfo)
 {
   NS_ASSERT_OWNINGTHREAD(Context);
   MOZ_ASSERT(mState == STATE_CONTEXT_INIT);
@@ -535,8 +550,7 @@ Context::OnQuotaInit(nsresult aRv, nsIFile* aQuotaDir)
     return;
   }
 
-  mQuotaDir = aQuotaDir;
-  MOZ_ASSERT(mQuotaDir);
+  mQuotaInfo = aQuotaInfo;
   mState = STATE_CONTEXT_READY;
 
   for (uint32_t i = 0; i < mPendingActions.Length(); ++i) {

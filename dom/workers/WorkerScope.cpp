@@ -117,13 +117,15 @@ WorkerGlobalScope::GetConsole()
 }
 
 already_AddRefed<CacheStorage>
-WorkerGlobalScope::Caches()
+WorkerGlobalScope::GetCaches(ErrorResult& aRv)
 {
   if (!mCacheStorage) {
     MOZ_ASSERT(mWorkerPrivate);
-    NS_ConvertUTF16toUTF8 origin(mWorkerPrivate->GetLocationInfo().mOrigin);
-    mCacheStorage = new CacheStorage(cache::DEFAULT_NAMESPACE, ToSupports(this),
-                                     this, origin, origin, false, false);
+    mCacheStorage = CacheStorage::CreateOnWorker(cache::DEFAULT_NAMESPACE, this,
+                                                 mWorkerPrivate, aRv);
+    if (aRv.Failed()) {
+      return nullptr;
+    }
   }
 
   nsRefPtr<CacheStorage> ref = mCacheStorage;

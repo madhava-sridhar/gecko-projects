@@ -425,7 +425,10 @@ TypeUtils::ToInternalRequest(const PCacheRequest& aIn)
 {
   nsRefPtr<InternalRequest> internalRequest = new InternalRequest();
 
+  // TODO: Is this valid if DOM object has a system principal with
+  //       an origin of "[System Principal]"?
   internalRequest->SetOrigin(Origin());
+
   internalRequest->SetMethod(aIn.method());
   internalRequest->SetURL(NS_ConvertUTF16toUTF8(aIn.url()));
   internalRequest->SetReferrer(NS_ConvertUTF16toUTF8(aIn.referrer()));

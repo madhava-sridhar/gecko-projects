@@ -165,7 +165,8 @@ BackgroundChildImpl::DeallocPFileDescriptorSetChild(
 }
 
 PCacheStorageChild*
-BackgroundChildImpl::AllocPCacheStorageChild(const CacheInitData& aInitData)
+BackgroundChildImpl::AllocPCacheStorageChild(const Namespace& aNamespace,
+                                             const PrincipalInfo& aPrincipalInfo)
 {
   MOZ_CRASH("CacheStorageChild actor must be provided to PBackground manager");
   return nullptr;

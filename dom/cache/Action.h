@@ -39,7 +39,7 @@ public:
   // Execute operations on target thread. Once complete call
   // Resolver::Resolve().  This can be done sync or async.
   // Note: Action should hold Resolver ref until its ready to call Resolve().
-  virtual void RunOnTarget(Resolver* aResolver, nsIFile* aQuotaDir)=0;
+  virtual void RunOnTarget(Resolver* aResolver, const QuotaInfo& aQuotaInfo)=0;
 
   // Called on target thread if the Action is being canceled.  Simply
   // clean up and do not call Resolver::Resolve() in this case.

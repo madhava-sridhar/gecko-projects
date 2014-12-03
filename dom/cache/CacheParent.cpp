@@ -26,10 +26,9 @@ using mozilla::void_t;
 using mozilla::ipc::FileDescriptorSetParent;
 using mozilla::ipc::PFileDescriptorSetParent;
 
-CacheParent::CacheParent(const CacheInitData& aInitData,
-                         CacheId aCacheId)
-  : mCacheId(aCacheId)
-  , mManager(Manager::ForOrigin(aInitData))
+CacheParent::CacheParent(cache::Manager* aManager, CacheId aCacheId)
+  : mManager(aManager)
+  , mCacheId(aCacheId)
 {
   MOZ_ASSERT(mManager);
   mManager->AddRefCacheId(mCacheId);

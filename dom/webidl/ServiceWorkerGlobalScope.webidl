@@ -13,8 +13,6 @@
 [Global=(Worker,ServiceWorker),
  Exposed=ServiceWorker]
 interface ServiceWorkerGlobalScope : WorkerGlobalScope {
-  readonly attribute CacheStorage caches;
-
   readonly attribute ServiceWorkerClients clients;
 
   [Unforgeable] readonly attribute DOMString scope;

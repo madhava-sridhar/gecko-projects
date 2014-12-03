@@ -8,6 +8,9 @@
 #define mozilla_dom_cache_Types_h
 
 #include <stdint.h>
+#include "nsCOMPtr.h"
+#include "nsIFile.h"
+#include "nsString.h"
 
 namespace mozilla {
 namespace dom {
@@ -24,6 +27,16 @@ typedef uintptr_t RequestId;
 static const RequestId INVALID_REQUEST_ID = 0;
 
 typedef int32_t CacheId;
+
+struct QuotaInfo
+{
+  QuotaInfo() : mIsApp(false), mHasUnlimStoragePerm(false) { }
+  nsCOMPtr<nsIFile> mDir;
+  nsCString mGroup;
+  nsCString mOrigin;
+  bool mIsApp;
+  bool mHasUnlimStoragePerm;
+};
 
 } // namespace cache
 } // namespace dom

@@ -9,6 +9,7 @@
 
 #include "mozilla/dom/cache/Action.h"
 #include "mozilla/dom/cache/CacheInitData.h"
+#include "nsRefPtr.h"
 #include "nsString.h"
 
 class mozIStorageConnection;
@@ -27,38 +28,39 @@ protected:
     Create
   };
 
-  DBAction(Mode aMode, const CacheInitData& aInitData);
+  DBAction(Mode aMode);
+  virtual ~DBAction();
 
   // Just as the resolver must be ref'd until cancel or resolve, you may also
   // ref the DB connection.  The connection can only be referenced from the
   // target thread and must be released upon cancel or resolve.
-  virtual void RunWithDBOnTarget(Resolver* aResolver, nsIFile* aDBDir,
-                                 mozIStorageConnection* aConn)=0;
+  virtual void
+  RunWithDBOnTarget(Resolver* aResolver, const QuotaInfo& aQuotaInfo,
+                    nsIFile* aDBDir, mozIStorageConnection* aConn)=0;
 
-  virtual
-  void RunOnTarget(Resolver* aResolver, nsIFile* aQuotaDir) MOZ_OVERRIDE;
-
-  virtual ~DBAction() { }
+  virtual void
+  RunOnTarget(Resolver* aResolver, const QuotaInfo& aQuotaInfo) MOZ_OVERRIDE;
 
 private:
-  nsresult OpenConnection(nsIFile* aQuotaDir, mozIStorageConnection** aConnOut);
+  nsresult OpenConnection(const QuotaInfo& aQuotaInfo, nsIFile* aQuotaDir,
+                          mozIStorageConnection** aConnOut);
 
   const Mode mMode;
-  const CacheInitData mInitData;
 };
 
 class SyncDBAction : public DBAction
 {
 protected:
-  SyncDBAction(Mode aMode, const CacheInitData& aInitData);
+  SyncDBAction(Mode aMode);
+  virtual ~SyncDBAction();
 
-  virtual ~SyncDBAction() { }
+  virtual nsresult
+  RunSyncWithDBOnTarget(const QuotaInfo& aQuotaInfo, nsIFile* aDBDir,
+                        mozIStorageConnection* aConn)=0;
 
-  virtual nsresult RunSyncWithDBOnTarget(nsIFile* aDBDir,
-                                         mozIStorageConnection* aConn)=0;
-
-  virtual void RunWithDBOnTarget(Resolver* aResolver, nsIFile* aDBDir,
-                                 mozIStorageConnection* aConn) MOZ_OVERRIDE;
+  virtual void
+  RunWithDBOnTarget(Resolver* aResolver, const QuotaInfo& aQuotaInfo,
+                    nsIFile* aDBDir, mozIStorageConnection* aConn) MOZ_OVERRIDE;
 };
 
 } // namespace cache

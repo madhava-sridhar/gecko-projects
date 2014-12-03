@@ -21,37 +21,48 @@ namespace cache {
 using mozilla::dom::quota::PERSISTENCE_TYPE_PERSISTENT;
 using mozilla::dom::quota::PersistenceType;
 
-DBAction::DBAction(Mode aMode, const CacheInitData& aInitData)
+DBAction::DBAction(Mode aMode)
   : mMode(aMode)
-  , mInitData(aInitData)
+{
+}
+
+DBAction::~DBAction()
 {
 }
 
 void
-DBAction::RunOnTarget(Resolver* aResolver, nsIFile* aQuotaDir)
+DBAction::RunOnTarget(Resolver* aResolver, const QuotaInfo& aQuotaInfo)
 {
   MOZ_ASSERT(aResolver);
-  MOZ_ASSERT(aQuotaDir);
+  MOZ_ASSERT(aQuotaInfo.mDir);
 
-  nsresult rv = aQuotaDir->Append(NS_LITERAL_STRING("cache"));
+  nsCOMPtr<nsIFile> dbDir;
+  nsresult rv = aQuotaInfo.mDir->Clone(getter_AddRefs(dbDir));
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    aResolver->Resolve(rv);
+    return;
+  }
+
+  rv = dbDir->Append(NS_LITERAL_STRING("cache"));
   if (NS_WARN_IF(NS_FAILED(rv))) {
     aResolver->Resolve(rv);
     return;
   }
 
   nsCOMPtr<mozIStorageConnection> conn;
-  rv = OpenConnection(aQuotaDir, getter_AddRefs(conn));
+  rv = OpenConnection(aQuotaInfo, dbDir, getter_AddRefs(conn));
   if (NS_WARN_IF(NS_FAILED(rv))) {
     aResolver->Resolve(rv);
     return;
   }
   MOZ_ASSERT(conn);
 
-  RunWithDBOnTarget(aResolver, aQuotaDir, conn);
+  RunWithDBOnTarget(aResolver, aQuotaInfo, dbDir, conn);
 }
 
 nsresult
-DBAction::OpenConnection(nsIFile* aDBDir, mozIStorageConnection** aConnOut)
+DBAction::OpenConnection(const QuotaInfo& aQuotaInfo, nsIFile* aDBDir,
+                         mozIStorageConnection** aConnOut)
 {
   MOZ_ASSERT(aDBDir);
   MOZ_ASSERT(aConnOut);
@@ -86,6 +97,7 @@ DBAction::OpenConnection(nsIFile* aDBDir, mozIStorageConnection** aConnOut)
   // XXX: Jonas tells me nsIFileURL usage off-main-thread is dangerous,
   //      but this is what IDB does to access mozIStorageConnection so
   //      it seems at least this corner case mostly works.
+  // TODO: move this to main thread where GetInfoFromPrincipal() is executed
   nsCOMPtr<nsIURI> uri;
   rv = NS_NewFileURI(getter_AddRefs(uri), dbFile);
   if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
@@ -93,13 +105,14 @@ DBAction::OpenConnection(nsIFile* aDBDir, mozIStorageConnection** aConnOut)
   nsCOMPtr<nsIFileURL> dbFileUrl = do_QueryInterface(uri);
   if (NS_WARN_IF(!dbFileUrl)) { return NS_ERROR_UNEXPECTED; }
 
+  // TODO: use default storage
   nsAutoCString type;
   PersistenceTypeToText(PERSISTENCE_TYPE_PERSISTENT, type);
 
   rv = dbFileUrl->SetQuery(
     NS_LITERAL_CSTRING("persistenceType=") + type +
-    NS_LITERAL_CSTRING("&group=") + mInitData.quotaGroup() +
-    NS_LITERAL_CSTRING("&origin=") + mInitData.origin());
+    NS_LITERAL_CSTRING("&group=") + aQuotaInfo.mGroup +
+    NS_LITERAL_CSTRING("&origin=") + aQuotaInfo.mOrigin);
   if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 
   nsCOMPtr<mozIStorageService> ss =
@@ -130,20 +143,25 @@ DBAction::OpenConnection(nsIFile* aDBDir, mozIStorageConnection** aConnOut)
   return rv;
 }
 
-SyncDBAction::SyncDBAction(Mode aMode, const CacheInitData& aInitData)
-  : DBAction(aMode, aInitData)
+SyncDBAction::SyncDBAction(Mode aMode)
+  : DBAction(aMode)
+{
+}
+
+SyncDBAction::~SyncDBAction()
 {
 }
 
 void
-SyncDBAction::RunWithDBOnTarget(Resolver* aResolver, nsIFile* aQuotaDir,
+SyncDBAction::RunWithDBOnTarget(Resolver* aResolver,
+                                const QuotaInfo& aQuotaInfo, nsIFile* aDBDir,
                                 mozIStorageConnection* aConn)
 {
   MOZ_ASSERT(aResolver);
-  MOZ_ASSERT(aQuotaDir);
+  MOZ_ASSERT(aDBDir);
   MOZ_ASSERT(aConn);
 
-  nsresult rv = RunSyncWithDBOnTarget(aQuotaDir, aConn);
+  nsresult rv = RunSyncWithDBOnTarget(aQuotaInfo, aDBDir, aConn);
   aResolver->Resolve(rv);
 }
 

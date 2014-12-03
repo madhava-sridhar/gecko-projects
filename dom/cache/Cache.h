@@ -43,8 +43,8 @@ class Cache MOZ_FINAL : public nsISupports
                       , public TypeUtils
 {
 public:
-  Cache(nsISupports* aOwner, nsIGlobalObject* aGlobal,
-        const nsACString& aOrigin, PCacheChild* aActor);
+  Cache(nsIGlobalObject* aGlobal, const nsACString& aOrigin,
+        PCacheChild* aActor);
 
   // webidl interface methods
   already_AddRefed<Promise>
@@ -110,8 +110,6 @@ private:
   already_AddRefed<Promise> RemoveRequestPromise(RequestId aRequestId);
 
 private:
-  // TODO: remove separate mOwner
-  nsCOMPtr<nsISupports> mOwner;
   nsCOMPtr<nsIGlobalObject> mGlobal;
   const nsCString mOrigin;
   CacheChild* mActor;

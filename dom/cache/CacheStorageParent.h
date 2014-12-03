@@ -10,6 +10,7 @@
 #include "mozilla/dom/cache/CacheInitData.h"
 #include "mozilla/dom/cache/PCacheStorageParent.h"
 #include "mozilla/dom/cache/Manager.h"
+#include "mozilla/dom/cache/PrincipalVerifier.h"
 #include "mozilla/dom/cache/Types.h"
 
 template <class T> class nsRefPtr;
@@ -18,11 +19,15 @@ namespace mozilla {
 namespace dom {
 namespace cache {
 
+class ManagerId;
+
 class CacheStorageParent MOZ_FINAL : public PCacheStorageParent
+                                   , public PrincipalVerifier::Listener
                                    , public Manager::Listener
 {
 public:
-  CacheStorageParent(const CacheInitData& aInitData);
+  CacheStorageParent(PBackgroundParent* aManagingActor, Namespace aNamespace,
+                     const ipc::PrincipalInfo& aPrincipalInfo);
   virtual ~CacheStorageParent();
 
   // PCacheStorageParent methods
@@ -37,6 +42,10 @@ public:
   virtual bool RecvDelete(const RequestId& aRequestId,
                           const nsString& aKey) MOZ_OVERRIDE;
   virtual bool RecvKeys(const RequestId& aRequestId) MOZ_OVERRIDE;
+
+  // PrincipalVerifier::Listener methods
+  virtual void OnPrincipalVerified(nsresult aRv,
+                                   ManagerId* aManagerId) MOZ_OVERRIDE;
 
   // Manager::Listener methods
   virtual void OnStorageMatch(RequestId aRequestId, nsresult aRv,
@@ -57,8 +66,37 @@ private:
                       Manager::StreamList* aStreamList,
                       PCacheReadStream* aReadStreamOut);
 
-  const CacheInitData mInitData;
-  nsRefPtr<mozilla::dom::cache::Manager> mManager;
+  void RetryPendingRequests();
+  void FailPendingRequests(nsresult aRv);
+
+  cache::Manager* RequestManager(RequestId aRequestId);
+  void ReleaseManager(RequestId aRequestId);
+
+  const Namespace mNamespace;
+  nsRefPtr<PrincipalVerifier> mVerifier;
+  nsRefPtr<ManagerId> mManagerId;
+  nsRefPtr<cache::Manager> mManager;
+
+  enum Op
+  {
+    OP_MATCH,
+    OP_HAS,
+    OP_OPEN,
+    OP_DELETE,
+    OP_KEYS
+  };
+
+  struct Entry
+  {
+    Op mOp;
+    RequestId mRequestId;
+    nsString mKey;
+    PCacheRequest mRequest;
+    PCacheQueryParams mParams;
+  };
+
+  nsTArray<Entry> mPendingRequests;
+  nsTArray<RequestId> mActiveRequests;
 };
 
 } // namesapce cache

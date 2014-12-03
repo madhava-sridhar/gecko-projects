@@ -53,6 +53,6 @@ partial interface WorkerGlobalScope {
   [Constant, Cached]
   readonly attribute Performance performance;
 
-  [Func="mozilla::dom::cache::CacheStorage::PrefEnabled"]
+  [Throws, Func="mozilla::dom::cache::CacheStorage::PrefEnabled"]
   readonly attribute CacheStorage caches;
 };

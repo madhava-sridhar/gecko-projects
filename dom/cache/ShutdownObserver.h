@@ -18,21 +18,23 @@ namespace mozilla {
 namespace dom {
 namespace cache {
 
+class ManagerId;
+
 class ShutdownObserver MOZ_FINAL : public nsIObserver
 {
 public:
   static already_AddRefed<ShutdownObserver> Instance();
 
-  nsresult AddOrigin(const nsACString& aOrigin);
-  void RemoveOrigin(const nsACString& aOrigin);
+  nsresult AddManagerId(ManagerId* aManagerId);
+  void RemoveManagerId(ManagerId* aManagerId);
 
 private:
   ShutdownObserver();
   virtual ~ShutdownObserver();
 
   void InitOnMainThread();
-  void AddOriginOnMainThread(const nsACString& aOrigin);
-  void RemoveOriginOnMainThread(const nsACString& aOrigin);
+  void AddManagerIdOnMainThread(ManagerId* aManagerId);
+  void RemoveManagerIdOnMainThread(ManagerId* aManagerId);
 
   void StartShutdownOnBgThread();
   void FinishShutdownOnBgThread();
@@ -42,10 +44,10 @@ private:
   nsCOMPtr<nsIThread> mBackgroundThread;
 
   // main thread only
-  nsTArray<nsCString> mOrigins;
+  nsTArray<nsRefPtr<ManagerId>> mManagerIds;
 
   // set on main thread once and read on bg thread
-  nsTArray<nsCString> mOriginsInProcess;
+  nsTArray<nsRefPtr<ManagerId>> mManagerIdsInProcess;
 
   // bg thread only
   bool mShuttingDown;

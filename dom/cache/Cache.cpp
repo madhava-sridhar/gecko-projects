@@ -75,17 +75,16 @@ using mozilla::dom::workers::WorkerPrivate;
 
 NS_IMPL_CYCLE_COLLECTING_ADDREF(mozilla::dom::cache::Cache);
 NS_IMPL_CYCLE_COLLECTING_RELEASE(mozilla::dom::cache::Cache);
-NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE(Cache, mOwner, mGlobal)
+NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE(Cache, mGlobal)
 
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(Cache)
   NS_WRAPPERCACHE_INTERFACE_MAP_ENTRY
   NS_INTERFACE_MAP_ENTRY(nsISupports)
 NS_INTERFACE_MAP_END
 
-Cache::Cache(nsISupports* aOwner, nsIGlobalObject* aGlobal,
-             const nsACString& aOrigin, PCacheChild* aActor)
-  : mOwner(aOwner)
-  , mGlobal(aGlobal)
+Cache::Cache(nsIGlobalObject* aGlobal, const nsACString& aOrigin,
+             PCacheChild* aActor)
+  : mGlobal(aGlobal)
   , mOrigin(aOrigin)
   , mActor(static_cast<CacheChild*>(aActor))
 {
@@ -350,7 +349,7 @@ Cache::PrefEnabled(JSContext* aCx, JSObject* aObj)
 nsISupports*
 Cache::GetParentObject() const
 {
-  return mOwner;
+  return mGlobal;
 }
 
 JSObject*

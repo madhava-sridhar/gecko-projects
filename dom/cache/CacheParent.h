@@ -19,7 +19,6 @@ namespace mozilla {
 namespace dom {
 namespace cache {
 
-class CacheInitData;
 class CacheDBConnection;
 struct SavedResponse;
 struct StreamHolder;
@@ -29,7 +28,7 @@ class CacheParent MOZ_FINAL : public PCacheParent
                             , public FetchPut::Listener
 {
 public:
-  CacheParent(const CacheInitData& aInitData, CacheId aCacheId);
+  CacheParent(cache::Manager* aManager, CacheId aCacheId);
   virtual ~CacheParent();
   virtual void ActorDestroy(ActorDestroyReason aReason) MOZ_OVERRIDE;
 
@@ -79,8 +78,8 @@ private:
   already_AddRefed<nsIInputStream>
   DeserializeCacheStream(const PCacheReadStreamOrVoid& aStreamOrVoid);
 
+  nsRefPtr<cache::Manager> mManager;
   const CacheId mCacheId;
-  nsRefPtr<mozilla::dom::cache::Manager> mManager;
   nsTArray<nsRefPtr<FetchPut>> mFetchPutList;
 };
 

@@ -12,7 +12,9 @@ include protocol PCacheStreamControl;
 include protocol PMessagePort;
 
 include DOMTypes;
-include CacheInitData;
+include PBackgroundSharedTypes;
+
+using mozilla::dom::cache::Namespace from "mozilla/dom/cache/IPCUtils.h";
 
 using struct mozilla::void_t
   from "ipc/IPCMessageUtils.h";
@@ -49,7 +51,7 @@ parent:
 
   PBackgroundIDBFactory(OptionalWindowId optionalWindowId);
 
-  PCacheStorage(CacheInitData initData);
+  PCacheStorage(Namespace aNamespace, PrincipalInfo aPrincipalInfo);
 
   PMessagePort();
 

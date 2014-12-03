@@ -384,7 +384,8 @@ partial interface Window {
 
   [Throws, ChromeOnly] any getInterface(IID iid);
 
-  [Pref="dom.window-caches.enabled"] readonly attribute CacheStorage caches;
+  [Throws, Pref="dom.window-caches.enabled"]
+  readonly attribute CacheStorage caches;
 };
 
 Window implements TouchEventHandlers;

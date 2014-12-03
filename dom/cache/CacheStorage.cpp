@@ -11,14 +11,16 @@
 #include "mozilla/dom/Promise.h"
 #include "mozilla/dom/Response.h"
 #include "mozilla/dom/cache/Cache.h"
-#include "mozilla/dom/cache/CacheInitData.h"
 #include "mozilla/dom/cache/CacheStorageChild.h"
 #include "mozilla/dom/cache/PCacheChild.h"
 #include "mozilla/dom/cache/ReadStream.h"
 #include "mozilla/dom/cache/TypeUtils.h"
 #include "mozilla/ipc/BackgroundChild.h"
+#include "mozilla/ipc/BackgroundUtils.h"
 #include "mozilla/ipc/PBackgroundChild.h"
+#include "mozilla/ipc/PBackgroundSharedTypes.h"
 #include "nsIGlobalObject.h"
+#include "WorkerPrivate.h"
 
 namespace mozilla {
 namespace dom {
@@ -26,14 +28,16 @@ namespace cache {
 
 using mozilla::unused;
 using mozilla::ErrorResult;
+using mozilla::dom::workers::WorkerPrivate;
 using mozilla::ipc::BackgroundChild;
 using mozilla::ipc::PBackgroundChild;
 using mozilla::ipc::IProtocol;
+using mozilla::ipc::PrincipalInfo;
+using mozilla::ipc::PrincipalToPrincipalInfo;
 
 NS_IMPL_CYCLE_COLLECTING_ADDREF(mozilla::dom::cache::CacheStorage);
 NS_IMPL_CYCLE_COLLECTING_RELEASE(mozilla::dom::cache::CacheStorage);
-NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE(CacheStorage, mOwner,
-                                                    mGlobal,
+NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE(CacheStorage, mGlobal,
                                                     mRequestPromises)
 
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(CacheStorage)
@@ -42,28 +46,86 @@ NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(CacheStorage)
   NS_INTERFACE_MAP_ENTRY(nsIIPCBackgroundChildCreateCallback)
 NS_INTERFACE_MAP_END
 
+// static
+already_AddRefed<CacheStorage>
+CacheStorage::CreateOnMainThread(Namespace aNamespace,
+                                 nsIGlobalObject* aGlobal,
+                                 nsIPrincipal* aPrincipal,
+                                 ErrorResult& aRv)
+{
+  MOZ_ASSERT(aGlobal);
+  MOZ_ASSERT(aPrincipal);
+  MOZ_ASSERT(NS_IsMainThread());
+
+  bool nullPrincipal;
+  nsresult rv = aPrincipal->GetIsNullPrincipal(&nullPrincipal);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    aRv.Throw(rv);
+    return nullptr;
+  }
+
+  if (nullPrincipal) {
+    NS_WARNING("CacheStorage is not supported on this principal.");
+    aRv.Throw(NS_ERROR_FAILURE);
+    return nullptr;
+  }
+
+  nsAutoCString origin;
+  rv = aPrincipal->GetOrigin(getter_Copies(origin));
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    aRv.Throw(rv);
+    return nullptr;
+  }
+
+  PrincipalInfo principalInfo;
+  rv = PrincipalToPrincipalInfo(aPrincipal, &principalInfo);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    aRv.Throw(rv);
+    return nullptr;
+  }
+
+  nsRefPtr<CacheStorage> ref = new CacheStorage(aNamespace, aGlobal, origin,
+                                                principalInfo);
+  return ref.forget();
+}
+
+// static
+already_AddRefed<CacheStorage>
+CacheStorage::CreateOnWorker(Namespace aNamespace,
+                             nsIGlobalObject* aGlobal,
+                             WorkerPrivate* aWorkerPrivate,
+                             ErrorResult& aRv)
+{
+  MOZ_ASSERT(aGlobal);
+  MOZ_ASSERT(aWorkerPrivate);
+  aWorkerPrivate->AssertIsOnWorkerThread();
+
+  const PrincipalInfo& principalInfo = aWorkerPrivate->GetPrincipalInfo();
+  if (principalInfo.type() == PrincipalInfo::TNullPrincipalInfo) {
+    NS_WARNING("CacheStorage is not supported on this principal.");
+    aRv.Throw(NS_ERROR_FAILURE);
+    return nullptr;
+  }
+
+  NS_ConvertUTF16toUTF8 origin(aWorkerPrivate->GetLocationInfo().mOrigin);
+
+  nsRefPtr<CacheStorage> ref = new CacheStorage(aNamespace, aGlobal, origin,
+                                                principalInfo);
+  return ref.forget();
+}
+
 CacheStorage::CacheStorage(Namespace aNamespace,
-                           nsISupports* aOwner,
                            nsIGlobalObject* aGlobal,
                            const nsACString& aOrigin,
-                           const nsACString& aQuotaGroup,
-                           bool aIsApp, bool aHasUnlimStoragePerm)
+                           const PrincipalInfo& aPrincipalInfo)
   : mNamespace(aNamespace)
-  , mOwner(aOwner)
   , mGlobal(aGlobal)
   , mOrigin(aOrigin)
-  , mQuotaGroup(aQuotaGroup)
-  , mIsApp(aIsApp)
-  , mHasUnlimStoragePerm(aHasUnlimStoragePerm)
+  , mPrincipalInfo(new PrincipalInfo(aPrincipalInfo))
   , mActor(nullptr)
   , mFailedActor(false)
 {
   MOZ_ASSERT(mGlobal);
-
-  if (mOrigin.EqualsLiteral("null") || mQuotaGroup.EqualsLiteral("")) {
-    ActorFailed();
-    return;
-  }
 
   PBackgroundChild* actor = BackgroundChild::GetForCurrentThread();
   if (actor) {
@@ -259,7 +321,7 @@ CacheStorage::PrefEnabled(JSContext* aCx, JSObject* aObj)
 nsISupports*
 CacheStorage::GetParentObject() const
 {
-  return mOwner;
+  return mGlobal;
 }
 
 JSObject*
@@ -280,10 +342,8 @@ CacheStorage::ActorCreated(PBackgroundChild* aActor)
     return;
   }
 
-  CacheInitData initData(mNamespace, mOrigin, mQuotaGroup,
-                         mIsApp, mHasUnlimStoragePerm);
   PCacheStorageChild* constructedActor =
-    aActor->SendPCacheStorageConstructor(newActor, initData);
+    aActor->SendPCacheStorageConstructor(newActor, mNamespace, *mPrincipalInfo);
 
   if (NS_WARN_IF(!constructedActor)) {
     ActorFailed();
@@ -361,6 +421,10 @@ CacheStorage::ActorDestroy(IProtocol& aActor)
   MOZ_ASSERT(mActor == &aActor);
   mActor->ClearListener();
   mActor = nullptr;
+
+  // Note that we will never get an actor again in case another request is
+  // made before this object is destructed.
+  ActorFailed();
 }
 
 void
@@ -431,7 +495,7 @@ CacheStorage::RecvOpenResponse(RequestId aRequestId, nsresult aRv,
     return;
   }
 
-  nsRefPtr<Cache> cache = new Cache(mOwner, mGlobal, mOrigin, aActor);
+  nsRefPtr<Cache> cache = new Cache(mGlobal, mOrigin, aActor);
   promise->MaybeResolve(cache);
 }
 

@@ -34,4 +34,7 @@ caches.open('adder').then(function(openCache) {
     ok(!!result, 'Responses should now be in cache for each URL.');
   });
   workerTestDone();
+}).catch(function(err) {
+  ok(false, 'Caught error: ' + err);
+  workerTestDone();
 });

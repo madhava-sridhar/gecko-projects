@@ -25,6 +25,7 @@ namespace dom {
 namespace cache {
 
 class CacheRequestResponse;
+class ManagerId;
 class PCacheQueryParams;
 class PCacheRequest;
 class PCacheRequestOrVoid;
@@ -115,14 +116,15 @@ public:
                                const nsTArray<nsString>& aKeys) { }
   };
 
-  static already_AddRefed<Manager> ForOrigin(const CacheInitData& aInitData);
-  static already_AddRefed<Manager> ForExistingOrigin(const nsACString& aOrigin);
+  static already_AddRefed<Manager> GetOrCreate(ManagerId* aManagerId);
+  static already_AddRefed<Manager> Get(ManagerId* aManagerId);
 
   void RemoveListener(Listener* aListener);
   void AddRefCacheId(CacheId aCacheId);
   void ReleaseCacheId(CacheId aCacheId);
   bool SetCacheIdOrphanedIfRefed(CacheId aCacheId);
   void Shutdown();
+  already_AddRefed<ManagerId> GetManagerId() const;
 
   // TODO: consider moving CacheId up in the argument lists below
   void CacheMatch(Listener* aListener, RequestId aRequestId, CacheId aCacheId,
@@ -154,8 +156,6 @@ public:
   void StorageKeys(Listener* aListener, RequestId aRequestId,
                    Namespace aNamespace);
 
-  const nsCString& Origin() const { return mInitData.origin(); }
-
   // Context::Listener methods
   virtual void RemoveContext(Context* aContext) MOZ_OVERRIDE;
 
@@ -179,7 +179,7 @@ private:
 
   typedef uintptr_t ListenerId;
 
-  Manager(const CacheInitData& aInitData);
+  Manager(ManagerId* aManagerId);
   ~Manager();
   Context* CurrentContext();
 
@@ -194,7 +194,7 @@ private:
   bool SetBodyIdOrphanedIfRefed(const nsID& aBodyId);
   void NoteOrphanedBodyIdList(const nsTArray<nsID>& aDeletedBodyIdList);
 
-  const CacheInitData mInitData;
+  nsRefPtr<ManagerId> mManagerId;
   nsCOMPtr<nsIThread> mIOThread;
   nsTArray<Listener*> mListeners;
   nsTArray<StreamList*> mStreamLists;

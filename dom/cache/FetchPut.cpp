@@ -15,6 +15,7 @@
 #include "mozilla/dom/Response.h"
 #include "mozilla/dom/ResponseBinding.h"
 #include "mozilla/dom/UnionTypes.h"
+#include "mozilla/dom/cache/ManagerId.h"
 #include "mozilla/dom/cache/PCacheTypes.h"
 #include "nsContentUtils.h"
 #include "nsNetUtil.h"
@@ -136,6 +137,7 @@ FetchPut::FetchPut(Listener* aListener, Manager* aManager,
   , mResult(NS_OK)
 {
   MOZ_ASSERT(mListener);
+  MOZ_ASSERT(mManager);
   MOZ_ASSERT(aRequests.Length() == aRequestStreams.Length());
 
   for (uint32_t i = 0; i < aRequests.Length(); ++i) {
@@ -192,29 +194,8 @@ FetchPut::DoFetchOnMainThread()
 {
   MOZ_ASSERT(NS_IsMainThread());
 
-  nsCOMPtr<nsIURI> uri;
-  nsresult rv = NS_NewURI(getter_AddRefs(uri), mManager->Origin());
-  if (NS_WARN_IF(NS_FAILED(rv))) {
-    MaybeSetError(rv);
-    MaybeCompleteOnMainThread();
-    return;
-  }
-
-  nsCOMPtr<nsIScriptSecurityManager> ssm = nsContentUtils::GetSecurityManager();
-  if (!ssm) {
-    MaybeSetError(NS_ERROR_UNEXPECTED);
-    MaybeCompleteOnMainThread();
-    return;
-  }
-
-  nsCOMPtr<nsIPrincipal> principal;
-  rv = ssm->GetSimpleCodebasePrincipal(uri, getter_AddRefs(principal));
-  if (NS_WARN_IF(NS_FAILED(rv))) {
-    MaybeSetError(rv);
-    MaybeCompleteOnMainThread();
-    return;
-  }
-
+  nsRefPtr<ManagerId> managerId = mManager->GetManagerId();
+  nsCOMPtr<nsIPrincipal> principal = managerId->Principal();
   mPendingCount = mStateList.Length();
 
   for (uint32_t i = 0; i < mStateList.Length(); ++i) {
@@ -238,7 +219,7 @@ FetchPut::DoFetchOnMainThread()
                                                         principal);
 
     mStateList[i].mFetchObserver = new FetchObserver(this);
-    rv = fetchDriver->Fetch(mStateList[i].mFetchObserver);
+    nsresult rv = fetchDriver->Fetch(mStateList[i].mFetchObserver);
     if (NS_WARN_IF(NS_FAILED(rv))) {
       MaybeSetError(rv);
       mStateList[i].mFetchObserver = nullptr;
@@ -437,7 +418,8 @@ FetchPut::GetGlobalObject() const
 const nsACString&
 FetchPut::Origin() const
 {
-  return mManager->Origin();
+  nsRefPtr<ManagerId> managerId = mManager->GetManagerId();
+  return managerId->Origin();
 }
 
 #ifdef DEBUG
