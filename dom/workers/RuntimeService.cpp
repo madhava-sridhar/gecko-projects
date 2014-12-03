@@ -2243,7 +2243,7 @@ RuntimeService::CreateServiceWorker(const GlobalObject& aGlobal,
 
 nsresult
 RuntimeService::CreateServiceWorkerFromLoadInfo(JSContext* aCx,
-                                               WorkerPrivate::LoadInfo aLoadInfo,
+                                               WorkerPrivate::LoadInfo* aLoadInfo,
                                                const nsAString& aScriptURL,
                                                const nsACString& aScope,
                                                ServiceWorker** aServiceWorker)
@@ -2288,21 +2288,21 @@ RuntimeService::CreateSharedWorkerInternal(const GlobalObject& aGlobal,
                                            false, &loadInfo);
   NS_ENSURE_SUCCESS(rv, rv);
 
-  return CreateSharedWorkerFromLoadInfo(cx, loadInfo, aScriptURL, aName, aType,
+  return CreateSharedWorkerFromLoadInfo(cx, &loadInfo, aScriptURL, aName, aType,
                                         aSharedWorker);
 }
 
 nsresult
 RuntimeService::CreateSharedWorkerFromLoadInfo(JSContext* aCx,
-                                               WorkerPrivate::LoadInfo aLoadInfo,
+                                               WorkerPrivate::LoadInfo* aLoadInfo,
                                                const nsAString& aScriptURL,
                                                const nsACString& aName,
                                                WorkerType aType,
                                                SharedWorker** aSharedWorker)
 {
   AssertIsOnMainThread();
-
-  MOZ_ASSERT(aLoadInfo.mResolvedScriptURI);
+  MOZ_ASSERT(aLoadInfo);
+  MOZ_ASSERT(aLoadInfo->mResolvedScriptURI);
 
   nsRefPtr<WorkerPrivate> workerPrivate;
   {
@@ -2312,13 +2312,13 @@ RuntimeService::CreateSharedWorkerFromLoadInfo(JSContext* aCx,
     SharedWorkerInfo* sharedWorkerInfo;
 
     nsCString scriptSpec;
-    nsresult rv = aLoadInfo.mResolvedScriptURI->GetSpec(scriptSpec);
+    nsresult rv = aLoadInfo->mResolvedScriptURI->GetSpec(scriptSpec);
     NS_ENSURE_SUCCESS(rv, rv);
 
     nsAutoCString key;
     GenerateSharedWorkerKey(scriptSpec, aName, key);
 
-    if (mDomainMap.Get(aLoadInfo.mDomain, &domainInfo) &&
+    if (mDomainMap.Get(aLoadInfo->mDomain, &domainInfo) &&
         domainInfo->mSharedWorkerInfos.Get(key, &sharedWorkerInfo)) {
       workerPrivate = sharedWorkerInfo->mWorkerPrivate;
     }
@@ -2328,14 +2328,14 @@ RuntimeService::CreateSharedWorkerFromLoadInfo(JSContext* aCx,
   // a Shared/Service worker and the worker script loads and executes before
   // the SharedWorker object itself is created before then WorkerScriptLoaded()
   // will reset the loadInfo's window.
-  nsCOMPtr<nsPIDOMWindow> window = aLoadInfo.mWindow;
+  nsCOMPtr<nsPIDOMWindow> window = aLoadInfo->mWindow;
 
   bool created = false;
   if (!workerPrivate) {
     ErrorResult rv;
     workerPrivate =
       WorkerPrivate::Constructor(aCx, aScriptURL, false,
-                                 aType, aName, &aLoadInfo, rv);
+                                 aType, aName, aLoadInfo, rv);
     NS_ENSURE_TRUE(workerPrivate, rv.ErrorCode());
 
     created = true;

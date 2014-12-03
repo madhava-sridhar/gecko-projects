@@ -54,6 +54,8 @@
 #include "mozilla/dom/ScriptSettings.h"
 #include "mozilla/dom/StructuredClone.h"
 #include "mozilla/dom/WorkerBinding.h"
+#include "mozilla/ipc/BackgroundUtils.h"
+#include "mozilla/ipc/PBackgroundSharedTypes.h"
 #include "mozilla/Preferences.h"
 #include "nsAlgorithm.h"
 #include "nsContentUtils.h"
@@ -88,6 +90,10 @@
 #include "WorkerRunnable.h"
 #include "WorkerScope.h"
 
+#ifdef XP_WIN
+#undef PostMessage
+#endif
+
 // JS_MaybeGC will run once every second during normal execution.
 #define PERIODIC_GC_TIMER_DELAY_SEC 1
 
@@ -104,6 +110,8 @@
 
 using namespace mozilla;
 using namespace mozilla::dom;
+using namespace mozilla::ipc;
+
 USING_WORKERS_NAMESPACE
 
 MOZ_DEFINE_MALLOC_SIZE_OF(JsWorkerMallocSizeOf)
@@ -1915,6 +1923,26 @@ NS_IMPL_ISUPPORTS_INHERITED0(TopLevelWorkerFinishedRunnable, nsRunnable)
 NS_IMPL_ISUPPORTS(TimerThreadEventTarget, nsIEventTarget)
 
 template <class Derived>
+WorkerPrivateParent<Derived>::
+LoadInfo::LoadInfo()
+  : mEvalAllowed(false)
+  , mReportCSPViolations(false)
+  , mXHRParamsAllowed(false)
+  , mPrincipalIsSystem(false)
+  , mIsInPrivilegedApp(false)
+  , mIsInCertifiedApp(false)
+{
+  MOZ_COUNT_CTOR(WorkerPrivateParent<Derived>::LoadInfo);
+}
+
+template <class Derived>
+WorkerPrivateParent<Derived>::
+LoadInfo::~LoadInfo()
+{
+  MOZ_COUNT_DTOR(WorkerPrivateParent<Derived>::LoadInfo);
+}
+
+template <class Derived>
 class WorkerPrivateParent<Derived>::SynchronizeAndResumeRunnable MOZ_FINAL
   : public nsRunnable
 {
@@ -3559,6 +3587,7 @@ void
 WorkerPrivateParent<Derived>::SetPrincipal(nsIPrincipal* aPrincipal)
 {
   AssertIsOnMainThread();
+  MOZ_ASSERT(!mLoadInfo.mPrincipalInfo);
 
   mLoadInfo.mPrincipal = aPrincipal;
   mLoadInfo.mPrincipalIsSystem = nsContentUtils::IsSystemPrincipal(aPrincipal);
@@ -3567,6 +3596,11 @@ WorkerPrivateParent<Derived>::SetPrincipal(nsIPrincipal* aPrincipal)
     (appStatus == nsIPrincipal::APP_STATUS_CERTIFIED ||
      appStatus == nsIPrincipal::APP_STATUS_PRIVILEGED);
   mLoadInfo.mIsInCertifiedApp = (appStatus == nsIPrincipal::APP_STATUS_CERTIFIED);
+
+  mLoadInfo.mPrincipalInfo = new PrincipalInfo();
+
+  MOZ_ALWAYS_TRUE(NS_SUCCEEDED(
+    PrincipalToPrincipalInfo(aPrincipal, mLoadInfo.mPrincipalInfo)));
 }
 
 template <class Derived>

@@ -16,6 +16,7 @@
 #include "mozilla/DOMEventTargetHelper.h"
 #include "mozilla/TimeStamp.h"
 #include "mozilla/dom/BindingDeclarations.h"
+#include "nsAutoPtr.h"
 #include "nsCycleCollectionParticipant.h"
 #include "nsDataHashtable.h"
 #include "nsHashKeys.h"
@@ -46,6 +47,9 @@ struct RuntimeStats;
 namespace mozilla {
 namespace dom {
 class Function;
+}
+namespace ipc {
+class PrincipalInfo;
 }
 }
 
@@ -132,6 +136,8 @@ protected:
   class EventTarget;
   friend class EventTarget;
 
+  typedef mozilla::ipc::PrincipalInfo PrincipalInfo;
+
 public:
   struct LocationInfo
   {
@@ -157,6 +163,7 @@ public:
     nsCOMPtr<nsIContentSecurityPolicy> mCSP;
     nsCOMPtr<nsIChannel> mChannel;
 
+    nsAutoPtr<PrincipalInfo> mPrincipalInfo;
     nsCString mDomain;
 
     bool mEvalAllowed;
@@ -166,11 +173,8 @@ public:
     bool mIsInPrivilegedApp;
     bool mIsInCertifiedApp;
 
-    LoadInfo()
-    : mEvalAllowed(false), mReportCSPViolations(false),
-      mXHRParamsAllowed(false), mPrincipalIsSystem(false),
-      mIsInPrivilegedApp(false), mIsInCertifiedApp(false)
-    { }
+    LoadInfo();
+    ~LoadInfo();
 
     void
     StealFrom(LoadInfo& aOther)
@@ -195,6 +199,9 @@ public:
 
       MOZ_ASSERT(!mChannel);
       aOther.mChannel.swap(mChannel);
+
+      MOZ_ASSERT(!mPrincipalInfo);
+      mPrincipalInfo = aOther.mPrincipalInfo.forget();
 
       mDomain = aOther.mDomain;
       mEvalAllowed = aOther.mEvalAllowed;
@@ -577,6 +584,12 @@ public:
   IsInCertifiedApp() const
   {
     return mLoadInfo.mIsInCertifiedApp;
+  }
+
+  const PrincipalInfo&
+  GetPrincipalInfo() const
+  {
+    return *mLoadInfo.mPrincipalInfo;
   }
 
   already_AddRefed<nsIChannel>

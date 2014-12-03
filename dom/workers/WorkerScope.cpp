@@ -47,6 +47,8 @@ using namespace mozilla::dom;
 using mozilla::dom::cache::CacheStorage;
 USING_WORKERS_NAMESPACE
 
+using mozilla::ipc::PrincipalInfo;
+
 BEGIN_WORKERS_NAMESPACE
 
 WorkerGlobalScope::WorkerGlobalScope(WorkerPrivate* aWorkerPrivate)
