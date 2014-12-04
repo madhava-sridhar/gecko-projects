@@ -105,20 +105,6 @@ public:
 #endif
   {}
 
-  // Constructor taking appId/inBrowsingElement for use in fetch()
-  LoadContext(uint32_t aAppId, bool aIsInBrowserElement)
-    : mTopFrameElement(nullptr)
-    , mNestedFrameId(0)
-    , mAppId(aAppId)
-    , mIsContent(false)
-    , mUsePrivateBrowsing(false)
-    , mUseRemoteTabs(false)
-    , mIsInBrowserElement(aIsInBrowserElement)
-#ifdef DEBUG
-    , mIsNotNull(true)
-#endif
-  {}
-
 private:
   ~LoadContext() {}
 

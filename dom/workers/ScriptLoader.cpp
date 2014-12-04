@@ -29,7 +29,6 @@
 #include "nsXPCOM.h"
 #include "xpcpublic.h"
 
-#include "mozilla/LoadContext.h"
 #include "mozilla/dom/Exceptions.h"
 #include "Principal.h"
 #include "WorkerFeature.h"
@@ -118,24 +117,19 @@ ChannelFromScriptURL(nsIPrincipal* principal,
                        flags,
                        ios);
   } else {
-    uint32_t appId;
-    rv = principal->GetAppId(&appId);
-    NS_ENSURE_SUCCESS(rv, rv);
-
-    bool inBrowserElement;
-    rv = principal->GetIsInBrowserElement(&inBrowserElement);
-    NS_ENSURE_SUCCESS(rv, rv);
-
-    nsRefPtr<LoadContext> loadContext = new LoadContext(appId,
-                                                        inBrowserElement);
-
+    // we should use 'principal' here; needs to be fixed before
+    // we move security checks to AsyncOpen. We use nullPrincipal
+    // for now, because the loadGroup is null and hence causes
+    // GetChannelUriPrincipal to return the wrong principal.
+    nsCOMPtr<nsIPrincipal> nullPrincipal =
+      do_CreateInstance("@mozilla.org/nullprincipal;1", &rv);
     rv = NS_NewChannel(getter_AddRefs(channel),
                        uri,
-                       principal,
+                       nullPrincipal,
                        nsILoadInfo::SEC_NORMAL,
                        nsIContentPolicy::TYPE_SCRIPT,
                        loadGroup,
-                       loadContext,
+                       nullptr, // aCallbacks
                        flags,
                        ios);
   }
