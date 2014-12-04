@@ -541,6 +541,8 @@ Context::OnQuotaInit(nsresult aRv, const QuotaInfo& aQuotaInfo)
   NS_ASSERT_OWNINGTHREAD(Context);
   MOZ_ASSERT(mState == STATE_CONTEXT_INIT);
 
+  mQuotaInfo = aQuotaInfo;
+
   if (NS_FAILED(aRv)) {
     for (uint32_t i = 0; i < mPendingActions.Length(); ++i) {
       mPendingActions[i].mAction->CompleteOnInitiatingThread(aRv);
@@ -550,7 +552,6 @@ Context::OnQuotaInit(nsresult aRv, const QuotaInfo& aQuotaInfo)
     return;
   }
 
-  mQuotaInfo = aQuotaInfo;
   mState = STATE_CONTEXT_READY;
 
   for (uint32_t i = 0; i < mPendingActions.Length(); ++i) {
