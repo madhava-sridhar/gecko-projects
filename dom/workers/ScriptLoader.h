@@ -11,6 +11,7 @@
 class nsIPrincipal;
 class nsIURI;
 class nsIDocument;
+class nsILoadGroup;
 class nsString;
 class nsIChannel;
 
