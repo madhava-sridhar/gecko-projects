@@ -51,7 +51,7 @@ void
 CacheStorageParent::ActorDestroy(ActorDestroyReason aReason)
 {
   if (mManager) {
-    MOZ_ASSERT(mActiveRequests.Length() > 1);
+    MOZ_ASSERT(mActiveRequests.Length() > 0);
     mManager->RemoveListener(this);
     mManager = nullptr;
   }
