@@ -34,6 +34,7 @@ nsresult
 ChannelFromScriptURLMainThread(nsIPrincipal* aPrincipal,
                                nsIURI* aBaseURI,
                                nsIDocument* aParentDoc,
+                               nsILoadGroup* aLoadGroup,
                                const nsAString& aScriptURL,
                                nsIChannel** aChannel);
 

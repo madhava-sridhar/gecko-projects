@@ -16,6 +16,7 @@
 #include "jsapi.h"
 
 #include "mozilla/DebugOnly.h"
+#include "mozilla/LoadContext.h"
 #include "mozilla/dom/BindingUtils.h"
 #include "mozilla/dom/DOMError.h"
 #include "mozilla/dom/ErrorEvent.h"
@@ -41,6 +42,10 @@
 #include "WorkerPrivate.h"
 #include "WorkerRunnable.h"
 #include "WorkerScope.h"
+
+#ifdef PostMessage
+#undef PostMessage
+#endif
 
 using namespace mozilla;
 using namespace mozilla::dom;
@@ -2381,6 +2386,17 @@ ServiceWorkerManager::CreateServiceWorker(const nsACString& aScriptSpec,
   }
 
   info.mPrincipal = aPrincipal;
+
+  info.mLoadGroup = do_CreateInstance(NS_LOADGROUP_CONTRACTID, &rv);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+
+  nsRefPtr<LoadContext> loadContext = new LoadContext(info.mPrincipal);
+  rv = info.mLoadGroup->SetNotificationCallbacks(loadContext);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
 
   AutoSafeJSContext cx;
 
