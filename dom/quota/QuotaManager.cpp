@@ -2017,14 +2017,11 @@ QuotaManager::InitializeOrigin(PersistenceType aPersistenceType,
 
     Client::Type clientType;
     rv = Client::TypeFromText(leafName, clientType);
-    if (NS_FAILED(rv)) {
-      NS_WARNING("Unknown directory found!");
-      return NS_ERROR_UNEXPECTED;
+    if (NS_SUCCEEDED(rv)) {
+      rv = mClients[clientType]->InitOrigin(aPersistenceType, aGroup, aOrigin,
+                                            usageInfo);
+      NS_ENSURE_SUCCESS(rv, rv);
     }
-
-    rv = mClients[clientType]->InitOrigin(aPersistenceType, aGroup, aOrigin,
-                                          usageInfo);
-    NS_ENSURE_SUCCESS(rv, rv);
   }
 
   if (trackQuota) {
