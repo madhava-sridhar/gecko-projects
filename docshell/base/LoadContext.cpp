@@ -4,11 +4,36 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#include "mozilla/Assertions.h"
 #include "mozilla/LoadContext.h"
 
 namespace mozilla {
 
 NS_IMPL_ISUPPORTS(LoadContext, nsILoadContext, nsIInterfaceRequestor)
+
+LoadContext::LoadContext(nsIPrincipal* aPrincipal, nsILoadContext* aBase)
+  : mTopFrameElement(nullptr)
+  , mNestedFrameId(0)
+  , mIsContent(true)
+  , mUsePrivateBrowsing(false)
+  , mUseRemoteTabs(false)
+#ifdef DEBUG
+  , mIsNotNull(true)
+#endif
+{
+  MOZ_ALWAYS_TRUE(NS_SUCCEEDED(aPrincipal->GetAppId(&mAppId)));
+  MOZ_ALWAYS_TRUE(NS_SUCCEEDED(
+    aPrincipal->GetIsInBrowserElement(&mIsInBrowserElement)));
+
+  if (!aBase) {
+    return;
+  }
+
+  MOZ_ALWAYS_TRUE(NS_SUCCEEDED(aBase->GetIsContent(&mIsContent)));
+  MOZ_ALWAYS_TRUE(NS_SUCCEEDED(
+    aBase->GetUsePrivateBrowsing(&mUsePrivateBrowsing)));
+  MOZ_ALWAYS_TRUE(NS_SUCCEEDED(aBase->GetUseRemoteTabs(&mUseRemoteTabs)));
+}
 
 //-----------------------------------------------------------------------------
 // LoadContext::nsILoadContext
