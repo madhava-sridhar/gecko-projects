@@ -29,7 +29,6 @@
 #include "nsXPCOM.h"
 #include "xpcpublic.h"
 
-#include "mozilla/Assertions.h"
 #include "mozilla/dom/Exceptions.h"
 #include "Principal.h"
 #include "WorkerFeature.h"
@@ -118,36 +117,15 @@ ChannelFromScriptURL(nsIPrincipal* principal,
                        flags,
                        ios);
   } else {
-    // We must have a loadGroup with a load context for the principal to
-    // traverse the channel correctly.
-    MOZ_ASSERT(loadGroup);
-#ifdef DEBUG
-    // Verify load context exists.
-    nsCOMPtr<nsIInterfaceRequestor> callbacks;
-    rv = loadGroup->GetNotificationCallbacks(getter_AddRefs(callbacks));
-    MOZ_ASSERT(NS_SUCCEEDED(rv));
-    nsCOMPtr<nsILoadContext> loadContext = do_QueryInterface(callbacks);
-
-    // Verify load context appId and browser flag match the principal
-    uint32_t contextAppId;
-    bool contextInBrowserElement;
-    MOZ_ALWAYS_TRUE(NS_SUCCEEDED(loadContext->GetAppId(&contextAppId)));
-    MOZ_ALWAYS_TRUE(NS_SUCCEEDED(
-      loadContext->GetIsInBrowserElement(&contextInBrowserElement)));
-
-    uint32_t principalAppId;
-    bool principalInBrowserElement;
-    MOZ_ALWAYS_TRUE(NS_SUCCEEDED(principal->GetAppId(&principalAppId)));
-    MOZ_ALWAYS_TRUE(NS_SUCCEEDED(
-      principal->GetIsInBrowserElement(&principalInBrowserElement)));
-
-    MOZ_ASSERT(contextAppId == principalAppId);
-    MOZ_ASSERT(contextInBrowserElement == principalInBrowserElement);
-#endif
-
+    // we should use 'principal' here; needs to be fixed before
+    // we move security checks to AsyncOpen. We use nullPrincipal
+    // for now, because the loadGroup is null and hence causes
+    // GetChannelUriPrincipal to return the wrong principal.
+    nsCOMPtr<nsIPrincipal> nullPrincipal =
+      do_CreateInstance("@mozilla.org/nullprincipal;1", &rv);
     rv = NS_NewChannel(getter_AddRefs(channel),
                        uri,
-                       principal,
+                       nullPrincipal,
                        nsILoadInfo::SEC_NORMAL,
                        nsIContentPolicy::TYPE_SCRIPT,
                        loadGroup,
@@ -390,9 +368,11 @@ private:
       channel = mWorkerPrivate->ForgetWorkerChannel();
     }
 
-    nsCOMPtr<nsILoadGroup> loadGroup = mWorkerPrivate->GetLoadGroup();
-    if (!loadGroup) {
-      loadGroup = parentWorker->GetLoadGroup();
+    // All of these can potentially be null, but that should be ok. We'll either
+    // succeed without them or fail below.
+    nsCOMPtr<nsILoadGroup> loadGroup;
+    if (parentDoc) {
+      loadGroup = parentDoc->GetDocumentLoadGroup();
     }
 
     nsCOMPtr<nsIIOService> ios(do_GetIOService());
@@ -672,13 +652,10 @@ public:
     // May be null.
     nsCOMPtr<nsIDocument> parentDoc = mParentWorker->GetDocument();
 
-    nsCOMPtr<nsILoadGroup> loadGroup = mParentWorker->GetLoadGroup();
-
     nsCOMPtr<nsIChannel> channel;
     mResult =
       scriptloader::ChannelFromScriptURLMainThread(principal, baseURI,
-                                                   parentDoc, loadGroup,
-                                                   mScriptURL,
+                                                   parentDoc, mScriptURL,
                                                    getter_AddRefs(channel));
     if (NS_SUCCEEDED(mResult)) {
       channel.forget(mChannel);
@@ -868,18 +845,22 @@ nsresult
 ChannelFromScriptURLMainThread(nsIPrincipal* aPrincipal,
                                nsIURI* aBaseURI,
                                nsIDocument* aParentDoc,
-                               nsILoadGroup* aLoadGroup,
                                const nsAString& aScriptURL,
                                nsIChannel** aChannel)
 {
   AssertIsOnMainThread();
+
+  nsCOMPtr<nsILoadGroup> loadGroup;
+  if (aParentDoc) {
+    loadGroup = aParentDoc->GetDocumentLoadGroup();
+  }
 
   nsCOMPtr<nsIIOService> ios(do_GetIOService());
 
   nsIScriptSecurityManager* secMan = nsContentUtils::GetSecurityManager();
   NS_ASSERTION(secMan, "This should never be null!");
 
-  return ChannelFromScriptURL(aPrincipal, aBaseURI, aParentDoc, aLoadGroup,
+  return ChannelFromScriptURL(aPrincipal, aBaseURI, aParentDoc, loadGroup,
                               ios, secMan, aScriptURL, true, aChannel);
 }
 
