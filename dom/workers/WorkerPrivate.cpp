@@ -39,6 +39,7 @@
 #include "mozilla/ContentEvents.h"
 #include "mozilla/EventDispatcher.h"
 #include "mozilla/Likely.h"
+#include "mozilla/LoadContext.h"
 #include "mozilla/dom/BindingUtils.h"
 #include "mozilla/dom/BlobBinding.h"
 #include "mozilla/dom/ErrorEvent.h"
@@ -2847,7 +2848,7 @@ WorkerPrivateParent<Derived>::ForgetMainThreadObjects(
   AssertIsOnParentThread();
   MOZ_ASSERT(!mMainThreadObjectsForgotten);
 
-  static const uint32_t kDoomedCount = 7;
+  static const uint32_t kDoomedCount = 8;
 
   aDoomed.SetCapacity(kDoomedCount);
 
@@ -2858,6 +2859,7 @@ WorkerPrivateParent<Derived>::ForgetMainThreadObjects(
   SwapToISupportsArray(mLoadInfo.mPrincipal, aDoomed);
   SwapToISupportsArray(mLoadInfo.mChannel, aDoomed);
   SwapToISupportsArray(mLoadInfo.mCSP, aDoomed);
+  SwapToISupportsArray(mLoadInfo.mLoadGroup, aDoomed);
   // Before adding anything here update kDoomedCount above!
 
   MOZ_ASSERT(aDoomed.Length() == kDoomedCount);
@@ -3584,10 +3586,12 @@ WorkerPrivateParent<Derived>::SetBaseURI(nsIURI* aBaseURI)
 
 template <class Derived>
 void
-WorkerPrivateParent<Derived>::SetPrincipal(nsIPrincipal* aPrincipal)
+WorkerPrivateParent<Derived>::SetPrincipal(nsIPrincipal* aPrincipal,
+                                           nsILoadGroup* aLoadGroup)
 {
   AssertIsOnMainThread();
   MOZ_ASSERT(!mLoadInfo.mPrincipalInfo);
+  MOZ_ASSERT(NS_LoadGroupMatchesPrincipal(aLoadGroup, aPrincipal));
 
   mLoadInfo.mPrincipal = aPrincipal;
   mLoadInfo.mPrincipalIsSystem = nsContentUtils::IsSystemPrincipal(aPrincipal);
@@ -3596,6 +3600,8 @@ WorkerPrivateParent<Derived>::SetPrincipal(nsIPrincipal* aPrincipal)
     (appStatus == nsIPrincipal::APP_STATUS_CERTIFIED ||
      appStatus == nsIPrincipal::APP_STATUS_PRIVILEGED);
   mLoadInfo.mIsInCertifiedApp = (appStatus == nsIPrincipal::APP_STATUS_CERTIFIED);
+
+  mLoadInfo.mLoadGroup = aLoadGroup;
 
   mLoadInfo.mPrincipalInfo = new PrincipalInfo();
 
@@ -4237,6 +4243,7 @@ WorkerPrivate::GetLoadInfo(JSContext* aCx, nsPIDOMWindow* aWindow,
       NS_ENSURE_TRUE(document, NS_ERROR_FAILURE);
 
       loadInfo.mBaseURI = document->GetDocBaseURI();
+      loadInfo.mLoadGroup = document->GetDocumentLoadGroup();
 
       // Use the document's NodePrincipal as our principal if we're not being
       // called from chrome.
@@ -4345,8 +4352,16 @@ WorkerPrivate::GetLoadInfo(JSContext* aCx, nsPIDOMWindow* aWindow,
       loadInfo.mReportCSPViolations = false;
     }
 
+    if (!NS_LoadGroupMatchesPrincipal(loadInfo.mLoadGroup,
+                                      loadInfo.mPrincipal)) {
+      rv = NS_NewLoadGroup(getter_AddRefs(loadInfo.mLoadGroup),
+                           loadInfo.mPrincipal, loadInfo.mLoadGroup);
+      NS_ENSURE_SUCCESS(rv, rv);
+    }
+
     rv = ChannelFromScriptURLMainThread(loadInfo.mPrincipal, loadInfo.mBaseURI,
-                                        document, aScriptURL,
+                                        document, loadInfo.mLoadGroup,
+                                        aScriptURL,
                                         getter_AddRefs(loadInfo.mChannel));
     NS_ENSURE_SUCCESS(rv, rv);
 
