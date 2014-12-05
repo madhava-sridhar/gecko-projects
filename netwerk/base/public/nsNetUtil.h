@@ -907,6 +907,17 @@ NS_NewLoadGroup(nsILoadGroup      **result,
     return rv;
 }
 
+// Create a new nsILoadGroup that will match the given principal.  Also,
+// if a base load group is provided, populate the nsILoadContext of the
+// new group with information for the existing context.
+nsresult
+NS_NewLoadGroup(nsILoadGroup** aResult, nsIPrincipal* aPrincipal,
+                nsILoadGroup* aBaseLoadGroup = nullptr);
+
+bool
+NS_LoadGroupMatchesPrincipal(nsILoadGroup* aLoadGroup,
+                             nsIPrincipal* aPrincipal);
+
 inline nsresult
 NS_NewDownloader(nsIStreamListener   **result,
                  nsIDownloadObserver  *observer,
