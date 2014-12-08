@@ -889,7 +889,9 @@ protected:
   bool ParseDirectionalBoxProperty(nsCSSProperty aProperty,
                                      int32_t aSourceType);
   bool ParseBoxCornerRadius(const nsCSSProperty aPropID);
+  bool ParseBoxCornerRadiiInternals(nsCSSValue array[]);
   bool ParseBoxCornerRadii(const nsCSSProperty aPropIDs[]);
+
   int32_t ParseChoice(nsCSSValue aValues[],
                       const nsCSSProperty aPropIDs[], int32_t aNumIDs);
   bool ParseColor(nsCSSValue& aValue);
@@ -966,6 +968,7 @@ protected:
   bool ParseBasicShape(nsCSSValue& aValue, bool* aConsumedTokens);
   bool ParsePolygonFunction(nsCSSValue& aValue);
   bool ParseCircleOrEllipseFunction(nsCSSKeyword, nsCSSValue& aValue);
+  bool ParseInsetFunction(nsCSSValue& aValue);
 
   /* Functions for transform Parsing */
   bool ParseSingleTransform(bool aIsPrefixed, nsCSSValue& aValue);
@@ -1478,6 +1481,7 @@ CSSParserImpl::ParseProperty(const nsCSSProperty aPropID,
   NS_PRECONDITION(aSheetPrincipal, "Must have principal here!");
   NS_PRECONDITION(aBaseURI, "need base URI");
   NS_PRECONDITION(aDeclaration, "Need declaration to parse into!");
+  MOZ_ASSERT(aPropID != eCSSPropertyExtra_variable);
 
   mData.AssertInitialState();
   mTempData.AssertInitialState();
@@ -5704,15 +5708,12 @@ CSSParserImpl::ParsePseudoClassWithIdentArg(nsCSSSelector& aSelector,
     return eSelectorParsingStatus_Error; // our caller calls SkipUntil(')')
   }
 
-  // -moz-locale-dir and -moz-dir can only have values of 'ltr' or 'rtl'.
+  // -moz-locale-dir and -moz-dir take an identifier argument.  While
+  // only 'ltr' and 'rtl' (case-insensitively) will match anything, any
+  // other identifier is still valid.
   if (aType == nsCSSPseudoClasses::ePseudoClass_mozLocaleDir ||
       aType == nsCSSPseudoClasses::ePseudoClass_dir) {
     nsContentUtils::ASCIIToLower(mToken.mIdent); // case insensitive
-    if (!mToken.mIdent.EqualsLiteral("ltr") &&
-        !mToken.mIdent.EqualsLiteral("rtl")) {
-      REPORT_UNEXPECTED_TOKEN(PEBadDirValue);
-      return eSelectorParsingStatus_Error; // our caller calls SkipUntil(')')
-    }
   }
 
   // Add the pseudo with the language parameter
@@ -6523,6 +6524,7 @@ CSSParserImpl::ParseDeclaration(css::Declaration* aDeclaration,
     // Map property name to its ID.
     propID = LookupEnabledProperty(propertyName);
     if (eCSSProperty_UNKNOWN == propID ||
+        eCSSPropertyExtra_variable == propID ||
         (aContext == eCSSContext_Page &&
          !nsCSSProps::PropHasFlags(propID,
                                    CSS_PROPERTY_APPLIES_TO_PAGE_RULE))) { // unknown property
@@ -7498,12 +7500,11 @@ CSSParserImpl::ParseFlex()
     return true;
   }
 
-  // Next, check for 'none' == '0 0 main-size'
+  // Next, check for 'none' == '0 0 auto'
   if (ParseVariant(tmpVal, VARIANT_NONE, nullptr)) {
     AppendValue(eCSSProperty_flex_grow, nsCSSValue(0.0f, eCSSUnit_Number));
     AppendValue(eCSSProperty_flex_shrink, nsCSSValue(0.0f, eCSSUnit_Number));
-    AppendValue(eCSSProperty_flex_basis,
-                nsCSSValue(NS_STYLE_FLEX_BASIS_MAIN_SIZE, eCSSUnit_Enumerated));
+    AppendValue(eCSSProperty_flex_basis, nsCSSValue(eCSSUnit_Auto));
     return true;
   }
 
@@ -7543,7 +7544,7 @@ CSSParserImpl::ParseFlex()
   // "a unitless zero that is not already preceded by two flex factors must be
   //  interpreted as a flex factor.
   if (!ParseNonNegativeVariant(tmpVal, flexBasisVariantMask | VARIANT_NUMBER,
-                               nsCSSProps::kFlexBasisKTable)) {
+                               nsCSSProps::kWidthKTable)) {
     // First component was not a valid flex-basis or flex-grow value. Fail.
     return false;
   }
@@ -7561,15 +7562,6 @@ CSSParserImpl::ParseFlex()
       // Failed to parse anything after our flex-basis -- that's fine. We can
       // skip the remaining parsing.
       doneParsing = true;
-      if (flexBasis.GetUnit() == eCSSUnit_Auto) {
-        // We've just parsed "flex:auto", without a number after "auto".  In
-        // this case, "auto" is *not* actually the flex-basis -- it's a special
-        // keyword for the "flex" shorthand, which expands to "1 1 main-size".
-        // Fortunately, the variables flexGrow & flexShrink are already set to
-        // 1, so we don't need to adjust them; we just need to set flexBasis.
-        flexBasis.SetIntValue(NS_STYLE_FLEX_BASIS_MAIN_SIZE,
-                              eCSSUnit_Enumerated);
-      }
     }
   }
 
@@ -7600,7 +7592,7 @@ CSSParserImpl::ParseFlex()
     // unitless 0 encountered here *must* have been preceded by 2 flex factors.
     if (!wasFirstComponentFlexBasis &&
         ParseNonNegativeVariant(tmpVal, flexBasisVariantMask,
-                                nsCSSProps::kFlexBasisKTable)) {
+                                nsCSSProps::kWidthKTable)) {
       flexBasis = tmpVal;
     }
   }
@@ -9383,7 +9375,7 @@ CSSParserImpl::ParseBoxCornerRadius(nsCSSProperty aPropID)
 }
 
 bool
-CSSParserImpl::ParseBoxCornerRadii(const nsCSSProperty aPropIDs[])
+CSSParserImpl::ParseBoxCornerRadiiInternals(nsCSSValue array[])
 {
   // Rectangles are used as scratch storage.
   // top => top-left, right => top-right,
@@ -9446,12 +9438,26 @@ CSSParserImpl::ParseBoxCornerRadii(const nsCSSProperty aPropIDs[])
     nsCSSValue& y = dimenY.*nsCSSRect::sides[side];
 
     if (x == y) {
-      AppendValue(aPropIDs[side], x);
+      array[side] = x;
     } else {
       nsCSSValue pair;
       pair.SetPairValue(x, y);
-      AppendValue(aPropIDs[side], pair);
+      array[side] = pair;
     }
+  }
+  return true;
+}
+
+bool
+CSSParserImpl::ParseBoxCornerRadii(const nsCSSProperty aPropIDs[])
+{
+  nsCSSValue value[4];
+  if (!ParseBoxCornerRadiiInternals(value)) {
+    return false;
+  }
+
+  NS_FOR_CSS_SIDES(side) {
+    AppendValue(aPropIDs[side], value[side]);
   }
   return true;
 }
@@ -9512,6 +9518,7 @@ CSSParserImpl::ParseProperty(nsCSSProperty aPropID)
                     "hashless color quirk should not be set");
   NS_ABORT_IF_FALSE(!mUnitlessLengthQuirk,
                     "unitless length quirk should not be set");
+  MOZ_ASSERT(aPropID != eCSSPropertyExtra_variable);
 
   if (mNavQuirkMode) {
     mHashlessColorQuirk =
@@ -13144,82 +13151,36 @@ CSSParserImpl::ParseSize()
 bool
 CSSParserImpl::ParseTextDecoration()
 {
-  enum {
-    eDecorationNone         = NS_STYLE_TEXT_DECORATION_LINE_NONE,
-    eDecorationUnderline    = NS_STYLE_TEXT_DECORATION_LINE_UNDERLINE,
-    eDecorationOverline     = NS_STYLE_TEXT_DECORATION_LINE_OVERLINE,
-    eDecorationLineThrough  = NS_STYLE_TEXT_DECORATION_LINE_LINE_THROUGH,
-    eDecorationBlink        = NS_STYLE_TEXT_DECORATION_LINE_BLINK,
-    eDecorationPrefAnchors  = NS_STYLE_TEXT_DECORATION_LINE_PREF_ANCHORS
+  static const nsCSSProperty kTextDecorationIDs[] = {
+    eCSSProperty_text_decoration_line,
+    eCSSProperty_text_decoration_style,
+    eCSSProperty_text_decoration_color
   };
-  static_assert((eDecorationNone ^ eDecorationUnderline ^
-                 eDecorationOverline ^ eDecorationLineThrough ^
-                 eDecorationBlink ^ eDecorationPrefAnchors) ==
-                (eDecorationNone | eDecorationUnderline |
-                 eDecorationOverline | eDecorationLineThrough |
-                 eDecorationBlink | eDecorationPrefAnchors),
-                "text decoration constants need to be bitmasks");
+  const int32_t numProps = MOZ_ARRAY_LENGTH(kTextDecorationIDs);
+  nsCSSValue values[numProps];
 
-  static const KTableValue kTextDecorationKTable[] = {
-    eCSSKeyword_none,                   eDecorationNone,
-    eCSSKeyword_underline,              eDecorationUnderline,
-    eCSSKeyword_overline,               eDecorationOverline,
-    eCSSKeyword_line_through,           eDecorationLineThrough,
-    eCSSKeyword_blink,                  eDecorationBlink,
-    eCSSKeyword__moz_anchor_decoration, eDecorationPrefAnchors,
-    eCSSKeyword_UNKNOWN,-1
-  };
-
-  nsCSSValue value;
-  if (!ParseVariant(value, VARIANT_HK, kTextDecorationKTable)) {
+  int32_t found = ParseChoice(values, kTextDecorationIDs, numProps);
+  if (found < 1) {
     return false;
   }
 
-  nsCSSValue line, style, color;
-  switch (value.GetUnit()) {
-    case eCSSUnit_Enumerated: {
-      // We shouldn't accept decoration line style and color via
-      // text-decoration.
-      color.SetIntValue(NS_STYLE_COLOR_MOZ_USE_TEXT_COLOR,
-                        eCSSUnit_Enumerated);
-      style.SetIntValue(NS_STYLE_TEXT_DECORATION_STYLE_SOLID,
-                        eCSSUnit_Enumerated);
-
-      int32_t intValue = value.GetIntValue();
-      if (intValue == eDecorationNone) {
-        line.SetIntValue(NS_STYLE_TEXT_DECORATION_LINE_NONE,
-                         eCSSUnit_Enumerated);
-        break;
-      }
-
-      // look for more keywords
-      nsCSSValue keyword;
-      int32_t index;
-      for (index = 0; index < 3; index++) {
-        if (!ParseEnum(keyword, kTextDecorationKTable)) {
-          break;
-        }
-        int32_t newValue = keyword.GetIntValue();
-        if (newValue == eDecorationNone || newValue & intValue) {
-          // 'none' keyword in conjuction with others is not allowed, and
-          // duplicate keyword is not allowed.
-          return false;
-        }
-        intValue |= newValue;
-      }
-
-      line.SetIntValue(intValue, eCSSUnit_Enumerated);
-      break;
-    }
-    default:
-      line = color = style = value;
-      break;
+  // Provide default values
+  if ((found & 1) == 0) { // Provide default text-decoration-line
+    values[0].SetIntValue(NS_STYLE_TEXT_DECORATION_LINE_NONE,
+                          eCSSUnit_Enumerated);
+  }
+  if ((found & 2) == 0) { // Provide default text-decoration-style
+    values[1].SetIntValue(NS_STYLE_TEXT_DECORATION_STYLE_SOLID,
+                          eCSSUnit_Enumerated);
+  }
+  if ((found & 4) == 0) { // Provide default text-decoration-color
+    values[2].SetIntValue(NS_STYLE_COLOR_MOZ_USE_TEXT_COLOR,
+                          eCSSUnit_Enumerated);
   }
 
-  AppendValue(eCSSProperty_text_decoration_line, line);
-  AppendValue(eCSSProperty_text_decoration_color, color);
-  AppendValue(eCSSProperty_text_decoration_style, style);
-
+  for (int32_t index = 0; index < numProps; index++) {
+    AppendValue(kTextDecorationIDs[index], values[index]);
+  }
   return true;
 }
 
@@ -13274,6 +13235,19 @@ CSSParserImpl::ParseTextAlignLast(nsCSSValue& aValue)
 bool
 CSSParserImpl::ParseTextDecorationLine(nsCSSValue& aValue)
 {
+  static_assert((NS_STYLE_TEXT_DECORATION_LINE_NONE ^
+                 NS_STYLE_TEXT_DECORATION_LINE_UNDERLINE ^
+                 NS_STYLE_TEXT_DECORATION_LINE_OVERLINE ^
+                 NS_STYLE_TEXT_DECORATION_LINE_LINE_THROUGH ^
+                 NS_STYLE_TEXT_DECORATION_LINE_BLINK ^
+                 NS_STYLE_TEXT_DECORATION_LINE_PREF_ANCHORS) ==
+                (NS_STYLE_TEXT_DECORATION_LINE_NONE |
+                 NS_STYLE_TEXT_DECORATION_LINE_UNDERLINE |
+                 NS_STYLE_TEXT_DECORATION_LINE_OVERLINE |
+                 NS_STYLE_TEXT_DECORATION_LINE_LINE_THROUGH |
+                 NS_STYLE_TEXT_DECORATION_LINE_BLINK |
+                 NS_STYLE_TEXT_DECORATION_LINE_PREF_ANCHORS),
+                "text decoration constants need to be bitmasks");
   if (ParseVariant(aValue, VARIANT_HK, nsCSSProps::kTextDecorationLineKTable)) {
     if (eCSSUnit_Enumerated == aValue.GetUnit()) {
       int32_t intValue = aValue.GetIntValue();
@@ -13921,6 +13895,49 @@ CSSParserImpl::ParseCircleOrEllipseFunction(nsCSSKeyword aKeyword,
 }
 
 bool
+CSSParserImpl::ParseInsetFunction(nsCSSValue& aValue)
+{
+  nsRefPtr<nsCSSValue::Array> functionArray =
+    aValue.InitFunction(eCSSKeyword_inset, 5);
+
+  if (ParseVariant(functionArray->Item(1), VARIANT_LPCALC, nullptr)) {
+    // Consume up to 4, but only require one.
+    ParseVariant(functionArray->Item(2), VARIANT_LPCALC, nullptr) &&
+    ParseVariant(functionArray->Item(3), VARIANT_LPCALC, nullptr) &&
+    ParseVariant(functionArray->Item(4), VARIANT_LPCALC, nullptr);
+  } else {
+    REPORT_UNEXPECTED_TOKEN(PEExpectedShapeArg);
+    SkipUntil(')');
+    return false;
+  }
+
+  if (!ExpectSymbol(')', true)) {
+    if (!GetToken(true)) {
+      NS_NOTREACHED("ExpectSymbol should have returned true");
+      return false;
+    }
+
+    nsRefPtr<nsCSSValue::Array> radiusArray = nsCSSValue::Array::Create(4);
+    functionArray->Item(5).SetArrayValue(radiusArray, eCSSUnit_Array);
+    if (mToken.mType != eCSSToken_Ident ||
+        !mToken.mIdent.LowerCaseEqualsLiteral("round") ||
+        !ParseBoxCornerRadiiInternals(radiusArray->ItemStorage())) {
+      REPORT_UNEXPECTED_TOKEN(PEExpectedRadius);
+      SkipUntil(')');
+      return false;
+    }
+
+    if (!ExpectSymbol(')', true)) {
+      REPORT_UNEXPECTED_TOKEN(PEExpectedCloseParen);
+      SkipUntil(')');
+      return false;
+    }
+  }
+
+  return true;
+}
+
+bool
 CSSParserImpl::ParseBasicShape(nsCSSValue& aValue, bool* aConsumedTokens)
 {
   if (!GetToken(true)) {
@@ -13941,6 +13958,8 @@ CSSParserImpl::ParseBasicShape(nsCSSValue& aValue, bool* aConsumedTokens)
   case eCSSKeyword_circle:
   case eCSSKeyword_ellipse:
     return ParseCircleOrEllipseFunction(keyword, aValue);
+  case eCSSKeyword_inset:
+    return ParseInsetFunction(aValue);
   default:
     return false;
   }

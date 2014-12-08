@@ -29,7 +29,7 @@
 #include "ActorsChild.h"
 
 #ifdef DEBUG
-#include "nsContentUtils.h" // For IsCallerChrome assertions.
+#include "nsContentUtils.h" // For assertions.
 #endif
 
 namespace mozilla {
@@ -110,6 +110,7 @@ struct IDBFactory::PendingRequestInfo
 IDBFactory::IDBFactory()
   : mOwningObject(nullptr)
   , mBackgroundActor(nullptr)
+  , mInnerWindowID(0)
   , mBackgroundActorFailed(false)
   , mPrivateBrowsingMode(false)
 {
@@ -183,6 +184,7 @@ IDBFactory::CreateForWindow(nsPIDOMWindow* aWindow,
   factory->mPrincipalInfo = Move(principalInfo);
   factory->mWindow = aWindow;
   factory->mTabChild = TabChild::GetFrom(aWindow);
+  factory->mInnerWindowID = aWindow->WindowID();
   factory->mPrivateBrowsingMode = privateBrowsingMode;
 
   factory.forget(aFactory);
@@ -284,6 +286,15 @@ IDBFactory::AssertIsOnOwningThread() const
 }
 
 #endif // DEBUG
+
+bool
+IDBFactory::IsChrome() const
+{
+  AssertIsOnOwningThread();
+  MOZ_ASSERT(mPrincipalInfo);
+
+  return mPrincipalInfo->type() == PrincipalInfo::TSystemPrincipalInfo;
+}
 
 void
 IDBFactory::SetBackgroundActor(BackgroundFactoryChild* aBackgroundActor)
@@ -468,24 +479,18 @@ IDBFactory::OpenInternal(nsIPrincipal* aPrincipal,
     return nullptr;
   }
 
-  // XXX We need a bug to switch to temporary storage by default.
-
   PersistenceType persistenceType;
-  bool persistenceTypeIsExplicit;
 
   if (principalInfo.type() == PrincipalInfo::TSystemPrincipalInfo) {
     // Chrome privilege always gets persistent storage.
     persistenceType = PERSISTENCE_TYPE_PERSISTENT;
-    persistenceTypeIsExplicit = false;
   } else {
     persistenceType = PersistenceTypeFromStorage(aStorageType);
-    persistenceTypeIsExplicit = aStorageType.WasPassed();
   }
 
   DatabaseMetadata& metadata = commonParams.metadata();
   metadata.name() = aName;
   metadata.persistenceType() = persistenceType;
-  metadata.persistenceTypeIsExplicit() = persistenceTypeIsExplicit;
 
   FactoryRequestParams params;
   if (aDeleting) {
@@ -524,19 +529,20 @@ IDBFactory::OpenInternal(nsIPrincipal* aPrincipal,
   nsRefPtr<IDBOpenDBRequest> request;
 
   if (mWindow) {
-    if (NS_WARN_IF(!autoJS.Init(mWindow))) {
+    AutoJSContext cx;
+    if (NS_WARN_IF(!autoJS.Init(mWindow, cx))) {
       IDB_REPORT_INTERNAL_ERR();
       aRv.Throw(NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
       return nullptr;
     }
 
-    JS::Rooted<JSObject*> scriptOwner(autoJS.cx(),
+    JS::Rooted<JSObject*> scriptOwner(cx,
       static_cast<nsGlobalWindow*>(mWindow.get())->FastGetGlobalJSObject());
     MOZ_ASSERT(scriptOwner);
 
     request = IDBOpenDBRequest::CreateForWindow(this, mWindow, scriptOwner);
   } else {
-    autoJS.Init();
+    autoJS.Init(mOwningObject.get());
     JS::Rooted<JSObject*> scriptOwner(autoJS.cx(), mOwningObject);
 
     request = IDBOpenDBRequest::CreateForJS(this, scriptOwner);
@@ -587,18 +593,9 @@ IDBFactory::BackgroundActorCreated(PBackgroundChild* aBackgroundActor)
 
     MOZ_ASSERT(NS_IsMainThread(), "Fix this windowId stuff for workers!");
 
-    OptionalWindowId windowId;
-    if (mWindow && IndexedDatabaseManager::IsMainProcess()) {
-      MOZ_ASSERT(mWindow->IsInnerWindow());
-      windowId = mWindow->WindowID();
-    } else {
-      windowId = void_t();
-    }
-
     mBackgroundActor =
       static_cast<BackgroundFactoryChild*>(
-        aBackgroundActor->SendPBackgroundIDBFactoryConstructor(actor,
-                                                               windowId));
+        aBackgroundActor->SendPBackgroundIDBFactoryConstructor(actor));
   }
 
   if (NS_WARN_IF(!mBackgroundActor)) {

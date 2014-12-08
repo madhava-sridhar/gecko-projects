@@ -25,7 +25,7 @@ var bigListenerMD5 = '8f607cfdd2c87d6a7eedb657dafbd836';
 
 function checkIsHttp2(request) {
   try {
-    if (request.getResponseHeader("X-Firefox-Spdy") == "h2-15") {
+    if (request.getResponseHeader("X-Firefox-Spdy") == "h2-16") {
       if (request.getResponseHeader("X-Connection-Http2") == "yes") {
         return true;
       }
@@ -259,7 +259,7 @@ function test_http2_header() {
 // Test to make sure cookies are split into separate fields before compression
 function test_http2_cookie_crumbling() {
   var chan = makeChan("https://localhost:6944/cookie_crumbling");
-  var cookiesSent = ['a=b', 'c=d', 'e=f'].sort();
+  var cookiesSent = ['a=b', 'c=d01234567890123456789', 'e=f'].sort();
   chan.setRequestHeader("Cookie", cookiesSent.join('; '), false);
   var listener = new Http2HeaderListener("X-Received-Header-Pairs", function(pairsReceived) {
     var cookiesReceived = JSON.parse(pairsReceived).filter(function(pair) {
@@ -378,7 +378,7 @@ var altsvcClientListener = {
 function altsvcHttp1Server(metadata, response) {
   response.setStatusLine(metadata.httpVersion, 200, "OK");
   response.setHeader("Content-Type", "text/plain", false);
-  response.setHeader("Alt-Svc", 'h2=":6944"; ma=3200, h2-15=":6944"', false);
+  response.setHeader("Alt-Svc", 'h2-16=":6944"', false);
   var body = "this is where a cool kid would write something neat.\n";
   response.bodyOutputStream.write(body, body.length);
 }
@@ -508,6 +508,12 @@ function test_http2_retry_rst() {
   chan.asyncOpen(listener, null);
 }
 
+function test_complete() {
+  resetPrefs();
+  do_test_finished();
+  do_timeout(0,run_next_test);
+}
+
 // hack - the header test resets the multiplex object on the server,
 // so make sure header is always run before the multiplex test.
 //
@@ -533,6 +539,9 @@ var tests = [ test_http2_post_big
             , test_http2_h11required_stream
             , test_http2_h11required_session
             , test_http2_retry_rst
+
+            // cleanup
+            , test_complete
             ];
 var current_test = 0;
 
@@ -610,7 +619,7 @@ var loadGroup;
 
 function resetPrefs() {
   prefs.setBoolPref("network.http.spdy.enabled", spdypref);
-  prefs.setBoolPref("network.http.spdy.enabled.v3", spdy3pref);
+  prefs.setBoolPref("network.http.spdy.enabled.v3-1", spdy3pref);
   prefs.setBoolPref("network.http.spdy.allow-push", spdypush);
   prefs.setBoolPref("network.http.spdy.enabled.http2draft", http2pref);
   prefs.setBoolPref("network.http.spdy.enforce-tls-profile", tlspref);
@@ -621,7 +630,7 @@ function resetPrefs() {
 function run_test() {
   // Set to allow the cert presented by our SPDY server
   do_get_profile();
-  var prefs = Cc["@mozilla.org/preferences-service;1"].getService(Ci.nsIPrefBranch);
+  prefs = Cc["@mozilla.org/preferences-service;1"].getService(Ci.nsIPrefBranch);
   var oldPref = prefs.getIntPref("network.http.speculative-parallel-limit");
   prefs.setIntPref("network.http.speculative-parallel-limit", 0);
 
@@ -634,7 +643,7 @@ function run_test() {
 
   // Enable all versions of spdy to see that we auto negotiate http/2
   spdypref = prefs.getBoolPref("network.http.spdy.enabled");
-  spdy3pref = prefs.getBoolPref("network.http.spdy.enabled.v3");
+  spdy3pref = prefs.getBoolPref("network.http.spdy.enabled.v3-1");
   spdypush = prefs.getBoolPref("network.http.spdy.allow-push");
   http2pref = prefs.getBoolPref("network.http.spdy.enabled.http2draft");
   tlspref = prefs.getBoolPref("network.http.spdy.enforce-tls-profile");
@@ -642,7 +651,7 @@ function run_test() {
   altsvcpref2 = prefs.getBoolPref("network.http.altsvc.oe", true);
 
   prefs.setBoolPref("network.http.spdy.enabled", true);
-  prefs.setBoolPref("network.http.spdy.enabled.v3", true);
+  prefs.setBoolPref("network.http.spdy.enabled.v3-1", true);
   prefs.setBoolPref("network.http.spdy.allow-push", true);
   prefs.setBoolPref("network.http.spdy.enabled.http2draft", true);
   prefs.setBoolPref("network.http.spdy.enforce-tls-profile", false);

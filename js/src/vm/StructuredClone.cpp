@@ -50,6 +50,7 @@
 
 using namespace js;
 
+using mozilla::BitwiseCast;
 using mozilla::IsNaN;
 using mozilla::LittleEndian;
 using mozilla::NativeEndian;
@@ -99,7 +100,7 @@ enum StructuredDataType MOZ_ENUM_TYPE(uint32_t) {
     SCTAG_TYPED_ARRAY_V1_FLOAT32 = SCTAG_TYPED_ARRAY_V1_MIN + Scalar::Float32,
     SCTAG_TYPED_ARRAY_V1_FLOAT64 = SCTAG_TYPED_ARRAY_V1_MIN + Scalar::Float64,
     SCTAG_TYPED_ARRAY_V1_UINT8_CLAMPED = SCTAG_TYPED_ARRAY_V1_MIN + Scalar::Uint8Clamped,
-    SCTAG_TYPED_ARRAY_V1_MAX = SCTAG_TYPED_ARRAY_V1_MIN + Scalar::TypeMax - 1,
+    SCTAG_TYPED_ARRAY_V1_MAX = SCTAG_TYPED_ARRAY_V1_MIN + Scalar::MaxTypedArrayViewType - 1,
 
     /*
      * Define a separate range of numbers for Transferable-only tags, since
@@ -204,7 +205,6 @@ class SCInput {
     void staticAssertions() {
         JS_STATIC_ASSERT(sizeof(char16_t) == 2);
         JS_STATIC_ASSERT(sizeof(uint32_t) == 4);
-        JS_STATIC_ASSERT(sizeof(double) == 8);
     }
 
     JSContext *cx;
@@ -634,38 +634,16 @@ SCOutput::writePair(uint32_t tag, uint32_t data)
     return write(PairToUInt64(tag, data));
 }
 
-static inline uint64_t
-ReinterpretDoubleAsUInt64(double d)
-{
-    union {
-        double d;
-        uint64_t u;
-    } pun;
-    pun.d = d;
-    return pun.u;
-}
-
-static inline double
-ReinterpretUInt64AsDouble(uint64_t u)
-{
-    union {
-        uint64_t u;
-        double d;
-    } pun;
-    pun.u = u;
-    return pun.d;
-}
-
 static inline double
 ReinterpretPairAsDouble(uint32_t tag, uint32_t data)
 {
-    return ReinterpretUInt64AsDouble(PairToUInt64(tag, data));
+    return BitwiseCast<double>(PairToUInt64(tag, data));
 }
 
 bool
 SCOutput::writeDouble(double d)
 {
-    return write(ReinterpretDoubleAsUInt64(CanonicalizeNaN(d)));
+    return write(BitwiseCast<uint64_t>(CanonicalizeNaN(d)));
 }
 
 template <typename T>
@@ -718,7 +696,9 @@ SCOutput::writeBytes(const void *p, size_t nbytes)
 bool
 SCOutput::writeChars(const char16_t *p, size_t nchars)
 {
-    MOZ_ASSERT(sizeof(char16_t) == sizeof(uint16_t));
+    static_assert(sizeof(char16_t) == sizeof(uint16_t),
+                  "required so that treating char16_t[] memory as uint16_t[] "
+                  "memory is permissible");
     return writeArray((const uint16_t *) p, nchars);
 }
 
@@ -1652,8 +1632,8 @@ JSStructuredCloneReader::startRead(MutableHandleValue vp)
       case SCTAG_ARRAY_OBJECT:
       case SCTAG_OBJECT_OBJECT: {
         JSObject *obj = (tag == SCTAG_ARRAY_OBJECT)
-                        ? NewDenseEmptyArray(context())
-                        : NewBuiltinClassInstance(context(), &JSObject::class_);
+                        ? (JSObject *) NewDenseEmptyArray(context())
+                        : (JSObject *) NewBuiltinClassInstance<PlainObject>(context());
         if (!obj || !objs.append(ObjectValue(*obj)))
             return false;
         vp.setObject(*obj);

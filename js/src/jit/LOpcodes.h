@@ -46,6 +46,7 @@
     _(Goto)                         \
     _(NewArray)                     \
     _(NewArrayCopyOnWrite)          \
+    _(NewArrayDynamicLength)        \
     _(ArraySplice)                  \
     _(NewObject)                    \
     _(NewTypedObject)               \
@@ -187,6 +188,7 @@
     _(RegExpTest)                   \
     _(RegExpReplace)                \
     _(StringReplace)                \
+    _(Substr)                       \
     _(Lambda)                       \
     _(LambdaArrow)                  \
     _(LambdaForSingleton)           \
@@ -331,6 +333,8 @@
     _(AsmJSVoidReturn)              \
     _(AsmJSPassStackArg)            \
     _(AsmJSCall)                    \
+    _(AsmJSCompareExchangeHeap)     \
+    _(AsmJSAtomicBinopHeap)         \
     _(InterruptCheckPar)            \
     _(RecompileCheck)               \
     _(MemoryBarrier)                \
@@ -339,7 +343,8 @@
     _(AssertRangeF)                 \
     _(AssertRangeV)                 \
     _(LexicalCheck)                 \
-    _(ThrowUninitializedLexical)
+    _(ThrowUninitializedLexical)    \
+    _(Debugger)
 
 #if defined(JS_CODEGEN_X86)
 # include "jit/x86/LOpcodes-x86.h"

@@ -21,6 +21,7 @@
 
 #include "asmjs/AsmJSLink.h"
 #include "asmjs/AsmJSValidate.h"
+#include "js/Debug.h"
 #include "js/HashTable.h"
 #include "js/StructuredClone.h"
 #include "js/UbiNode.h"
@@ -60,6 +61,9 @@ GetBuildConfiguration(JSContext *cx, unsigned argc, jsval *vp)
         return false;
 
     if (!JS_SetProperty(cx, info, "exact-rooting", TrueHandleValue))
+        return false;
+
+    if (!JS_SetProperty(cx, info, "trace-jscalls-api", FalseHandleValue))
         return false;
 
     RootedValue value(cx);
@@ -141,14 +145,6 @@ GetBuildConfiguration(JSContext *cx, unsigned argc, jsval *vp)
     value = BooleanValue(false);
 #endif
     if (!JS_SetProperty(cx, info, "dtrace", value))
-        return false;
-
-#ifdef MOZ_TRACE_JSCALLS
-    value = BooleanValue(true);
-#else
-    value = BooleanValue(false);
-#endif
-    if (!JS_SetProperty(cx, info, "trace-jscalls-api", value))
         return false;
 
 #ifdef JSGC_INCREMENTAL
@@ -956,6 +952,50 @@ OOMAfterAllocations(JSContext *cx, unsigned argc, jsval *vp)
 }
 #endif
 
+static const js::Class FakePromiseClass = {
+    "Promise", JSCLASS_IS_ANONYMOUS,
+    JS_PropertyStub,       /* addProperty */
+    JS_DeletePropertyStub, /* delProperty */
+    JS_PropertyStub,       /* getProperty */
+    JS_StrictPropertyStub, /* setProperty */
+    JS_EnumerateStub,
+    JS_ResolveStub,
+    JS_ConvertStub
+};
+
+static bool
+MakeFakePromise(JSContext *cx, unsigned argc, jsval *vp)
+{
+    CallArgs args = CallArgsFromVp(argc, vp);
+    RootedObject scope(cx, cx->global());
+    if (!scope)
+        return false;
+
+    RootedObject obj(cx, NewObjectWithGivenProto(cx, &FakePromiseClass, nullptr, scope));
+    if (!obj)
+        return false;
+
+    JS::dbg::onNewPromise(cx, obj);
+    args.rval().setObject(*obj);
+    return true;
+}
+
+static bool
+SettleFakePromise(JSContext *cx, unsigned argc, jsval *vp)
+{
+    CallArgs args = CallArgsFromVp(argc, vp);
+    if (!args.requireAtLeast(cx, "settleFakePromise", 1))
+        return false;
+    if (!args[0].isObject() || args[0].toObject().getClass() != &FakePromiseClass) {
+        JS_ReportError(cx, "first argument must be a (fake) Promise object");
+        return false;
+    }
+
+    RootedObject promise(cx, &args[0].toObject());
+    JS::dbg::onPromiseSettled(cx, promise);
+    return true;
+}
+
 static unsigned finalizeCount = 0;
 
 static void
@@ -1172,7 +1212,7 @@ js::testingFunc_inParallelSection(JSContext *cx, unsigned argc, jsval *vp)
 static bool
 ShellObjectMetadataCallback(JSContext *cx, JSObject **pmetadata)
 {
-    RootedObject obj(cx, NewBuiltinClassInstance(cx, &JSObject::class_));
+    RootedObject obj(cx, NewBuiltinClassInstance<PlainObject>(cx));
     if (!obj)
         return false;
 
@@ -1985,7 +2025,7 @@ FindPath(JSContext *cx, unsigned argc, jsval *vp)
     // array in start-to-target order.
     for (size_t i = 0; i < length; i++) {
         // Build an object describing the node and edge.
-        RootedObject obj(cx, NewBuiltinClassInstance<JSObject>(cx));
+        RootedObject obj(cx, NewBuiltinClassInstance<PlainObject>(cx));
         if (!obj)
             return false;
 
@@ -2234,6 +2274,19 @@ static const JSFunctionSpecWithHelp TestingFunctions[] = {
 "  After 'count' js_malloc memory allocations, fail every following allocation\n"
 "  (return NULL)."),
 #endif
+
+    JS_FN_HELP("makeFakePromise", MakeFakePromise, 0, 0,
+"makeFakePromise()",
+"  Create an object whose [[Class]] name is 'Promise' and call\n"
+"  JS::dbg::onNewPromise on it before returning it. It doesn't actually have\n"
+"  any of the other behavior associated with promises."),
+
+    JS_FN_HELP("settleFakePromise", SettleFakePromise, 1, 0,
+"settleFakePromise(promise)",
+"  'Settle' a 'promise' created by makeFakePromise(). This doesn't have any\n"
+"  observable effects outside of firing any onPromiseSettled hooks set on\n"
+"  Debugger instances that are observing the given promise's global as a\n"
+"  debuggee."),
 
     JS_FN_HELP("makeFinalizeObserver", MakeFinalizeObserver, 0, 0,
 "makeFinalizeObserver()",

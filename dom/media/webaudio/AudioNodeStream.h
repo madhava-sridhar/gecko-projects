@@ -47,23 +47,7 @@ public:
    */
   AudioNodeStream(AudioNodeEngine* aEngine,
                   MediaStreamGraph::AudioNodeStreamKind aKind,
-                  TrackRate aSampleRate)
-    : ProcessedMediaStream(nullptr),
-      mEngine(aEngine),
-      mSampleRate(aSampleRate),
-      mKind(aKind),
-      mNumberOfInputChannels(2),
-      mMarkAsFinishedAfterThisBlock(false),
-      mAudioParamStream(false),
-      mPassThrough(false)
-  {
-    MOZ_ASSERT(NS_IsMainThread());
-    mChannelCountMode = ChannelCountMode::Max;
-    mChannelInterpretation = ChannelInterpretation::Speakers;
-    // AudioNodes are always producing data
-    mHasCurrentData = true;
-    MOZ_COUNT_CTOR(AudioNodeStream);
-  }
+                  TrackRate aSampleRate);
 
 protected:
   ~AudioNodeStream();
@@ -113,7 +97,7 @@ public:
    * the output.  This is used only for DelayNodeEngine in a feedback loop.
    */
   void ProduceOutputBeforeInput(GraphTime aFrom);
-  TrackTicks GetCurrentPosition();
+  StreamTime GetCurrentPosition();
   bool IsAudioParamStream() const
   {
     return mAudioParamStream;
@@ -145,17 +129,17 @@ public:
   double FractionalTicksFromDestinationTime(AudioNodeStream* aDestination,
                                             double aSeconds);
   /**
-   * Convert a time in seconds on the destination stream to nearest TrackTicks
+   * Convert a time in seconds on the destination stream to StreamTime
    * on this stream.
    */
-  TrackTicks TicksFromDestinationTime(MediaStream* aDestination,
+  StreamTime TicksFromDestinationTime(MediaStream* aDestination,
                                       double aSeconds);
   /**
    * Get the destination stream time in seconds corresponding to a position on
    * this stream.
    */
   double DestinationTimeFromTicks(AudioNodeStream* aDestination,
-                                  TrackTicks aPosition);
+                                  StreamTime aPosition);
 
   size_t SizeOfExcludingThis(MallocSizeOf aMallocSizeOf) const MOZ_OVERRIDE;
   size_t SizeOfIncludingThis(MallocSizeOf aMallocSizeOf) const MOZ_OVERRIDE;

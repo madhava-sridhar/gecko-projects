@@ -10,7 +10,7 @@
 
 #include "jit/Bailouts.h"
 #include "jit/BaselineFrame.h"
-#include "jit/IonFrames.h"
+#include "jit/JitFrames.h"
 #include "jit/MoveEmitter.h"
 
 #include "jsscriptinlines.h"
@@ -170,7 +170,7 @@ MacroAssemblerX86::finish()
     for (size_t i = 0; i < doubles_.length(); i++) {
         CodeLabel cl(doubles_[i].uses);
         writeDoubleConstant(doubles_[i].value, cl.src());
-        enoughMemory_ &= addCodeLabel(cl);
+        addCodeLabel(cl);
         if (!enoughMemory_)
             return;
     }
@@ -180,7 +180,7 @@ MacroAssemblerX86::finish()
     for (size_t i = 0; i < floats_.length(); i++) {
         CodeLabel cl(floats_[i].uses);
         writeFloatConstant(floats_[i].value, cl.src());
-        enoughMemory_ &= addCodeLabel(cl);
+        addCodeLabel(cl);
         if (!enoughMemory_)
             return;
     }
@@ -196,7 +196,7 @@ MacroAssemblerX86::finish()
           case SimdConstant::Float32x4: writeFloat32x4Constant(v.value, cl.src()); break;
           default: MOZ_CRASH("unexpected SimdConstant type");
         }
-        enoughMemory_ &= addCodeLabel(cl);
+        addCodeLabel(cl);
         if (!enoughMemory_)
             return;
     }
@@ -369,7 +369,7 @@ MacroAssemblerX86::handleFailureWithHandler(void *handler)
     passABIArg(eax);
     callWithABI(handler);
 
-    JitCode *excTail = GetIonContext()->runtime->jitRuntime()->getExceptionTail();
+    JitCode *excTail = GetJitContext()->runtime->jitRuntime()->getExceptionTail();
     jmp(excTail);
 }
 
@@ -503,7 +503,7 @@ MacroAssemblerX86::branchPtrInNurseryRange(Condition cond, Register ptr, Registe
     MOZ_ASSERT(ptr != temp);
     MOZ_ASSERT(temp != InvalidReg);  // A temp register is required for x86.
 
-    const Nursery &nursery = GetIonContext()->runtime->gcNursery();
+    const Nursery &nursery = GetJitContext()->runtime->gcNursery();
     movePtr(ImmWord(-ptrdiff_t(nursery.start())), temp);
     addPtr(ptr, temp);
     branchPtr(cond == Assembler::Equal ? Assembler::Below : Assembler::AboveOrEqual,

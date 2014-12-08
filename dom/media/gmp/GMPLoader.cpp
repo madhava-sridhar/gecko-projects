@@ -72,7 +72,7 @@ GMPLoader* CreateGMPLoader(SandboxStarter* aStarter) {
   return static_cast<GMPLoader*>(new GMPLoaderImpl(aStarter));
 }
 
-#if defined(XP_WIN)
+#if defined(XP_WIN) && defined(HASH_NODE_ID_WITH_DEVICE_ID)
 MOZ_NEVER_INLINE
 static bool
 GetStackAfterCurrentFrame(uint8_t** aOutTop, uint8_t** aOutBottom)
@@ -168,7 +168,7 @@ GMPLoaderImpl::Load(const char* aLibPath,
   // This must happen after the node id is bound to the device id, as
   // generating the device id requires privileges.
   if (mSandboxStarter) {
-    mSandboxStarter->Start();
+    mSandboxStarter->Start(aLibPath);
   }
 #endif
 

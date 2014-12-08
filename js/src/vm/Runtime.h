@@ -364,19 +364,24 @@ class NewObjectCache
 class FreeOp : public JSFreeOp
 {
     Vector<void *, 0, SystemAllocPolicy> freeLaterList;
+    ThreadType threadType;
 
   public:
     static FreeOp *get(JSFreeOp *fop) {
         return static_cast<FreeOp *>(fop);
     }
 
-    explicit FreeOp(JSRuntime *rt)
-      : JSFreeOp(rt)
+    explicit FreeOp(JSRuntime *rt, ThreadType thread = MainThread)
+      : JSFreeOp(rt), threadType(thread)
     {}
 
     ~FreeOp() {
         for (size_t i = 0; i < freeLaterList.length(); i++)
             free_(freeLaterList[i]);
+    }
+
+    bool onBackgroundThread() {
+        return threadType == BackgroundThread;
     }
 
     inline void free_(void *p);
@@ -702,7 +707,16 @@ struct JSRuntime : public JS::shadow::Runtime,
   private:
     mozilla::Atomic<uint32_t, mozilla::Relaxed> interrupt_;
     mozilla::Atomic<uint32_t, mozilla::Relaxed> interruptPar_;
+
+    /* Call this to accumulate telemetry data. */
+    JSAccumulateTelemetryDataCallback telemetryCallback;
   public:
+    // Accumulates data for Firefox telemetry. |id| is the ID of a JS_TELEMETRY_*
+    // histogram. |key| provides an additional key to identify the histogram.
+    // |sample| is the data to add to the histogram.
+    void addTelemetry(int id, uint32_t sample, const char *key = nullptr);
+
+    void setTelemetryCallback(JSRuntime *rt, JSAccumulateTelemetryDataCallback callback);
 
     enum InterruptMode {
         RequestInterruptUrgent,
@@ -1084,9 +1098,6 @@ struct JSRuntime : public JS::shadow::Runtime,
 
     /* Structured data callbacks are runtime-wide. */
     const JSStructuredCloneCallbacks *structuredCloneCallbacks;
-
-    /* Call this to accumulate telemetry data. */
-    JSAccumulateTelemetryDataCallback telemetryCallback;
 
     /* Optional error reporter. */
     JSErrorReporter     errorReporter;
@@ -1489,42 +1500,72 @@ FreeOp::freeLater(void *p)
         CrashAtUnhandlableOOM("FreeOp::freeLater");
 }
 
-class AutoLockGC
+/*
+ * RAII class that takes the GC lock while it is live.
+ *
+ * Note that the lock may be temporarily released by use of AutoUnlockGC when
+ * passed a non-const reference to this class.
+ */
+class MOZ_STACK_CLASS AutoLockGC
 {
   public:
     explicit AutoLockGC(JSRuntime *rt
                         MOZ_GUARD_OBJECT_NOTIFIER_PARAM)
-      : runtime(rt)
+      : runtime_(rt), wasUnlocked_(false)
     {
         MOZ_GUARD_OBJECT_NOTIFIER_INIT;
-        rt->lockGC();
+        lock();
     }
 
-    ~AutoLockGC()
-    {
-        runtime->unlockGC();
+    ~AutoLockGC() {
+        unlock();
     }
+
+    void lock() {
+        runtime_->lockGC();
+    }
+
+    void unlock() {
+        runtime_->unlockGC();
+        wasUnlocked_ = true;
+    }
+
+#ifdef DEBUG
+    bool wasUnlocked() {
+        return wasUnlocked_;
+    }
+#endif
 
   private:
-    JSRuntime *runtime;
+    JSRuntime *runtime_;
+    mozilla::DebugOnly<bool> wasUnlocked_;
     MOZ_DECL_USE_GUARD_OBJECT_NOTIFIER
+
+    AutoLockGC(const AutoLockGC&) MOZ_DELETE;
+    AutoLockGC& operator=(const AutoLockGC&) MOZ_DELETE;
 };
 
-class AutoUnlockGC
+class MOZ_STACK_CLASS AutoUnlockGC
 {
-  private:
-    JSRuntime *rt;
-    MOZ_DECL_USE_GUARD_OBJECT_NOTIFIER
-
   public:
-    explicit AutoUnlockGC(JSRuntime *rt
+    explicit AutoUnlockGC(AutoLockGC& lock
                           MOZ_GUARD_OBJECT_NOTIFIER_PARAM)
-      : rt(rt)
+      : lock(lock)
     {
         MOZ_GUARD_OBJECT_NOTIFIER_INIT;
-        rt->unlockGC();
+        lock.unlock();
     }
-    ~AutoUnlockGC() { rt->lockGC(); }
+
+    ~AutoUnlockGC() {
+        lock.lock();
+    }
+
+  private:
+    AutoLockGC& lock;
+    MOZ_DECL_USE_GUARD_OBJECT_NOTIFIER
+
+    AutoUnlockGC(const AutoUnlockGC&) MOZ_DELETE;
+    AutoUnlockGC& operator=(const AutoUnlockGC&) MOZ_DELETE;
 };
 
 class MOZ_STACK_CLASS AutoKeepAtoms

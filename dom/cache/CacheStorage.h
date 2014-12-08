@@ -59,7 +59,7 @@ public:
                  workers::WorkerPrivate* aWorkerPrivate, ErrorResult& aRv);
 
   // webidl interface methods
-  already_AddRefed<Promise> Match(const RequestOrScalarValueString& aRequest,
+  already_AddRefed<Promise> Match(const RequestOrUSVString& aRequest,
                                   const QueryParams& aParams, ErrorResult& aRv);
   already_AddRefed<Promise> Has(const nsAString& aKey, ErrorResult& aRv);
   already_AddRefed<Promise> Open(const nsAString& aKey, ErrorResult& aRv);
@@ -132,7 +132,7 @@ private:
     // Would prefer to use PCacheRequest/PCacheQueryParams, but can't
     // because they introduce a header dependency on windows.h which
     // breaks the bindings build.
-    RequestOrScalarValueString mRequest;
+    RequestOrUSVString mRequest;
     QueryParams mParams;
     // It would also be nice to union the key with the match args above,
     // but VS2013 doesn't like these types in unions because of copy

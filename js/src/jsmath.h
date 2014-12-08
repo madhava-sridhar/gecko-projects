@@ -120,8 +120,14 @@ math_abs_handle(JSContext *cx, js::HandleValue v, js::MutableHandleValue r);
 extern bool
 math_abs(JSContext *cx, unsigned argc, js::Value *vp);
 
+extern double
+math_max_impl(double x, double y);
+
 extern bool
 math_max(JSContext *cx, unsigned argc, js::Value *vp);
+
+extern double
+math_min_impl(double x, double y);
 
 extern bool
 math_min(JSContext *cx, unsigned argc, js::Value *vp);
@@ -172,6 +178,9 @@ math_sin_impl(MathCache *cache, double x);
 
 extern double
 math_sin_uncached(double x);
+
+extern bool
+math_sin_handle(JSContext *cx, HandleValue val, MutableHandleValue res);
 
 extern bool
 math_cos(JSContext *cx, unsigned argc, js::Value *vp);
@@ -235,6 +244,9 @@ ecmaHypot(double x, double y);
 
 extern bool
 math_hypot(JSContext *cx, unsigned argc, Value *vp);
+
+extern bool
+math_hypot_handle(JSContext *cx, HandleValueArray args, MutableHandleValue res);
 
 extern bool
 math_trunc(JSContext *cx, unsigned argc, Value *vp);

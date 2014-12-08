@@ -16,6 +16,7 @@
 
 #include "BlobChild.h"
 #include "CrashReporterChild.h"
+#include "GeckoProfiler.h"
 #include "TabChild.h"
 
 #include "mozilla/Attributes.h"
@@ -51,7 +52,10 @@
 #define TARGET_SANDBOX_EXPORTS
 #include "mozilla/sandboxTarget.h"
 #include "nsDirectoryServiceDefs.h"
-#elif defined(XP_LINUX) || defined(XP_MACOSX)
+#elif defined(XP_LINUX)
+#include "mozilla/Sandbox.h"
+#include "mozilla/SandboxInfo.h"
+#elif defined(XP_MACOSX)
 #include "mozilla/Sandbox.h"
 #endif
 #endif
@@ -1031,6 +1035,11 @@ SetUpSandboxEnvironment()
 void
 ContentChild::CleanUpSandboxEnvironment()
 {
+    // Sandbox environment is only currently set up with the more strict sandbox.
+    if (!Preferences::GetBool("security.sandbox.windows.content.moreStrict")) {
+        return;
+    }
+
     nsresult rv;
     nsCOMPtr<nsIProperties> directoryService =
         do_GetService(NS_DIRECTORY_SERVICE_CONTRACTID, &rv);
@@ -1131,20 +1140,17 @@ ContentChild::RecvSetProcessSandbox()
 #if defined(MOZ_WIDGET_GONK) && ANDROID_VERSION >= 19
     // For B2G >= KitKat, sandboxing is mandatory; this has already
     // been enforced by ContentParent::StartUp().
-    MOZ_ASSERT(ContentProcessSandboxStatus() != kSandboxingWouldFail);
+    MOZ_ASSERT(SandboxInfo::Get().CanSandboxContent());
 #else
     // Otherwise, sandboxing is best-effort.
-    if (ContentProcessSandboxStatus() == kSandboxingWouldFail) {
+    if (!SandboxInfo::Get().CanSandboxContent()) {
         return true;
     }
 #endif
     SetContentProcessSandbox();
 #elif defined(XP_WIN)
-    nsAdoptingString contentSandboxPref =
-        Preferences::GetString("browser.tabs.remote.sandbox");
-    if (contentSandboxPref.EqualsLiteral("on")
-        || contentSandboxPref.EqualsLiteral("warn")) {
-        mozilla::SandboxTarget::Instance()->StartSandbox();
+    mozilla::SandboxTarget::Instance()->StartSandbox();
+    if (Preferences::GetBool("security.sandbox.windows.content.moreStrict")) {
         SetUpSandboxEnvironment();
     }
 #elif defined(XP_MACOSX)
@@ -2381,6 +2387,48 @@ ContentChild::RecvOnAppThemeChanged()
     nsCOMPtr<nsIObserverService> os = services::GetObserverService();
     if (os) {
         os->NotifyObservers(nullptr, "app-theme-changed", nullptr);
+    }
+    return true;
+}
+
+bool
+ContentChild::RecvStartProfiler(const uint32_t& aEntries,
+                                const double& aInterval,
+                                const nsTArray<nsCString>& aFeatures,
+                                const nsTArray<nsCString>& aThreadNameFilters)
+{
+    nsTArray<const char*> featureArray;
+    for (size_t i = 0; i < aFeatures.Length(); ++i) {
+        featureArray.AppendElement(aFeatures[i].get());
+    }
+
+    nsTArray<const char*> threadNameFilterArray;
+    for (size_t i = 0; i < aThreadNameFilters.Length(); ++i) {
+        threadNameFilterArray.AppendElement(aThreadNameFilters[i].get());
+    }
+
+    profiler_start(aEntries, aInterval, featureArray.Elements(), featureArray.Length(),
+                   threadNameFilterArray.Elements(), threadNameFilterArray.Length());
+
+    return true;
+}
+
+bool
+ContentChild::RecvStopProfiler()
+{
+    profiler_stop();
+    return true;
+}
+
+bool
+ContentChild::AnswerGetProfile(nsCString* aProfile)
+{
+    char* profile = profiler_get_profile();
+    if (profile) {
+        *aProfile = nsCString(profile, strlen(profile));
+        free(profile);
+    } else {
+        *aProfile = EmptyCString();
     }
     return true;
 }

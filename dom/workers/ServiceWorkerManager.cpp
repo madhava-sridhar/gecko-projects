@@ -2145,8 +2145,8 @@ private:
     MOZ_ASSERT(aWorkerPrivate->IsServiceWorker());
     GlobalObject globalObj(aCx, aWorkerPrivate->GlobalScope()->GetWrapper());
 
-    RequestOrScalarValueString requestInfo;
-    *requestInfo.SetAsScalarValueString().ToAStringPtr() = NS_ConvertUTF8toUTF16(mSpec);
+    RequestOrUSVString requestInfo;
+    *requestInfo.SetAsUSVString().ToAStringPtr() = NS_ConvertUTF8toUTF16(mSpec);
 
     RequestInit reqInit;
     reqInit.mMethod.Construct(mMethod);
@@ -2158,7 +2158,7 @@ private:
     reqInit.mHeaders.Value().SetAsHeaders() = headers;
 
     reqInit.mBody.Construct();
-    reqInit.mBody.Value().SetAsScalarValueString() = EmptyString(); //XXXjdm get this from the channel
+    reqInit.mBody.Value().SetAsUSVString() = EmptyString(); //XXXjdm get this from the channel
 
     reqInit.mMode.Construct(RequestMode::Same_origin); //XXXjdm how to find this out?
     reqInit.mCredentials.Construct(RequestCredentials::Same_origin); //XXXjdm how to find this out?

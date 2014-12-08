@@ -116,7 +116,7 @@ using mozilla::ipc::OptionalFileDescriptorSet;
 
 void
 TypeUtils::ToPCacheRequest(PCacheRequest& aOut,
-                           const RequestOrScalarValueString& aIn,
+                           const RequestOrUSVString& aIn,
                            BodyAction aBodyAction,
                            ReferrerAction aReferrerAction, ErrorResult& aRv)
 {
@@ -133,7 +133,7 @@ TypeUtils::ToPCacheRequest(PCacheRequest& aOut,
 
 void
 TypeUtils::ToPCacheRequest(PCacheRequest& aOut,
-                           const OwningRequestOrScalarValueString& aIn,
+                           const OwningRequestOrUSVString& aIn,
                            BodyAction aBodyAction,
                            ReferrerAction aReferrerAction, ErrorResult& aRv)
 {
@@ -150,7 +150,7 @@ TypeUtils::ToPCacheRequest(PCacheRequest& aOut,
 
 void
 TypeUtils::ToPCacheRequestOrVoid(PCacheRequestOrVoid& aOut,
-                                 const Optional<RequestOrScalarValueString>& aIn,
+                                 const Optional<RequestOrUSVString>& aIn,
                                  BodyAction aBodyAction,
                                  ReferrerAction aReferrerAction,
                                  ErrorResult& aRv)
@@ -232,7 +232,7 @@ TypeUtils::ToPCacheRequest(PCacheRequest& aOut, Request& aIn,
 void
 TypeUtils::ToPCacheRequest(const GlobalObject& aGlobal,
                            PCacheRequest& aOut,
-                           const RequestOrScalarValueString& aIn,
+                           const RequestOrUSVString& aIn,
                            BodyAction aBodyAction, ReferrerAction aReferrerAction,
                            ErrorResult& aRv)
 {
@@ -252,7 +252,7 @@ TypeUtils::ToPCacheRequest(const GlobalObject& aGlobal,
 void
 TypeUtils::ToPCacheRequestOrVoid(const GlobalObject& aGlobal,
                                  PCacheRequestOrVoid& aOut,
-                                 const Optional<RequestOrScalarValueString>& aIn,
+                                 const Optional<RequestOrUSVString>& aIn,
                                  BodyAction aBodyAction,
                                  ReferrerAction aReferrerAction,
                                  ErrorResult& aRv)
@@ -272,7 +272,7 @@ TypeUtils::ToPCacheRequestOrVoid(const GlobalObject& aGlobal,
 
 void
 TypeUtils::ToPCacheRequest(const GlobalObject& aGlobal, PCacheRequest& aOut,
-                           const OwningRequestOrScalarValueString& aIn,
+                           const OwningRequestOrUSVString& aIn,
                            BodyAction aBodyAction,
                            ReferrerAction aReferrerAction, ErrorResult& aRv)
 {
@@ -282,11 +282,11 @@ TypeUtils::ToPCacheRequest(const GlobalObject& aGlobal, PCacheRequest& aOut,
     return;
   }
 
-  RequestOrScalarValueString input;
+  RequestOrUSVString input;
   RequestInit init;
   nsString str;
-  str.Assign(aIn.GetAsScalarValueString());
-  input.SetAsScalarValueString().Rebind(str.Data(), str.Length());
+  str.Assign(aIn.GetAsUSVString());
+  input.SetAsUSVString().Rebind(str.Data(), str.Length());
 
   nsRefPtr<Request> request = Request::Constructor(aGlobal, input, init, aRv);
   if (NS_WARN_IF(aRv.Failed())) {

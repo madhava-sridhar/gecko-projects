@@ -282,6 +282,10 @@ void MediaDecoder::DestroyDecodedStream()
   MOZ_ASSERT(NS_IsMainThread());
   GetReentrantMonitor().AssertCurrentThreadIn();
 
+  if (GetDecodedStream()) {
+    GetStateMachine()->ResyncMediaStreamClock();
+  }
+
   // All streams are having their SourceMediaStream disconnected, so they
   // need to be explicitly blocked again.
   for (int32_t i = mOutputStreams.Length() - 1; i >= 0; --i) {
@@ -1689,11 +1693,7 @@ MediaDecoder::IsRawEnabled()
 bool
 MediaDecoder::IsOpusEnabled()
 {
-#ifdef MOZ_OPUS
   return Preferences::GetBool("media.opus.enabled");
-#else
-  return false;
-#endif
 }
 
 bool

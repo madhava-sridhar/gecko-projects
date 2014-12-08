@@ -79,6 +79,10 @@ public:
   virtual dom::AnimationPlayState PlayStateFromJS() const MOZ_OVERRIDE;
   virtual void PlayFromJS() MOZ_OVERRIDE;
 
+  // A variant of Play() that avoids posting style updates since this method
+  // is expected to be called whilst already updating style.
+  void PlayFromStyle() { DoPlay(); }
+
 protected:
   virtual ~CSSTransitionPlayer() { }
 
@@ -98,23 +102,6 @@ public:
   }
 
   typedef mozilla::AnimationPlayerCollection AnimationPlayerCollection;
-
-  static AnimationPlayerCollection*
-  GetTransitions(nsIContent* aContent) {
-    return static_cast<AnimationPlayerCollection*>
-      (aContent->GetProperty(nsGkAtoms::transitionsProperty));
-  }
-
-  // Returns true if aContent or any of its ancestors has a transition.
-  static bool ContentOrAncestorHasTransition(nsIContent* aContent) {
-    do {
-      if (GetTransitions(aContent)) {
-        return true;
-      }
-    } while ((aContent = aContent->GetParent()));
-
-    return false;
-  }
 
   static AnimationPlayerCollection*
   GetAnimationsForCompositor(nsIContent* aContent, nsCSSProperty aProperty)
@@ -148,13 +135,6 @@ public:
     mInAnimationOnlyStyleUpdate = aInAnimationOnlyUpdate;
   }
 
-  // nsIStyleRuleProcessor (parts)
-  virtual void RulesMatching(ElementRuleProcessorData* aData) MOZ_OVERRIDE;
-  virtual void RulesMatching(PseudoElementRuleProcessorData* aData) MOZ_OVERRIDE;
-  virtual void RulesMatching(AnonBoxRuleProcessorData* aData) MOZ_OVERRIDE;
-#ifdef MOZ_XUL
-  virtual void RulesMatching(XULTreeRuleProcessorData* aData) MOZ_OVERRIDE;
-#endif
   virtual size_t SizeOfExcludingThis(mozilla::MallocSizeOf aMallocSizeOf) const
     MOZ_MUST_OVERRIDE MOZ_OVERRIDE;
   virtual size_t SizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf) const
@@ -165,13 +145,16 @@ public:
 
   void FlushTransitions(FlushFlags aFlags);
 
-  virtual AnimationPlayerCollection*
-  GetAnimationPlayers(mozilla::dom::Element *aElement,
-                      nsCSSPseudoElements::Type aPseudoType,
-                      bool aCreateIfNeeded) MOZ_OVERRIDE;
-  void WalkTransitionRule(mozilla::dom::Element* aElement,
-                          nsCSSPseudoElements::Type aPseudoType,
-                          nsRuleWalker* aRuleWalker);
+protected:
+  virtual nsIAtom* GetAnimationsAtom() MOZ_OVERRIDE {
+    return nsGkAtoms::transitionsProperty;
+  }
+  virtual nsIAtom* GetAnimationsBeforeAtom() MOZ_OVERRIDE {
+    return nsGkAtoms::transitionsOfBeforeProperty;
+  }
+  virtual nsIAtom* GetAnimationsAfterAtom() MOZ_OVERRIDE {
+    return nsGkAtoms::transitionsOfAfterProperty;
+  }
 
 private:
   void

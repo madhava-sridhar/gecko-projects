@@ -106,6 +106,8 @@ void AndroidMediaReader::Shutdown()
     GetAndroidMediaPluginHost()->DestroyDecoder(mPlugin);
     mPlugin = nullptr;
   }
+
+  MediaDecoderReader::Shutdown();
 }
 
 // Resets all state related to decoding, emptying all buffers etc.
@@ -144,8 +146,9 @@ bool AndroidMediaReader::DecodeVideoFrame(bool &aKeyframeSkip,
         int64_t durationUs;
         mPlugin->GetDuration(mPlugin, &durationUs);
         durationUs = std::max<int64_t>(durationUs - mLastVideoFrame->mTime, 0);
-        mVideoQueue.Push(VideoData::ShallowCopyUpdateDuration(mLastVideoFrame,
-                                                              durationUs));
+        nsRefPtr<VideoData> data = VideoData::ShallowCopyUpdateDuration(mLastVideoFrame,
+                                                                        durationUs);
+        mVideoQueue.Push(data);
         mLastVideoFrame = nullptr;
       }
       return false;
@@ -172,7 +175,7 @@ bool AndroidMediaReader::DecodeVideoFrame(bool &aKeyframeSkip,
     int64_t pos = mDecoder->GetResource()->Tell();
     IntRect picture = ToIntRect(mPicture);
 
-    nsAutoPtr<VideoData> v;
+    nsRefPtr<VideoData> v;
     if (currentImage) {
       gfx::IntSize frameSize = currentImage->GetSize();
       if (frameSize.width != mInitialFrame.width ||
@@ -273,9 +276,8 @@ bool AndroidMediaReader::DecodeVideoFrame(bool &aKeyframeSkip,
       continue;
     }
 
-    mVideoQueue.Push(mLastVideoFrame.forget());
-
     // Buffer the current frame we just decoded.
+    mVideoQueue.Push(mLastVideoFrame);
     mLastVideoFrame = v;
 
     break;

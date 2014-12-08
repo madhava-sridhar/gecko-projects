@@ -40,6 +40,7 @@
 #include "mozilla/dom/Telephony.h"
 #include "mozilla/dom/Voicemail.h"
 #include "mozilla/dom/TVManager.h"
+#include "mozilla/dom/VRDevice.h"
 #include "mozilla/Hal.h"
 #include "nsISiteSpecificUserAgent.h"
 #include "mozilla/ClearOnShutdown.h"
@@ -1413,6 +1414,19 @@ Navigator::GetFeature(const nsAString& aName, ErrorResult& aRv)
   } // hardware.memory
 #endif
 
+  p->MaybeResolve(JS::UndefinedHandleValue);
+  return p.forget();
+}
+
+already_AddRefed<Promise>
+Navigator::HasFeature(const nsAString& aName, ErrorResult& aRv)
+{
+  nsCOMPtr<nsIGlobalObject> go = do_QueryInterface(mWindow);
+  nsRefPtr<Promise> p = Promise::Create(go, aRv);
+  if (aRv.Failed()) {
+    return nullptr;
+  }
+
   // Hardcoded manifest features. Some are still b2g specific.
   const char manifestFeatures[][64] = {
     "manifest.origin"
@@ -1429,19 +1443,6 @@ Navigator::GetFeature(const nsAString& aName, ErrorResult& aRv)
       p->MaybeResolve(true);
       return p.forget();
     }
-  }
-
-  p->MaybeResolve(JS::UndefinedHandleValue);
-  return p.forget();
-}
-
-already_AddRefed<Promise>
-Navigator::HasFeature(const nsAString& aName, ErrorResult& aRv)
-{
-  nsCOMPtr<nsIGlobalObject> go = do_QueryInterface(mWindow);
-  nsRefPtr<Promise> p = Promise::Create(go, aRv);
-  if (aRv.Failed()) {
-    return nullptr;
   }
 
   NS_NAMED_LITERAL_STRING(apiWindowPrefix, "api.window.");
@@ -1721,6 +1722,32 @@ Navigator::GetGamepads(nsTArray<nsRefPtr<Gamepad> >& aGamepads,
   win->GetGamepads(aGamepads);
 }
 #endif
+
+already_AddRefed<Promise>
+Navigator::GetVRDevices(ErrorResult& aRv)
+{
+  if (!mWindow || !mWindow->GetDocShell()) {
+    aRv.Throw(NS_ERROR_UNEXPECTED);
+    return nullptr;
+  }
+
+  nsCOMPtr<nsIGlobalObject> go = do_QueryInterface(mWindow);
+  nsRefPtr<Promise> p = Promise::Create(go, aRv);
+  if (aRv.Failed()) {
+    return nullptr;
+  }
+
+  nsGlobalWindow* win = static_cast<nsGlobalWindow*>(mWindow.get());
+
+  nsTArray<nsRefPtr<VRDevice>> vrDevs;
+  if (!win->GetVRDevices(vrDevs)) {
+    p->MaybeReject(NS_ERROR_FAILURE);
+  } else {
+    p->MaybeResolve(vrDevs);
+  }
+
+  return p.forget();
+}
 
 //*****************************************************************************
 //    Navigator::nsIMozNavigatorNetwork
@@ -2029,7 +2056,7 @@ Navigator::DoResolve(JSContext* aCx, JS::Handle<JSObject*> aObject,
       nsISupports* existingObject = mCachedResolveResults.GetWeak(name);
       if (existingObject) {
         // We know all of our WebIDL objects here are wrappercached, so just go
-        // ahead and WrapObject() them.  We can't use WrapNewBindingObject,
+        // ahead and WrapObject() them.  We can't use GetOrCreateDOMReflector,
         // because we don't have the concrete type.
         JS::Rooted<JS::Value> wrapped(aCx);
         if (!dom::WrapObject(aCx, existingObject, &wrapped)) {
@@ -2532,6 +2559,44 @@ Navigator::GetUserAgent(nsPIDOMWindow* aWindow, nsIURI* aURI,
 
   return siteSpecificUA->GetUserAgentForURIAndWindow(aURI, aWindow, aUserAgent);
 }
+
+#ifdef MOZ_EME
+already_AddRefed<Promise>
+Navigator::RequestMediaKeySystemAccess(const nsAString& aKeySystem,
+                                       const Optional<Sequence<MediaKeySystemOptions>>& aOptions,
+                                       ErrorResult& aRv)
+{
+  nsCOMPtr<nsIGlobalObject> go = do_QueryInterface(mWindow);
+  nsRefPtr<Promise> p = Promise::Create(go, aRv);
+  if (aRv.Failed()) {
+    return nullptr;
+  }
+
+  if (aKeySystem.IsEmpty() ||
+      (aOptions.WasPassed() && aOptions.Value().IsEmpty())) {
+    p->MaybeReject(NS_ERROR_DOM_INVALID_ACCESS_ERR);
+    return p.forget();
+  }
+
+  if (!MediaKeySystemAccess::IsKeySystemSupported(aKeySystem)) {
+    p->MaybeReject(NS_ERROR_DOM_NOT_SUPPORTED_ERR);
+    return p.forget();
+  }
+
+  // TODO: Wait (async) until the CDM is downloaded, if it's not already.
+
+  if (!aOptions.WasPassed() ||
+      MediaKeySystemAccess::IsSupported(aKeySystem, aOptions.Value())) {
+    nsRefPtr<MediaKeySystemAccess> access(new MediaKeySystemAccess(mWindow, aKeySystem));
+    p->MaybeResolve(access);
+    return p.forget();
+  }
+
+  p->MaybeReject(NS_ERROR_DOM_NOT_SUPPORTED_ERR);
+
+  return p.forget();
+}
+#endif
 
 } // namespace dom
 } // namespace mozilla

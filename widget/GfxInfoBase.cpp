@@ -90,7 +90,11 @@ void InitGfxDriverInfoShutdownObserver()
 using namespace mozilla::widget;
 using namespace mozilla;
 
+#ifdef XP_MACOSX
+NS_IMPL_ISUPPORTS(GfxInfoBase, nsIGfxInfo, nsIGfxInfo2, nsIObserver, nsISupportsWeakReference)
+#else
 NS_IMPL_ISUPPORTS(GfxInfoBase, nsIGfxInfo, nsIObserver, nsISupportsWeakReference)
+#endif
 
 #define BLACKLIST_PREF_BRANCH "gfx.blacklist."
 #define SUGGESTED_VERSION_PREF BLACKLIST_PREF_BRANCH "suggested-driver-version"
@@ -229,6 +233,10 @@ BlacklistOSToOperatingSystem(const nsAString& os)
     return DRIVER_OS_OS_X_10_7;
   else if (os.EqualsLiteral("Darwin 12"))
     return DRIVER_OS_OS_X_10_8;
+  else if (os.EqualsLiteral("Darwin 13"))
+    return DRIVER_OS_OS_X_10_9;
+  else if (os.EqualsLiteral("Darwin 14"))
+    return DRIVER_OS_OS_X_10_10;
   else if (os.EqualsLiteral("Android"))
     return DRIVER_OS_ANDROID;
   else if (os.EqualsLiteral("All"))

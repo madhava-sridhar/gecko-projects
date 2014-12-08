@@ -229,6 +229,7 @@ TabParent::TabParent(nsIContentParent* aManager,
   , mFrameElement(nullptr)
   , mIMESelectionAnchor(0)
   , mIMESelectionFocus(0)
+  , mWritingMode()
   , mIMEComposing(false)
   , mIMECompositionEnding(false)
   , mIMECompositionStart(0)
@@ -600,7 +601,19 @@ TabParent::Show(const nsIntSize& size)
           unused << SendPRenderFrameConstructor(renderFrame);
         }
     }
-    unused << SendShow(size, scrolling, textureFactoryIdentifier, layersId, renderFrame);
+
+    ShowInfo info(EmptyString(), false, false);
+    if (mFrameElement) {
+      nsAutoString name;
+      mFrameElement->GetAttr(kNameSpaceID_None, nsGkAtoms::name, name);
+      bool allowFullscreen =
+        mFrameElement->HasAttr(kNameSpaceID_None, nsGkAtoms::allowfullscreen) ||
+        mFrameElement->HasAttr(kNameSpaceID_None, nsGkAtoms::mozallowfullscreen);
+      bool isPrivate = mFrameElement->HasAttr(kNameSpaceID_None, nsGkAtoms::mozprivatebrowsing);
+      info = ShowInfo(name, allowFullscreen, isPrivate);
+    }
+
+    unused << SendShow(size, info, scrolling, textureFactoryIdentifier, layersId, renderFrame);
 }
 
 void
@@ -1383,6 +1396,7 @@ bool
 TabParent::RecvNotifyIMESelection(const uint32_t& aSeqno,
                                   const uint32_t& aAnchor,
                                   const uint32_t& aFocus,
+                                  const mozilla::WritingMode& aWritingMode,
                                   const bool& aCausedByComposition)
 {
   nsCOMPtr<nsIWidget> widget = GetWidget();
@@ -1392,6 +1406,7 @@ TabParent::RecvNotifyIMESelection(const uint32_t& aSeqno,
   if (aSeqno == mIMESeqno) {
     mIMESelectionAnchor = aAnchor;
     mIMESelectionFocus = aFocus;
+    mWritingMode = aWritingMode;
     const nsIMEUpdatePreference updatePreference =
       widget->GetIMEUpdatePreference();
     if (updatePreference.WantSelectionChange() &&
@@ -1573,6 +1588,7 @@ TabParent::HandleQueryContentEvent(WidgetQueryContentEvent& aEvent)
       }
       aEvent.mReply.mReversed = mIMESelectionFocus < mIMESelectionAnchor;
       aEvent.mReply.mHasSelection = true;
+      aEvent.mReply.mWritingMode = mWritingMode;
       aEvent.mSucceeded = true;
     }
     break;
@@ -1638,11 +1654,11 @@ TabParent::SendCompositionEvent(WidgetCompositionEvent& event)
     return false;
   }
 
-  if (event.message == NS_COMPOSITION_CHANGE) {
+  if (event.CausesDOMTextEvent()) {
     return SendCompositionChangeEvent(event);
   }
 
-  mIMEComposing = event.message != NS_COMPOSITION_END;
+  mIMEComposing = !event.CausesDOMCompositionEndEvent();
   mIMECompositionStart = std::min(mIMESelectionAnchor, mIMESelectionFocus);
   if (mIMECompositionEnding)
     return true;
@@ -1673,6 +1689,7 @@ TabParent::SendCompositionChangeEvent(WidgetCompositionEvent& event)
   }
   mIMESelectionAnchor = mIMESelectionFocus =
       mIMECompositionStart + event.mData.Length();
+  mIMEComposing = !event.CausesDOMCompositionEndEvent();
 
   event.mSeqno = ++mIMESeqno;
   return PBrowserParent::SendCompositionEvent(event);
@@ -2097,6 +2114,16 @@ TabParent::RecvContentReceivedTouch(const ScrollableLayerGuid& aGuid,
 {
   if (RenderFrameParent* rfp = GetRenderFrame()) {
     rfp->ContentReceivedTouch(aGuid, aInputBlockId, aPreventDefault);
+  }
+  return true;
+}
+
+bool
+TabParent::RecvSetTargetAPZC(const uint64_t& aInputBlockId,
+                             const nsTArray<ScrollableLayerGuid>& aTargets)
+{
+  if (RenderFrameParent* rfp = GetRenderFrame()) {
+    rfp->SetTargetAPZC(aInputBlockId, aTargets);
   }
   return true;
 }

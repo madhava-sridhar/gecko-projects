@@ -18,6 +18,9 @@
 #include "nsInterfaceHashtable.h"
 #include "nsString.h"
 #include "nsTArray.h"
+#ifdef MOZ_EME
+#include "mozilla/dom/MediaKeySystemAccess.h"
+#endif
 
 class nsPluginArray;
 class nsMimeTypeArray;
@@ -243,6 +246,7 @@ public:
 #ifdef MOZ_GAMEPAD
   void GetGamepads(nsTArray<nsRefPtr<Gamepad> >& aGamepads, ErrorResult& aRv);
 #endif // MOZ_GAMEPAD
+  already_AddRefed<Promise> GetVRDevices(ErrorResult& aRv);
 #ifdef MOZ_B2G_FM
   FMRadio* GetMozFMRadio(ErrorResult& aRv);
 #endif
@@ -319,6 +323,13 @@ public:
   // GetWindowFromGlobal returns the inner window for this global, if
   // any, else null.
   static already_AddRefed<nsPIDOMWindow> GetWindowFromGlobal(JSObject* aGlobal);
+
+#ifdef MOZ_EME
+  already_AddRefed<Promise>
+  RequestMediaKeySystemAccess(const nsAString& aKeySystem,
+                              const Optional<Sequence<MediaKeySystemOptions>>& aOptions,
+                              ErrorResult& aRv);
+#endif
 
 private:
   virtual ~Navigator();

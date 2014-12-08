@@ -122,7 +122,7 @@ js::StackUses(JSScript *script, jsbytecode *pc)
       default:
         /* stack: fun, this, [argc arguments] */
         MOZ_ASSERT(op == JSOP_NEW || op == JSOP_CALL || op == JSOP_EVAL ||
-                   op == JSOP_FUNCALL || op == JSOP_FUNAPPLY);
+                   op == JSOP_STRICTEVAL || op == JSOP_FUNCALL || op == JSOP_FUNAPPLY);
         return 2 + GET_ARGC(pc);
     }
 }
@@ -1466,10 +1466,8 @@ namespace {
 struct ExpressionDecompiler
 {
     JSContext *cx;
-    InterpreterFrame *fp;
     RootedScript script;
     RootedFunction fun;
-    BindingVector *localNames;
     BytecodeParser parser;
     Sprinter sprinter;
 
@@ -1477,11 +1475,9 @@ struct ExpressionDecompiler
         : cx(cx),
           script(cx, script),
           fun(cx, fun),
-          localNames(nullptr),
           parser(cx, script),
           sprinter(cx)
     {}
-    ~ExpressionDecompiler();
     bool init();
     bool decompilePCForStackOperand(jsbytecode *pc, int i);
     bool decompilePC(jsbytecode *pc);
@@ -1537,7 +1533,7 @@ ExpressionDecompiler::decompilePC(jsbytecode *pc)
 
     switch (op) {
       case JSOP_GETGNAME:
-      case JSOP_NAME:
+      case JSOP_GETNAME:
       case JSOP_GETINTRINSIC:
         return write(loadAtom(pc));
       case JSOP_GETARG: {
@@ -1631,24 +1627,12 @@ ExpressionDecompiler::decompilePC(jsbytecode *pc)
     return write("(intermediate value)");
 }
 
-ExpressionDecompiler::~ExpressionDecompiler()
-{
-    js_delete<BindingVector>(localNames);
-}
-
 bool
 ExpressionDecompiler::init()
 {
     assertSameCompartment(cx, script);
 
     if (!sprinter.init())
-        return false;
-
-    localNames = cx->new_<BindingVector>(cx);
-    if (!localNames)
-        return false;
-    RootedScript script_(cx, script);
-    if (!FillBindingVector(script_, localNames))
         return false;
 
     if (!parser.parse())
@@ -1685,8 +1669,15 @@ JSAtom *
 ExpressionDecompiler::getArg(unsigned slot)
 {
     MOZ_ASSERT(fun);
-    MOZ_ASSERT(slot < script->bindings.count());
-    return (*localNames)[slot].name();
+    MOZ_ASSERT(slot < script->bindings.numArgs());
+
+    for (BindingIter bi(script); bi; bi++) {
+        MOZ_ASSERT(bi->kind() == Binding::ARGUMENT);
+        if (bi.argIndex() == slot)
+            return bi->name();
+    }
+
+    MOZ_CRASH("No binding");
 }
 
 JSAtom *
@@ -1694,14 +1685,17 @@ ExpressionDecompiler::getLocal(uint32_t local, jsbytecode *pc)
 {
     MOZ_ASSERT(local < script->nfixed());
     if (local < script->nbodyfixed()) {
-        MOZ_ASSERT(fun);
-        uint32_t slot = local + fun->nargs();
-        MOZ_ASSERT(slot < script->bindings.count());
-        return (*localNames)[slot].name();
+        for (BindingIter bi(script); bi; bi++) {
+            if (bi->kind() != Binding::ARGUMENT && !bi->aliased() && bi.frameIndex() == local)
+                return bi->name();
+        }
+
+        MOZ_CRASH("No binding");
     }
     for (NestedScopeObject *chain = script->getStaticScope(pc);
          chain;
-         chain = chain->enclosingNestedScope()) {
+         chain = chain->enclosingNestedScope())
+    {
         if (!chain->is<StaticBlockObject>())
             continue;
         StaticBlockObject &block = chain->as<StaticBlockObject>();
@@ -2392,9 +2386,6 @@ js::GetPCCountScriptContents(JSContext *cx, size_t index)
     JSScript *script = sac.script;
 
     StringBuffer buf(cx);
-
-    if (!script->functionNonDelazifying() && !script->compileAndGo())
-        return buf.finishString();
 
     {
         AutoCompartment ac(cx, &script->global());

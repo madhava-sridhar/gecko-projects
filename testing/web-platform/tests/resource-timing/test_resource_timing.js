@@ -115,10 +115,20 @@ function poll_for_stylesheet_load(expected_entry) {
     function inner() {
         for(var i=0; i<document.styleSheets.length; i++) {
             var sheet = document.styleSheets[i];
-            console.log(sheet.href);;
             if (sheet.href === expected_entry.name) {
-                resource_load(expected_entry);
-                return;
+                try {
+                    // try/catch avoids throwing if sheet object exists before it is loaded,
+                    // which is a bug, but not what we are trying to test here.
+                    var hasRules = sheet.cssRules.length > 0;
+                } catch(e) {
+                    hasRules = false;
+                }
+                if (hasRules) {
+                    setTimeout(function() {
+                        resource_load(expected_entry);
+                    }, 200);
+                    return;
+                }
             }
         }
         setTimeout(inner, 100);

@@ -22,6 +22,7 @@
 #include "nsDisplayList.h"
 #include "mozilla/MemoryReporting.h"
 #include "RestyleManager.h"
+#include "nsRuleProcessorData.h"
 #include "nsStyleSet.h"
 #include "nsStyleChangeList.h"
 
@@ -186,6 +187,50 @@ CommonAnimationManager::MediumFeaturesChanged(nsPresContext* aPresContext)
   return false;
 }
 
+/* virtual */ void
+CommonAnimationManager::RulesMatching(ElementRuleProcessorData* aData)
+{
+  NS_ABORT_IF_FALSE(aData->mPresContext == mPresContext,
+                    "pres context mismatch");
+  nsIStyleRule *rule =
+    GetAnimationRule(aData->mElement,
+                     nsCSSPseudoElements::ePseudo_NotPseudoElement);
+  if (rule) {
+    aData->mRuleWalker->Forward(rule);
+  }
+}
+
+/* virtual */ void
+CommonAnimationManager::RulesMatching(PseudoElementRuleProcessorData* aData)
+{
+  NS_ABORT_IF_FALSE(aData->mPresContext == mPresContext,
+                    "pres context mismatch");
+  if (aData->mPseudoType != nsCSSPseudoElements::ePseudo_before &&
+      aData->mPseudoType != nsCSSPseudoElements::ePseudo_after) {
+    return;
+  }
+
+  // FIXME: Do we really want to be the only thing keeping a
+  // pseudo-element alive?  I *think* the non-animation restyle should
+  // handle that, but should add a test.
+  nsIStyleRule *rule = GetAnimationRule(aData->mElement, aData->mPseudoType);
+  if (rule) {
+    aData->mRuleWalker->Forward(rule);
+  }
+}
+
+/* virtual */ void
+CommonAnimationManager::RulesMatching(AnonBoxRuleProcessorData* aData)
+{
+}
+
+#ifdef MOZ_XUL
+/* virtual */ void
+CommonAnimationManager::RulesMatching(XULTreeRuleProcessorData* aData)
+{
+}
+#endif
+
 /* virtual */ size_t
 CommonAnimationManager::SizeOfExcludingThis(mozilla::MallocSizeOf aMallocSizeOf) const
 {
@@ -257,6 +302,106 @@ CommonAnimationManager::ExtractComputedValueForTransition(
   return result;
 }
 
+AnimationPlayerCollection*
+CommonAnimationManager::GetAnimationPlayers(dom::Element *aElement,
+                                            nsCSSPseudoElements::Type aPseudoType,
+                                            bool aCreateIfNeeded)
+{
+  if (!aCreateIfNeeded && PR_CLIST_IS_EMPTY(&mElementCollections)) {
+    // Early return for the most common case.
+    return nullptr;
+  }
+
+  nsIAtom *propName;
+  if (aPseudoType == nsCSSPseudoElements::ePseudo_NotPseudoElement) {
+    propName = GetAnimationsAtom();
+  } else if (aPseudoType == nsCSSPseudoElements::ePseudo_before) {
+    propName = GetAnimationsBeforeAtom();
+  } else if (aPseudoType == nsCSSPseudoElements::ePseudo_after) {
+    propName = GetAnimationsAfterAtom();
+  } else {
+    NS_ASSERTION(!aCreateIfNeeded,
+                 "should never try to create transitions for pseudo "
+                 "other than :before or :after");
+    return nullptr;
+  }
+  AnimationPlayerCollection* collection =
+    static_cast<AnimationPlayerCollection*>(aElement->GetProperty(propName));
+  if (!collection && aCreateIfNeeded) {
+    // FIXME: Consider arena-allocating?
+    collection =
+      new AnimationPlayerCollection(aElement, propName, this);
+    nsresult rv =
+      aElement->SetProperty(propName, collection,
+                            &AnimationPlayerCollection::PropertyDtor, false);
+    if (NS_FAILED(rv)) {
+      NS_WARNING("SetProperty failed");
+      delete collection;
+      return nullptr;
+    }
+    if (propName == nsGkAtoms::animationsProperty ||
+        propName == nsGkAtoms::transitionsProperty) {
+      aElement->SetMayHaveAnimations();
+    }
+
+    AddElementCollection(collection);
+  }
+
+  return collection;
+}
+
+nsIStyleRule*
+CommonAnimationManager::GetAnimationRule(mozilla::dom::Element* aElement,
+                                         nsCSSPseudoElements::Type aPseudoType)
+{
+  NS_ABORT_IF_FALSE(
+    aPseudoType == nsCSSPseudoElements::ePseudo_NotPseudoElement ||
+    aPseudoType == nsCSSPseudoElements::ePseudo_before ||
+    aPseudoType == nsCSSPseudoElements::ePseudo_after,
+    "forbidden pseudo type");
+
+  if (!mPresContext->IsDynamic()) {
+    // For print or print preview, ignore animations.
+    return nullptr;
+  }
+
+  AnimationPlayerCollection* collection =
+    GetAnimationPlayers(aElement, aPseudoType, false);
+  if (!collection) {
+    return nullptr;
+  }
+
+  RestyleManager* restyleManager = mPresContext->RestyleManager();
+  if (restyleManager->SkipAnimationRules()) {
+    // During the non-animation part of processing restyles, we don't
+    // add the animation rule.
+
+    if (collection->mStyleRule && restyleManager->PostAnimationRestyles()) {
+      collection->PostRestyleForAnimation(mPresContext);
+    }
+
+    return nullptr;
+  }
+
+  // Animations should already be refreshed, but transitions may not be.
+  // Note that this is temporary, we would like both animations and transitions
+  // to both be refreshed by this point.
+  if (IsAnimationManager()) {
+    NS_WARN_IF_FALSE(!collection->mNeedsRefreshes ||
+                     collection->mStyleRuleRefreshTime ==
+                       mPresContext->RefreshDriver()->MostRecentRefresh(),
+                     "should already have refreshed style rule");
+  } else {
+    // FIXME: Remove this assignment.  See bug 1061364.
+    collection->mNeedsRefreshes = true;
+    collection->EnsureStyleRuleFor(
+      mPresContext->RefreshDriver()->MostRecentRefresh(),
+      EnsureStyleRule_IsNotThrottled);
+  }
+
+  return collection->mStyleRule;
+}
+
 /* static */ const CommonAnimationManager::LayerAnimationRecord
   CommonAnimationManager::sLayerAnimationInfo[] =
     { { eCSSProperty_transform,
@@ -300,16 +445,22 @@ AnimValuesStyleRule::MapRuleInfoInto(nsRuleData* aRuleData)
 /* virtual */ void
 AnimValuesStyleRule::List(FILE* out, int32_t aIndent) const
 {
-  for (int32_t index = aIndent; --index >= 0; ) fputs("  ", out);
-  fputs("[anim values] { ", out);
+  nsAutoCString str;
+  for (int32_t index = aIndent; --index >= 0; ) {
+    str.AppendLiteral("  ");
+  }
+  str.AppendLiteral("[anim values] { ");
   for (uint32_t i = 0, i_end = mPropertyValuePairs.Length(); i < i_end; ++i) {
     const PropertyValuePair &pair = mPropertyValuePairs[i];
+    str.Append(nsCSSProps::GetStringValue(pair.mProperty));
+    str.AppendLiteral(": ");
     nsAutoString value;
     StyleAnimationValue::UncomputeValue(pair.mProperty, pair.mValue, value);
-    fprintf(out, "%s: %s; ", nsCSSProps::GetStringValue(pair.mProperty).get(),
-                             NS_ConvertUTF16toUTF8(value).get());
+    AppendUTF16toUTF8(value, str);
+    str.AppendLiteral("; ");
   }
-  fputs("}\n", out);
+  str.AppendLiteral("}\n");
+  fprintf_stderr(out, "%s", str.get());
 }
 #endif
 
@@ -560,8 +711,8 @@ AnimationPlayerCollection::EnsureStyleRuleFor(TimeStamp aRefreshTime,
   // If we're performing animations on the compositor thread, then we can skip
   // most of the work in this method. But even if we are throttled, then we
   // have to do the work if an animation is ending in order to get correct end
-  // of animation behaviour (the styles of the animation disappear, or the fill
-  // mode behaviour). CanThrottle returns false for any finishing animations
+  // of animation behavior (the styles of the animation disappear, or the fill
+  // mode behavior). CanThrottle returns false for any finishing animations
   // so we can force style recalculation in that case.
   if (aFlags == EnsureStyleRule_IsThrottled) {
     for (size_t playerIdx = mPlayers.Length(); playerIdx-- != 0; ) {

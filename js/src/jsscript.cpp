@@ -334,17 +334,6 @@ Bindings::trace(JSTracer *trc)
     }
 }
 
-bool
-js::FillBindingVector(HandleScript fromScript, BindingVector *vec)
-{
-    for (BindingIter bi(fromScript); bi; bi++) {
-        if (!vec->append(*bi))
-            return false;
-    }
-
-    return true;
-}
-
 template<XDRMode mode>
 bool
 js::XDRScriptConst(XDRState<mode> *xdr, MutableHandleValue vp)
@@ -932,7 +921,7 @@ js::XDRScript(XDRState<mode> *xdr, HandleObject enclosingScope, HandleScript enc
                 classk = CK_WithObject;
             else if (obj->is<JSFunction>())
                 classk = CK_JSFunction;
-            else if (obj->is<JSObject>() || obj->is<ArrayObject>())
+            else if (obj->is<PlainObject>() || obj->is<ArrayObject>())
                 classk = CK_JSObject;
             else
                 MOZ_CRASH("Cannot encode this class of object.");
@@ -2103,17 +2092,6 @@ bool
 ScriptSource::setSourceMapURL(ExclusiveContext *cx, const char16_t *sourceMapURL)
 {
     MOZ_ASSERT(sourceMapURL);
-    if (hasSourceMapURL()) {
-        // Warn about the replacement, but use the new one.
-        if (cx->isJSContext()) {
-            JS_ReportErrorFlagsAndNumber(cx->asJSContext(), JSREPORT_WARNING,
-                                         js_GetErrorMessage, nullptr,
-                                         JSMSG_ALREADY_HAS_PRAGMA, filename_.get(),
-                                         "//# sourceMappingURL");
-        }
-
-        sourceMapURL_ = nullptr;
-    }
 
     size_t len = js_strlen(sourceMapURL) + 1;
     if (len == 1)
@@ -2734,7 +2712,7 @@ JSScript::finalize(FreeOp *fop)
     if (types_)
         types_->destroy();
 
-    jit::DestroyIonScripts(fop, this);
+    jit::DestroyJitScripts(fop, this);
 
     destroyScriptCounts(fop);
     destroyDebugScript(fop);
@@ -2933,9 +2911,15 @@ js::DescribeScriptedCallerForCompilation(JSContext *cx, MutableHandleScript mayb
     if (opt == CALLED_FROM_JSOP_EVAL) {
         jsbytecode *pc = nullptr;
         maybeScript.set(cx->currentScript(&pc));
-        MOZ_ASSERT(JSOp(*pc) == JSOP_EVAL || JSOp(*pc) == JSOP_SPREADEVAL);
-        MOZ_ASSERT(*(pc + (JSOp(*pc) == JSOP_EVAL ? JSOP_EVAL_LENGTH
-                                                  : JSOP_SPREADEVAL_LENGTH)) == JSOP_LINENO);
+        static_assert(JSOP_SPREADEVAL_LENGTH == JSOP_STRICTSPREADEVAL_LENGTH,
+                    "next op after a spread must be at consistent offset");
+        static_assert(JSOP_EVAL_LENGTH == JSOP_STRICTEVAL_LENGTH,
+                    "next op after a direct eval must be at consistent offset");
+        MOZ_ASSERT(JSOp(*pc) == JSOP_EVAL || JSOp(*pc) == JSOP_STRICTEVAL ||
+                   JSOp(*pc) == JSOP_SPREADEVAL || JSOp(*pc) == JSOP_STRICTSPREADEVAL);
+        mozilla::DebugOnly<bool> isSpread = JSOp(*pc) == JSOP_SPREADEVAL ||
+                                            JSOp(*pc) == JSOP_STRICTSPREADEVAL;
+        MOZ_ASSERT(*(pc + (isSpread ? JSOP_SPREADEVAL_LENGTH : JSOP_EVAL_LENGTH)) == JSOP_LINENO);
         *file = maybeScript->filename();
         *linenop = GET_UINT16(pc + (JSOp(*pc) == JSOP_EVAL ? JSOP_EVAL_LENGTH
                                                            : JSOP_SPREADEVAL_LENGTH));
@@ -3454,7 +3438,7 @@ JSScript::markChildren(JSTracer *trc)
 
     bindings.trace(trc);
 
-    jit::TraceIonScripts(trc, this);
+    jit::TraceJitScripts(trc, this);
 }
 
 void

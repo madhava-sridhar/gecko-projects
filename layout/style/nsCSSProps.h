@@ -564,15 +564,14 @@ public:
   static const KTableValue kControlCharacterVisibilityKTable[];
   static const KTableValue kCursorKTable[];
   static const KTableValue kDirectionKTable[];
-  // Not const because we modify its entries when the pref
-  // "layout.css.grid.enabled" changes:
+  // Not const because we modify its entries when various 
+  // "layout.css.*.enabled" prefs changes:
   static KTableValue kDisplayKTable[];
   static const KTableValue kElevationKTable[];
   static const KTableValue kEmptyCellsKTable[];
   static const KTableValue kAlignContentKTable[];
   static const KTableValue kAlignItemsKTable[];
   static const KTableValue kAlignSelfKTable[];
-  static const KTableValue kFlexBasisKTable[];
   static const KTableValue kFlexDirectionKTable[];
   static const KTableValue kFlexWrapKTable[];
   static const KTableValue kJustifyContentKTable[];

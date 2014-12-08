@@ -4,12 +4,10 @@
 
 import base64
 import ConfigParser
-import datetime
 import json
 import os
 import socket
 import StringIO
-import time
 import traceback
 import warnings
 
@@ -477,6 +475,7 @@ class Marionette(object):
         self.host = host
         self.port = self.local_port = port
         self.bin = bin
+        self.profile = profile
         self.instance = None
         self.session = None
         self.session_id = None
@@ -514,7 +513,7 @@ class Marionette(object):
                         KeyError):
                     instance_class = geckoinstance.GeckoInstance
             self.instance = instance_class(host=self.host, port=self.port,
-                                           bin=self.bin, profile=profile,
+                                           bin=self.bin, profile=self.profile,
                                            app_args=app_args, symbols_path=symbols_path,
                                            gecko_log=gecko_log)
             self.instance.start()
@@ -530,7 +529,7 @@ class Marionette(object):
                                             binary=emulator_binary,
                                             userdata=emulator_img,
                                             resolution=emulator_res,
-                                            profile=profile,
+                                            profile=self.profile,
                                             adb_path=adb_path,
                                             process_args=process_args)
             self.emulator = self.runner.device
@@ -587,24 +586,9 @@ class Marionette(object):
             s.close()
 
     def wait_for_port(self, timeout=60):
-        starttime = datetime.datetime.now()
-        poll_interval = 0.1
-        while datetime.datetime.now() - starttime < datetime.timedelta(seconds=timeout):
-            sock = None
-            try:
-                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                sock.connect((self.host, self.port))
-                data = sock.recv(16)
-                sock.close()
-                if ':' in data:
-                    return True
-            except socket.error:
-                pass
-            finally:
-                if sock:
-                    sock.close()
-            time.sleep(poll_interval)
-        return False
+        return MarionetteTransport.wait_for_port(self.host,
+                                                 self.port,
+                                                 timeout=timeout)
 
     @do_crash_check
     def _send_message(self, command, response_key="ok", **kwargs):
@@ -790,20 +774,20 @@ class Marionette(object):
             self.start_session()
             self._reset_timeouts()
 
-    def restart_with_clean_profile(self):
+    def restart(self, clean=False):
         """
         This will terminate the currently running instance, and spawn a new instance
-        with a clean profile.
+        with the same profile and then reuse the session id when creating a session again.
 
         : param prefs: A dictionary whose keys are preference names.
         """
         if not self.instance:
-            raise errors.MarionetteException("enforce_gecko_prefs can only be called " \
+            raise errors.MarionetteException("restart can only be called " \
                                              "on gecko instances launched by Marionette")
         self.delete_session()
-        self.instance.restart()
+        self.instance.restart(clean=clean)
         assert(self.wait_for_port()), "Timed out waiting for port!"
-        self.start_session()
+        self.start_session(session_id=self.session_id)
         self._reset_timeouts()
 
     def absolute_url(self, relative_url):
@@ -814,15 +798,17 @@ class Marionette(object):
         '''
         return "%s%s" % (self.baseurl, relative_url)
 
-    def start_session(self, desired_capabilities=None, session_id=None):
+    def start_session(self, desired_capabilities=None, session_id=None, timeout=60):
         """Create a new Marionette session.
 
         This method must be called before performing any other action.
 
-        :params desired_capabilities: An optional dict of desired
+        :param desired_capabilities: An optional dict of desired
             capabilities.  This is currently ignored.
+        :param timeout: Timeout in seconds for the server to be ready.
 
         :returns: A dict of the capabilities offered."""
+        self.wait_for_port(timeout=timeout)
         self.session = self._send_message('newSession', 'value', capabilities=desired_capabilities, session_id=session_id)
         self.b2g = 'b2g' in self.session
         return self.session
@@ -1313,7 +1299,7 @@ class Marionette(object):
         :param method: The method to use to locate the element; one of: "id",
                        "name", "class name", "tag name", "css selector", "link text",
                        "partial link text", "xpath", "anon" and "anon attribute".
-                       Note that the "name", "css selector", "link text" and
+                       Note that the "name", "link text" and
                        "partial link test" methods are not supported in the chrome dom.
         :param target: The target of the search.  For example, if method =
                        "tag", target might equal "div".  If method = "id", target would be
@@ -1340,7 +1326,7 @@ class Marionette(object):
         :param method: The method to use to locate the elements; one of:
                        "id", "name", "class name", "tag name", "css selector", "link text",
                        "partial link text", "xpath", "anon" and "anon attribute".
-                       Note that the "name", "css selector", "link text" and
+                       Note that the "name", "link text" and
                        "partial link test" methods are not supported in the chrome dom.
         :param target: The target of the search.  For example, if method =
                        "tag", target might equal "div".  If method = "id", target would be

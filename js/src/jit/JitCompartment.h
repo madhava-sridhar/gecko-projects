@@ -13,7 +13,7 @@
 
 #include "jit/CompileInfo.h"
 #include "jit/IonCode.h"
-#include "jit/IonFrames.h"
+#include "jit/JitFrames.h"
 #include "jit/shared/Assembler-shared.h"
 #include "js/Value.h"
 #include "vm/Stack.h"
@@ -462,7 +462,8 @@ class JitCompartment
     // Set of JSScripts invoked by ForkJoin (i.e. the entry script). These
     // scripts are marked if their respective parallel IonScripts' age is less
     // than a certain amount. See IonScript::parallelAge_.
-    typedef HashSet<PreBarrieredScript> ScriptSet;
+    typedef HashSet<PreBarrieredScript, DefaultHasher<PreBarrieredScript>, SystemAllocPolicy>
+        ScriptSet;
     ScriptSet *activeParallelEntryScripts_;
 
     JitCode *generateStringConcatStub(JSContext *cx, ExecutionMode mode);

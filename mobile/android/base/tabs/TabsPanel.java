@@ -9,14 +9,14 @@ import org.mozilla.gecko.AppConstants.Versions;
 import org.mozilla.gecko.GeckoApp;
 import org.mozilla.gecko.GeckoAppShell;
 import org.mozilla.gecko.GeckoApplication;
-import org.mozilla.gecko.LightweightTheme;
-import org.mozilla.gecko.LightweightThemeDrawable;
 import org.mozilla.gecko.NewTabletUI;
 import org.mozilla.gecko.R;
 import org.mozilla.gecko.Telemetry;
 import org.mozilla.gecko.TelemetryContract;
 import org.mozilla.gecko.animation.PropertyAnimator;
 import org.mozilla.gecko.animation.ViewHelper;
+import org.mozilla.gecko.lwt.LightweightTheme;
+import org.mozilla.gecko.lwt.LightweightThemeDrawable;
 import org.mozilla.gecko.util.HardwareUtils;
 import org.mozilla.gecko.widget.GeckoPopupMenu;
 import org.mozilla.gecko.widget.IconTabWidget;
@@ -241,17 +241,16 @@ public class TabsPanel extends LinearLayout
         Resources resources = tabsContainer.getContext().getResources();
 
         int screenHeight = resources.getDisplayMetrics().heightPixels;
+        int actionBarHeight = resources.getDimensionPixelSize(R.dimen.browser_toolbar_height);
 
         if(NewTabletUI.isEnabled(tabsContainer.getContext())){
-            return screenHeight;
+            return screenHeight - actionBarHeight;
         }
 
         PanelView panelView = tabsContainer.getCurrentPanelView();
         if (panelView != null && !panelView.shouldExpand()) {
             return resources.getDimensionPixelSize(R.dimen.tabs_layout_horizontal_height);
         }
-
-        int actionBarHeight = resources.getDimensionPixelSize(R.dimen.browser_toolbar_height);
 
         Rect windowRect = new Rect();
         tabsContainer.getWindowVisibleDisplayFrame(windowRect);

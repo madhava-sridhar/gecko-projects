@@ -984,6 +984,7 @@ RTCPeerConnection.prototype = {
 
   get peerIdentity() { return this._peerIdentity; },
   get id() { return this._impl.id; },
+  set id(s) { this._impl.id = s; },
   get iceGatheringState()  { return this._iceGatheringState; },
   get iceConnectionState() { return this._iceConnectionState; },
 
@@ -1100,27 +1101,6 @@ RTCPeerConnection.prototype = {
   }
 };
 
-function RTCError(code, message) {
-  this.name = this.reasonName[Math.min(code, this.reasonName.length - 1)];
-  this.message = (typeof message === "string")? message : this.name;
-  this.__exposedProps__ = { name: "rw", message: "rw" };
-}
-RTCError.prototype = {
-  // These strings must match those defined in the WebRTC spec.
-  reasonName: [
-    "NO_ERROR", // Should never happen -- only used for testing
-    "INVALID_CONSTRAINTS_TYPE",
-    "INVALID_CANDIDATE_TYPE",
-    "INVALID_MEDIASTREAM_TRACK",
-    "INVALID_STATE",
-    "INVALID_SESSION_DESCRIPTION",
-    "INCOMPATIBLE_SESSION_DESCRIPTION",
-    "INCOMPATIBLE_CONSTRAINTS",
-    "INCOMPATIBLE_MEDIASTREAMTRACK",
-    "INTERNAL_ERROR"
-  ]
-};
-
 // This is a separate object because we don't want to expose it to DOM.
 function PeerConnectionObserver() {
   this._dompc = null;
@@ -1135,6 +1115,24 @@ PeerConnectionObserver.prototype = {
 
   __init: function(dompc) {
     this._dompc = dompc._innerObject;
+  },
+
+  newError: function(code, message) {
+    // These strings must match those defined in the WebRTC spec.
+    const reasonName = [
+      "",
+      "InternalError",
+      "InternalError",
+      "InvalidParameter",
+      "InvalidStateError",
+      "InvalidSessionDescriptionError",
+      "IncompatibleSessionDescriptionError",
+      "InternalError",
+      "IncompatibleMediaStreamTrackError",
+      "InternalError"
+    ];
+    let name = reasonName[Math.min(code, reasonName.length - 1)];
+    return new this._dompc._win.DOMError(name, message);
   },
 
   dispatchEvent: function(event) {
@@ -1156,7 +1154,7 @@ PeerConnectionObserver.prototype = {
   },
 
   onCreateOfferError: function(code, message) {
-    this._dompc.callCB(this._dompc._onCreateOfferFailure, new RTCError(code, message));
+    this._dompc.callCB(this._dompc._onCreateOfferFailure, this.newError(code, message));
     this._dompc._executeNext();
   },
 
@@ -1176,7 +1174,7 @@ PeerConnectionObserver.prototype = {
 
   onCreateAnswerError: function(code, message) {
     this._dompc.callCB(this._dompc._onCreateAnswerFailure,
-                       new RTCError(code, message));
+                       this.newError(code, message));
     this._dompc._executeNext();
   },
 
@@ -1193,14 +1191,14 @@ PeerConnectionObserver.prototype = {
   onSetLocalDescriptionError: function(code, message) {
     this._localType = null;
     this._dompc.callCB(this._dompc._onSetLocalDescriptionFailure,
-                       new RTCError(code, message));
+                       this.newError(code, message));
     this._dompc._executeNext();
   },
 
   onSetRemoteDescriptionError: function(code, message) {
     this._remoteType = null;
     this._dompc.callCB(this._dompc._onSetRemoteDescriptionFailure,
-                       new RTCError(code, message));
+                       this.newError(code, message));
     this._dompc._executeNext();
   },
 
@@ -1211,7 +1209,7 @@ PeerConnectionObserver.prototype = {
 
   onAddIceCandidateError: function(code, message) {
     this._dompc.callCB(this._dompc._onAddIceCandidateError,
-                       new RTCError(code, message));
+                       this.newError(code, message));
     this._dompc._executeNext();
   },
 
@@ -1302,8 +1300,7 @@ PeerConnectionObserver.prototype = {
   onStateChange: function(state) {
     switch (state) {
       case "SignalingState":
-        this._dompc.callCB(this._dompc.onsignalingstatechange,
-                           this._dompc.signalingState);
+        this.dispatchEvent(new this._win.Event("signalingstatechange"));
         break;
 
       case "IceConnectionState":
@@ -1343,7 +1340,7 @@ PeerConnectionObserver.prototype = {
 
   onGetStatsError: function(code, message) {
     this._dompc.callCB(this._dompc._onGetStatsFailure,
-                       new RTCError(code, message));
+                       this.newError(code, message));
     this._dompc._executeNext();
   },
 
@@ -1381,7 +1378,7 @@ PeerConnectionObserver.prototype = {
     var pc = this._dompc;
     pc._onReplaceTrackWithTrack = null;
     pc._onReplaceTrackSender = null;
-    pc.callCB(pc._onReplaceTrackError, new RTCError(code, message));
+    pc.callCB(pc._onReplaceTrackError, this.newError(code, message));
   },
 
   foundIceCandidate: function(cand) {

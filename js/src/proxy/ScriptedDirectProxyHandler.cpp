@@ -1020,10 +1020,10 @@ ScriptedDirectProxyHandler::set(JSContext *cx, HandleObject proxy, HandleObject 
 
 bool
 ScriptedDirectProxyHandler::iterate(JSContext *cx, HandleObject proxy, unsigned flags,
-                                    MutableHandleValue vp) const
+                                    MutableHandleObject objp) const
 {
     // FIXME: Provide a proper implementation for this trap, see bug 787004
-    return DirectProxyHandler::iterate(cx, proxy, flags, vp);
+    return DirectProxyHandler::iterate(cx, proxy, flags, objp);
 }
 
 // ES6 (22 May, 2014) 9.5.13 Proxy.[[Call]]
@@ -1201,7 +1201,7 @@ js::proxy_revocable(JSContext *cx, unsigned argc, Value *vp)
 
     revoker->as<JSFunction>().initExtendedSlot(ScriptedDirectProxyHandler::REVOKE_SLOT, proxyVal);
 
-    RootedObject result(cx, NewBuiltinClassInstance(cx, &JSObject::class_));
+    RootedPlainObject result(cx, NewBuiltinClassInstance<PlainObject>(cx));
     if (!result)
         return false;
 

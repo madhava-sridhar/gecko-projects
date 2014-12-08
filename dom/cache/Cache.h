@@ -22,10 +22,10 @@ class ErrorResult;
 
 namespace dom {
 
-class OwningRequestOrScalarValueString;
+class OwningRequestOrUSVString;
 class Promise;
 struct QueryParams;
-class RequestOrScalarValueString;
+class RequestOrUSVString;
 class Response;
 template<typename T> class Optional;
 template<typename T> class Sequence;
@@ -48,24 +48,24 @@ public:
 
   // webidl interface methods
   already_AddRefed<Promise>
-  Match(const RequestOrScalarValueString& aRequest, const QueryParams& aParams,
+  Match(const RequestOrUSVString& aRequest, const QueryParams& aParams,
         ErrorResult& aRv);
   already_AddRefed<Promise>
-  MatchAll(const Optional<RequestOrScalarValueString>& aRequest,
+  MatchAll(const Optional<RequestOrUSVString>& aRequest,
            const QueryParams& aParams, ErrorResult& aRv);
   already_AddRefed<Promise>
-  Add(const RequestOrScalarValueString& aRequest, ErrorResult& aRv);
+  Add(const RequestOrUSVString& aRequest, ErrorResult& aRv);
   already_AddRefed<Promise>
-  AddAll(const Sequence<OwningRequestOrScalarValueString>& aRequests,
+  AddAll(const Sequence<OwningRequestOrUSVString>& aRequests,
          ErrorResult& aRv);
   already_AddRefed<Promise>
-  Put(const RequestOrScalarValueString& aRequest, Response& aResponse,
+  Put(const RequestOrUSVString& aRequest, Response& aResponse,
       ErrorResult& aRv);
   already_AddRefed<Promise>
-  Delete(const RequestOrScalarValueString& aRequest, const QueryParams& aParams,
+  Delete(const RequestOrUSVString& aRequest, const QueryParams& aParams,
          ErrorResult& aRv);
   already_AddRefed<Promise>
-  Keys(const Optional<RequestOrScalarValueString>& aRequest,
+  Keys(const Optional<RequestOrUSVString>& aRequest,
        const QueryParams& aParams, ErrorResult& aRv);
 
   // binding methods

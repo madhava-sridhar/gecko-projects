@@ -12,23 +12,23 @@
  Func="mozilla::dom::cache::Cache::PrefEnabled"]
 interface Cache {
   [Throws]
-  Promise<Response> match((Request or ScalarValueString) request,
+  Promise<Response> match((Request or USVString) request,
                           optional QueryParams params);
   [Throws]
-  Promise<sequence<Response>> matchAll(optional (Request or ScalarValueString) request,
+  Promise<sequence<Response>> matchAll(optional (Request or USVString) request,
                                        optional QueryParams params);
   [Throws]
-  Promise<Response> add((Request or ScalarValueString) request);
+  Promise<Response> add((Request or USVString) request);
   [Throws]
-  Promise<sequence<Response>> addAll(sequence<(Request or ScalarValueString)> requests);
+  Promise<sequence<Response>> addAll(sequence<(Request or USVString)> requests);
   [Throws]
-  Promise<Response> put((Request or ScalarValueString) request,
+  Promise<Response> put((Request or USVString) request,
                         Response response);
   [Throws]
-  Promise<boolean> delete((Request or ScalarValueString) request,
+  Promise<boolean> delete((Request or USVString) request,
                           optional QueryParams params);
   [Throws]
-  Promise<sequence<Request>> keys(optional (Request or ScalarValueString) request,
+  Promise<sequence<Request>> keys(optional (Request or USVString) request,
                                   optional QueryParams params);
 };
 

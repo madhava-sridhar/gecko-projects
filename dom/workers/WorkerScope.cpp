@@ -249,10 +249,11 @@ WorkerGlobalScope::SetInterval(JSContext* aCx,
 {
   mWorkerPrivate->AssertIsOnWorkerThread();
 
+  bool isInterval = aTimeout.WasPassed();
   int32_t timeout = aTimeout.WasPassed() ? aTimeout.Value() : 0;
 
   return mWorkerPrivate->SetTimeout(aCx, &aHandler, EmptyString(), timeout,
-                                    aArguments, !!timeout, aRv);
+                                    aArguments, isInterval, aRv);
 }
 
 int32_t
@@ -266,10 +267,11 @@ WorkerGlobalScope::SetInterval(JSContext* /* unused */,
 
   Sequence<JS::Value> dummy;
 
+  bool isInterval = aTimeout.WasPassed();
   int32_t timeout = aTimeout.WasPassed() ? aTimeout.Value() : 0;
 
   return mWorkerPrivate->SetTimeout(GetCurrentThreadJSContext(), nullptr,
-                                    aHandler, timeout, dummy, !!timeout, aRv);
+                                    aHandler, timeout, dummy, isInterval, aRv);
 }
 
 void
@@ -328,7 +330,7 @@ WorkerGlobalScope::GetPerformance()
 }
 
 already_AddRefed<Promise>
-WorkerGlobalScope::Fetch(const RequestOrScalarValueString& aInput,
+WorkerGlobalScope::Fetch(const RequestOrUSVString& aInput,
                          const RequestInit& aInit, ErrorResult& aRv)
 {
   return FetchRequest(this, aInput, aInit, aRv);

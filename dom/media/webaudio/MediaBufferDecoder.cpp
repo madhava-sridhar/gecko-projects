@@ -142,6 +142,7 @@ private:
     MOZ_ASSERT(NS_IsMainThread());
     // MediaDecoderReader expects that BufferDecoder is alive.
     // Destruct MediaDecoderReader first.
+    mDecoderReader->BreakCycles();
     mDecoderReader = nullptr;
     mBufferDecoder = nullptr;
     JS_free(nullptr, mBuffer);
@@ -248,11 +249,13 @@ MediaDecodeTask::Decode()
   nsAutoPtr<MetadataTags> tags;
   nsresult rv = mDecoderReader->ReadMetadata(&mediaInfo, getter_Transfers(tags));
   if (NS_FAILED(rv)) {
+    mDecoderReader->Shutdown();
     ReportFailureOnMainThread(WebAudioDecodeJob::InvalidContent);
     return;
   }
 
   if (!mDecoderReader->HasAudio()) {
+    mDecoderReader->Shutdown();
     ReportFailureOnMainThread(WebAudioDecodeJob::NoAudio);
     return;
   }
@@ -262,8 +265,9 @@ MediaDecodeTask::Decode()
   mDecoderReader->SetCallback(barrier);
   while (1) {
     mDecoderReader->RequestAudioData();
-    nsAutoPtr<AudioData> audio;
+    nsRefPtr<AudioData> audio;
     if (NS_FAILED(barrier->Await(audio))) {
+      mDecoderReader->Shutdown();
       ReportFailureOnMainThread(WebAudioDecodeJob::InvalidContent);
       return;
     }
@@ -271,10 +275,9 @@ MediaDecodeTask::Decode()
       // End of stream.
       break;
     }
-    audioQueue.Push(audio.forget());
+    audioQueue.Push(audio);
   }
   mDecoderReader->Shutdown();
-  mDecoderReader->BreakCycles();
 
   uint32_t frameCount = audioQueue.FrameCount();
   uint32_t channelCount = mediaInfo.mAudio.mChannels;
@@ -325,7 +328,7 @@ MediaDecodeTask::Decode()
     return;
   }
 
-  nsAutoPtr<AudioData> audioData;
+  nsRefPtr<AudioData> audioData;
   while ((audioData = audioQueue.PopFront())) {
     audioData->EnsureAudioBuffer(); // could lead to a copy :(
     AudioDataValue* bufferData = static_cast<AudioDataValue*>

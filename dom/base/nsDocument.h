@@ -121,6 +121,7 @@ class nsIdentifierMapEntry : public nsStringHashKey
 {
 public:
   typedef mozilla::dom::Element Element;
+  typedef mozilla::net::ReferrerPolicy ReferrerPolicy;
 
   explicit nsIdentifierMapEntry(const nsAString& aKey) :
     nsStringHashKey(&aKey), mNameContentList(nullptr)
@@ -932,8 +933,8 @@ public:
   virtual void RemoveFromRadioGroup(const nsAString& aName,
                                     nsIFormControl* aRadio) MOZ_OVERRIDE;
   virtual uint32_t GetRequiredRadioCount(const nsAString& aName) const MOZ_OVERRIDE;
-  virtual void RadioRequiredChanged(const nsAString& aName,
-                                    nsIFormControl* aRadio) MOZ_OVERRIDE;
+  virtual void RadioRequiredWillChange(const nsAString& aName,
+                                       bool aRequiredAdded) MOZ_OVERRIDE;
   virtual bool GetValueMissingState(const nsAString& aName) const MOZ_OVERRIDE;
   virtual void SetValueMissingState(const nsAString& aName, bool aValue) MOZ_OVERRIDE;
 
@@ -1096,10 +1097,13 @@ public:
   void MaybeEndOutermostXBLUpdate();
 
   virtual void MaybePreLoadImage(nsIURI* uri,
-                                 const nsAString &aCrossOriginAttr) MOZ_OVERRIDE;
+                                 const nsAString &aCrossOriginAttr,
+                                 ReferrerPolicy aReferrerPolicy) MOZ_OVERRIDE;
+  virtual void ForgetImagePreload(nsIURI* aURI) MOZ_OVERRIDE;
 
   virtual void PreloadStyle(nsIURI* uri, const nsAString& charset,
-                            const nsAString& aCrossOriginAttr) MOZ_OVERRIDE;
+                            const nsAString& aCrossOriginAttr,
+                            ReferrerPolicy aReferrerPolicy) MOZ_OVERRIDE;
 
   virtual nsresult LoadChromeSheetSync(nsIURI* uri, bool isAgentSheet,
                                        mozilla::CSSStyleSheet** sheet) MOZ_OVERRIDE;
@@ -1148,7 +1152,8 @@ public:
   virtual Element* FindImageMap(const nsAString& aNormalizedMapName) MOZ_OVERRIDE;
 
   virtual Element* GetFullScreenElement() MOZ_OVERRIDE;
-  virtual void AsyncRequestFullScreen(Element* aElement) MOZ_OVERRIDE;
+  virtual void AsyncRequestFullScreen(Element* aElement,
+                                      mozilla::dom::FullScreenOptions& aOptions) MOZ_OVERRIDE;
   virtual void RestorePreviousFullScreenState() MOZ_OVERRIDE;
   virtual bool IsFullscreenLeaf() MOZ_OVERRIDE;
   virtual bool IsFullScreenDoc() MOZ_OVERRIDE;
@@ -1199,6 +1204,7 @@ public:
   // need to send the notification with the origin of the document which
   // originally requested fullscreen, not *this* document's origin.
   void RequestFullScreen(Element* aElement,
+                         mozilla::dom::FullScreenOptions& aOptions,
                          bool aWasCallerChrome,
                          bool aNotifyOnOriginChange);
 
@@ -1742,8 +1748,11 @@ private:
 
   nsExternalResourceMap mExternalResourceMap;
 
-  // All images in process of being preloaded
-  nsCOMArray<imgIRequest> mPreloadingImages;
+  // All images in process of being preloaded.  This is a hashtable so
+  // we can remove them as the real image loads start; that way we
+  // make sure to not keep the image load going when no one cares
+  // about it anymore.
+  nsRefPtrHashtable<nsURIHashKey, imgIRequest> mPreloadingImages;
 
   nsRefPtr<mozilla::dom::DOMImplementation> mDOMImplementation;
 

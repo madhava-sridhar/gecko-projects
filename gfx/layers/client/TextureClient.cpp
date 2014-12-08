@@ -475,6 +475,9 @@ TextureClient::TextureClient(TextureFlags aFlags)
   , mShared(false)
   , mValid(true)
   , mAddedToCompositableClient(false)
+#ifdef GFX_DEBUG_TRACK_CLIENTS_IN_POOL
+  , mPoolTracker(nullptr)
+#endif
 {}
 
 TextureClient::~TextureClient()
@@ -711,7 +714,7 @@ BufferTextureClient::AllocateForSurface(gfx::IntSize aSize, TextureAllocationFla
 {
   MOZ_ASSERT(IsValid());
   MOZ_ASSERT(mFormat != gfx::SurfaceFormat::YUV, "This textureClient cannot use YCbCr data");
-  MOZ_ASSERT(aSize.width * aSize.height);
+  MOZ_ASSERT(aSize.width > 0 && aSize.height > 0);
 
   int bufSize
     = ImageDataSerializer::ComputeMinBufferSize(aSize, mFormat);

@@ -12,10 +12,7 @@
 
 #include"GeckoProfiler.h"
 #include "OggWriter.h"
-#ifdef MOZ_OPUS
 #include "OpusTrackEncoder.h"
-
-#endif
 
 #ifdef MOZ_VORBIS
 #include "VorbisTrackEncoder.h"
@@ -46,20 +43,19 @@ namespace mozilla {
 void
 MediaEncoder::NotifyQueuedTrackChanges(MediaStreamGraph* aGraph,
                                        TrackID aID,
-                                       TrackRate aTrackRate,
-                                       TrackTicks aTrackOffset,
+                                       StreamTime aTrackOffset,
                                        uint32_t aTrackEvents,
                                        const MediaSegment& aQueuedMedia)
 {
   // Process the incoming raw track data from MediaStreamGraph, called on the
   // thread of MediaStreamGraph.
   if (mAudioEncoder && aQueuedMedia.GetType() == MediaSegment::AUDIO) {
-    mAudioEncoder->NotifyQueuedTrackChanges(aGraph, aID, aTrackRate,
+    mAudioEncoder->NotifyQueuedTrackChanges(aGraph, aID,
                                             aTrackOffset, aTrackEvents,
                                             aQueuedMedia);
 
   } else if (mVideoEncoder && aQueuedMedia.GetType() == MediaSegment::VIDEO) {
-      mVideoEncoder->NotifyQueuedTrackChanges(aGraph, aID, aTrackRate,
+      mVideoEncoder->NotifyQueuedTrackChanges(aGraph, aID,
                                               aTrackOffset, aTrackEvents,
                                               aQueuedMedia);
   }

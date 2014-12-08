@@ -332,7 +332,7 @@ struct WorkerStructuredCloneCallbacks
           // New scope to protect |result| from a moving GC during ~nsRefPtr.
           nsRefPtr<File> blob = new File(nullptr, blobImpl);
           JS::Rooted<JS::Value> val(aCx);
-          if (WrapNewBindingObject(aCx, blob, &val)) {
+          if (GetOrCreateDOMReflector(aCx, blob, &val)) {
             result = val.toObjectOrNull();
           }
         }
@@ -510,7 +510,7 @@ struct MainThreadWorkerStructuredCloneCallbacks
         JS::Rooted<JS::Value> val(aCx);
         {
           nsRefPtr<File> blob = new File(nullptr, blobImpl);
-          if (!WrapNewBindingObject(aCx, blob, &val)) {
+          if (!GetOrCreateDOMReflector(aCx, blob, &val)) {
             return nullptr;
           }
         }
@@ -5876,8 +5876,10 @@ WorkerPrivate::RunExpiredTimeouts(JSContext* aCx)
       options.setFileAndLine(info->mFilename.get(), info->mLineNumber)
              .setNoScriptRval(true);
 
+      JS::Rooted<JS::Value> unused(aCx);
       if ((expression.IsEmpty() ||
-           !JS::Evaluate(aCx, global, options, expression.get(), expression.Length())) &&
+           !JS::Evaluate(aCx, global, options,
+                         expression.get(), expression.Length(), &unused)) &&
           !JS_ReportPendingException(aCx)) {
         retval = false;
         break;

@@ -39,6 +39,12 @@ enum HeapState {
     MinorCollecting   // doing a GC of the minor heap (nursery)
 };
 
+enum ThreadType
+{
+    MainThread,
+    BackgroundThread
+};
+
 namespace jit {
     class JitCode;
 }
@@ -52,9 +58,7 @@ enum State {
     MARK_ROOTS,
     MARK,
     SWEEP,
-#ifdef JSGC_COMPACTING
     COMPACT
-#endif
 };
 
 /* Return a printable string for the given kind, for diagnostic purposes. */
@@ -499,9 +503,8 @@ class ArenaList {
     }
 
 #ifdef JSGC_COMPACTING
-    size_t countUsedCells();
-    ArenaHeader *removeRemainingArenas(ArenaHeader **arenap);
-    ArenaHeader *pickArenasToRelocate();
+    ArenaHeader *removeRemainingArenas(ArenaHeader **arenap, const AutoLockGC &lock);
+    ArenaHeader *pickArenasToRelocate(JSRuntime *runtime);
     ArenaHeader *relocateArenas(ArenaHeader *toRelocate, ArenaHeader *relocated);
 #endif
 };
@@ -845,7 +848,7 @@ class ArenaLists
 
     bool foregroundFinalize(FreeOp *fop, AllocKind thingKind, SliceBudget &sliceBudget,
                             SortedArenaList &sweepList);
-    static void backgroundFinalize(FreeOp *fop, ArenaHeader *listHead);
+    static void backgroundFinalize(FreeOp *fop, ArenaHeader *listHead, ArenaHeader **empty);
 
     void wipeDuringParallelExecution(JSRuntime *rt);
 
@@ -881,13 +884,6 @@ class ArenaLists
 
     friend class GCRuntime;
 };
-
-/*
- * Initial allocation size for data structures holding chunks is set to hold
- * chunks with total capacity of 16MB to avoid buffer resizes during browser
- * startup.
- */
-const size_t INITIAL_CHUNK_CAPACITY = 16 * 1024 * 1024 / ChunkSize;
 
 /* The number of GC cycles an empty chunk can survive before been released. */
 const size_t MAX_EMPTY_CHUNK_AGE = 4;
@@ -1030,8 +1026,7 @@ class GCHelperState
         js_free(array);
     }
 
-    /* Must be called with the GC lock taken. */
-    void doSweep(const AutoLockGC &lock);
+    void doSweep(AutoLockGC &lock);
 
   public:
     explicit GCHelperState(JSRuntime *rt)
@@ -1048,11 +1043,8 @@ class GCHelperState
 
     void work();
 
-    /* Must be called with the GC lock taken. */
-    void startBackgroundSweep();
-
-    /* Must be called with the GC lock taken. */
-    void startBackgroundShrink();
+    void maybeStartBackgroundSweep(const AutoLockGC &lock);
+    void startBackgroundShrink(const AutoLockGC &lock);
 
     /* Must be called without the GC lock taken. */
     void waitBackgroundSweepEnd();
@@ -1464,6 +1456,33 @@ class AutoEnterOOMUnsafeRegion {};
 // is appropriate.
 bool
 IsInsideGGCNursery(const gc::Cell *cell);
+
+// A singly linked list of zones.
+class ZoneList
+{
+    static Zone * const End;
+
+    Zone *head;
+    Zone *tail;
+
+  public:
+    ZoneList();
+    ~ZoneList();
+
+    bool isEmpty() const;
+    Zone *front() const;
+
+    void append(Zone *zone);
+    void transferFrom(ZoneList &other);
+    void removeFront();
+
+  private:
+    explicit ZoneList(Zone *singleZone);
+    void check() const;
+
+    ZoneList(const ZoneList &other) MOZ_DELETE;
+    ZoneList &operator=(const ZoneList &other) MOZ_DELETE;
+};
 
 } /* namespace gc */
 

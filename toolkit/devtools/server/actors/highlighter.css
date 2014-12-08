@@ -26,24 +26,24 @@
 
 /* Box model highlighter */
 
-:-moz-native-anonymous .box-model-container {
-  opacity: 0.4;
+:-moz-native-anonymous .box-model-regions {
+  opacity: 0.6;
 }
 
 :-moz-native-anonymous .box-model-content {
-  fill: #80d4ff;
+  fill: #87ceeb;
 }
 
 :-moz-native-anonymous .box-model-padding {
-  fill: #66cc52;
+  fill: #6a5acd;
 }
 
 :-moz-native-anonymous .box-model-border {
-  fill: #ffe431;
+  fill: #444444;
 }
 
 :-moz-native-anonymous .box-model-margin {
-  fill: #d89b28;
+  fill: #edff64;
 }
 
 :-moz-native-anonymous .box-model-content,
@@ -103,7 +103,7 @@
 
   height: 0;
   width: 0;
-  border: 14px solid hsl(210,2%,22%);
+  border: 14px solid hsl(214,13%,24%);
   border-left-color: transparent;
   border-right-color: transparent;
 }
@@ -169,4 +169,12 @@
   stroke: #08C;
   stroke-dasharray: 5 3;
   stroke-width: 2;
+}
+
+/* Rect highlighter */
+
+:-moz-native-anonymous .highlighted-rect {
+  position: absolute;
+  background: #80d4ff;
+  opacity: 0.8;
 }

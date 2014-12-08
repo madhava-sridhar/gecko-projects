@@ -179,7 +179,6 @@ nsHttpHandler::nsHttpHandler()
     , mAllowExperiments(true)
     , mHandlerActive(false)
     , mEnableSpdy(false)
-    , mSpdyV3(true)
     , mSpdyV31(true)
     , mHttp2DraftEnabled(true)
     , mHttp2Enabled(true)
@@ -1177,12 +1176,6 @@ nsHttpHandler::PrefsChanged(nsIPrefBranch *prefs, const char *pref)
             mEnableSpdy = cVar;
     }
 
-    if (PREF_CHANGED(HTTP_PREF("spdy.enabled.v3"))) {
-        rv = prefs->GetBoolPref(HTTP_PREF("spdy.enabled.v3"), &cVar);
-        if (NS_SUCCEEDED(rv))
-            mSpdyV3 = cVar;
-    }
-
     if (PREF_CHANGED(HTTP_PREF("spdy.enabled.v3-1"))) {
         rv = prefs->GetBoolPref(HTTP_PREF("spdy.enabled.v3-1"), &cVar);
         if (NS_SUCCEEDED(rv))
@@ -1526,6 +1519,25 @@ nsHttpHandler::TimerCallback(nsITimer * aTimer, void * aClosure)
         thisObject->mCapabilities &= ~NS_HTTP_ALLOW_PIPELINING;
 }
 
+static void
+NormalizeLanguageTag(char *code)
+{
+    bool is_region = false;
+    while (*code != '\0')
+    {
+        if (*code == '-') {
+            is_region = true;
+        } else {
+            if (is_region) {
+                *code = nsCRT::ToUpper(*code);
+            } else {
+                *code = nsCRT::ToLower(*code);
+            }
+        }
+        code++;
+    }
+}
+
 /**
  *  Allocates a C string into that contains a ISO 639 language list
  *  notated with HTTP "q" values for output with a HTTP Accept-Language
@@ -1581,6 +1593,8 @@ PrepareAcceptLanguages(const char *i_AcceptLanguages, nsACString &o_AcceptLangua
             *trim = '\0';
 
         if (*token != '\0') {
+            NormalizeLanguageTag(token);
+
             comma = count_n++ != 0 ? "," : ""; // delimiter if not first item
             uint32_t u = QVAL_TO_UINT(q);
 

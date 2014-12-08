@@ -1965,9 +1965,13 @@ void
 ScrollFrameHelper::AsyncScrollCallback(ScrollFrameHelper* aInstance,
                                        mozilla::TimeStamp aTime)
 {
-  NS_ASSERTION(aInstance != nullptr, "aInstance must not be null");
-  NS_ASSERTION(aInstance->mAsyncScroll,
+  MOZ_ASSERT(aInstance != nullptr, "aInstance must not be null");
+  MOZ_ASSERT(aInstance->mAsyncScroll,
     "Did not expect AsyncScrollCallback without an active async scroll.");
+
+  if (!aInstance || !aInstance->mAsyncScroll) {
+    return;  // XXX wallpaper bug 1107353 for now.
+  }
 
   nsRect range = aInstance->mAsyncScroll->mRange;
   if (aInstance->mAsyncScroll->mIsSmoothScroll) {
@@ -2091,6 +2095,16 @@ ScrollFrameHelper::ScrollToWithOrigin(nsPoint aScrollPosition,
           // animation for this scroll.
           mLastSmoothScrollOrigin = aOrigin;
           mScrollGeneration = ++sScrollGenerationCounter;
+
+          if (!nsLayoutUtils::GetDisplayPort(mOuter->GetContent())) {
+            // If this frame doesn't have a displayport then there won't be an
+            // APZC instance for it and so there won't be anything to process
+            // this smooth scroll request. We should set a displayport on this
+            // frame to force an APZC which can handle the request.
+            nsLayoutUtils::CalculateAndSetDisplayPortMargins(
+              mOuter->GetScrollTargetFrame(),
+              nsLayoutUtils::RepaintMode::DoNotRepaint);
+          }
 
           // Schedule a paint to ensure that the frame metrics get updated on
           // the compositor thread.
@@ -2879,6 +2893,8 @@ ScrollFrameHelper::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
   nsRect displayPort;
   bool usingDisplayport = false;
   if (aBuilder->IsPaintingToWindow()) {
+    bool wasUsingDisplayPort = nsLayoutUtils::GetDisplayPort(mOuter->GetContent(), nullptr);
+
     if (!mIsRoot) {
       // For a non-root scroll frame, override the value of the display port
       // base rect, and possibly create a display port if there isn't one
@@ -2903,6 +2919,12 @@ ScrollFrameHelper::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
     // Override the dirty rectangle if the displayport has been set.
     if (usingDisplayport) {
       dirtyRect = displayPort;
+
+      // The cached animated geometry root for the display builder is out of
+      // date if we just introduced a new animated geometry root.
+      if (!wasUsingDisplayPort) {
+        aBuilder->RecomputeCurrentAnimatedGeometryRoot();
+      }
     }
   }
 
@@ -2950,6 +2972,17 @@ ScrollFrameHelper::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
       // info layer to make a ComputeFrameMetrics call for us as
       // nsDisplayList::PaintForFrame already calls ComputeFrameMetrics for us.
       (!mIsRoot || aBuilder->RootReferenceFrame()->PresContext() != mOuter->PresContext());
+  }
+
+  if (aBuilder->IsPaintingToWindow() &&
+      !mShouldBuildScrollableLayer &&
+      shouldBuildLayer)
+  {
+    if (nsDisplayLayerEventRegions *eventRegions = aBuilder->GetLayerEventRegions()) {
+      // Make sure that APZ will dispatch events back to content so we can
+      // create a displayport for this frame.
+      eventRegions->AddInactiveScrollPort(mScrollPort + aBuilder->ToReferenceFrame(mOuter));
+    }
   }
 
   mScrollParentID = aBuilder->GetCurrentScrollParentId();

@@ -55,6 +55,7 @@ static bool
 SetSourceMap(ExclusiveContext *cx, TokenStream &tokenStream, ScriptSource *ss)
 {
     if (tokenStream.hasSourceMapURL()) {
+        MOZ_ASSERT(!ss->hasSourceMapURL());
         if (!ss->setSourceMapURL(cx, tokenStream.sourceMapURL()))
             return false;
     }
@@ -234,6 +235,7 @@ frontend::CompileScript(ExclusiveContext *cx, LifoAlloc *alloc, HandleObject sco
      */
     MOZ_ASSERT_IF(evalCaller, options.compileAndGo);
     MOZ_ASSERT_IF(evalCaller, options.forEval);
+    MOZ_ASSERT_IF(evalCaller && evalCaller->strict(), options.strictOption);
     MOZ_ASSERT_IF(staticLevel != 0, evalCaller);
 
     if (!CheckLength(cx, srcBuf))
@@ -313,10 +315,6 @@ frontend::CompileScript(ExclusiveContext *cx, LifoAlloc *alloc, HandleObject sco
     if (!pc->init(parser.tokenStream))
         return nullptr;
 
-    /* If this is a direct call to eval, inherit the caller's strictness.  */
-    if (evalCaller && evalCaller->strict())
-        globalsc.strict = true;
-
     if (savedCallerFun) {
         /*
          * An eval script in a caller frame needs to have its enclosing
@@ -324,7 +322,8 @@ frontend::CompileScript(ExclusiveContext *cx, LifoAlloc *alloc, HandleObject sco
          * wishes to decompile it while it's running.
          */
         JSFunction *fun = evalCaller->functionOrCallerFunction();
-        Directives directives(/* strict = */ fun->strict());
+        MOZ_ASSERT_IF(fun->strict(), options.strictOption);
+        Directives directives(/* strict = */ options.strictOption);
         ObjectBox *funbox = parser.newFunctionBox(/* fn = */ nullptr, fun, pc.ptr(),
                                                   directives, fun->generatorKind());
         if (!funbox)
@@ -414,6 +413,13 @@ frontend::CompileScript(ExclusiveContext *cx, LifoAlloc *alloc, HandleObject sco
      * header) override any source map urls passed as comment pragmas.
      */
     if (options.sourceMapURL()) {
+        // Warn about the replacement, but use the new one.
+        if (ss->hasSourceMapURL()) {
+            if(!parser.report(ParseWarning, false, nullptr, JSMSG_ALREADY_HAS_PRAGMA,
+                              ss->filename(), "//# sourceMappingURL"))
+                return nullptr;
+        }
+
         if (!ss->setSourceMapURL(cx, options.sourceMapURL()))
             return nullptr;
     }

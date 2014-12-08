@@ -1014,7 +1014,7 @@ nsXMLHttpRequest::GetResponse(JSContext* aCx,
       return;
     }
 
-    WrapNewBindingObject(aCx, mResponseBlob, aResponse);
+    GetOrCreateDOMReflector(aCx, mResponseBlob, aResponse);
     return;
   }
   case XML_HTTP_RESPONSE_TYPE_DOCUMENT:
@@ -2401,14 +2401,9 @@ GetRequestBody(nsIDOMDocument* aDoc, nsIInputStream** aResult,
                nsACString& aCharset)
 {
   aContentType.AssignLiteral("application/xml");
-  nsAutoString inputEncoding;
-  aDoc->GetInputEncoding(inputEncoding);
-  if (!DOMStringIsNull(inputEncoding)) {
-    CopyUTF16toUTF8(inputEncoding, aCharset);
-  }
-  else {
-    aCharset.AssignLiteral("UTF-8");
-  }
+  nsCOMPtr<nsIDocument> doc(do_QueryInterface(aDoc));
+  NS_ENSURE_STATE(doc);
+  aCharset = doc->GetDocumentCharacterSet();
 
   // Serialize to a stream so that the encoding used will
   // match the document's.
@@ -2722,9 +2717,12 @@ nsXMLHttpRequest::Send(nsIVariant* aVariant, const Nullable<RequestBody>& aBody)
 
       nsCOMPtr<nsIURI> docCurURI;
       nsCOMPtr<nsIURI> docOrigURI;
+      net::ReferrerPolicy referrerPolicy = net::RP_Default;
+
       if (doc) {
         docCurURI = doc->GetDocumentURI();
         docOrigURI = doc->GetOriginalURI();
+        referrerPolicy = doc->GetReferrerPolicy();
       }
 
       nsCOMPtr<nsIURI> referrerURI;
@@ -2740,7 +2738,7 @@ nsXMLHttpRequest::Send(nsIVariant* aVariant, const Nullable<RequestBody>& aBody)
       if (!referrerURI)
         referrerURI = principalURI;
 
-      httpChannel->SetReferrer(referrerURI);
+      httpChannel->SetReferrerWithPolicy(referrerURI, referrerPolicy);
     }
 
     // Some extensions override the http protocol handler and provide their own

@@ -392,12 +392,16 @@ SavedFrame::toStringMethod(JSContext *cx, unsigned argc, Value *vp)
             || !NumberValueToStringBuffer(cx, NumberValue(frame->getLine()), sb)
             || !sb.append(':')
             || !NumberValueToStringBuffer(cx, NumberValue(frame->getColumn()), sb)
-            || !sb.append('\n')) {
+            || !sb.append('\n'))
+        {
             return false;
         }
     } while ((frame = frame->getParent()));
 
-    args.rval().setString(sb.finishString());
+    JSString *str = sb.finishString();
+    if (!str)
+        return false;
+    args.rval().setString(str);
     return true;
 }
 
@@ -595,10 +599,8 @@ SavedStacks::getOrCreateSavedFramePrototype(JSContext *cx)
     if (!global)
         return nullptr;
 
-    RootedNativeObject proto(cx,
-        NewNativeObjectWithGivenProto(cx, &SavedFrame::class_,
-                                      global->getOrCreateObjectPrototype(cx),
-                                      global));
+    Rooted<SavedFrame *> proto(cx,
+        NewObjectWithGivenProto<SavedFrame>(cx, global->getOrCreateObjectPrototype(cx), global));
     if (!proto
         || !JS_DefineProperties(cx, proto, SavedFrame::properties)
         || !JS_DefineFunctions(cx, proto, SavedFrame::methods)

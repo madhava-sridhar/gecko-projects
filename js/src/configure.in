@@ -1770,7 +1770,7 @@ ia64*-hpux*)
         if test "$CPU_ARCH" = "x86"; then
             WIN32_SUBSYSTEM_VERSION=5.01
         else
-            WIN32_SUBSYSTEM_VERSION=5.02
+            WIN32_SUBSYSTEM_VERSION=6.01
         fi
         WIN32_CONSOLE_EXE_LDFLAGS=-SUBSYSTEM:CONSOLE,$WIN32_SUBSYSTEM_VERSION
         WIN32_GUI_EXE_LDFLAGS=-SUBSYSTEM:WINDOWS,$WIN32_SUBSYSTEM_VERSION
@@ -1820,17 +1820,8 @@ ia64*-hpux*)
         dnl For profile-guided optimization
         PROFILE_GEN_CFLAGS="-GL"
         PROFILE_GEN_LDFLAGS="-LTCG:PGINSTRUMENT"
-        dnl XXX: PGO builds can fail with warnings treated as errors,
-        dnl specifically "no profile data available" appears to be
-        dnl treated as an error sometimes. This might be a consequence
-        dnl of using WARNINGS_AS_ERRORS in some modules, combined
-        dnl with the linker doing most of the work in the whole-program
-        dnl optimization/PGO case. I think it's probably a compiler bug,
-        dnl but we work around it here.
-        PROFILE_USE_CFLAGS="-GL -wd4624 -wd4952"
-        dnl XXX: should be -LTCG:PGOPTIMIZE, but that fails on libxul.
-        dnl Probably also a compiler bug, but what can you do?
-        PROFILE_USE_LDFLAGS="-LTCG:PGUPDATE"
+        PROFILE_USE_CFLAGS="-GL"
+        PROFILE_USE_LDFLAGS="-LTCG:PGOPTIMIZE"
         LDFLAGS="$LDFLAGS -DYNAMICBASE"
     fi
     AC_DEFINE(HAVE_SNPRINTF)
@@ -3142,17 +3133,6 @@ MOZ_ARG_WITH_STRING(wrap-malloc,
     WRAP_LDFLAGS="${WRAP_LDFLAGS} $withval")
 
 dnl ========================================================
-dnl = Use JS Call tracing
-dnl ========================================================
-MOZ_ARG_ENABLE_BOOL(trace-jscalls,
-[  --enable-trace-jscalls  Enable JS call enter/exit callback (default=no)],
-    MOZ_TRACE_JSCALLS=1,
-    MOZ_TRACE_JSCALLS= )
-if test -n "$MOZ_TRACE_JSCALLS"; then
-    AC_DEFINE(MOZ_TRACE_JSCALLS)
-fi
-
-dnl ========================================================
 dnl = Use incremental GC
 dnl ========================================================
 JSGC_INCREMENTAL=1
@@ -3975,7 +3955,17 @@ dnl ========================================================
 dnl JavaScript shell
 dnl ========================================================
 
-AC_CHECK_HEADERS(malloc.h malloc/malloc.h)
+MALLOC_HEADERS="malloc.h malloc_np.h malloc/malloc.h sys/malloc.h"
+MALLOC_H=
+
+for file in $MALLOC_HEADERS; do
+  MOZ_CHECK_HEADER($file, [MALLOC_H=$file])
+  if test "$MALLOC_H" != ""; then
+    AC_DEFINE_UNQUOTED(MALLOC_H, <$MALLOC_H>)
+    break
+  fi
+done
+
 AC_CHECK_FUNCS(setlocale localeconv malloc_size malloc_usable_size)
 
 AC_SUBST(MOZILLA_VERSION)

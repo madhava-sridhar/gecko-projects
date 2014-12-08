@@ -139,6 +139,7 @@ JSRuntime::JSRuntime(JSRuntime *parentRuntime)
     parentRuntime(parentRuntime),
     interrupt_(false),
     interruptPar_(false),
+    telemetryCallback(nullptr),
     handlingSignal(false),
     interruptCallback(nullptr),
     exclusiveAccessLock(nullptr),
@@ -196,7 +197,6 @@ JSRuntime::JSRuntime(JSRuntime *parentRuntime)
     DOMcallbacks(nullptr),
     destroyPrincipals(nullptr),
     structuredCloneCallbacks(nullptr),
-    telemetryCallback(nullptr),
     errorReporter(nullptr),
     linkedAsmJSModules(nullptr),
     propertyRemovals(0),
@@ -259,7 +259,8 @@ JSRuntime::init(uint32_t maxbytes, uint32_t maxNurseryBytes)
     // Get a platform-native handle for the owner thread, used by
     // js::InterruptRunningJitCode to halt the runtime's main thread.
 #ifdef XP_WIN
-    size_t openFlags = THREAD_GET_CONTEXT | THREAD_SET_CONTEXT | THREAD_SUSPEND_RESUME;
+    size_t openFlags = THREAD_GET_CONTEXT | THREAD_SET_CONTEXT | THREAD_SUSPEND_RESUME |
+                       THREAD_QUERY_INFORMATION;
     HANDLE self = OpenThread(openFlags, false, GetCurrentThreadId());
     if (!self)
         return false;
@@ -455,6 +456,19 @@ JSRuntime::~JSRuntime()
     if (ownerThreadNative_)
         CloseHandle((HANDLE)ownerThreadNative_);
 #endif
+}
+
+void
+JSRuntime::addTelemetry(int id, uint32_t sample, const char *key)
+{
+    if (telemetryCallback)
+        (*telemetryCallback)(id, sample, key);
+}
+
+void
+JSRuntime::setTelemetryCallback(JSRuntime *rt, JSAccumulateTelemetryDataCallback callback)
+{
+    rt->telemetryCallback = callback;
 }
 
 void

@@ -228,6 +228,7 @@ public class GeckoAppShell
     private static Sensor gLightSensor;
 
     private static final String GECKOREQUEST_RESPONSE_KEY = "response";
+    private static final String GECKOREQUEST_ERROR_KEY = "error";
 
     /*
      * Keep in sync with constants found here:
@@ -434,7 +435,7 @@ public class GeckoAppShell
             public void handleMessage(String event, NativeJSObject message, EventCallback callback) {
                 EventDispatcher.getInstance().unregisterGeckoThreadListener(this, event);
                 if (!message.has(GECKOREQUEST_RESPONSE_KEY)) {
-                    request.onError();
+                    request.onError(message.getObject(GECKOREQUEST_ERROR_KEY));
                     return;
                 }
                 request.onResponse(message.getObject(GECKOREQUEST_RESPONSE_KEY));
@@ -1415,10 +1416,19 @@ public class GeckoAppShell
         return (Vibrator) layerView.getContext().getSystemService(Context.VIBRATOR_SERVICE);
     }
 
+    // Helper method to convert integer array to long array.
+    private static long[] convertIntToLongArray(int[] input) {
+        long[] output = new long[input.length];
+        for (int i = 0; i < input.length; i++) {
+            output[i] = input[i];
+        }
+        return output;
+    }
+
     // Vibrate only if haptic feedback is enabled.
-    public static void vibrateOnHapticFeedbackEnabled(long milliseconds) {
+    public static void vibrateOnHapticFeedbackEnabled(int[] milliseconds) {
         if (Settings.System.getInt(getContext().getContentResolver(), Settings.System.HAPTIC_FEEDBACK_ENABLED, 0) > 0) {
-            vibrate(milliseconds);
+            vibrate(convertIntToLongArray(milliseconds), -1);
         }
     }
 

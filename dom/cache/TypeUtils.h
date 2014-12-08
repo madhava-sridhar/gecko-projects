@@ -18,12 +18,12 @@ class nsIInputStream;
 namespace mozilla {
 namespace dom {
 
-class OwningRequestOrScalarValueString;
+class OwningRequestOrUSVString;
 struct QueryParams;
 class InternalRequest;
 class InternalResponse;
 class Request;
-class RequestOrScalarValueString;
+class RequestOrUSVString;
 class Response;
 template<typename T> class Optional;
 
@@ -63,18 +63,18 @@ protected:
 
   void
   ToPCacheRequest(PCacheRequest& aOut,
-                  const RequestOrScalarValueString& aIn, BodyAction aBodyAction,
+                  const RequestOrUSVString& aIn, BodyAction aBodyAction,
                   ReferrerAction aReferrerAction, ErrorResult& aRv);
 
   void
   ToPCacheRequest(PCacheRequest& aOut,
-                  const OwningRequestOrScalarValueString& aIn,
+                  const OwningRequestOrUSVString& aIn,
                   BodyAction aBodyAction, ReferrerAction aReferrerAction,
                   ErrorResult& aRv);
 
   void
   ToPCacheRequestOrVoid(PCacheRequestOrVoid& aOut,
-                        const Optional<RequestOrScalarValueString>& aIn,
+                        const Optional<RequestOrUSVString>& aIn,
                         BodyAction aBodyAction,
                         ReferrerAction aReferrerAction,
                         ErrorResult& aRv);
@@ -108,19 +108,19 @@ protected:
 private:
   void
   ToPCacheRequest(const GlobalObject& aGlobal, PCacheRequest& aOut,
-                  const RequestOrScalarValueString& aIn, BodyAction aBodyAction,
+                  const RequestOrUSVString& aIn, BodyAction aBodyAction,
                   ReferrerAction aReferrerAction, ErrorResult& aRv);
 
   void
   ToPCacheRequestOrVoid(const GlobalObject& aGlobal,
                         PCacheRequestOrVoid& aOut,
-                        const Optional<RequestOrScalarValueString>& aIn,
+                        const Optional<RequestOrUSVString>& aIn,
                         BodyAction aBodyAction, ReferrerAction aReferrerAction,
                         ErrorResult& aRv);
 
   void
   ToPCacheRequest(const GlobalObject& aGlobal, PCacheRequest& aOut,
-                  const OwningRequestOrScalarValueString& aIn,
+                  const OwningRequestOrUSVString& aIn,
                   BodyAction aBodyAction, ReferrerAction aReferrerAction,
                   ErrorResult& aRv);
 

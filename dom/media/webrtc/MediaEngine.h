@@ -39,12 +39,6 @@ enum MediaEngineState {
   kReleased
 };
 
-// We only support 1 audio and 1 video track for now.
-enum {
-  kVideoTrack = 1,
-  kAudioTrack = 2
-};
-
 // includes everything from dom::MediaSourceEnum (really video sources), plus audio sources
 enum MediaSourceType {
   Camera = (int) dom::MediaSourceEnum::Camera,
@@ -117,7 +111,7 @@ public:
                           SourceMediaStream *aSource,
                           TrackID aId,
                           StreamTime aDesiredTime,
-                          TrackTicks &aLastEndTime) = 0;
+                          StreamTime &aLastEndTime) = 0;
 
   /* Stop the device and release the corresponding MediaStream */
   virtual nsresult Stop(SourceMediaStream *aSource, TrackID aID) = 0;

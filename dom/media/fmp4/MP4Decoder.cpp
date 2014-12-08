@@ -24,6 +24,7 @@
 #include "apple/AppleDecoderModule.h"
 #endif
 #ifdef MOZ_WIDGET_ANDROID
+#include "nsIGfxInfo.h"
 #include "AndroidBridge.h"
 #endif
 
@@ -54,14 +55,25 @@ MP4Decoder::SetCDMProxy(CDMProxy* aProxy)
 #endif
 
 static bool
-IsSupportedAudioCodec(const nsAString& aCodec)
+IsSupportedAudioCodec(const nsAString& aCodec,
+                      bool& aOutContainsAAC,
+                      bool& aOutContainsMP3)
 {
-  // AAC-LC, HE-AAC or MP3 in M4A.
-  return aCodec.EqualsASCII("mp4a.40.2") ||
+  // AAC-LC or HE-AAC in M4A.
+  aOutContainsAAC = aCodec.EqualsASCII("mp4a.40.2") ||
+                    aCodec.EqualsASCII("mp4a.40.5");
+  if (aOutContainsAAC) {
+    return true;
+  }
 #ifndef MOZ_GONK_MEDIACODEC // B2G doesn't support MP3 in MP4 yet.
-         aCodec.EqualsASCII("mp3") ||
+  aOutContainsMP3 = aCodec.EqualsASCII("mp3");
+  if (aOutContainsMP3) {
+    return true;
+  }
+#else
+  aOutContainsMP3 = false;
 #endif
-         aCodec.EqualsASCII("mp4a.40.5");
+  return false;
 }
 
 static bool
@@ -92,14 +104,20 @@ IsSupportedH264Codec(const nsAString& aCodec)
 /* static */
 bool
 MP4Decoder::CanHandleMediaType(const nsACString& aType,
-                               const nsAString& aCodecs)
+                               const nsAString& aCodecs,
+                               bool& aOutContainsAAC,
+                               bool& aOutContainsH264,
+                               bool& aOutContainsMP3)
 {
   if (!IsEnabled()) {
     return false;
   }
 
   if (aType.EqualsASCII("audio/mp4") || aType.EqualsASCII("audio/x-m4a")) {
-    return aCodecs.IsEmpty() || IsSupportedAudioCodec(aCodecs);
+    return aCodecs.IsEmpty() ||
+           IsSupportedAudioCodec(aCodecs,
+                                 aOutContainsAAC,
+                                 aOutContainsMP3);
   }
 
   if (!aType.EqualsASCII("video/mp4")) {
@@ -113,7 +131,13 @@ MP4Decoder::CanHandleMediaType(const nsACString& aType,
   while (tokenizer.hasMoreTokens()) {
     const nsSubstring& token = tokenizer.nextToken();
     expectMoreTokens = tokenizer.separatorAfterCurrentToken();
-    if (IsSupportedAudioCodec(token) || IsSupportedH264Codec(token)) {
+    if (IsSupportedAudioCodec(token,
+                              aOutContainsAAC,
+                              aOutContainsMP3)) {
+      continue;
+    }
+    if (IsSupportedH264Codec(token)) {
+      aOutContainsH264 = true;
       continue;
     }
     return false;
@@ -122,8 +146,8 @@ MP4Decoder::CanHandleMediaType(const nsACString& aType,
     // Last codec name was empty
     return false;
   }
-  return true;
 
+  return true;
 }
 
 static bool
@@ -158,6 +182,27 @@ IsAppleAvailable()
 }
 
 static bool
+IsAndroidAvailable()
+{
+#ifndef MOZ_WIDGET_ANDROID
+  return false;
+#else
+  // PowerVR is very slow at texture allocation for some reason, which causes poor performance.
+  nsCOMPtr<nsIGfxInfo> gfxInfo = do_GetService("@mozilla.org/gfx/info;1");
+
+  nsString vendor;
+  if (NS_FAILED(gfxInfo->GetAdapterVendorID(vendor)) ||
+      vendor.Find("Imagination") == 0) {
+    printf_stderr("SNORP: not doing video for PowerVR\n");
+    return nullptr;
+  }
+
+  // We need android.media.MediaCodec which exists in API level 16 and higher.
+  return AndroidBridge::Bridge()->GetAPIVersion() >= 16;
+#endif
+}
+
+static bool
 IsGonkMP4DecoderAvailable()
 {
   return Preferences::GetBool("media.fragmented-mp4.gonk.enabled", false);
@@ -171,10 +216,7 @@ HavePlatformMPEGDecoders()
          // We have H.264/AAC platform decoders on Windows Vista and up.
          IsVistaOrLater() ||
 #endif
-#ifdef MOZ_WIDGET_ANDROID
-         // We need android.media.MediaCodec which exists in API level 16 and higher.
-         (AndroidBridge::Bridge()->GetAPIVersion() >= 16) ||
-#endif
+         IsAndroidAvailable() ||
          IsFFmpegAvailable() ||
          IsAppleAvailable() ||
          IsGonkMP4DecoderAvailable() ||

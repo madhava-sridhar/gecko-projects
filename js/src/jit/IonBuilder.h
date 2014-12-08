@@ -13,6 +13,7 @@
 #include "mozilla/LinkedList.h"
 
 #include "jit/BytecodeAnalysis.h"
+#include "jit/IonAnalysis.h"
 #include "jit/IonOptimizationLevels.h"
 #include "jit/MIR.h"
 #include "jit/MIRGenerator.h"
@@ -420,21 +421,18 @@ class IonBuilder
                                 types::TemporaryTypeSet *types);
     bool getPropTryInlineAccess(bool *emitted, MDefinition *obj, PropertyName *name,
                                 BarrierKind barrier, types::TemporaryTypeSet *types);
-    bool getPropTryTypedObject(bool *emitted, MDefinition *obj, PropertyName *name,
-                               types::TemporaryTypeSet *resultTypes);
+    bool getPropTryTypedObject(bool *emitted, MDefinition *obj, PropertyName *name);
     bool getPropTryScalarPropOfTypedObject(bool *emitted, MDefinition *typedObj,
                                            int32_t fieldOffset,
-                                           TypedObjectPrediction fieldTypeReprs,
-                                           types::TemporaryTypeSet *resultTypes);
+                                           TypedObjectPrediction fieldTypeReprs);
     bool getPropTryReferencePropOfTypedObject(bool *emitted, MDefinition *typedObj,
                                               int32_t fieldOffset,
                                               TypedObjectPrediction fieldPrediction,
-                                              types::TemporaryTypeSet *resultTypes);
+                                              PropertyName *name);
     bool getPropTryComplexPropOfTypedObject(bool *emitted, MDefinition *typedObj,
                                             int32_t fieldOffset,
                                             TypedObjectPrediction fieldTypeReprs,
-                                            size_t fieldIndex,
-                                            types::TemporaryTypeSet *resultTypes);
+                                            size_t fieldIndex);
     bool getPropTryInnerize(bool *emitted, MDefinition *obj, PropertyName *name,
                             types::TemporaryTypeSet *types);
     bool getPropTryCache(bool *emitted, MDefinition *obj, PropertyName *name,
@@ -459,7 +457,8 @@ class IonBuilder
                                               MDefinition *obj,
                                               int32_t fieldOffset,
                                               MDefinition *value,
-                                              TypedObjectPrediction fieldPrediction);
+                                              TypedObjectPrediction fieldPrediction,
+                                              PropertyName *name);
     bool setPropTryScalarPropOfTypedObject(bool *emitted,
                                            MDefinition *obj,
                                            int32_t fieldOffset,
@@ -479,23 +478,24 @@ class IonBuilder
                              size_t *fieldIndex);
     MDefinition *loadTypedObjectType(MDefinition *value);
     void loadTypedObjectData(MDefinition *typedObj,
-                             MDefinition *offset,
                              MDefinition **owner,
-                             MDefinition **ownerOffset);
+                             LinearSum *ownerOffset);
     void loadTypedObjectElements(MDefinition *typedObj,
-                                 MDefinition *offset,
-                                 int32_t unit,
+                                 const LinearSum &byteOffset,
+                                 int32_t scale,
                                  MDefinition **ownerElements,
-                                 MDefinition **ownerScaledOffset);
+                                 MDefinition **ownerScaledOffset,
+                                 int32_t *ownerByteAdjustment);
     MDefinition *typeObjectForElementFromArrayStructType(MDefinition *typedObj);
     MDefinition *typeObjectForFieldFromStructType(MDefinition *type,
                                                   size_t fieldIndex);
     bool storeReferenceTypedObjectValue(MDefinition *typedObj,
-                                        MDefinition *byteOffset,
+                                        const LinearSum &byteOffset,
                                         ReferenceTypeDescr::Type type,
-                                        MDefinition *value);
+                                        MDefinition *value,
+                                        PropertyName *name);
     bool storeScalarTypedObjectValue(MDefinition *typedObj,
-                                     MDefinition *offset,
+                                     const LinearSum &byteOffset,
                                      ScalarTypeDescr::Type type,
                                      bool racy,
                                      MDefinition *value);
@@ -503,18 +503,19 @@ class IonBuilder
                                        MDefinition *obj,
                                        MDefinition *index,
                                        TypedObjectPrediction objTypeDescrs,
-                                       MDefinition **indexAsByteOffset);
+                                       LinearSum *indexAsByteOffset);
     bool pushDerivedTypedObject(bool *emitted,
                                 MDefinition *obj,
-                                MDefinition *offset,
+                                const LinearSum &byteOffset,
                                 TypedObjectPrediction derivedTypeDescrs,
                                 MDefinition *derivedTypeObj);
     bool pushScalarLoadFromTypedObject(MDefinition *obj,
-                                       MDefinition *offset,
+                                       const LinearSum &byteoffset,
                                        ScalarTypeDescr::Type type);
     bool pushReferenceLoadFromTypedObject(MDefinition *typedObj,
-                                          MDefinition *byteOffset,
-                                          ReferenceTypeDescr::Type type);
+                                          const LinearSum &byteOffset,
+                                          ReferenceTypeDescr::Type type,
+                                          PropertyName *name);
     MDefinition *neuterCheck(MDefinition *obj);
 
     // jsop_setelem() helpers.
@@ -679,6 +680,7 @@ class IonBuilder
     bool jsop_instanceof();
     bool jsop_getaliasedvar(ScopeCoordinate sc);
     bool jsop_setaliasedvar(ScopeCoordinate sc);
+    bool jsop_debugger();
 
     /* Inlining. */
 
@@ -792,6 +794,7 @@ class IonBuilder
                                   const Class *clasp3 = nullptr,
                                   const Class *clasp4 = nullptr);
     InliningStatus inlineIsConstructing(CallInfo &callInfo);
+    InliningStatus inlineSubstringKernel(CallInfo &callInfo);
 
     // Testing functions.
     InliningStatus inlineForceSequentialOrInParallelSection(CallInfo &callInfo);
@@ -838,9 +841,13 @@ class IonBuilder
                                     bool isGetter, JSObject *foundProto, bool *guardGlobal);
     void freezePropertiesForCommonPrototype(types::TemporaryTypeSet *types, PropertyName *name,
                                             JSObject *foundProto, bool allowEmptyTypesForGlobal = false);
-    MDefinition *testCommonGetterSetter(types::TemporaryTypeSet *types, PropertyName *name,
-                                        bool isGetter, JSObject *foundProto, Shape *lastProperty,
-                                        Shape *globalShape = nullptr);
+    /*
+     * Callers must pass a non-null globalGuard if they pass a non-null globalShape.
+     */
+    bool testCommonGetterSetter(types::TemporaryTypeSet *types, PropertyName *name,
+                                bool isGetter, JSObject *foundProto, Shape *lastProperty,
+                                MDefinition **guard, Shape *globalShape = nullptr,
+                                MDefinition **globalGuard = nullptr);
     bool testShouldDOMCall(types::TypeSet *inTypes,
                            JSFunction *func, JSJitInfo::OpType opType);
 
@@ -967,12 +974,12 @@ class IonBuilder
         {}
     };
 
-    Vector<CFGState, 8, IonAllocPolicy> cfgStack_;
-    Vector<ControlFlowInfo, 4, IonAllocPolicy> loops_;
-    Vector<ControlFlowInfo, 0, IonAllocPolicy> switches_;
-    Vector<ControlFlowInfo, 2, IonAllocPolicy> labels_;
-    Vector<MInstruction *, 2, IonAllocPolicy> iterators_;
-    Vector<LoopHeader, 0, IonAllocPolicy> loopHeaders_;
+    Vector<CFGState, 8, JitAllocPolicy> cfgStack_;
+    Vector<ControlFlowInfo, 4, JitAllocPolicy> loops_;
+    Vector<ControlFlowInfo, 0, JitAllocPolicy> switches_;
+    Vector<ControlFlowInfo, 2, JitAllocPolicy> labels_;
+    Vector<MInstruction *, 2, JitAllocPolicy> iterators_;
+    Vector<LoopHeader, 0, JitAllocPolicy> loopHeaders_;
     BaselineInspector *inspector;
 
     size_t inliningDepth_;

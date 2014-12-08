@@ -154,19 +154,14 @@ class TypedProto : public NativeObject
     }
 
     inline type::Kind kind() const;
+
+    static int32_t offsetOfTypeDescr() {
+        return getFixedSlotOffset(JS_TYPROTO_SLOT_DESCR);
+    }
 };
 
 class TypeDescr : public NativeObject
 {
-  public:
-    // This is *intentionally* not defined so as to produce link
-    // errors if a is<FooTypeDescr>() etc goes wrong. Otherwise, the
-    // default implementation resolves this to a reference to
-    // FooTypeDescr::class_ which resolves to
-    // JSObject::class_. Debugging the resulting errors leads to much
-    // fun and rejoicing.
-    static const Class class_;
-
   public:
     TypedProto &typedProto() const {
         return getReservedSlot(JS_DESCR_SLOT_TYPROTO).toObject().as<TypedProto>();
@@ -196,8 +191,24 @@ class TypeDescr : public NativeObject
         return getReservedSlot(JS_DESCR_SLOT_SIZE).toInt32();
     }
 
+    // Type descriptors may contain a list of their references for use during
+    // scanning. Marking code is optimized to use this list to mark inline
+    // typed objects, rather than the slower trace hook. This list is only
+    // specified when (a) the descriptor is short enough that it can fit in an
+    // InlineTypedObject, and (b) the descriptor contains at least one
+    // reference. Otherwise it is null.
+    //
+    // The list is three consecutive arrays of int32_t offsets, with each array
+    // terminated by -1. The arrays store offsets of string, object, and value
+    // references in the descriptor, in that order.
+    const int32_t *traceList() const {
+        return reinterpret_cast<int32_t *>(getReservedSlot(JS_DESCR_SLOT_TRACE_LIST).toPrivate());
+    }
+
     void initInstances(const JSRuntime *rt, uint8_t *mem, size_t length);
     void traceInstances(JSTracer *trace, uint8_t *mem, size_t length);
+
+    static void finalize(FreeOp *fop, JSObject *obj);
 };
 
 typedef Handle<TypeDescr*> HandleTypeDescr;
@@ -246,6 +257,10 @@ class ScalarTypeDescr : public SimpleTypeDescr
         static_assert(Scalar::Float64 == JS_SCALARTYPEREPR_FLOAT64,
                       "TypedObjectConstants.h must be consistent with Scalar::Type");
         static_assert(Scalar::Uint8Clamped == JS_SCALARTYPEREPR_UINT8_CLAMPED,
+                      "TypedObjectConstants.h must be consistent with Scalar::Type");
+        static_assert(Scalar::Float32x4 == JS_SCALARTYPEREPR_FLOAT32X4,
+                      "TypedObjectConstants.h must be consistent with Scalar::Type");
+        static_assert(Scalar::Int32x4 == JS_SCALARTYPEREPR_INT32X4,
                       "TypedObjectConstants.h must be consistent with Scalar::Type");
 
         return Type(getReservedSlot(JS_DESCR_SLOT_TYPE).toInt32());
@@ -416,6 +431,10 @@ class ArrayTypeDescr : public ComplexTypeDescr
     int32_t length() const {
         return getReservedSlot(JS_DESCR_SLOT_ARRAY_LENGTH).toInt32();
     }
+
+    static int32_t offsetOfLength() {
+        return getFixedSlotOffset(JS_DESCR_SLOT_ARRAY_LENGTH);
+    }
 };
 
 /*
@@ -470,12 +489,12 @@ class StructTypeDescr : public ComplexTypeDescr
     size_t maybeForwardedFieldOffset(size_t index) const;
 
   private:
-    NativeObject &fieldInfoObject(size_t slot) const {
-        return getReservedSlot(slot).toObject().as<NativeObject>();
+    ArrayObject &fieldInfoObject(size_t slot) const {
+        return getReservedSlot(slot).toObject().as<ArrayObject>();
     }
 
-    NativeObject &maybeForwardedFieldInfoObject(size_t slot) const {
-        return MaybeForwarded(&getReservedSlot(slot).toObject())->as<NativeObject>();
+    ArrayObject &maybeForwardedFieldInfoObject(size_t slot) const {
+        return MaybeForwarded(&getReservedSlot(slot).toObject())->as<ArrayObject>();
     }
 };
 
@@ -725,7 +744,11 @@ class InlineTypedObject : public TypedObject
         size_t nbytes = descr->size();
         MOZ_ASSERT(nbytes <= MaximumSize);
 
-        size_t dataSlots = AlignBytes(nbytes, sizeof(Value) / sizeof(Value));
+        if (nbytes <= sizeof(NativeObject) - sizeof(TypedObject))
+            return gc::FINALIZE_OBJECT0;
+        nbytes -= sizeof(NativeObject) - sizeof(TypedObject);
+
+        size_t dataSlots = AlignBytes(nbytes, sizeof(Value)) / sizeof(Value);
         MOZ_ASSERT(nbytes <= dataSlots * sizeof(Value));
         return gc::GetGCObjectKind(dataSlots);
     }
@@ -737,6 +760,7 @@ class InlineTypedObject : public TypedObject
     }
 
     static void obj_trace(JSTracer *trace, JSObject *object);
+    static void objectMovedDuringMinorGC(JSTracer *trc, JSObject *dst, JSObject *src);
 
     static size_t offsetOfDataStart() {
         return offsetof(InlineTypedObject, data_);
@@ -906,9 +930,9 @@ class StoreScalar##T {                                                        \
 };
 
 /*
- * Usage: Store_Any(targetDatum, targetOffset, value)
- *        Store_Object(targetDatum, targetOffset, value)
- *        Store_string(targetDatum, targetOffset, value)
+ * Usage: Store_Any(targetDatum, targetOffset, fieldName, value)
+ *        Store_Object(targetDatum, targetOffset, fieldName, value)
+ *        Store_string(targetDatum, targetOffset, fieldName, value)
  *
  * Intrinsic function. Stores `value` into the memory referenced by
  * `targetDatum` at the offset `targetOffset`.
@@ -916,12 +940,13 @@ class StoreScalar##T {                                                        \
  * Assumes (and asserts) that:
  * - `targetDatum` is attached
  * - `targetOffset` is a valid offset within the bounds of `targetDatum`
- * - `value` is an object (`Store_Object`) or string (`Store_string`).
+ * - `value` is an object or null (`Store_Object`) or string (`Store_string`).
  */
 #define JS_STORE_REFERENCE_CLASS_DEFN(_constant, T, _name)                    \
 class StoreReference##T {                                                     \
   private:                                                                    \
-    static void store(T* heap, const Value &v);                               \
+    static bool store(ThreadSafeContext *cx, T* heap, const Value &v,         \
+                      TypedObject *obj, jsid id);                             \
                                                                               \
   public:                                                                     \
     static bool Func(ThreadSafeContext *cx, unsigned argc, Value *vp);        \
@@ -982,6 +1007,20 @@ IsOpaqueTypedObjectClass(const Class *class_)
 {
     return class_ == &OutlineOpaqueTypedObject::class_ ||
            class_ == &InlineOpaqueTypedObject::class_;
+}
+
+inline bool
+IsOutlineTypedObjectClass(const Class *class_)
+{
+    return class_ == &OutlineOpaqueTypedObject::class_ ||
+           class_ == &OutlineTransparentTypedObject::class_;
+}
+
+inline bool
+IsInlineTypedObjectClass(const Class *class_)
+{
+    return class_ == &InlineOpaqueTypedObject::class_ ||
+           class_ == &InlineTransparentTypedObject::class_;
 }
 
 inline const Class *

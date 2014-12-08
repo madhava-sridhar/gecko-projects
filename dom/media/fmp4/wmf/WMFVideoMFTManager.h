@@ -31,7 +31,7 @@ public:
   virtual HRESULT Input(mp4_demuxer::MP4Sample* aSample) MOZ_OVERRIDE;
 
   virtual HRESULT Output(int64_t aStreamOffset,
-                         nsAutoPtr<MediaData>& aOutput) MOZ_OVERRIDE;
+                         nsRefPtr<MediaData>& aOutput) MOZ_OVERRIDE;
 
   virtual void Shutdown() MOZ_OVERRIDE;
 
@@ -56,8 +56,6 @@ private:
   uint32_t mVideoHeight;
   nsIntRect mPictureRegion;
 
-  const mp4_demuxer::VideoDecoderConfig& mConfig;
-
   RefPtr<MFTDecoder> mDecoder;
   RefPtr<layers::ImageContainer> mImageContainer;
   nsAutoPtr<DXVA2Manager> mDXVA2Manager;
@@ -67,6 +65,18 @@ private:
   const bool mDXVAEnabled;
   const layers::LayersBackend mLayersBackend;
   bool mUseHwAccel;
+
+  enum StreamType {
+    Unknown,
+    H264,
+    VP8,
+    VP9
+  };
+
+  StreamType mStreamType;
+
+  const GUID& GetMFTGUID();
+  const GUID& GetMediaSubtypeGUID();
 };
 
 } // namespace mozilla

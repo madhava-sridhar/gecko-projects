@@ -1942,9 +1942,9 @@ public:
     inline void TraceJS(JSTracer* trc) {}
     inline void AutoTrace(JSTracer* trc) {}
 
-    void Mark()       {mJSObject = (JSObject*)(intptr_t(mJSObject) | 1);}
-    void Unmark()     {mJSObject = (JSObject*)(intptr_t(mJSObject) & ~1);}
-    bool IsMarked() const {return !!(intptr_t(mJSObject) & 1);}
+    void Mark()       {mJSObject.setFlags(1);}
+    void Unmark()     {mJSObject.unsetFlags(1);}
+    bool IsMarked() const {return mJSObject.hasFlag(1);}
 
 private:
     XPCWrappedNativeTearOff(const XPCWrappedNativeTearOff& r) MOZ_DELETE;
@@ -1953,7 +1953,7 @@ private:
 private:
     XPCNativeInterface* mInterface;
     nsISupports*        mNative;
-    JSObject*           mJSObject;
+    JS::TenuredHeap<JSObject*> mJSObject;
 };
 
 /***********************************************/
@@ -2393,11 +2393,11 @@ private:
 // nsXPCWrappedJS objects are chained together to represent the various
 // interface on the single underlying (possibly aggregate) JSObject.
 
-class nsXPCWrappedJS : protected nsAutoXPTCStub,
-                       public nsIXPConnectWrappedJS,
-                       public nsSupportsWeakReference,
-                       public nsIPropertyBag,
-                       public XPCRootSetElem
+class nsXPCWrappedJS MOZ_FINAL : protected nsAutoXPTCStub,
+                                 public nsIXPConnectWrappedJS,
+                                 public nsSupportsWeakReference,
+                                 public nsIPropertyBag,
+                                 public XPCRootSetElem
 {
 public:
     NS_DECL_CYCLE_COLLECTING_ISUPPORTS
@@ -2720,7 +2720,7 @@ public:
 // safe.
 extern void xpc_DestroyJSxIDClassObjects();
 
-class nsJSID : public nsIJSID
+class nsJSID MOZ_FINAL : public nsIJSID
 {
 public:
     NS_DEFINE_STATIC_CID_ACCESSOR(NS_JS_ID_CID)
@@ -2967,7 +2967,7 @@ xpc_PrintJSStack(JSContext* cx, bool showArgs, bool showLocals,
 
 // Definition of nsScriptError, defined here because we lack a place to put
 // XPCOM objects associated with the JavaScript engine.
-class nsScriptError : public nsIScriptError {
+class nsScriptError MOZ_FINAL : public nsIScriptError {
 public:
     nsScriptError();
 
@@ -3629,6 +3629,7 @@ public:
         , skipWriteToGlobalPrototype(false)
         , universalXPConnectEnabled(false)
         , forcePermissiveCOWs(false)
+        , CPOWTime(0)
         , skipCOWCallableChecks(false)
         , scriptability(c)
         , scope(nullptr)
@@ -3681,6 +3682,9 @@ public:
     //
     // Using it in production is inherently unsafe.
     bool forcePermissiveCOWs;
+
+    // A running count of how much time we've spent processing CPOWs.
+    PRIntervalTime               CPOWTime;
 
     // Disables the XPConnect security checks that deny access to callables and
     // accessor descriptors on COWs. Do not use this unless you are bholley.

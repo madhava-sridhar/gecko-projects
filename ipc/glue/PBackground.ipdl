@@ -16,22 +16,7 @@ include PBackgroundSharedTypes;
 
 using mozilla::dom::cache::Namespace from "mozilla/dom/cache/IPCUtils.h";
 
-using struct mozilla::void_t
-  from "ipc/IPCMessageUtils.h";
-
 namespace mozilla {
-namespace dom {
-namespace indexedDB {
-
-union OptionalWindowId
-{
-  uint64_t;
-  void_t;
-};
-
-} // namespace indexedDB
-} // namespace dom
-
 namespace ipc {
 
 sync protocol PBackground
@@ -49,7 +34,7 @@ parent:
   // Only called at startup during mochitests to check the basic infrastructure.
   PBackgroundTest(nsCString testArg);
 
-  PBackgroundIDBFactory(OptionalWindowId optionalWindowId);
+  PBackgroundIDBFactory();
 
   PCacheStorage(Namespace aNamespace, PrincipalInfo aPrincipalInfo);
 

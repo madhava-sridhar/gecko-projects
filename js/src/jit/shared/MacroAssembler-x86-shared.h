@@ -844,8 +844,14 @@ class MacroAssemblerX86Shared : public Assembler
     void loadUnalignedInt32x4(const Address &src, FloatRegister dest) {
         movdqu(Operand(src), dest);
     }
+    void loadUnalignedInt32x4(const Operand &src, FloatRegister dest) {
+        movdqu(src, dest);
+    }
     void storeUnalignedInt32x4(FloatRegister src, const Address &dest) {
         movdqu(src, Operand(dest));
+    }
+    void storeUnalignedInt32x4(FloatRegister src, const Operand &dest) {
+        movdqu(src, dest);
     }
     void packedEqualInt32x4(const Operand &src, FloatRegister dest) {
         pcmpeqd(src, dest);
@@ -907,8 +913,14 @@ class MacroAssemblerX86Shared : public Assembler
     void loadUnalignedFloat32x4(const Address &src, FloatRegister dest) {
         movups(Operand(src), dest);
     }
+    void loadUnalignedFloat32x4(const Operand &src, FloatRegister dest) {
+        movups(src, dest);
+    }
     void storeUnalignedFloat32x4(FloatRegister src, const Address &dest) {
         movups(src, Operand(dest));
+    }
+    void storeUnalignedFloat32x4(FloatRegister src, const Operand &dest) {
+        movups(src, dest);
     }
     void packedAddFloat32(const Operand &src, FloatRegister dest) {
         addps(src, dest);
@@ -1178,7 +1190,7 @@ class MacroAssemblerX86Shared : public Assembler
 
     // Builds an exit frame on the stack, with a return address to an internal
     // non-function. Returns offset to be passed to markSafepointAt().
-    bool buildFakeExitFrame(Register scratch, uint32_t *offset);
+    void buildFakeExitFrame(Register scratch, uint32_t *offset);
     void callWithExitFrame(Label *target);
     void callWithExitFrame(JitCode *target);
 
@@ -1190,10 +1202,10 @@ class MacroAssemblerX86Shared : public Assembler
         call(reg);
         append(desc, currentOffset(), framePushed_);
     }
-    void callIon(Register callee) {
+    void callJit(Register callee) {
         call(callee);
     }
-    void callIonFromAsmJS(Register callee) {
+    void callJitFromAsmJS(Register callee) {
         call(callee);
     }
     void call(AsmJSImmPtr target) {

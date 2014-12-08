@@ -36,12 +36,12 @@ namespace dom {
 class AsyncVerifyRedirectCallbackFwr;
 struct EventSourceInit;
 
-class EventSource : public DOMEventTargetHelper
-                  , public nsIObserver
-                  , public nsIStreamListener
-                  , public nsIChannelEventSink
-                  , public nsIInterfaceRequestor
-                  , public nsSupportsWeakReference
+class EventSource MOZ_FINAL : public DOMEventTargetHelper
+                            , public nsIObserver
+                            , public nsIStreamListener
+                            , public nsIChannelEventSink
+                            , public nsIInterfaceRequestor
+                            , public nsSupportsWeakReference
 {
 friend class AsyncVerifyRedirectCallbackFwr;
 
@@ -108,6 +108,8 @@ protected:
                 bool aWithCredentials);
 
   nsresult GetBaseURI(nsIURI **aBaseURI);
+
+  net::ReferrerPolicy GetReferrerPolicy();
 
   nsresult SetupHttpChannel();
   nsresult InitChannelAndRequestEventSource();
@@ -221,7 +223,6 @@ protected:
   bool mGoingToDispatchAllMessages;
   bool mWithCredentials;
   bool mWaitingForOnStopRequest;
-  bool mInterrupted;
 
   // used while reading the input streams
   nsCOMPtr<nsIUnicodeDecoder> mUnicodeDecoder;

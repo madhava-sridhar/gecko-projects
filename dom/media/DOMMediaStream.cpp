@@ -15,7 +15,6 @@
 #include "MediaStreamGraph.h"
 #include "AudioStreamTrack.h"
 #include "VideoStreamTrack.h"
-#include "MediaEngine.h"
 
 using namespace mozilla;
 using namespace mozilla::dom;
@@ -33,7 +32,7 @@ public:
   class TrackChange : public nsRunnable {
   public:
     TrackChange(StreamListener* aListener,
-                TrackID aID, TrackTicks aTrackOffset,
+                TrackID aID, StreamTime aTrackOffset,
                 uint32_t aEvents, MediaSegment::Type aType)
       : mListener(aListener), mID(aID), mEvents(aEvents), mType(aType)
     {
@@ -54,8 +53,8 @@ public:
         if (!track) {
           stream->CreateDOMTrack(mID, mType);
           track = stream->BindDOMTrack(mID, mType);
-          stream->NotifyMediaStreamTrackCreated(track);
         }
+        stream->NotifyMediaStreamTrackCreated(track);
       } else {
         track = stream->GetDOMTrackFor(mID);
       }
@@ -85,8 +84,7 @@ public:
    * aQueuedMedia can be null if there is no output.
    */
   virtual void NotifyQueuedTrackChanges(MediaStreamGraph* aGraph, TrackID aID,
-                                        TrackRate aTrackRate,
-                                        TrackTicks aTrackOffset,
+                                        StreamTime aTrackOffset,
                                         uint32_t aTrackEvents,
                                         const MediaSegment& aQueuedMedia) MOZ_OVERRIDE
   {
@@ -94,7 +92,7 @@ public:
       nsRefPtr<TrackChange> runnable =
         new TrackChange(this, aID, aTrackOffset, aTrackEvents,
                         aQueuedMedia.GetType());
-      NS_DispatchToMainThread(runnable);
+      aGraph->DispatchToMainThreadAfterStreamStateUpdate(runnable.forget());
     }
   }
 
@@ -326,12 +324,15 @@ DOMMediaStream::RemovePrincipalChangeObserver(PrincipalChangeObserver* aObserver
 void
 DOMMediaStream::SetHintContents(TrackTypeHints aHintContents)
 {
-  mHintContents = aHintContents;
-  if (aHintContents & HINT_CONTENTS_AUDIO) {
-    CreateDOMTrack(kAudioTrack, MediaSegment::AUDIO);
-  }
-  if (aHintContents & HINT_CONTENTS_VIDEO) {
+  TrackTypeHints oldHintContents = mHintContents;
+  mHintContents |= aHintContents;
+  if (aHintContents & HINT_CONTENTS_VIDEO &&
+      !(oldHintContents & HINT_CONTENTS_VIDEO)) {
     CreateDOMTrack(kVideoTrack, MediaSegment::VIDEO);
+  }
+  if (aHintContents & HINT_CONTENTS_AUDIO &&
+      !(oldHintContents & HINT_CONTENTS_AUDIO)) {
+    CreateDOMTrack(kAudioTrack, MediaSegment::AUDIO);
   }
 }
 
@@ -341,9 +342,11 @@ DOMMediaStream::CreateDOMTrack(TrackID aTrackID, MediaSegment::Type aType)
   MediaStreamTrack* track;
   switch (aType) {
   case MediaSegment::AUDIO:
+    mHintContents |= HINT_CONTENTS_AUDIO;
     track = new AudioStreamTrack(this, aTrackID);
     break;
   case MediaSegment::VIDEO:
+    mHintContents |= HINT_CONTENTS_VIDEO;
     track = new VideoStreamTrack(this, aTrackID);
     break;
   default:

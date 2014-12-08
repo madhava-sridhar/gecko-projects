@@ -161,7 +161,7 @@ CacheStorage::CacheStorage(Namespace aNamespace,
 }
 
 already_AddRefed<Promise>
-CacheStorage::Match(const RequestOrScalarValueString& aRequest,
+CacheStorage::Match(const RequestOrUSVString& aRequest,
                     const QueryParams& aParams, ErrorResult& aRv)
 {
   NS_ASSERT_OWNINGTHREAD(CacheStorage);
@@ -184,9 +184,9 @@ CacheStorage::Match(const RequestOrScalarValueString& aRequest,
     entry->mOp = OP_MATCH;
     entry->mParams = aParams;
 
-    if (aRequest.IsScalarValueString()) {
-      *entry->mRequest.SetAsScalarValueString().ToAStringPtr() =
-        aRequest.GetAsScalarValueString();
+    if (aRequest.IsUSVString()) {
+      *entry->mRequest.SetAsUSVString().ToAStringPtr() =
+        aRequest.GetAsUSVString();
     } else {
       entry->mRequest.SetAsRequest() =
         &aRequest.GetAsRequest();

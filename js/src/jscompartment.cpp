@@ -56,6 +56,7 @@ JSCompartment::JSCompartment(Zone *zone, const JS::CompartmentOptions &options =
     lastAnimationTime(0),
     regExps(runtime_),
     globalWriteBarriered(false),
+    neuteredTypedObjects(0),
     propertyTree(thisForCtor()),
     selfHostingScriptSource(nullptr),
     lazyArrayBuffers(nullptr),
@@ -139,6 +140,8 @@ JSRuntime::createJitRuntime(JSContext *cx)
     jitRuntime_ = jrt;
 
     if (!jitRuntime_->initialize(cx)) {
+        js_ReportOutOfMemory(cx);
+
         js_delete(jitRuntime_);
         jitRuntime_ = nullptr;
 

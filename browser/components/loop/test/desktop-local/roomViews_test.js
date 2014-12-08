@@ -30,13 +30,11 @@ describe("loop.roomViews", function () {
       return x;
     });
 
-    activeRoomStore = new loop.store.ActiveRoomStore({
-      dispatcher: dispatcher,
+    activeRoomStore = new loop.store.ActiveRoomStore(dispatcher, {
       mozLoop: {},
       sdkDriver: {}
     });
-    roomStore = new loop.store.RoomStore({
-      dispatcher: dispatcher,
+    roomStore = new loop.store.RoomStore(dispatcher, {
       mozLoop: {},
       activeRoomStore: activeRoomStore
     });
@@ -119,6 +117,48 @@ describe("loop.roomViews", function () {
           new sharedActions.EmailRoomUrl({roomUrl: "http://invalid"}));
       });
 
+    describe("Rename Room", function() {
+      var roomNameBox;
+
+      beforeEach(function() {
+        view = mountTestComponent();
+        view.setState({
+          roomToken: "fakeToken",
+          roomName: "fakeName"
+        });
+
+        roomNameBox = view.getDOMNode().querySelector('.input-room-name');
+
+        React.addons.TestUtils.Simulate.change(roomNameBox, { target: {
+          value: "reallyFake"
+        }});
+      });
+
+      it("should dispatch a RenameRoom action when the focus is lost",
+        function() {
+          React.addons.TestUtils.Simulate.blur(roomNameBox);
+
+          sinon.assert.calledOnce(dispatcher.dispatch);
+          sinon.assert.calledWithExactly(dispatcher.dispatch,
+            new sharedActions.RenameRoom({
+              roomToken: "fakeToken",
+              newRoomName: "reallyFake"
+            }));
+        });
+
+      it("should dispatch a RenameRoom action when enter is pressed",
+        function() {
+          React.addons.TestUtils.Simulate.submit(roomNameBox);
+
+          sinon.assert.calledOnce(dispatcher.dispatch);
+          sinon.assert.calledWithExactly(dispatcher.dispatch,
+            new sharedActions.RenameRoom({
+              roomToken: "fakeToken",
+              newRoomName: "reallyFake"
+            }));
+        });
+    });
+
     describe("Copy Button", function() {
       beforeEach(function() {
         view = mountTestComponent();
@@ -159,18 +199,12 @@ describe("loop.roomViews", function () {
       return TestUtils.renderIntoDocument(
         new loop.roomViews.DesktopRoomConversationView({
           dispatcher: dispatcher,
-          roomStore: roomStore
+          roomStore: roomStore,
+          feedbackStore: new loop.store.FeedbackStore(dispatcher, {
+            feedbackClient: {}
+          })
         }));
     }
-
-    it("should dispatch a setupStreamElements action when the view is created",
-      function() {
-        view = mountTestComponent();
-
-        sinon.assert.calledOnce(dispatcher.dispatch);
-        sinon.assert.calledWithMatch(dispatcher.dispatch,
-          sinon.match.hasOwn("name", "setupStreamElements"));
-    });
 
     it("should dispatch a setMute action when the audio mute button is pressed",
       function() {
@@ -228,6 +262,44 @@ describe("loop.roomViews", function () {
       expect(muteBtn.classList.contains("muted")).eql(true);
     });
 
+    describe("#componentWillUpdate", function() {
+      function expectActionDispatched(view) {
+        sinon.assert.calledOnce(dispatcher.dispatch);
+        sinon.assert.calledWithExactly(dispatcher.dispatch,
+          sinon.match.instanceOf(sharedActions.SetupStreamElements));
+        sinon.assert.calledWithExactly(dispatcher.dispatch,
+          sinon.match(function(value) {
+            return value.getLocalElementFunc() ===
+                   view.getDOMNode().querySelector(".local");
+          }));
+        sinon.assert.calledWithExactly(dispatcher.dispatch,
+          sinon.match(function(value) {
+            return value.getRemoteElementFunc() ===
+                   view.getDOMNode().querySelector(".remote");
+          }));
+      }
+
+      it("should dispatch a `SetupStreamElements` action when the MEDIA_WAIT state " +
+        "is entered", function() {
+          activeRoomStore.setStoreState({roomState: ROOM_STATES.READY});
+          var view = mountTestComponent();
+
+          activeRoomStore.setStoreState({roomState: ROOM_STATES.MEDIA_WAIT});
+
+          expectActionDispatched(view);
+        });
+
+      it("should dispatch a `SetupStreamElements` action on MEDIA_WAIT state is " +
+        "re-entered", function() {
+          activeRoomStore.setStoreState({roomState: ROOM_STATES.ENDED});
+          var view = mountTestComponent();
+
+          activeRoomStore.setStoreState({roomState: ROOM_STATES.MEDIA_WAIT});
+
+          expectActionDispatched(view);
+        });
+    });
+
     describe("#render", function() {
       it("should set document.title to store.serverData.roomName", function() {
         mountTestComponent();
@@ -275,6 +347,31 @@ describe("loop.roomViews", function () {
 
           TestUtils.findRenderedComponentWithType(view,
             loop.roomViews.DesktopRoomConversationView);
+        });
+
+      it("should render the FeedbackView if roomState is `ENDED`",
+        function() {
+          activeRoomStore.setStoreState({roomState: ROOM_STATES.ENDED});
+
+          view = mountTestComponent();
+
+          TestUtils.findRenderedComponentWithType(view,
+            loop.shared.views.FeedbackView);
+        });
+    });
+
+    describe("Mute", function() {
+      it("should render local media as audio-only if video is muted",
+        function() {
+          activeRoomStore.setStoreState({
+            roomState: ROOM_STATES.SESSION_CONNECTED,
+            videoMuted: true
+          });
+
+          view = mountTestComponent();
+
+          expect(view.getDOMNode().querySelector(".local-stream-audio"))
+            .not.eql(null);
         });
     });
   });

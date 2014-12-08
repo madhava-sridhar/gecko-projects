@@ -239,18 +239,6 @@ gfxContext::Fill(const Pattern& aPattern)
 }
 
 void
-gfxContext::FillWithOpacity(gfxFloat aOpacity)
-{
-  FillWithOpacity(PatternFromState(this), aOpacity);
-}
-
-void
-gfxContext::FillWithOpacity(const Pattern& aPattern, gfxFloat aOpacity)
-{
-  FillAzure(aPattern, Float(aOpacity));
-}
-
-void
 gfxContext::MoveTo(const gfxPoint& pt)
 {
   EnsurePathBuilder();
@@ -262,20 +250,6 @@ gfxContext::LineTo(const gfxPoint& pt)
 {
   EnsurePathBuilder();
   mPathBuilder->LineTo(ToPoint(pt));
-}
-
-void
-gfxContext::CurveTo(const gfxPoint& pt1, const gfxPoint& pt2, const gfxPoint& pt3)
-{
-  EnsurePathBuilder();
-  mPathBuilder->BezierTo(ToPoint(pt1), ToPoint(pt2), ToPoint(pt3));
-}
-
-void
-gfxContext::QuadraticCurveTo(const gfxPoint& pt1, const gfxPoint& pt2)
-{
-  EnsurePathBuilder();
-  mPathBuilder->QuadraticBezierTo(ToPoint(pt1), ToPoint(pt2));
 }
 
 void
@@ -321,21 +295,6 @@ gfxContext::Rectangle(const gfxRect& rect, bool snapToPixels)
   mPathBuilder->LineTo(rec.BottomRight());
   mPathBuilder->LineTo(rec.BottomLeft());
   mPathBuilder->Close();
-}
-
-void
-gfxContext::Polygon(const gfxPoint *points, uint32_t numPoints)
-{
-  if (numPoints == 0) {
-    return;
-  }
-
-  EnsurePathBuilder();
-
-  mPathBuilder->MoveTo(ToPoint(points[0]));
-  for (uint32_t i = 1; i < numPoints; i++) {
-    mPathBuilder->LineTo(ToPoint(points[i]));
-  }
 }
 
 void
@@ -554,11 +513,6 @@ gfxContext::CurrentLineWidth() const
 void
 gfxContext::SetOperator(GraphicsOperator op)
 {
-  if (op == OPERATOR_CLEAR) {
-    CurrentState().opIsClear = true;
-    return;
-  }
-  CurrentState().opIsClear = false;
   CurrentState().op = CompositionOpForOp(op);
 }
 
@@ -676,6 +630,15 @@ gfxContext::ResetClip()
 void
 gfxContext::UpdateSurfaceClip()
 {
+}
+
+void
+gfxContext::PopClip()
+{
+  MOZ_ASSERT(CurrentState().pushedClips.Length() > 0);
+
+  CurrentState().pushedClips.RemoveElementAt(CurrentState().pushedClips.Length() - 1);
+  mDT->PopClip();
 }
 
 gfxRect
@@ -865,7 +828,7 @@ gfxContext::Paint(gfxFloat alpha)
   AzureState &state = CurrentState();
 
   if (state.sourceSurface && !state.sourceSurfCairo &&
-      !state.patternTransformChanged && !state.opIsClear)
+      !state.patternTransformChanged)
   {
     // This is the case where a PopGroupToSource has been done and this
     // paint is executed without changing the transform or the source.
@@ -888,12 +851,8 @@ gfxContext::Paint(gfxFloat alpha)
   mat.Invert();
   Rect paintRect = mat.TransformBounds(Rect(Point(0, 0), Size(mDT->GetSize())));
 
-  if (state.opIsClear) {
-    mDT->ClearRect(paintRect);
-  } else {
-    mDT->FillRect(paintRect, PatternFromState(this),
-                  DrawOptions(Float(alpha), GetOp()));
-  }
+  mDT->FillRect(paintRect, PatternFromState(this),
+                DrawOptions(Float(alpha), GetOp()));
 }
 
 // groups
@@ -1152,9 +1111,7 @@ gfxContext::FillAzure(const Pattern& aPattern, Float aOpacity)
   if (mPathIsRect) {
     MOZ_ASSERT(!mTransformChanged);
 
-    if (state.opIsClear) {
-      mDT->ClearRect(mRect);
-    } else if (op == CompositionOp::OP_SOURCE) {
+    if (op == CompositionOp::OP_SOURCE) {
       // Emulate cairo operator source which is bound by mask!
       mDT->ClearRect(mRect);
       mDT->FillRect(mRect, aPattern, DrawOptions(aOpacity));
@@ -1163,9 +1120,6 @@ gfxContext::FillAzure(const Pattern& aPattern, Float aOpacity)
     }
   } else {
     EnsurePath();
-
-    NS_ASSERTION(!state.opIsClear, "We shouldn't be clearing complex paths!");
-
     mDT->Fill(mPath, aPattern, DrawOptions(aOpacity, op, state.aaMode));
   }
 }

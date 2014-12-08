@@ -20,11 +20,11 @@
 #include "gmp-errors.h"
 #include <stdint.h>
 
-// Maximum size of a record, in bytes.
-#define GMP_MAX_RECORD_SIZE (1024 * 1024 * 1024)
+// Maximum size of a record, in bytes; 10 megabytes.
+#define GMP_MAX_RECORD_SIZE (10 * 1024 * 1024)
 
-// Maximum length of a record name.
-#define GMP_MAX_RECORD_NAME_SIZE 200
+// Maximum length of a record name in bytes.
+#define GMP_MAX_RECORD_NAME_SIZE 2000
 
 // Provides basic per-origin storage for CDMs. GMPRecord instances can be
 // retrieved by calling GMPPlatformAPI->openstorage. Multiple GMPRecords
@@ -108,6 +108,33 @@ class GMPRecordClient {
   virtual void WriteComplete(GMPErr aStatus) = 0;
 
   virtual ~GMPRecordClient() {}
+};
+
+// Iterates over the records that are available. Note: this list maintains
+// a snapshot of the records that were present when the iterator was created.
+// Create by calling the GMPCreateRecordIteratorPtr function on the
+// GMPPlatformAPI struct.
+// Iteration is in alphabetical order.
+class GMPRecordIterator {
+public:
+  // Retrieve the name for the current record.
+  // Returns GMPNoErr if successful, or GMPEndOfEnumeration if iteration has
+  // reached the end.
+  virtual GMPErr GetName(const char ** aOutName, uint32_t * aOutNameLength) = 0;
+
+  // Advance iteration to the next record.
+  // Returns GMPNoErr if successful, or GMPEndOfEnumeration if iteration has
+  // reached the end.
+  virtual GMPErr NextRecord() = 0;
+
+  // Signals to the GMP host that the GMP is finished with the
+  // GMPRecordIterator. GMPs must call this to release memory held by
+  // the GMPRecordIterator. Do not access the GMPRecordIterator pointer
+  // after calling this!
+  // Memory retrieved by GetName is *not* valid after calling Close()!
+  virtual void Close() = 0;
+
+  virtual ~GMPRecordIterator() {}
 };
 
 #endif // GMP_STORAGE_h_

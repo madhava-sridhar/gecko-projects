@@ -325,7 +325,7 @@ struct BindData;
 
 class CompExprTransplanter;
 
-enum LetContext { LetExpresion, LetStatement };
+enum LetContext { LetExpression, LetStatement };
 enum VarContext { HoistVars, DontHoistVars };
 enum FunctionType { Getter, Setter, Normal };
 
@@ -377,6 +377,8 @@ class Parser : private JS::AutoGCRooter, public StrictModeGetter
     bool sawDeprecatedDestructuringForIn:1;
     bool sawDeprecatedLegacyGenerator:1;
     bool sawDeprecatedExpressionClosure:1;
+    bool sawDeprecatedLetBlock:1;
+    bool sawDeprecatedLetExpression:1;
 
     typedef typename ParseHandler::Node Node;
     typedef typename ParseHandler::DefinitionNode DefinitionNode;
@@ -506,6 +508,9 @@ class Parser : private JS::AutoGCRooter, public StrictModeGetter
     // whether it's prohibited due to strictness, JS version, or occurrence
     // inside a star generator.
     bool checkYieldNameValidity();
+    bool yieldExpressionsSupported() {
+        return versionNumber() >= JSVERSION_1_7 || pc->isGenerator();
+    }
 
     virtual bool strictMode() { return pc->sc->strict; }
 

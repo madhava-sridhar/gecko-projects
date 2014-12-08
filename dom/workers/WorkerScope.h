@@ -18,7 +18,7 @@ namespace dom {
 class Console;
 class Function;
 class Promise;
-class RequestOrScalarValueString;
+class RequestOrUSVString;
 
 namespace cache {
 class CacheStorage;
@@ -132,7 +132,7 @@ public:
   Performance* GetPerformance();
 
   already_AddRefed<Promise>
-  Fetch(const RequestOrScalarValueString& aInput,
+  Fetch(const RequestOrUSVString& aInput,
         const RequestInit& aInit,
         ErrorResult& aRv);
 

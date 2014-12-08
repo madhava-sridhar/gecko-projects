@@ -33,7 +33,7 @@ js_ReportOverRecursed(js::ThreadSafeContext *cx);
 namespace js {
 
 namespace jit {
-class IonContext;
+class JitContext;
 class CompileCompartment;
 class DebugModeOSRVolatileJitFrameIterator;
 }
@@ -313,7 +313,7 @@ class ExclusiveContext : public ThreadSafeContext
     friend class AutoLockForExclusiveAccess;
     friend struct StackBaseShape;
     friend void JSScript::initCompartment(ExclusiveContext *cx);
-    friend class jit::IonContext;
+    friend class jit::JitContext;
 
     // The thread on which this context is running, if this is not a JSContext.
     HelperThread *helperThread_;
@@ -423,6 +423,7 @@ struct JSContext : public js::ExclusiveContext,
     friend class js::ExclusiveContext;
     friend class JS::AutoSaveExceptionState;
     friend class js::jit::DebugModeOSRVolatileJitFrameIterator;
+    friend void js_ReportOverRecursed(JSContext *);
 
   private:
     /* Exception state -- the exception member is a GC root by definition. */
@@ -431,6 +432,10 @@ struct JSContext : public js::ExclusiveContext,
 
     /* Per-context options. */
     JS::ContextOptions  options_;
+
+    // True if the exception currently being thrown is by result of
+    // js_ReportOverRecursed. See Debugger::slowPathOnExceptionUnwind.
+    bool                overRecursed_;
 
     // True if propagating a forced return from an interrupt handler during
     // debug mode.
@@ -529,19 +534,6 @@ struct JSContext : public js::ExclusiveContext,
     inline JSScript *currentScript(jsbytecode **pc = nullptr,
                                    MaybeAllowCrossCompartment = DONT_ALLOW_CROSS_COMPARTMENT) const;
 
-#ifdef MOZ_TRACE_JSCALLS
-    /* Function entry/exit debugging callback. */
-    JSFunctionCallback    functionCallback;
-
-    void doFunctionCallback(const JSFunction *fun,
-                            const JSScript *scr,
-                            int entering) const
-    {
-        if (functionCallback)
-            functionCallback(fun, scr, this, entering);
-    }
-#endif
-
     // The generational GC nursery may only be used on the main thread.
 #ifdef JSGC_GENERATIONAL
     inline js::Nursery &nursery() {
@@ -571,9 +563,11 @@ struct JSContext : public js::ExclusiveContext,
 
     void clearPendingException() {
         throwing = false;
+        overRecursed_ = false;
         unwrappedException_.setUndefined();
     }
 
+    bool isThrowingOverRecursed() const { return throwing && overRecursed_; }
     bool isPropagatingForcedReturn() const { return propagatingForcedReturn_; }
     void setPropagatingForcedReturn() { propagatingForcedReturn_ = true; }
     void clearPropagatingForcedReturn() { propagatingForcedReturn_ = false; }
@@ -964,6 +958,7 @@ bool intrinsic_IsCallable(JSContext *cx, unsigned argc, Value *vp);
 bool intrinsic_ThrowError(JSContext *cx, unsigned argc, Value *vp);
 bool intrinsic_NewDenseArray(JSContext *cx, unsigned argc, Value *vp);
 bool intrinsic_IsConstructing(JSContext *cx, unsigned argc, Value *vp);
+bool intrinsic_SubstringKernel(JSContext *cx, unsigned argc, Value *vp);
 
 bool intrinsic_UnsafePutElements(JSContext *cx, unsigned argc, Value *vp);
 bool intrinsic_DefineDataProperty(JSContext *cx, unsigned argc, Value *vp);

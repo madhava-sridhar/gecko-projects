@@ -16,10 +16,10 @@ namespace image {
 
 Decoder::Decoder(RasterImage &aImage)
   : mImage(aImage)
-  , mCurrentFrame(nullptr)
   , mProgress(NoProgress)
   , mImageData(nullptr)
   , mColormap(nullptr)
+  , mChunkCount(0)
   , mDecodeFlags(0)
   , mBytesDecoded(0)
   , mDecodeDone(false)
@@ -27,6 +27,7 @@ Decoder::Decoder(RasterImage &aImage)
   , mFrameCount(0)
   , mFailCode(NS_OK)
   , mNeedsNewFrame(false)
+  , mNeedsToFlushData(false)
   , mInitialized(false)
   , mSizeDecode(false)
   , mInFrame(false)
@@ -35,6 +36,10 @@ Decoder::Decoder(RasterImage &aImage)
 
 Decoder::~Decoder()
 {
+  MOZ_ASSERT(mProgress == NoProgress,
+             "Destroying Decoder without taking all its progress changes");
+  MOZ_ASSERT(mInvalidRect.IsEmpty(),
+             "Destroying Decoder without taking all its invalidations");
   mInitialized = false;
 }
 
@@ -62,18 +67,19 @@ Decoder::Init()
 // Initializes a decoder whose image and observer is already being used by a
 // parent decoder
 void
-Decoder::InitSharedDecoder(uint8_t* imageData, uint32_t imageDataLength,
-                           uint32_t* colormap, uint32_t colormapSize,
-                           imgFrame* currentFrame)
+Decoder::InitSharedDecoder(uint8_t* aImageData, uint32_t aImageDataLength,
+                           uint32_t* aColormap, uint32_t aColormapSize,
+                           RawAccessFrameRef&& aFrameRef)
 {
   // No re-initializing
   NS_ABORT_IF_FALSE(!mInitialized, "Can't re-initialize a decoder!");
 
-  mImageData = imageData;
-  mImageDataLength = imageDataLength;
-  mColormap = colormap;
-  mColormapSize = colormapSize;
-  mCurrentFrame = currentFrame;
+  mImageData = aImageData;
+  mImageDataLength = aImageDataLength;
+  mColormap = aColormap;
+  mColormapSize = aColormapSize;
+  mCurrentFrame = Move(aFrameRef);
+
   // We have all the frame data, so we've started the frame.
   if (!IsSizeDecode()) {
     PostFrameStart();
@@ -90,16 +96,26 @@ Decoder::Write(const char* aBuffer, uint32_t aCount, DecodeStrategy aStrategy)
   PROFILER_LABEL("ImageDecoder", "Write",
     js::ProfileEntry::Category::GRAPHICS);
 
-  MOZ_ASSERT(NS_IsMainThread() || aStrategy == DECODE_ASYNC);
+  MOZ_ASSERT(NS_IsMainThread() || aStrategy == DecodeStrategy::ASYNC);
 
   // We're strict about decoder errors
   MOZ_ASSERT(!HasDecoderError(),
              "Not allowed to make more decoder calls after error!");
 
+  // Begin recording telemetry data.
+  TimeStamp start = TimeStamp::Now();
+  mChunkCount++;
+
   // Keep track of the total number of bytes written.
   mBytesDecoded += aCount;
 
-  // If a data error occured, just ignore future data
+  // If we're flushing data, clear the flag.
+  if (aBuffer == nullptr && aCount == 0) {
+    MOZ_ASSERT(mNeedsToFlushData, "Flushing when we don't need to");
+    mNeedsToFlushData = false;
+  }
+
+  // If a data error occured, just ignore future data.
   if (HasDataError())
     return;
 
@@ -113,18 +129,25 @@ Decoder::Write(const char* aBuffer, uint32_t aCount, DecodeStrategy aStrategy)
 
   // If we're a synchronous decoder and we need a new frame to proceed, let's
   // create one and call it again.
-  while (aStrategy == DECODE_SYNC && NeedsNewFrame() && !HasDataError()) {
-    nsresult rv = AllocateFrame();
+  if (aStrategy == DecodeStrategy::SYNC) {
+    while (NeedsNewFrame() && !HasDataError()) {
+      nsresult rv = AllocateFrame();
 
-    if (NS_SUCCEEDED(rv)) {
-      // Tell the decoder to use the data it saved when it asked for a new frame.
-      WriteInternal(nullptr, 0, aStrategy);
+      if (NS_SUCCEEDED(rv)) {
+        // Use the data we saved when we asked for a new frame.
+        WriteInternal(nullptr, 0, aStrategy);
+      }
+
+      mNeedsToFlushData = false;
     }
   }
+
+  // Finish telemetry.
+  mDecodeTime += (TimeStamp::Now() - start);
 }
 
 void
-Decoder::Finish(RasterImage::eShutdownIntent aShutdownIntent)
+Decoder::Finish(ShutdownReason aReason)
 {
   MOZ_ASSERT(NS_IsMainThread());
 
@@ -161,7 +184,7 @@ Decoder::Finish(RasterImage::eShutdownIntent aShutdownIntent)
     }
 
     bool usable = !HasDecoderError();
-    if (aShutdownIntent != RasterImage::eShutdownIntent_NotNeeded && !HasDecoderError()) {
+    if (aReason != ShutdownReason::NOT_NEEDED && !HasDecoderError()) {
       // If we only have a data error, we're usable if we have at least one complete frame.
       if (GetCompleteFrameCount() == 0) {
         usable = false;
@@ -177,17 +200,19 @@ Decoder::Finish(RasterImage::eShutdownIntent aShutdownIntent)
       PostDecodeDone();
     } else {
       if (!IsSizeDecode()) {
-        mProgress |= FLAG_DECODE_STOPPED | FLAG_ONLOAD_UNBLOCKED;
+        mProgress |= FLAG_DECODE_COMPLETE | FLAG_ONLOAD_UNBLOCKED;
       }
       mProgress |= FLAG_HAS_ERROR;
     }
   }
 
-  // Set image metadata before calling DecodingComplete, because DecodingComplete calls Optimize().
+  // Set image metadata before calling DecodingComplete, because
+  // DecodingComplete calls Optimize().
   mImageMetadata.SetOnImage(&mImage);
 
   if (mDecodeDone) {
-    mImage.DecodingComplete();
+    MOZ_ASSERT(HasError() || mCurrentFrame, "Should have an error or a frame");
+    mImage.DecodingComplete(mCurrentFrame.get());
   }
 }
 
@@ -207,34 +232,22 @@ Decoder::AllocateFrame()
   MOZ_ASSERT(mNeedsNewFrame);
   MOZ_ASSERT(NS_IsMainThread());
 
-  nsresult rv;
-  nsRefPtr<imgFrame> frame;
-  if (mNewFrameData.mPaletteDepth) {
-    rv = mImage.EnsureFrame(mNewFrameData.mFrameNum, mNewFrameData.mOffsetX,
-                            mNewFrameData.mOffsetY, mNewFrameData.mWidth,
-                            mNewFrameData.mHeight, mNewFrameData.mFormat,
-                            mNewFrameData.mPaletteDepth,
-                            &mImageData, &mImageDataLength,
-                            &mColormap, &mColormapSize,
-                            getter_AddRefs(frame));
-  } else {
-    rv = mImage.EnsureFrame(mNewFrameData.mFrameNum, mNewFrameData.mOffsetX,
-                            mNewFrameData.mOffsetY, mNewFrameData.mWidth,
-                            mNewFrameData.mHeight, mNewFrameData.mFormat,
-                            &mImageData, &mImageDataLength,
-                            getter_AddRefs(frame));
-  }
+  mCurrentFrame = mImage.EnsureFrame(mNewFrameData.mFrameNum,
+                                     mNewFrameData.mFrameRect,
+                                     mDecodeFlags,
+                                     mNewFrameData.mFormat,
+                                     mNewFrameData.mPaletteDepth,
+                                     mCurrentFrame.get());
 
-  if (NS_SUCCEEDED(rv)) {
-    mCurrentFrame = frame;
-  } else {
-    mCurrentFrame = nullptr;
-  }
+  if (mCurrentFrame) {
+    // Gather the raw pointers the decoders will use.
+    mCurrentFrame->GetImageData(&mImageData, &mImageDataLength);
+    mCurrentFrame->GetPaletteData(&mColormap, &mColormapSize);
 
-  // Notify if appropriate
-  if (NS_SUCCEEDED(rv) && mNewFrameData.mFrameNum == mFrameCount) {
-    PostFrameStart();
-  } else if (NS_FAILED(rv)) {
+    if (mNewFrameData.mFrameNum == mFrameCount) {
+      PostFrameStart();
+    }
+  } else {
     PostDataError();
   }
 
@@ -242,7 +255,13 @@ Decoder::AllocateFrame()
   // so they can tell us if they need yet another.
   mNeedsNewFrame = false;
 
-  return rv;
+  // If we've received any data at all, we may have pending data that needs to
+  // be flushed now that we have a frame to decode into.
+  if (mBytesDecoded > 0) {
+    mNeedsToFlushData = true;
+  }
+
+  return mCurrentFrame ? NS_OK : NS_ERROR_FAILURE;
 }
 
 void
@@ -281,7 +300,13 @@ Decoder::PostSize(int32_t aWidth,
   mImageMetadata.SetSize(aWidth, aHeight, aOrientation);
 
   // Record this notification.
-  mProgress |= FLAG_HAS_SIZE;
+  mProgress |= FLAG_SIZE_AVAILABLE;
+}
+
+void
+Decoder::PostHasTransparency()
+{
+  mProgress |= FLAG_HAS_TRANSPARENCY;
 }
 
 void
@@ -303,8 +328,8 @@ Decoder::PostFrameStart()
   // Decoder implementations should only call this method if they successfully
   // appended the frame to the image. So mFrameCount should always match that
   // reported by the Image.
-  NS_ABORT_IF_FALSE(mFrameCount == mImage.GetNumFrames(),
-                    "Decoder frame count doesn't match image's!");
+  MOZ_ASSERT(mFrameCount == mImage.GetNumFrames(),
+             "Decoder frame count doesn't match image's!");
 }
 
 void
@@ -330,7 +355,7 @@ Decoder::PostFrameStop(FrameBlender::FrameAlpha aFrameAlpha /* = FrameBlender::k
   mCurrentFrame->SetBlendMethod(aBlendMethod);
   mCurrentFrame->ImageUpdated(mCurrentFrame->GetRect());
 
-  mProgress |= FLAG_FRAME_STOPPED | FLAG_ONLOAD_UNBLOCKED;
+  mProgress |= FLAG_FRAME_COMPLETE | FLAG_ONLOAD_UNBLOCKED;
 }
 
 void
@@ -354,9 +379,8 @@ Decoder::PostDecodeDone(int32_t aLoopCount /* = 0 */)
   mDecodeDone = true;
 
   mImageMetadata.SetLoopCount(aLoopCount);
-  mImageMetadata.SetIsNonPremultiplied(GetDecodeFlags() & DECODER_NO_PREMULTIPLY_ALPHA);
 
-  mProgress |= FLAG_DECODE_STOPPED;
+  mProgress |= FLAG_DECODE_COMPLETE;
 }
 
 void
@@ -389,7 +413,9 @@ Decoder::NeedNewFrame(uint32_t framenum, uint32_t x_offset, uint32_t y_offset,
   // We don't want images going back in time or skipping frames.
   MOZ_ASSERT(framenum == mFrameCount || framenum == (mFrameCount - 1));
 
-  mNewFrameData = NewFrameData(framenum, x_offset, y_offset, width, height, format, palette_depth);
+  mNewFrameData = NewFrameData(framenum,
+                               nsIntRect(x_offset, y_offset, width, height),
+                               format, palette_depth);
   mNeedsNewFrame = true;
 }
 

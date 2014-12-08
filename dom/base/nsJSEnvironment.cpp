@@ -187,6 +187,7 @@ static uint32_t sCleanupsSinceLastGC = UINT32_MAX;
 static bool sNeedsFullCC = false;
 static bool sNeedsGCAfterCC = false;
 static bool sIncrementalCC = false;
+static bool sDidPaintAfterPreviousICCSlice = false;
 
 static nsScriptNameSpaceManager *gNameSpaceManager;
 
@@ -1708,7 +1709,8 @@ nsJSContext::RunCycleCollectorSlice()
     }
   }
 
-  nsCycleCollector_collectSlice(budget);
+  nsCycleCollector_collectSlice(budget, sDidPaintAfterPreviousICCSlice);
+  sDidPaintAfterPreviousICCSlice = false;
 
   gCCStats.FinishCycleCollectionSlice();
 }
@@ -2412,14 +2414,6 @@ DOMGCSliceCallback(JSRuntime *aRt, JS::GCProgress aProgress, const JS::GCDescrip
 }
 
 void
-nsJSContext::ReportPendingException()
-{
-  if (mIsInitialized) {
-    nsJSUtils::ReportPendingException(mContext);
-  }
-}
-
-void
 nsJSContext::SetWindowProxy(JS::Handle<JSObject*> aWindowProxy)
 {
   mWindowProxy = aWindowProxy;
@@ -2862,6 +2856,12 @@ nsJSContext::EnsureStatics()
   }
 
   sIsInitialized = true;
+}
+
+void
+nsJSContext::NotifyDidPaint()
+{
+  sDidPaintAfterPreviousICCSlice = true;
 }
 
 nsScriptNameSpaceManager*

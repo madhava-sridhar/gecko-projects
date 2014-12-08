@@ -114,6 +114,7 @@ pref("browser.display.remotetabs.timeout", 10);
 /* session history */
 pref("browser.sessionhistory.max_total_viewers", 1);
 pref("browser.sessionhistory.max_entries", 50);
+pref("browser.sessionhistory.contentViewerTimeout", 360);
 
 /* session store */
 pref("browser.sessionstore.resume_session_once", false);
@@ -574,7 +575,6 @@ pref("media.fragmented-mp4.android-media-codec.preferred", true);
 
 // optimize images memory usage
 pref("image.mem.decodeondraw", true);
-pref("image.mem.min_discard_timeout_ms", 10000);
 
 #ifdef NIGHTLY_BUILD
 // Shumway component (SWF player) is disabled by default. Also see bug 904346.
@@ -856,3 +856,6 @@ pref("home.sync.checkIntervalSecs", 3600);
 
 // Enable device storage API
 pref("device.storage.enabled", true);
+
+// Enable meta-viewport support for font inflation code
+pref("dom.meta-viewport.enabled", true);

@@ -118,6 +118,10 @@ function testInit() {
 
   Services.prefs.setBoolPref("testing.jetpackTestHarness.running", true);
 
+  // Need to set this very early, otherwise the false value gets cached in
+  // DOM bindings code.
+  Services.prefs.setBoolPref("dom.indexedDB.experimental", true);
+
   // Get the list of tests to run
   let config = readConfig();
   getTestList(config, function(links) {
@@ -155,6 +159,9 @@ function testInit() {
         output: {
           logLevel: "verbose",
           format: "tbpl",
+        },
+        console: {
+          logLevel: "info",
         },
       }
       setPrefs("extensions." + TEST_ID + ".sdk", options);

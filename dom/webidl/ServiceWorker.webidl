@@ -11,7 +11,7 @@
 [Func="mozilla::dom::workers::ServiceWorkerVisible",
  Exposed=(ServiceWorker,Window)]
 interface ServiceWorker : EventTarget {
-  readonly attribute ScalarValueString scriptURL;
+  readonly attribute USVString scriptURL;
   readonly attribute ServiceWorkerState state;
 
   attribute EventHandler onstatechange;

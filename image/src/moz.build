@@ -16,12 +16,11 @@ EXPORTS += [
 
 UNIFIED_SOURCES += [
     'ClippedImage.cpp',
+    'DecodePool.cpp',
     'Decoder.cpp',
-    'DiscardTracker.cpp',
     'DynamicImage.cpp',
     'FrameAnimator.cpp',
     'FrameBlender.cpp',
-    'FrameSequence.cpp',
     'FrozenImage.cpp',
     'Image.cpp',
     'ImageFactory.cpp',

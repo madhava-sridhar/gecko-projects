@@ -72,7 +72,6 @@ class RestyleManager;
 class CounterStyleManager;
 namespace dom {
 class FontFaceSet;
-class MediaQueryList;
 }
 namespace layers {
 class ContainerLayer;
@@ -81,8 +80,7 @@ class ContainerLayer;
 
 // supported values for cached bool types
 enum nsPresContext_CachedBoolPrefType {
-  kPresContext_UseDocumentColors = 1,
-  kPresContext_UseDocumentFonts,
+  kPresContext_UseDocumentFonts = 1,
   kPresContext_UnderlineLinks
 };
 
@@ -290,12 +288,6 @@ public:
   }
 
   /**
-   * Support for window.matchMedia()
-   */
-  already_AddRefed<mozilla::dom::MediaQueryList>
-    MatchMedia(const nsAString& aMediaQueryList);
-
-  /**
    * Access compatibility mode for this context.  This is the same as
    * our document's compatibility mode.
    */
@@ -385,8 +377,6 @@ public:
     switch (aPrefType) {
     case kPresContext_UseDocumentFonts:
       return mUseDocumentFonts;
-    case kPresContext_UseDocumentColors:
-      return mUseDocumentColors;
     case kPresContext_UnderlineLinks:
       return mUnderlineLinks;
     default:
@@ -806,12 +796,6 @@ public:
    */
   void UIResolutionChanged();
 
-  /**
-   * Recursively notify all remote leaf descendants of a given message manager
-   * that the resolution of the user interface has changed.
-   */
-  void NotifyUIResolutionChanged(nsIMessageBroadcaster* aManager);
-
   /*
    * Notify the pres context that a system color has changed
    */
@@ -859,7 +843,9 @@ public:
 
   // Is it OK to let the page specify colors and backgrounds?
   bool UseDocumentColors() const {
-    return GetCachedBoolPref(kPresContext_UseDocumentColors) || IsChrome() || IsChromeOriginImage();
+    MOZ_ASSERT(mUseDocumentColors || !(IsChrome() || IsChromeOriginImage()),
+               "We should never have a chrome doc or image that can't use its colors.");
+    return mUseDocumentColors;
   }
 
   // Explicitly enable and disable paint flashing.
@@ -1238,8 +1224,6 @@ public:
 protected:
 
   mozilla::WeakPtr<nsDocShell>             mContainer;
-
-  PRCList               mDOMMediaQueryLists;
 
   // Base minimum font size, independent of the language-specific global preference. Defaults to 0
   int32_t               mBaseMinFontSize;

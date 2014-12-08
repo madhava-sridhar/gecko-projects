@@ -192,10 +192,17 @@ struct Zone : public JS::shadow::Zone,
             return needsIncrementalBarrier();
     }
 
+    bool isCollectingFromAnyThread() const {
+        if (runtimeFromAnyThread()->isHeapCollecting())
+            return gcState_ != NoGC;
+        else
+            return needsIncrementalBarrier();
+    }
+
     // If this returns true, all object tracing must be done with a GC marking
     // tracer.
     bool requireGCTracer() const {
-        JSRuntime *rt = runtimeFromMainThread();
+        JSRuntime *rt = runtimeFromAnyThread();
         return rt->isHeapMajorCollecting() && !rt->isHeapCompacting() && gcState_ != NoGC;
     }
 
@@ -242,6 +249,10 @@ struct Zone : public JS::shadow::Zone,
     void sweepCompartments(js::FreeOp *fop, bool keepAtleastOne, bool lastGC);
 
     js::jit::JitZone *createJitZone(JSContext *cx);
+
+    bool isQueuedForBackgroundSweep() {
+        return isOnList();
+    }
 
   public:
     js::Allocator allocator;
@@ -306,6 +317,12 @@ struct Zone : public JS::shadow::Zone,
     bool gcScheduled_;
     bool gcPreserveCode_;
     bool jitUsingBarriers_;
+
+    // Allow zones to be linked into a list
+    friend class js::gc::ZoneList;
+    static Zone * const NotOnList;
+    Zone *listNext_;
+    bool isOnList();
 
     friend bool js::CurrentThreadCanAccessZone(Zone *zone);
     friend class js::gc::GCRuntime;

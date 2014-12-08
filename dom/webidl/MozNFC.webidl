@@ -29,12 +29,6 @@ enum NfcErrorMessage {
 [NoInterfaceObject]
 interface MozNFCManager {
   /**
-   * Returns MozNFCPeer object or null in case of invalid sessionToken
-   */
-   [CheckPermissions="nfc-manager"]
-  MozNFCPeer? getNFCPeer(DOMString sessionToken);
-
-  /**
    * API to check if the given application's manifest
    * URL is registered with the Chrome Process or not.
    *
@@ -42,7 +36,7 @@ interface MozNFCManager {
    * otherwise error
    */
   [CheckPermissions="nfc-manager"]
-  DOMRequest checkP2PRegistration(DOMString manifestUrl);
+  Promise<boolean> checkP2PRegistration(DOMString manifestUrl);
 
   /**
    * Notify that user has accepted to share nfc message on P2P UI
@@ -60,25 +54,25 @@ interface MozNFCManager {
    * Power on the NFC hardware and start polling for NFC tags or devices.
    */
   [CheckPermissions="nfc-manager"]
-  DOMRequest startPoll();
+  Promise<void> startPoll();
 
   /**
    * Stop polling for NFC tags or devices. i.e. enter low power mode.
    */
   [CheckPermissions="nfc-manager"]
-  DOMRequest stopPoll();
+  Promise<void> stopPoll();
 
   /**
    * Power off the NFC hardware.
    */
   [CheckPermissions="nfc-manager"]
-  DOMRequest powerOff();
+  Promise<void> powerOff();
 };
 
 [JSImplementation="@mozilla.org/navigatorNfc;1",
  NavigatorProperty="mozNfc",
  Func="Navigator::HasNFCSupport",
- CheckPermissions="nfc-read nfc-write",
+ CheckPermissions="nfc nfc-share",
  AvailableIn="CertifiedApps"]
 interface MozNFC : EventTarget {
   /**
@@ -86,32 +80,28 @@ interface MozNFC : EventTarget {
    * to share data to the NFCPeer object by calling mozNFC.notifyUserAcceptedP2P.
    * The event will be type of NFCPeerEvent.
    */
-  [CheckPermissions="nfc-write"]
+  [CheckPermissions="nfc-share"]
   attribute EventHandler onpeerready;
 
   /**
    * This event will be fired when a NFCPeer is detected.
    */
-  [CheckPermissions="nfc-write"]
   attribute EventHandler onpeerfound;
 
   /**
    * This event will be fired when NFCPeer, earlier detected in onpeerready
    * or onpeerfound, moves out of range.
    */
-  [CheckPermissions="nfc-write"]
   attribute EventHandler onpeerlost;
 
   /**
    * Ths event will be fired when a NFCTag is detected.
    */
-  [CheckPermissions="nfc-read nfc-write"]
   attribute EventHandler ontagfound;
 
   /**
    * This event will be fired if the tag detected in ontagfound has been removed.
    */
-  [CheckPermissions="nfc-read nfc-write"]
   attribute EventHandler ontaglost;
 };
 

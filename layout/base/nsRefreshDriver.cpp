@@ -27,6 +27,7 @@
 
 #include "mozilla/ArrayUtils.h"
 #include "mozilla/AutoRestore.h"
+#include "nsHostObjectProtocolHandler.h"
 #include "nsRefreshDriver.h"
 #include "nsITimer.h"
 #include "nsLayoutUtils.h"
@@ -50,6 +51,8 @@
 #include "mozilla/dom/ScriptSettings.h"
 #include "nsDocShell.h"
 #include "nsISimpleEnumerator.h"
+#include "nsJSEnvironment.h"
+#include "mozilla/Telemetry.h"
 
 using namespace mozilla;
 using namespace mozilla::widget;
@@ -296,6 +299,7 @@ protected:
         this,
         (aNowTime - mTargetTime).ToMilliseconds(),
         delay);
+    Telemetry::Accumulate(Telemetry::FX_REFRESH_DRIVER_FRAME_DELAY_MS, (aNowTime - mTargetTime).ToMilliseconds());
 
     // then schedule the timer
     LOG("[%p] scheduling callback for %d ms (2)", this, delay);
@@ -410,6 +414,7 @@ protected:
         this,
         (aNowTime - mTargetTime).ToMilliseconds(),
         delay);
+    Telemetry::Accumulate(Telemetry::FX_REFRESH_DRIVER_FRAME_DELAY_MS, (aNowTime - mTargetTime).ToMilliseconds());
 
     // then schedule the timer
     LOG("[%p] scheduling callback for %d ms (2)", this, delay);
@@ -856,6 +861,18 @@ nsRefreshDriver::EnsureTimerStarted(bool aAdjustingTimer)
     // If we don't want to start it now, or we've been disconnected.
     StopTimer();
     return;
+  }
+
+  if (mPresContext->Document()->IsBeingUsedAsImage()) {
+    // Image documents receive ticks from clients' refresh drivers.
+    // XXXdholbert Exclude SVG-in-opentype fonts from this optimization, until
+    // they receive refresh-driver ticks from their client docs (bug 1107252).
+    nsIURI* uri = mPresContext->Document()->GetDocumentURI();
+    if (!uri || !IsFontTableURI(uri)) {
+      MOZ_ASSERT(!mActiveTimer,
+                 "image doc refresh driver should never have its own timer");
+      return;
+    }
   }
 
   // We got here because we're either adjusting the time *or* we're
@@ -1365,6 +1382,7 @@ nsRefreshDriver::Tick(int64_t aNowEpoch, TimeStamp aNowTime)
 
     if (nsContentUtils::XPConnect()) {
       nsContentUtils::XPConnect()->NotifyDidPaint();
+      nsJSContext::NotifyDidPaint();
     }
   }
 

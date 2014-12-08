@@ -37,8 +37,16 @@ specialpowers.specialPowersObserver.init();
 Cu.import("resource://gre/modules/FileUtils.jsm");
 Cu.import("resource://gre/modules/NetUtil.jsm");
 
+function isMulet() {
+  let isMulet = false;
+  try {
+   isMulet = Services.prefs.getBoolPref("b2g.is_mulet");
+  } catch (ex) { }
+  return isMulet;
+}
+
 Services.prefs.setBoolPref("marionette.contentListener", false);
-let appName = Services.appinfo.name;
+let appName = isMulet() ? "B2G" : Services.appinfo.name;
 
 let { devtools } = Cu.import("resource://gre/modules/devtools/Loader.jsm", {});
 let DevToolsUtils = devtools.require("devtools/toolkit/DevToolsUtils.js");
@@ -481,16 +489,32 @@ MarionetteServerConnection.prototype = {
    *        True if this is the first time we're talking to this browser
    */
   whenBrowserStarted: function MDA_whenBrowserStarted(win, newSession) {
+    utils.window = win;
+
     try {
+      let mm = win.window.messageManager;
+      if (!newSession) {
+        // Loading the frame script corresponds to a situation we need to
+        // return to the server. If the messageManager is a message broadcaster
+        // with no children, we don't have a hope of coming back from this call,
+        // so send the ack here. Otherwise, make a note of how many child scripts
+        // will be loaded so we known when it's safe to return.
+        if (mm.childCount === 0) {
+          this.sendOk(this.command_id);
+        } else {
+          this.curBrowser.frameRegsPending = mm.childCount;
+        }
+      }
+
       if (!Services.prefs.getBoolPref("marionette.contentListener") || !newSession) {
-        this.curBrowser.loadFrameScript(FRAME_SCRIPT, win);
+        mm.loadFrameScript(FRAME_SCRIPT, true, true);
+        Services.prefs.setBoolPref("marionette.contentListener", true);
       }
     }
     catch (e) {
       //there may not always be a content process
       logger.info("could not load listener into content for page: " + win.location.href);
     }
-    utils.window = win;
   },
 
   /**
@@ -1167,6 +1191,16 @@ MarionetteServerConnection.prototype = {
       return;
     }
 
+    // At least on desktop, navigating in chrome scope does not
+    // correspond to something a user can do, and leaves marionette
+    // and the browser in an unusable state. Return a generic error insted.
+    // TODO: Error codes need to be refined as a part of bug 1100545 and
+    // bug 945729.
+    if (appName == "Firefox") {
+      this.sendError("Cannot navigate in chrome context", 13, null, command_id);
+      return;
+    }
+
     this.getCurrentWindow().location.href = aRequest.parameters.url;
     let checkTimer = Cc["@mozilla.org/timer;1"].createInstance(Ci.nsITimer);
     let start = new Date().getTime();
@@ -1395,8 +1429,8 @@ MarionetteServerConnection.prototype = {
         else {
           utils.window = foundWin;
           this.curBrowser = this.browsers[winId];
+          this.sendOk(command_id);
         }
-        this.sendOk(command_id);
         return;
       }
     }
@@ -1462,7 +1496,7 @@ MarionetteServerConnection.prototype = {
         if (this.curBrowser.elementManager.seenItems[aRequest.parameters.element]) {
           let wantedFrame = this.curBrowser.elementManager.getKnownElement(aRequest.parameters.element, curWindow); //HTMLIFrameElement
           // Deal with an embedded xul:browser case
-          if (wantedFrame.tagName == "xul:browser") {
+          if (wantedFrame.tagName == "xul:browser" || wantedFrame.tagName == "browser") {
             curWindow = wantedFrame.contentWindow;
             this.curFrame = curWindow;
             if (aRequest.parameters.focus) {
@@ -2777,6 +2811,16 @@ MarionetteServerConnection.prototype = {
             this.newSessionCommandId = null;
           }
         }
+        if (this.curBrowser.frameRegsPending) {
+          if (this.curBrowser.frameRegsPending > 0) {
+            this.curBrowser.frameRegsPending -= 1;
+          }
+          if (this.curBrowser.frameRegsPending === 0) {
+            // In case of a freshly registered window, we're responsible here
+            // for sending the ack.
+            this.sendOk(this.command_id);
+          }
+        }
         return [reg, mainContent];
       case "Marionette:emitTouchEvent":
         let globalMessageManager = Cc["@mozilla.org/globalmessagemanager;1"]
@@ -2889,7 +2933,7 @@ function BrowserObj(win, server) {
   this.startPage = "about:blank";
   this.mainContentId = null; // used in B2G to identify the homescreen content page
   this.newSession = true; //used to set curFrameId upon new session
-  this.elementManager = new ElementManager([SELECTOR, NAME, LINK_TEXT, PARTIAL_LINK_TEXT]);
+  this.elementManager = new ElementManager([NAME, LINK_TEXT, PARTIAL_LINK_TEXT]);
   this.setBrowser(win);
   this.frameManager = new FrameManager(server); //We should have one FM per BO so that we can handle modals in each Browser
 
@@ -2907,10 +2951,9 @@ BrowserObj.prototype = {
   setBrowser: function BO_setBrowser(win) {
     switch (appName) {
       case "Firefox":
-        if (this.window.location.href.indexOf("chrome://b2g") == -1) {
+        if (!isMulet()) {
           this.browser = win.gBrowser;
-        }
-        else {
+        } else {
           // this is Mulet
           appName = "B2G";
         }
@@ -2953,19 +2996,6 @@ BrowserObj.prototype = {
    */
   addTab: function BO_addTab(uri) {
     return this.browser.addTab(uri, true);
-  },
-
-  /**
-   * Loads content listeners if we don't already have them
-   *
-   * @param string script
-   *        path of script to load
-   * @param nsIDOMWindow frame
-   *        frame to load the script in
-   */
-  loadFrameScript: function BO_loadFrameScript(script, frame) {
-    frame.window.messageManager.loadFrameScript(script, true, true);
-    Services.prefs.setBoolPref("marionette.contentListener", true);
   },
 
   /**

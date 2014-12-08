@@ -317,6 +317,7 @@ public:
                                          const FileDescriptor& aFileDescriptor)
                                          MOZ_OVERRIDE;
     virtual bool RecvShow(const nsIntSize& aSize,
+                          const ShowInfo& aInfo,
                           const ScrollingBehavior& aScrolling,
                           const TextureFactoryIdentifier& aTextureFactoryIdentifier,
                           const uint64_t& aLayersId,
@@ -503,6 +504,8 @@ protected:
 
     virtual bool RecvRequestNotifyAfterRemotePaint();
 
+    virtual bool RecvParentActivated(const bool& aActivated) MOZ_OVERRIDE;
+
 #ifdef MOZ_WIDGET_GONK
     void MaybeRequestPreinitCamera();
 #endif
@@ -550,6 +553,8 @@ private:
                     const uint64_t& aLayersId,
                     PRenderFrameChild* aRenderFrame);
 
+    void ApplyShowInfo(const ShowInfo& aInfo);
+
     // These methods are used for tracking synthetic mouse events
     // dispatched for compatibility.  On each touch event, we
     // UpdateTapState().  If we've detected that the current gesture
@@ -573,6 +578,10 @@ private:
     void SendPendingTouchPreventedResponse(bool aPreventDefault,
                                            const ScrollableLayerGuid& aGuid);
 
+    void SendSetTargetAPZCNotification(const WidgetTouchEvent& aEvent,
+                                       const mozilla::layers::ScrollableLayerGuid& aGuid,
+                                       const uint64_t& aInputBlockId);
+
     void SetTabId(const TabId& aTabId)
     {
       MOZ_ASSERT(mUniqueId == 0);
@@ -583,6 +592,7 @@ private:
 
     class CachedFileDescriptorInfo;
     class CachedFileDescriptorCallbackRunnable;
+    class DelayedDeleteRunnable;
 
     TextureFactoryIdentifier mTextureFactoryIdentifier;
     nsCOMPtr<nsIWebNavigation> mWebNav;

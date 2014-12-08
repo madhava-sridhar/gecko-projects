@@ -204,7 +204,7 @@ template <> struct ExecutionModeTraits<ParallelExecution>
 
 namespace jit {
     struct IonScript;
-    class IonAllocPolicy;
+    class JitAllocPolicy;
     class TempAllocator;
 }
 
@@ -798,10 +798,10 @@ class TemporaryTypeSet : public TypeSet
     /* Get the prototype shared by all objects in this set, or nullptr. */
     JSObject *getCommonPrototype();
 
-    /* Get the typed array type of all objects in this set, or Scalar::TypeMax. */
+    /* Get the typed array type of all objects in this set, or Scalar::MaxTypedArrayViewType. */
     Scalar::Type getTypedArrayType();
 
-    /* Get the shared typed array type of all objects in this set, or Scalar::TypeMax. */
+    /* Get the shared typed array type of all objects in this set, or Scalar::MaxTypedArrayViewType. */
     Scalar::Type getSharedTypedArrayType();
 
     /* Whether clasp->isCallable() is true for one or more objects in this set. */
@@ -939,13 +939,14 @@ class TypeNewScript
     // analyses are performed and this array is cleared. The pointers in this
     // array are weak.
     static const uint32_t PRELIMINARY_OBJECT_COUNT = 20;
-    NativeObject **preliminaryObjects;
+    PlainObject **preliminaryObjects;
 
     // After the new script properties analyses have been performed, a template
     // object to use for newly constructed objects. The shape of this object
     // reflects all definite properties the object will have, and the
-    // allocation kind to use.
-    HeapPtrNativeObject templateObject_;
+    // allocation kind to use. Note that this is actually a PlainObject, but is
+    // JSObject here to avoid cyclic include dependencies.
+    HeapPtrPlainObject templateObject_;
 
     // Order in which definite properties become initialized. We need this in
     // case the definite properties are invalidated (such as by adding a setter
@@ -990,7 +991,7 @@ class TypeNewScript
         return true;
     }
 
-    NativeObject *templateObject() const {
+    PlainObject *templateObject() const {
         return templateObject_;
     }
 
@@ -1009,8 +1010,8 @@ class TypeNewScript
     void fixupAfterMovingGC();
 #endif
 
-    void registerNewObject(NativeObject *res);
-    void unregisterNewObject(NativeObject *res);
+    void registerNewObject(PlainObject *res);
+    void unregisterNewObject(PlainObject *res);
     bool maybeAnalyze(JSContext *cx, TypeObject *type, bool *regenerate, bool force = false);
 
     void rollbackPartiallyInitializedObjects(JSContext *cx, TypeObject *type);
@@ -1137,9 +1138,12 @@ struct TypeObject : public gc::TenuredCell
      *
      * The type sets in the properties of a type object describe the possible
      * values that can be read out of that property in actual JS objects.
-     * Properties only account for native properties (those with a slot and no
-     * specialized getter hook) and the elements of dense arrays. For accesses
-     * on such properties, the correspondence is as follows:
+     * In native objects, property types account for plain data properties
+     * (those with a slot and no getter or setter hook) and dense elements.
+     * In typed objects, property types account for object and value properties
+     * and elements in the object.
+     *
+     * For accesses on these properties, the correspondence is as follows:
      *
      * 1. If the type has unknownProperties(), the possible properties and
      *    value types for associated JSObjects are unknown.
@@ -1148,16 +1152,21 @@ struct TypeObject : public gc::TenuredCell
      *    which is a property in obj, before obj->getProperty(id) the property
      *    in type for id must reflect the result of the getProperty.
      *
-     *    There is an exception for properties of global JS objects which
-     *    are undefined at the point where the property was (lazily) generated.
-     *    In such cases the property type set will remain empty, and the
-     *    'undefined' type will only be added after a subsequent assignment or
-     *    deletion. After these properties have been assigned a defined value,
-     *    the only way they can become undefined again is after such an assign
-     *    or deletion.
+     * There are several exceptions to this:
      *
-     *    There is another exception for array lengths, which are special cased
-     *    by the compiler and VM and are not reflected in property types.
+     * 1. For properties of global JS objects which are undefined at the point
+     *    where the property was (lazily) generated, the property type set will
+     *    remain empty, and the 'undefined' type will only be added after a
+     *    subsequent assignment or deletion. After these properties have been
+     *    assigned a defined value, the only way they can become undefined
+     *    again is after such an assign or deletion.
+     *
+     * 2. Array lengths are special cased by the compiler and VM and are not
+     *    reflected in property types.
+     *
+     * 3. In typed objects, the initial values of properties (null pointers and
+     *    undefined values) are not reflected in the property types. These
+     *    values are always possible when reading the property.
      *
      * We establish these by using write barriers on calls to setProperty and
      * defineProperty which are on native properties, and on any jitcode which
@@ -1201,13 +1210,7 @@ struct TypeObject : public gc::TenuredCell
     gc::InitialHeap initialHeap(CompilerConstraintList *constraints);
 
     bool canPreTenure() {
-        // Only types associated with particular allocation sites or 'new'
-        // scripts can be marked as needing pretenuring. Other types can be
-        // used for different purposes across the compartment and can't use
-        // this bit reliably.
-        if (unknownProperties())
-            return false;
-        return fromAllocationSite() || newScript();
+        return !unknownProperties();
     }
 
     bool fromAllocationSite() {
@@ -1686,7 +1689,7 @@ struct TypeCompartment
 
   public:
     void fixArrayType(ExclusiveContext *cx, ArrayObject *obj);
-    void fixObjectType(ExclusiveContext *cx, NativeObject *obj);
+    void fixObjectType(ExclusiveContext *cx, PlainObject *obj);
     void fixRestArgumentsType(ExclusiveContext *cx, ArrayObject *obj);
 
     JSObject *newTypedObject(JSContext *cx, IdValuePair *properties, size_t nproperties);

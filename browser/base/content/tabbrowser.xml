@@ -1099,6 +1099,7 @@
             }
 
             if (!this._previewMode) {
+              this.mCurrentTab.lastAccessed = Infinity;
               this.mCurrentTab.removeAttribute("unread");
               oldTab.lastAccessed = Date.now();
 
@@ -1638,6 +1639,7 @@
             t.linkedBrowser = b;
             this._tabForBrowser.set(b, t);
             t._tPos = position;
+            t.lastAccessed = Date.now();
             this.tabContainer._setPositionalAttributes();
 
             // Prevent the superfluous initial load of a blank document
@@ -1657,6 +1659,9 @@
             // allows the TabLabelModified event to be properly dispatched.
             if (!aURI || isBlankPageURL(aURI)) {
               t.label = this.mStringBundle.getString("tabs.emptyTabTitle");
+            } else if (aURI.toLowerCase().startsWith("javascript:")) {
+              // This can go away when bug 672618 or bug 55696 are fixed.
+              t.label = aURI;
             }
 
             this.tabContainer.updateVisibility();
@@ -3082,10 +3087,13 @@
               let spellInfo = aMessage.data.spellInfo;
               if (spellInfo)
                 spellInfo.target = aMessage.target.messageManager;
-              gContextMenuContentData = { event: aMessage.objects.event,
+              gContextMenuContentData = { isRemote: true,
+                                          event: aMessage.objects.event,
+                                          popupNode: aMessage.objects.popupNode,
                                           browser: browser,
                                           editFlags: aMessage.data.editFlags,
-                                          spellInfo: spellInfo };
+                                          spellInfo: spellInfo,
+                                          addonInfo: aMessage.data.addonInfo };
               let popup = browser.ownerDocument.getElementById("contentAreaContextMenu");
               let event = gContextMenuContentData.event;
               let pos = browser.mapScreenCoordinatesFromContent(event.screenX, event.screenY);
@@ -3130,6 +3138,7 @@
           this.mCurrentTab.linkedPanel = uniqueId;
           this.mCurrentTab._tPos = 0;
           this.mCurrentTab._fullyOpen = true;
+          this.mCurrentTab.lastAccessed = Infinity;
           this.mCurrentTab.linkedBrowser = this.mCurrentBrowser;
           this._tabForBrowser.set(this.mCurrentBrowser, this.mCurrentTab);
 
@@ -3304,7 +3313,11 @@
 
             let timeoutPromise = new Promise((aResolve, aReject) => {
               timeoutId = setTimeout(() => {
-                this._showBusySpinnerRemoteBrowser(toBrowser);
+                if (toBrowser.isRemoteBrowser) {
+                  // The browser's remoteness could have changed since we
+                  // setTimeout so only show the spinner if it's still remote.
+                  this._showBusySpinnerRemoteBrowser(toBrowser);
+                }
                 attemptTabSwitch(aResolve, aReject);
               }, kTabSwitchTimeout);
             });
@@ -3462,7 +3475,7 @@
             return;
 
           var tab = this._getTabForContentWindow(contentWin);
-          if (tab.hasAttribute("pending"))
+          if (!tab || tab.hasAttribute("pending"))
             return;
 
           var titleChanged = this.setTabTitle(tab);
@@ -4941,13 +4954,12 @@
 
       <property name="lastAccessed">
         <getter>
-          return this.selected ? Date.now() : this._lastAccessed;
+          return this._lastAccessed == Infinity ? Date.now() : this._lastAccessed;
         </getter>
         <setter>
           this._lastAccessed = val;
         </setter>
       </property>
-      <field name="_lastAccessed">0</field>
 
       <field name="mOverCloseButton">false</field>
       <field name="mCorrespondingMenuitem">null</field>
@@ -5366,7 +5378,10 @@
           }, () => {
             // If the promise rejected, that means we don't want to actually
             // flip the deck, so we cancel the tab switch.
-            gBrowser._cancelTabSwitch(toTab);
+            // We need to nullcheck the method we're about to call because
+            // the binding might be dead at this point.
+            if (gBrowser._cancelTabSwitch)
+              gBrowser._cancelTabSwitch(toTab);
           });
 
           return val;

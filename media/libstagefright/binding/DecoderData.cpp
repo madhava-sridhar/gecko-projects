@@ -6,6 +6,7 @@
 #include "mp4_demuxer/AnnexB.h"
 #include "mp4_demuxer/ByteReader.h"
 #include "mp4_demuxer/DecoderData.h"
+#include <media/stagefright/foundation/ABitReader.h>
 #include "media/stagefright/MetaData.h"
 #include "media/stagefright/MediaBuffer.h"
 #include "media/stagefright/MediaDefs.h"
@@ -130,6 +131,7 @@ TrackConfig::Update(sp<MetaData>& aMetaData, const char* aMimeType)
   // aMimeType points to a string from MediaDefs.cpp so we don't need to copy it
   mime_type = aMimeType;
   duration = FindInt64(aMetaData, kKeyDuration);
+  media_time = FindInt64(aMetaData, kKeyMediaTime);
   mTrackId = FindInt32(aMetaData, kKeyTrackID);
   crypto.Update(aMetaData);
 }
@@ -150,8 +152,16 @@ AudioDecoderConfig::Update(sp<MetaData>& aMetaData, const char* aMimeType)
     const void* data;
     size_t size;
     if (esds.getCodecSpecificInfo(&data, &size) == OK) {
-      audio_specific_config.append(reinterpret_cast<const uint8_t*>(data),
-                                   size);
+      const uint8_t* cdata = reinterpret_cast<const uint8_t*>(data);
+      audio_specific_config.append(cdata, size);
+      if (size > 1) {
+        ABitReader br(cdata, size);
+        extended_profile = br.getBits(5);
+
+        if (extended_profile == 31) {  // AAC-ELD => additional 6 bits
+          extended_profile = 32 + br.getBits(6);
+        }
+      }
     }
   }
 }
@@ -198,6 +208,21 @@ MP4Sample::MP4Sample()
 {
 }
 
+MP4Sample::MP4Sample(const MP4Sample& copy)
+  : mMediaBuffer(nullptr)
+  , decode_timestamp(copy.decode_timestamp)
+  , composition_timestamp(copy.composition_timestamp)
+  , duration(copy.duration)
+  , byte_offset(copy.byte_offset)
+  , is_sync_point(copy.is_sync_point)
+  , size(copy.size)
+  , crypto(copy.crypto)
+  , prefix_data(copy.prefix_data)
+{
+  extra_buffer = data = new uint8_t[size];
+  memcpy(data, copy.data, size);
+}
+
 MP4Sample::~MP4Sample()
 {
   if (mMediaBuffer) {
@@ -206,11 +231,11 @@ MP4Sample::~MP4Sample()
 }
 
 void
-MP4Sample::Update()
+MP4Sample::Update(int64_t& aMediaTime)
 {
   sp<MetaData> m = mMediaBuffer->meta_data();
   decode_timestamp = FindInt64(m, kKeyDecodingTime);
-  composition_timestamp = FindInt64(m, kKeyTime);
+  composition_timestamp = FindInt64(m, kKeyTime) - aMediaTime;
   duration = FindInt64(m, kKeyDuration);
   byte_offset = FindInt64(m, kKey64BitFileOffset);
   is_sync_point = FindInt32(m, kKeyIsSyncFrame);

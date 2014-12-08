@@ -20,6 +20,7 @@ class TimeRanges;
 
 class RequestSampleCallback;
 class MediaDecoderReader;
+class SharedDecoderManager;
 
 // Encapsulates the decoding and reading of media data. Reading can either
 // synchronous and done on the calling "decode" thread, or asynchronous and
@@ -47,6 +48,7 @@ public:
   // Release media resources they should be released in dormant state
   // The reader can be made usable again by calling ReadMetadata().
   virtual void ReleaseMediaResources() {};
+  virtual void SetSharedDecoderManager(SharedDecoderManager* aManager) {}
   // Breaks reference-counted cycles. Called during shutdown.
   // WARNING: If you override this, you must call the base implementation
   // in your override.
@@ -54,11 +56,24 @@ public:
 
   // Destroys the decoding state. The reader cannot be made usable again.
   // This is different from ReleaseMediaResources() as it is irreversable,
-  // whereas ReleaseMediaResources() is.
+  // whereas ReleaseMediaResources() is.  Must be called on the decode
+  // thread.
   virtual void Shutdown();
 
   virtual void SetCallback(RequestSampleCallback* aDecodedSampleCallback);
-  virtual void SetTaskQueue(MediaTaskQueue* aTaskQueue);
+  MediaTaskQueue* EnsureTaskQueue();
+
+  virtual bool OnDecodeThread()
+  {
+    return !GetTaskQueue() || GetTaskQueue()->IsCurrentThreadIn();
+  }
+
+  void SetBorrowedTaskQueue(MediaTaskQueue* aTaskQueue)
+  {
+    MOZ_ASSERT(!mTaskQueue && aTaskQueue);
+    mTaskQueue = aTaskQueue;
+    mTaskQueueIsBorrowed = true;
+  }
 
   // Resets all state related to decoding, emptying all buffers etc.
   // Cancels all pending Request*Data() request callbacks, and flushes the
@@ -258,11 +273,13 @@ private:
   nsRefPtr<RequestSampleCallback> mSampleDecodedCallback;
 
   nsRefPtr<MediaTaskQueue> mTaskQueue;
+  bool mTaskQueueIsBorrowed;
 
   // Flags whether a the next audio/video sample comes after a "gap" or
   // "discontinuity" in the stream. For example after a seek.
   bool mAudioDiscontinuity;
   bool mVideoDiscontinuity;
+  bool mShutdown;
 };
 
 // Interface that callers to MediaDecoderReader::Request{Audio,Video}Data()
@@ -276,7 +293,8 @@ public:
   enum NotDecodedReason {
     END_OF_STREAM,
     DECODE_ERROR,
-    WAITING_FOR_DATA
+    WAITING_FOR_DATA,
+    CANCELED
   };
 
   // Receives the result of a RequestAudioData() call.
@@ -320,7 +338,7 @@ public:
 
   // Returns failure on error, or NS_OK.
   // If *aSample is null, EOS has been reached.
-  nsresult Await(nsAutoPtr<AudioData>& aSample);
+  nsresult Await(nsRefPtr<AudioData>& aSample);
 
   // Interrupts a call to Wait().
   void Cancel();
@@ -328,7 +346,7 @@ public:
 private:
   Monitor mMonitor;
   nsresult mStatus;
-  nsAutoPtr<AudioData> mSample;
+  nsRefPtr<AudioData> mSample;
   bool mHaveResult;
 };
 

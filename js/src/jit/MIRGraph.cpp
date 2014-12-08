@@ -26,6 +26,7 @@ MIRGenerator::MIRGenerator(CompileCompartment *compartment, const JitCompileOpti
     alloc_(alloc),
     graph_(graph),
     abortReason_(AbortReason_NoAbort),
+    shouldForceAbort_(false),
     abortedNewScriptPropertiesTypes_(*alloc_),
     error_(false),
     pauseBuild_(nullptr),
@@ -792,6 +793,27 @@ MBasicBlock::moveBefore(MInstruction *at, MInstruction *ins)
     ins->setBlock(at->block());
     at->block()->instructions_.insertBefore(at, ins);
     ins->setTrackedSite(at->trackedSite());
+}
+
+MInstruction *
+MBasicBlock::safeInsertTop(MDefinition *ins, IgnoreTop ignore)
+{
+    // Beta nodes and interrupt checks are required to be located at the
+    // beginnings of basic blocks, so we must insert new instructions after any
+    // such instructions.
+    MInstructionIterator insertIter = !ins || ins->isPhi()
+                                    ? begin()
+                                    : begin(ins->toInstruction());
+    while (insertIter->isBeta() ||
+           insertIter->isInterruptCheck() ||
+           insertIter->isInterruptCheckPar() ||
+           insertIter->isConstant() ||
+           (!(ignore & IgnoreRecover) && insertIter->isRecoveredOnBailout()))
+    {
+        insertIter++;
+    }
+
+    return *insertIter;
 }
 
 void

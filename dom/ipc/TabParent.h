@@ -20,6 +20,7 @@
 #include "nsIXULBrowserWindow.h"
 #include "nsWeakReference.h"
 #include "Units.h"
+#include "WritingModes.h"
 #include "js/TypeDecls.h"
 
 class nsFrameLoader;
@@ -172,6 +173,7 @@ public:
     virtual bool RecvNotifyIMESelection(const uint32_t& aSeqno,
                                         const uint32_t& aAnchor,
                                         const uint32_t& aFocus,
+                                        const mozilla::WritingMode& aWritingMode,
                                         const bool& aCausedByComposition) MOZ_OVERRIDE;
     virtual bool RecvNotifyIMETextHint(const nsString& aText) MOZ_OVERRIDE;
     virtual bool RecvNotifyIMEMouseButtonEvent(const widget::IMENotification& aEventMessage,
@@ -208,6 +210,8 @@ public:
     virtual bool RecvContentReceivedTouch(const ScrollableLayerGuid& aGuid,
                                           const uint64_t& aInputBlockId,
                                           const bool& aPreventDefault) MOZ_OVERRIDE;
+    virtual bool RecvSetTargetAPZC(const uint64_t& aInputBlockId,
+                                   const nsTArray<ScrollableLayerGuid>& aTargets) MOZ_OVERRIDE;
 
     virtual PColorPickerParent*
     AllocPColorPickerParent(const nsString& aTitle, const nsString& aInitialColor) MOZ_OVERRIDE;
@@ -377,6 +381,7 @@ protected:
     nsString mIMECacheText;
     uint32_t mIMESelectionAnchor;
     uint32_t mIMESelectionFocus;
+    mozilla::WritingMode mWritingMode;
     bool mIMEComposing;
     bool mIMECompositionEnding;
     // Buffer to store composition text during ResetInputState

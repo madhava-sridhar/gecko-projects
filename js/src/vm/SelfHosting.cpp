@@ -120,6 +120,26 @@ intrinsic_IsConstructor(JSContext *cx, unsigned argc, Value *vp)
     return true;
 }
 
+bool
+js::intrinsic_SubstringKernel(JSContext *cx, unsigned argc, Value *vp)
+{
+    CallArgs args = CallArgsFromVp(argc, vp);
+    MOZ_ASSERT(args[0].isString());
+    MOZ_ASSERT(args[1].isInt32());
+    MOZ_ASSERT(args[2].isInt32());
+
+    RootedString str(cx, args[0].toString());
+    int32_t begin = args[1].toInt32();
+    int32_t length = args[2].toInt32();
+
+    JSString *substr = SubstringKernel(cx, str, begin, length);
+    if (!substr)
+        return false;
+
+    args.rval().setString(substr);
+    return true;
+}
+
 static bool
 intrinsic_OwnPropertyKeys(JSContext *cx, unsigned argc, Value *vp)
 {
@@ -765,6 +785,31 @@ intrinsic_GeneratorSetClosed(JSContext *cx, unsigned argc, Value *vp)
     return true;
 }
 
+// Return the value of [[ArrayLength]] internal slot of the TypedArray
+static bool
+intrinsic_TypedArrayLength(JSContext *cx, unsigned argc, Value *vp)
+{
+    CallArgs args = CallArgsFromVp(argc, vp);
+    MOZ_ASSERT(args.length() == 1);
+
+    RootedObject obj(cx, &args[0].toObject());
+    MOZ_ASSERT(obj->is<TypedArrayObject>());
+    args.rval().setInt32(obj->as<TypedArrayObject>().length());
+    return true;
+}
+
+static bool
+intrinsic_IsTypedArray(JSContext *cx, unsigned argc, Value *vp)
+{
+    CallArgs args = CallArgsFromVp(argc, vp);
+    MOZ_ASSERT(args.length() == 1);
+    MOZ_ASSERT(args[0].isObject());
+
+    RootedObject obj(cx, &args[0].toObject());
+    args.rval().setBoolean(obj->is<TypedArrayObject>());
+    return true;
+}
+
 bool
 CallSelfHostedNonGenericMethod(JSContext *cx, CallArgs args)
 {
@@ -800,18 +845,18 @@ CallSelfHostedNonGenericMethod(JSContext *cx, CallArgs args)
 }
 
 template<typename T>
-MOZ_ALWAYS_INLINE bool
-IsObjectOfType(HandleValue v)
+bool
+Is(HandleValue v)
 {
     return v.isObject() && v.toObject().is<T>();
 }
 
-template<typename T, NativeImpl Impl>
+template<IsAcceptableThis Test>
 static bool
-NativeMethod(JSContext *cx, unsigned argc, Value *vp)
+CallNonGenericSelfhostedMethod(JSContext *cx, unsigned argc, Value *vp)
 {
     CallArgs args = CallArgsFromVp(argc, vp);
-    return CallNonGenericMethod<IsObjectOfType<T>, Impl>(cx, args);
+    return CallNonGenericMethod<Test, CallSelfHostedNonGenericMethod>(cx, args);
 }
 
 static bool
@@ -1008,7 +1053,6 @@ static const JSFunctionSpec intrinsic_functions[] = {
     JS_FN("std_String_replace",                  str_replace,                  2,0),
     JS_FN("std_String_split",                    str_split,                    2,0),
     JS_FN("std_String_startsWith",               str_startsWith,               1,0),
-    JS_FN("std_String_substring",                str_substring,                2,0),
     JS_FN("std_String_toLowerCase",              str_toLowerCase,              0,0),
     JS_FN("std_String_toUpperCase",              str_toUpperCase,              0,0),
 
@@ -1033,6 +1077,7 @@ static const JSFunctionSpec intrinsic_functions[] = {
     JS_FN("_IsConstructing",         intrinsic_IsConstructing,          0,0),
     JS_FN("DecompileArg",            intrinsic_DecompileArg,            2,0),
     JS_FN("RuntimeDefaultLocale",    intrinsic_RuntimeDefaultLocale,    0,0),
+    JS_FN("SubstringKernel",         intrinsic_SubstringKernel,         3,0),
 
     JS_FN("UnsafePutElements",       intrinsic_UnsafePutElements,       3,0),
     JS_FN("_DefineDataProperty",     intrinsic_DefineDataProperty,      4,0),
@@ -1061,10 +1106,16 @@ static const JSFunctionSpec intrinsic_functions[] = {
     JS_FN("GeneratorIsRunning",      intrinsic_GeneratorIsRunning,      1,0),
     JS_FN("GeneratorSetClosed",      intrinsic_GeneratorSetClosed,      1,0),
 
+    JS_FN("TypedArrayLength",        intrinsic_TypedArrayLength,        1,0),
+    JS_FN("IsTypedArray",            intrinsic_IsTypedArray,            1,0),
+
+    JS_FN("CallTypedArrayMethodIfWrapped",
+          CallNonGenericSelfhostedMethod<Is<TypedArrayObject>>, 2, 0),
+
     JS_FN("CallLegacyGeneratorMethodIfWrapped",
-          (NativeMethod<LegacyGeneratorObject, CallSelfHostedNonGenericMethod>), 2, 0),
+          CallNonGenericSelfhostedMethod<Is<LegacyGeneratorObject>>, 2, 0),
     JS_FN("CallStarGeneratorMethodIfWrapped",
-          (NativeMethod<StarGeneratorObject, CallSelfHostedNonGenericMethod>), 2, 0),
+          CallNonGenericSelfhostedMethod<Is<StarGeneratorObject>>, 2, 0),
 
     JS_FN("IsWeakSet",               intrinsic_IsWeakSet,               1,0),
 
@@ -1187,10 +1238,10 @@ void
 js::FillSelfHostingCompileOptions(CompileOptions &options)
 {
     /*
-     * In self-hosting mode, scripts emit JSOP_GETINTRINSIC instead of
-     * JSOP_NAME or JSOP_GNAME to access unbound variables. JSOP_GETINTRINSIC
-     * does a name lookup in a special object, whose properties are filled in
-     * lazily upon first access for a given global.
+     * In self-hosting mode, scripts use JSOP_GETINTRINSIC instead of
+     * JSOP_GETNAME or JSOP_GETGNAME to access unbound variables.
+     * JSOP_GETINTRINSIC does a name lookup on a special object, whose
+     * properties are filled in lazily upon first access for a given global.
      *
      * As that object is inaccessible to client code, the lookups are
      * guaranteed to return the original objects, ensuring safe implementation
@@ -1305,7 +1356,7 @@ JSRuntime::isSelfHostingCompartment(JSCompartment *comp)
 bool
 JSRuntime::isSelfHostingZone(JS::Zone *zone)
 {
-    return selfHostingGlobal_->zoneFromAnyThread() == zone;
+    return selfHostingGlobal_ && selfHostingGlobal_->zoneFromAnyThread() == zone;
 }
 
 static bool

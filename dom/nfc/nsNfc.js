@@ -17,11 +17,77 @@ const Cu = Components.utils;
 
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 Cu.import("resource://gre/modules/Services.jsm");
+Cu.import("resource://gre/modules/DOMRequestHelper.jsm");
 
 XPCOMUtils.defineLazyServiceGetter(this,
                                    "appsService",
                                    "@mozilla.org/AppsService;1",
                                    "nsIAppsService");
+
+function NfcCallback(aWindow) {
+  this.initDOMRequestHelper(aWindow, null);
+  this._createPromise();
+}
+NfcCallback.prototype = {
+  __proto__: DOMRequestIpcHelper.prototype,
+
+  promise: null,
+  _requestId: null,
+
+  _createPromise: function _createPromise() {
+    this.promise = this.createPromise((aResolve, aReject) => {
+      this._requestId = btoa(this.getPromiseResolverId({
+        resolve: aResolve,
+        reject: aReject
+      }));
+    });
+  },
+
+  getCallbackId: function getCallbackId() {
+    return this._requestId;
+  },
+
+  notifySuccess: function notifySuccess() {
+    let resolver = this.takePromiseResolver(atob(this._requestId));
+    if (!resolver) {
+      debug("can not find promise resolver for id: " + this._requestId);
+      return;
+    }
+    resolver.resolve();
+  },
+
+  notifySuccessWithBoolean: function notifySuccessWithBoolean(aResult) {
+    let resolver = this.takePromiseResolver(atob(this._requestId));
+    if (!resolver) {
+      debug("can not find promise resolver for id: " + this._requestId);
+      return;
+    }
+    resolver.resolve(aResult);
+  },
+
+  notifySuccessWithNDEFRecords: function notifySuccessWithNDEFRecords(aRecords) {
+    let resolver = this.takePromiseResolver(atob(this._requestId));
+    if (!resolver) {
+      debug("can not find promise resolver for id: " + this._requestId);
+      return;
+    }
+    resolver.resolve(aRecords);
+  },
+
+  notifyError: function notifyError(aErrorMsg) {
+    let resolver = this.takePromiseResolver(atob(this._requestId));
+    if (!resolver) {
+      debug("can not find promise resolver for id: " + this._requestId +
+           ", errormsg: " + aErrorMsg);
+      return;
+    }
+    resolver.reject(aErrorMsg);
+  },
+
+  QueryInterface: XPCOMUtils.generateQI([Ci.nsISupportsWeakReference,
+                                         Ci.nsIObserver,
+                                         Ci.nsINfcRequestCallback]),
+};
 
 /**
  * Implementation of NFCTag.
@@ -64,7 +130,9 @@ MozNFCTagImpl.prototype = {
       throw new this._window.DOMError("InvalidStateError", "NFCTag object is invalid");
     }
 
-    return this._nfcContentHelper.readNDEF(this.session);
+    let callback = new NfcCallback(this._window);
+    this._nfcContentHelper.readNDEF(this.session, callback);
+    return callback.promise;
   },
 
   writeNDEF: function writeNDEF(records) {
@@ -85,7 +153,9 @@ MozNFCTagImpl.prototype = {
       throw new this._window.DOMError("NotSupportedError", "Exceed max NDEF size");
     }
 
-    return this._nfcContentHelper.writeNDEF(records, this.session);
+    let callback = new NfcCallback(this._window);
+    this._nfcContentHelper.writeNDEF(records, this.session, callback);
+    return callback.promise;
   },
 
   makeReadOnly: function makeReadOnly() {
@@ -98,7 +168,24 @@ MozNFCTagImpl.prototype = {
                                       "NFCTag object cannot be made read-only");
     }
 
-    return this._nfcContentHelper.makeReadOnly(this.session);
+    let callback = new NfcCallback(this._window);
+    this._nfcContentHelper.makeReadOnly(this.session, callback);
+    return callback.promise;
+  },
+
+  format: function format() {
+    if (this.isLost) {
+      throw new this._window.DOMError("InvalidStateError", "NFCTag object is invalid");
+    }
+
+    if (!this.isFormatable) {
+      throw new this._window.DOMError("InvalidAccessError",
+                                      "NFCTag object is not formatable");
+    }
+
+    let callback = new NfcCallback(this._window);
+    this._nfcContentHelper.format(this.session, callback);
+    return callback.promise;
   },
 
   classID: Components.ID("{4e1e2e90-3137-11e3-aa6e-0800200c9a66}"),
@@ -133,7 +220,9 @@ MozNFCPeerImpl.prototype = {
     }
 
     // Just forward sendNDEF to writeNDEF
-    return this._nfcContentHelper.writeNDEF(records, this.session);
+    let callback = new NfcCallback(this._window);
+    this._nfcContentHelper.writeNDEF(records, this.session, callback);
+    return callback.promise;
   },
 
   sendFile: function sendFile(blob) {
@@ -144,8 +233,11 @@ MozNFCPeerImpl.prototype = {
     let data = {
       "blob": blob
     };
-    return this._nfcContentHelper.sendFile(Cu.cloneInto(data, this._window),
-                                           this.session);
+
+    let callback = new NfcCallback(this._window);
+    this._nfcContentHelper.sendFile(Cu.cloneInto(data, this._window),
+                                    this.session, callback);
+    return callback.promise;
   },
 
   classID: Components.ID("{c1b2bcf0-35eb-11e3-aa6e-0800200c9a66}"),
@@ -166,13 +258,17 @@ function MozNFCImpl() {
     debug("No NFC support.")
   }
 
+  this.eventService = Cc["@mozilla.org/eventlistenerservice;1"]
+                        .getService(Ci.nsIEventListenerService);
   this._nfcContentHelper.addEventListener(this);
 }
 MozNFCImpl.prototype = {
   _nfcContentHelper: null,
   _window: null,
+  _rfState: null,
   nfcPeer: null,
   nfcTag: null,
+  eventService: null,
 
   // Should be mapped to the RFState defined in WebIDL.
   rfState: {
@@ -192,6 +288,7 @@ MozNFCImpl.prototype = {
 
     if (this._nfcContentHelper) {
       this._nfcContentHelper.init(aWindow);
+      this._rfState = this._nfcContentHelper.queryRFState();
     }
   },
 
@@ -201,7 +298,10 @@ MozNFCImpl.prototype = {
   checkP2PRegistration: function checkP2PRegistration(manifestUrl) {
     // Get the AppID and pass it to ContentHelper
     let appID = appsService.getAppLocalIdByManifestURL(manifestUrl);
-    return this._nfcContentHelper.checkP2PRegistration(appID);
+
+    let callback = new NfcCallback(this._window);
+    this._nfcContentHelper.checkP2PRegistration(appID, callback);
+    return callback.promise;
   },
 
   notifyUserAcceptedP2P: function notifyUserAcceptedP2P(manifestUrl) {
@@ -215,32 +315,21 @@ MozNFCImpl.prototype = {
   },
 
   startPoll: function startPoll() {
-    return this._nfcContentHelper.changeRFState(this.rfState.DISCOVERY);
+    let callback = new NfcCallback(this._window);
+    this._nfcContentHelper.changeRFState(this.rfState.DISCOVERY, callback);
+    return callback.promise;
   },
 
   stopPoll: function stopPoll() {
-    return this._nfcContentHelper.changeRFState(this.rfState.LISTEN);
+    let callback = new NfcCallback(this._window);
+    this._nfcContentHelper.changeRFState(this.rfState.LISTEN, callback);
+    return callback.promise;
   },
 
   powerOff: function powerOff() {
-    return this._nfcContentHelper.changeRFState(this.rfState.IDLE);
-  },
-
-  _createNFCPeer: function _createNFCPeer(sessionToken) {
-    let peer = new MozNFCPeerImpl(this._window, sessionToken);
-    return this._window.MozNFCPeer._create(this._window, peer);
-  },
-
-  getNFCPeer: function getNFCPeer(sessionToken) {
-    if (!sessionToken || !this._nfcContentHelper.checkSessionToken(sessionToken, true)) {
-      return null;
-    }
-
-    if (!this.nfcPeer || this.nfcPeer.session != sessionToken) {
-      this.nfcPeer = this._createNFCPeer(sessionToken);
-    }
-
-    return this.nfcPeer;
+    let callback = new NfcCallback(this._window);
+    this._nfcContentHelper.changeRFState(this.rfState.IDLE, callback);
+    return callback.promise;
   },
 
   defineEventHandlerGetterSetter: function defineEventHandlerGetterSetter(name) {
@@ -278,9 +367,17 @@ MozNFCImpl.prototype = {
       return;
     }
 
-    if (!this.checkPermissions(["nfc-read", "nfc-write"])) {
+    if (!this.eventService.hasListenersFor(this.__DOM_IMPL__, "tagfound")) {
+      debug("ontagfound is not registered.");
       return;
     }
+
+    if (!this.checkPermissions(["nfc"])) {
+      return;
+    }
+
+    this.eventService.addSystemEventListener(this._window, "visibilitychange",
+      this, /* useCapture */false);
 
     let tagImpl = new MozNFCTagImpl(this._window, sessionToken, event);
     let tag = this._window.MozNFCTag._create(this._window, tagImpl);
@@ -312,14 +409,23 @@ MozNFCImpl.prototype = {
       return;
     }
 
-    if (!this.checkPermissions(["nfc-read", "nfc-write"])) {
+    if (!this.checkPermissions(["nfc"])) {
       return;
     }
 
-    if (this.nfcTag && (this.nfcTag.session == sessionToken)) {
-      this.nfcTag.isLost = true;
-      this.nfcTag = null;
+    if (!this.nfcTag) {
+      debug("No NFCTag object existing.");
+      return;
     }
+
+    // Remove system event listener only when tag and peer are both lost.
+    if (!this.nfcPeer) {
+      this.eventService.removeSystemEventListener(this._window, "visibilitychange",
+        this, /* useCapture */false);
+    }
+
+    this.nfcTag.isLost = true;
+    this.nfcTag = null;
 
     debug("fire ontaglost " + sessionToken);
     let event = new this._window.Event("taglost");
@@ -332,12 +438,22 @@ MozNFCImpl.prototype = {
       return;
     }
 
-    if (!this.checkPermissions(["nfc-write"])) {
+    if (!isPeerReady &&
+        !this.eventService.hasListenersFor(this.__DOM_IMPL__, "peerfound")) {
+      debug("onpeerfound is not registered.");
       return;
     }
 
-    this.session = sessionToken;
-    this.nfcPeer = this._createNFCPeer(sessionToken);
+    let perm = isPeerReady ? ["nfc-share"] : ["nfc"];
+    if (!this.checkPermissions(perm)) {
+      return;
+    }
+
+    this.eventService.addSystemEventListener(this._window, "visibilitychange",
+      this, /* useCapture */false);
+
+    let peerImpl = new MozNFCPeerImpl(this._window, sessionToken);
+    this.nfcPeer = this._window.MozNFCPeer._create(this._window, peerImpl)
     let eventData = { "peer": this.nfcPeer };
     let type = (isPeerReady) ? "peerready" : "peerfound";
 
@@ -352,25 +468,47 @@ MozNFCImpl.prototype = {
       return;
     }
 
-    if (!this.checkPermissions(["nfc-write"])) {
+    if (!this.checkPermissions(["nfc", "nfc-share"])) {
       return;
     }
 
-    if (sessionToken != this.session) {
-      dump("Unpaired session for notifyPeerLost." + sessionToken);
+    if (!this.nfcPeer) {
+      debug("No NFCPeer object existing.");
       return;
     }
 
-    if (this.nfcPeer && (this.nfcPeer.session == sessionToken)) {
-      this.nfcPeer.isLost = true;
-      this.nfcPeer = null;
+    // Remove system event listener only when tag and peer are both lost.
+    if (!this.nfcTag) {
+      this.eventService.removeSystemEventListener(this._window, "visibilitychange",
+        this, /* useCapture */false);
     }
 
-    this.session = null;
+    this.nfcPeer.isLost = true;
+    this.nfcPeer = null;
 
     debug("fire onpeerlost");
     let event = new this._window.Event("peerlost");
     this.__DOM_IMPL__.dispatchEvent(event);
+  },
+
+  handleEvent: function handleEvent (event) {
+    if (!this._window.document.hidden) {
+      return;
+    }
+
+    if (this.nfcTag) {
+      debug("handleEvent notifyTagLost");
+      this.notifyTagLost(this.nfcTag.session);
+    }
+
+    if (this.nfcPeer) {
+      debug("handleEvent notifyPeerLost");
+      this.notifyPeerLost(this.nfcPeer.session);
+    }
+  },
+
+  notifyRFStateChange: function notifyRFStateChange(rfState) {
+    this._rfState = rfState;
   },
 
   checkPermissions: function checkPermissions(perms) {
@@ -396,8 +534,49 @@ MozNFCImpl.prototype = {
   contractID: "@mozilla.org/navigatorNfc;1",
   QueryInterface: XPCOMUtils.generateQI([Ci.nsISupports,
                                          Ci.nsIDOMGlobalPropertyInitializer,
-                                         Ci.nsINfcEventListener]),
+                                         Ci.nsINfcEventListener,
+                                         Ci.nsIDOMEventListener]),
+};
+
+function NFCSendFileWrapper() {
+}
+NFCSendFileWrapper.prototype = {
+  // nsISystemMessagesWrapper implementation.
+  wrapMessage: function wrapMessage(aMessage, aWindow) {
+    let peerImpl = new MozNFCPeerImpl(aWindow, aMessage.sessionToken);
+    let peer = aWindow.MozNFCPeer._create(aWindow, peerImpl);
+
+    delete aMessage.sessionToken;
+    aMessage = Cu.cloneInto(aMessage, aWindow);
+    aMessage.peer = peer;
+    return aMessage;
+  },
+
+  classDescription: "NFCSendFileWrapper",
+  classID: Components.ID("{c5063a5c-8cb9-41d2-baf5-56062a2e30e9}"),
+  contractID: "@mozilla.org/dom/system-messages/wrapper/nfc-manager-send-file;1",
+  QueryInterface: XPCOMUtils.generateQI([Ci.nsISystemMessagesWrapper])
+};
+
+function NFCTechDiscoveredWrapper() {
+}
+NFCTechDiscoveredWrapper.prototype = {
+  // nsISystemMessagesWrapper implementation.
+  wrapMessage: function wrapMessage(aMessage, aWindow) {
+    aMessage = Cu.cloneInto(aMessage, aWindow);
+    if (aMessage.techList.indexOf("P2P") != -1) {
+      let peerImpl = new MozNFCPeerImpl(aWindow, aMessage.sessionToken);
+      let peer = aWindow.MozNFCPeer._create(aWindow, peerImpl);
+      aMessage.peer = peer;
+    }
+    return aMessage;
+  },
+
+  classDescription: "NFCTechDiscoveredWrapper",
+  classID: Components.ID("{2e7f9285-3c72-4e1f-b985-141a00a23a75}"),
+  contractID: "@mozilla.org/dom/system-messages/wrapper/nfc-manager-tech-discovered;1",
+  QueryInterface: XPCOMUtils.generateQI([Ci.nsISystemMessagesWrapper])
 };
 
 this.NSGetFactory = XPCOMUtils.generateNSGetFactory([MozNFCTagImpl,
-  MozNFCPeerImpl, MozNFCImpl]);
+  MozNFCPeerImpl, MozNFCImpl, NFCSendFileWrapper, NFCTechDiscoveredWrapper]);

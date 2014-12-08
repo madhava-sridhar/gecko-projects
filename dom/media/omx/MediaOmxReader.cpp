@@ -181,7 +181,8 @@ void MediaOmxReader::Shutdown()
     NS_NewRunnableMethod(this, &MediaOmxReader::CancelProcessCachedData);
   NS_DispatchToMainThread(cancelEvent);
 
-  ReleaseMediaResources();
+  MediaDecoderReader::Shutdown();
+
   nsCOMPtr<nsIRunnable> event =
     NS_NewRunnableMethod(this, &MediaOmxReader::ReleaseDecoder);
   NS_DispatchToMainThread(event);
@@ -420,7 +421,7 @@ bool MediaOmxReader::DecodeVideoFrame(bool &aKeyframeSkip,
     // This is the approximate byte position in the stream.
     int64_t pos = mDecoder->GetResource()->Tell();
 
-    VideoData *v;
+    nsRefPtr<VideoData> v;
     if (!frame.mGraphicBuffer) {
 
       VideoData::YCbCrBuffer b;

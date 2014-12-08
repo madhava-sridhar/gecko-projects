@@ -20,6 +20,7 @@
 #include "jsfun.h"
 #include "jsnum.h"
 #include "jsobj.h"
+#include "jsprf.h"
 #include "jsscript.h"
 #include "jstypes.h"
 #include "jsutil.h"
@@ -490,16 +491,6 @@ exn_toSource(JSContext *cx, unsigned argc, Value *vp)
 }
 #endif
 
-/* JSProto_ ordering for exceptions shall match JSEXN_ constants. */
-JS_STATIC_ASSERT(JSEXN_ERR == 0);
-JS_STATIC_ASSERT(JSProto_Error + JSEXN_INTERNALERR  == JSProto_InternalError);
-JS_STATIC_ASSERT(JSProto_Error + JSEXN_EVALERR      == JSProto_EvalError);
-JS_STATIC_ASSERT(JSProto_Error + JSEXN_RANGEERR     == JSProto_RangeError);
-JS_STATIC_ASSERT(JSProto_Error + JSEXN_REFERENCEERR == JSProto_ReferenceError);
-JS_STATIC_ASSERT(JSProto_Error + JSEXN_SYNTAXERR    == JSProto_SyntaxError);
-JS_STATIC_ASSERT(JSProto_Error + JSEXN_TYPEERR      == JSProto_TypeError);
-JS_STATIC_ASSERT(JSProto_Error + JSEXN_URIERR       == JSProto_URIError);
-
 /* static */ JSObject *
 ErrorObject::createProto(JSContext *cx, JSProtoKey key)
 {
@@ -723,8 +714,31 @@ ErrorReport::init(JSContext *cx, HandleValue exn)
     if (exn.isObject()) {
         exnObject = &exn.toObject();
         reportp = js_ErrorFromException(cx, exnObject);
-    }
 
+        JSCompartment *comp = exnObject->compartment();
+        JSAddonId *addonId = comp->addonId;
+        if (addonId) {
+            UniqueChars addonIdChars(JS_EncodeString(cx, addonId));
+
+            const char *filename = nullptr;
+            
+            if (reportp && reportp->filename) {
+                filename = strrchr(reportp->filename, '/');
+                if (filename)
+                    filename++;
+            }
+            if (!filename) {
+                filename = "FILE_NOT_FOUND";
+            }
+            char histogramKey[64];
+            JS_snprintf(histogramKey, sizeof(histogramKey),
+                        "%s %s %u",
+                        addonIdChars.get(),
+                        filename,
+                        (reportp ? reportp->lineno : 0) );
+            cx->runtime()->addTelemetry(JS_TELEMETRY_ADDON_EXCEPTIONS, 1, histogramKey);
+        }
+    }
     // Be careful not to invoke ToString if we've already successfully extracted
     // an error report, since the exception might be wrapped in a security
     // wrapper, and ToString-ing it might throw.

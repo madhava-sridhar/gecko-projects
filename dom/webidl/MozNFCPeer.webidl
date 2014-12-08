@@ -10,10 +10,17 @@
 
 [JSImplementation="@mozilla.org/nfc/NFCPeer;1", AvailableIn="CertifiedApps"]
 interface MozNFCPeer {
+  /**
+   * Send NDEF data to peer device.
+   */
   [Throws]
-  DOMRequest sendNDEF(sequence<MozNDEFRecord> records);
-  [Throws]
-  DOMRequest sendFile(Blob blob);
+  Promise<void> sendNDEF(sequence<MozNDEFRecord> records);
+
+  /**
+   * Send file to peer device.
+   */
+  [Throws, CheckPermissions="nfc-share"]
+  Promise<void> sendFile(Blob blob);
 };
 
 // Mozilla Only

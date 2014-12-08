@@ -410,9 +410,9 @@ ResolveInterpretedFunctionPrototype(JSContext *cx, HandleObject obj)
         objProto = obj->global().getOrCreateObjectPrototype(cx);
     if (!objProto)
         return nullptr;
-    const Class *clasp = &JSObject::class_;
 
-    RootedObject proto(cx, NewObjectWithGivenProto(cx, clasp, objProto, nullptr, SingletonObject));
+    RootedPlainObject proto(cx, NewObjectWithGivenProto<PlainObject>(cx, objProto,
+                                                                     nullptr, SingletonObject));
     if (!proto)
         return nullptr;
 
@@ -443,9 +443,13 @@ ResolveInterpretedFunctionPrototype(JSContext *cx, HandleObject obj)
 }
 
 bool
-js::FunctionHasResolveHook(const JSAtomState &atomState, PropertyName *name)
+js::FunctionHasResolveHook(const JSAtomState &atomState, jsid id)
 {
-    return name == atomState.prototype || name == atomState.length || name == atomState.name;
+    if (!JSID_IS_ATOM(id))
+        return false;
+
+    JSAtom *atom = JSID_TO_ATOM(id);
+    return atom == atomState.prototype || atom == atomState.length || atom == atomState.name;
 }
 
 bool
@@ -1069,16 +1073,17 @@ js::FunctionToString(JSContext *cx, HandleFunction fun, bool bodyOnly, bool lamb
                 return nullptr;
 
             // Fish out the argument names.
-            BindingVector *localNames = cx->new_<BindingVector>(cx);
-            ScopedJSDeletePtr<BindingVector> freeNames(localNames);
-            if (!FillBindingVector(script, localNames))
-                return nullptr;
-            for (unsigned i = 0; i < fun->nargs(); i++) {
-                if ((i && !out.append(", ")) ||
-                    (i == unsigned(fun->nargs() - 1) && fun->hasRest() && !out.append("...")) ||
-                    !out.append((*localNames)[i].name())) {
+            MOZ_ASSERT(script->bindings.numArgs() == fun->nargs());
+
+            BindingIter bi(script);
+            for (unsigned i = 0; i < fun->nargs(); i++, bi++) {
+                MOZ_ASSERT(bi.argIndex() == i);
+                if (i && !out.append(", "))
                     return nullptr;
-                }
+                if (i == unsigned(fun->nargs() - 1) && fun->hasRest() && !out.append("..."))
+                    return nullptr;
+                if (!out.append(bi->name()))
+                    return nullptr;
             }
             if (!out.append(") {\n"))
                 return nullptr;
@@ -1911,7 +1916,7 @@ FunctionConstructor(JSContext *cx, unsigned argc, Value *vp, GeneratorKind gener
         ok = frontend::CompileStarGeneratorBody(cx, &fun, options, formals, srcBuf);
     else
         ok = frontend::CompileFunctionBody(cx, &fun, options, formals, srcBuf,
-                                           /* enclosingScope = */ NullPtr());
+                                           /* enclosingScope = */ js::NullPtr());
     args.rval().setObject(*fun);
     return ok;
 }

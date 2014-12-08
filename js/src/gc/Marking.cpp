@@ -192,17 +192,23 @@ CheckMarkedThing(JSTracer *trc, T **thingp)
     if (ThingIsPermanentAtom(thing))
         return;
 
-    MOZ_ASSERT(thing->zone());
-    MOZ_ASSERT(thing->zone()->runtimeFromMainThread() == trc->runtime());
-    MOZ_ASSERT(trc->hasTracingDetails());
+    Zone *zone = thing->zoneFromAnyThread();
+    JSRuntime *rt = trc->runtime();
 
-    DebugOnly<JSRuntime *> rt = trc->runtime();
+#ifdef JSGC_COMPACTING
+    MOZ_ASSERT_IF(!MovingTracer::IsMovingTracer(trc), CurrentThreadCanAccessZone(zone));
+    MOZ_ASSERT_IF(!MovingTracer::IsMovingTracer(trc), CurrentThreadCanAccessRuntime(rt));
+#else
+    MOZ_ASSERT(CurrentThreadCanAccessZone(zone));
+    MOZ_ASSERT(CurrentThreadCanAccessRuntime(rt));
+#endif
+
+    MOZ_ASSERT(zone->runtimeFromAnyThread() == trc->runtime());
+    MOZ_ASSERT(trc->hasTracingDetails());
 
     bool isGcMarkingTracer = IS_GC_MARKING_TRACER(trc);
 
-    MOZ_ASSERT(CurrentThreadCanAccessRuntime(rt));
-
-    MOZ_ASSERT_IF(thing->zone()->requireGCTracer(), isGcMarkingTracer);
+    MOZ_ASSERT_IF(zone->requireGCTracer(), isGcMarkingTracer);
 
     MOZ_ASSERT(thing->isAligned());
 
@@ -211,14 +217,12 @@ CheckMarkedThing(JSTracer *trc, T **thingp)
     if (isGcMarkingTracer) {
         GCMarker *gcMarker = static_cast<GCMarker *>(trc);
         MOZ_ASSERT_IF(gcMarker->shouldCheckCompartments(),
-                      thing->zone()->isCollecting() || rt->isAtomsZone(thing->zone()));
+                      zone->isCollecting() || rt->isAtomsZone(zone));
 
         MOZ_ASSERT_IF(gcMarker->getMarkColor() == GRAY,
-                      !thing->zone()->isGCMarkingBlack() || rt->isAtomsZone(thing->zone()));
+                      !zone->isGCMarkingBlack() || rt->isAtomsZone(zone));
 
-        MOZ_ASSERT(!(thing->zone()->isGCSweeping() ||
-                     thing->zone()->isGCFinished() ||
-                     thing->zone()->isGCCompacting()));
+        MOZ_ASSERT(!(zone->isGCSweeping() || zone->isGCFinished() || zone->isGCCompacting()));
     }
 
     /*
@@ -652,6 +656,7 @@ DeclMarkerImpl(Object, GlobalObject)
 DeclMarkerImpl(Object, JSObject)
 DeclMarkerImpl(Object, JSFunction)
 DeclMarkerImpl(Object, NestedScopeObject)
+DeclMarkerImpl(Object, PlainObject)
 DeclMarkerImpl(Object, SavedFrame)
 DeclMarkerImpl(Object, ScopeObject)
 DeclMarkerImpl(Object, SharedArrayBufferObject)
@@ -1696,6 +1701,36 @@ GCMarker::processMarkStackOther(uintptr_t tag, uintptr_t addr)
     }
 }
 
+MOZ_ALWAYS_INLINE void
+GCMarker::markAndScanString(JSObject *source, JSString *str)
+{
+    if (!str->isPermanentAtom()) {
+        JS_COMPARTMENT_ASSERT_STR(runtime(), str);
+        MOZ_ASSERT(runtime()->isAtomsZone(str->zone()) || str->zone() == source->zone());
+        if (str->markIfUnmarked())
+            ScanString(this, str);
+    }
+}
+
+MOZ_ALWAYS_INLINE void
+GCMarker::markAndScanSymbol(JSObject *source, JS::Symbol *sym)
+{
+    if (!sym->isWellKnownSymbol()) {
+        JS_COMPARTMENT_ASSERT_SYM(runtime(), sym);
+        MOZ_ASSERT(runtime()->isAtomsZone(sym->zone()) || sym->zone() == source->zone());
+        if (sym->markIfUnmarked())
+            ScanSymbol(this, sym);
+    }
+}
+
+MOZ_ALWAYS_INLINE bool
+GCMarker::markObject(JSObject *source, JSObject *obj)
+{
+    JS_COMPARTMENT_ASSERT(runtime(), obj);
+    MOZ_ASSERT(obj->compartment() == source->compartment());
+    return obj->asTenured().markIfUnmarked(getMarkColor());
+}
+
 inline void
 GCMarker::processMarkStackTop(SliceBudget &budget)
 {
@@ -1738,33 +1773,54 @@ GCMarker::processMarkStackTop(SliceBudget &budget)
     while (vp != end) {
         const Value &v = *vp++;
         if (v.isString()) {
-            JSString *str = v.toString();
-            if (!str->isPermanentAtom()) {
-                JS_COMPARTMENT_ASSERT_STR(runtime(), str);
-                MOZ_ASSERT(runtime()->isAtomsZone(str->zone()) || str->zone() == obj->zone());
-                if (str->markIfUnmarked())
-                    ScanString(this, str);
-            }
+            markAndScanString(obj, v.toString());
         } else if (v.isObject()) {
             JSObject *obj2 = &v.toObject();
-            JS_COMPARTMENT_ASSERT(runtime(), obj2);
-            MOZ_ASSERT(obj->compartment() == obj2->compartment());
-            if (obj2->asTenured().markIfUnmarked(getMarkColor())) {
+            if (markObject(obj, obj2)) {
                 pushValueArray(obj, vp, end);
                 obj = obj2;
                 goto scan_obj;
             }
         } else if (v.isSymbol()) {
-            JS::Symbol *sym = v.toSymbol();
-            if (!sym->isWellKnownSymbol()) {
-                JS_COMPARTMENT_ASSERT_SYM(runtime(), sym);
-                MOZ_ASSERT(runtime()->isAtomsZone(sym->zone()) || sym->zone() == obj->zone());
-                if (sym->markIfUnmarked())
-                    ScanSymbol(this, sym);
-            }
+            markAndScanSymbol(obj, v.toSymbol());
         }
     }
     return;
+
+  scan_typed_obj:
+    {
+        const int32_t *list = obj->as<InlineOpaqueTypedObject>().typeDescr().traceList();
+        if (!list)
+            return;
+        uint8_t *memory = obj->as<InlineOpaqueTypedObject>().inlineTypedMem();
+        while (*list != -1) {
+            JSString *str = *reinterpret_cast<JSString **>(memory + *list);
+            markAndScanString(obj, str);
+            list++;
+        }
+        list++;
+        while (*list != -1) {
+            JSObject *obj2 = *reinterpret_cast<JSObject **>(memory + *list);
+            if (obj2 && markObject(obj, obj2))
+                pushObject(obj2);
+            list++;
+        }
+        list++;
+        while (*list != -1) {
+            const Value &v = *reinterpret_cast<Value *>(memory + *list);
+            if (v.isString()) {
+                markAndScanString(obj, v.toString());
+            } else if (v.isObject()) {
+                JSObject *obj2 = &v.toObject();
+                if (markObject(obj, obj2))
+                    pushObject(obj2);
+            } else if (v.isSymbol()) {
+                markAndScanSymbol(obj, v.toSymbol());
+            }
+            list++;
+        }
+        return;
+    }
 
   scan_obj:
     {
@@ -1793,6 +1849,8 @@ GCMarker::processMarkStackTop(SliceBudget &budget)
                             (!obj->compartment()->options().getTrace() ||
                              !obj->isOwnGlobal())),
                           clasp->flags & JSCLASS_IMPLEMENTS_BARRIERS);
+            if (clasp->trace == InlineTypedObject::obj_trace)
+                goto scan_typed_obj;
             clasp->trace(this, obj);
         }
 

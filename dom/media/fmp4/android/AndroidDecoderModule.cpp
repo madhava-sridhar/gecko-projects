@@ -4,11 +4,15 @@
 
 #include "AndroidDecoderModule.h"
 #include "AndroidBridge.h"
+#include "GLBlitHelper.h"
+#include "GLContext.h"
+#include "GLContextEGL.h"
+#include "GLContextProvider.h"
 #include "GLImages.h"
+#include "GLLibraryEGL.h"
 
 #include "MediaData.h"
 
-#include "mp4_demuxer/Adts.h"
 #include "mp4_demuxer/AnnexB.h"
 #include "mp4_demuxer/DecoderData.h"
 
@@ -50,25 +54,25 @@ public:
   nsresult Init() MOZ_OVERRIDE {
     mSurfaceTexture = AndroidSurfaceTexture::Create();
     if (!mSurfaceTexture) {
-      printf_stderr("Failed to create SurfaceTexture for video decode\n");
+      NS_WARNING("Failed to create SurfaceTexture for video decode\n");
       return NS_ERROR_FAILURE;
     }
 
     return InitDecoder(mSurfaceTexture->JavaSurface());
   }
 
+  void Cleanup() MOZ_OVERRIDE {
+    mGLContext = nullptr;
+  }
+
   virtual nsresult Input(mp4_demuxer::MP4Sample* aSample) MOZ_OVERRIDE {
-    mp4_demuxer::AnnexB::ConvertSample(aSample, mConfig.annex_b);
+    mp4_demuxer::AnnexB::ConvertSample(aSample);
     return MediaCodecDataDecoder::Input(aSample);
   }
 
-  virtual nsresult PostOutput(BufferInfo* aInfo, MediaFormat* aFormat, Microseconds aDuration) MOZ_OVERRIDE {
-    VideoInfo videoInfo;
-    videoInfo.mDisplay = nsIntSize(mConfig.display_width, mConfig.display_height);
-
-    bool isSync = false;
-    if (MediaCodec::getBUFFER_FLAG_SYNC_FRAME() & aInfo->getFlags()) {
-      isSync = true;
+  EGLImage CopySurface() {
+    if (!EnsureGLContext()) {
+      return nullptr;
     }
 
     nsRefPtr<layers::Image> img = mImageContainer->CreateImage(ImageFormat::SURFACE_TEXTURE);
@@ -77,24 +81,96 @@ public:
     data.mSize = gfx::IntSize(mConfig.display_width, mConfig.display_height);
     data.mInverted = true;
 
-    layers::SurfaceTextureImage* typedImg = static_cast<layers::SurfaceTextureImage*>(img.get());
+    layers::SurfaceTextureImage* stImg = static_cast<layers::SurfaceTextureImage*>(img.get());
+    stImg->SetData(data);
+
+    mGLContext->MakeCurrent();
+
+    GLuint tex = CreateTextureForOffscreen(mGLContext, mGLContext->GetGLFormats(), data.mSize);
+
+    GLBlitHelper helper(mGLContext);
+    if (!helper.BlitImageToTexture(img, data.mSize, tex, LOCAL_GL_TEXTURE_2D)) {
+      mGLContext->fDeleteTextures(1, &tex);
+      return nullptr;
+    }
+
+    EGLint attribs[] = {
+      LOCAL_EGL_IMAGE_PRESERVED_KHR, LOCAL_EGL_TRUE,
+      LOCAL_EGL_NONE, LOCAL_EGL_NONE
+    };
+
+    EGLContext eglContext = static_cast<GLContextEGL*>(mGLContext.get())->GetEGLContext();
+    EGLImage eglImage = sEGLLibrary.fCreateImage(EGL_DISPLAY(), eglContext,
+                                                 LOCAL_EGL_GL_TEXTURE_2D_KHR,
+                                                 (EGLClientBuffer)tex, attribs);
+    mGLContext->fDeleteTextures(1, &tex);
+
+    return eglImage;
+  }
+
+  virtual nsresult PostOutput(BufferInfo* aInfo, MediaFormat* aFormat, Microseconds aDuration) MOZ_OVERRIDE {
+    VideoInfo videoInfo;
+    videoInfo.mDisplay = nsIntSize(mConfig.display_width, mConfig.display_height);
+
+    EGLImage eglImage = CopySurface();
+    if (!eglImage) {
+      return NS_ERROR_FAILURE;
+    }
+
+    EGLSync eglSync = nullptr;
+    if (sEGLLibrary.IsExtensionSupported(GLLibraryEGL::KHR_fence_sync) &&
+        mGLContext->IsExtensionSupported(GLContext::OES_EGL_sync))
+    {
+      MOZ_ASSERT(mGLContext->IsCurrent());
+      eglSync = sEGLLibrary.fCreateSync(EGL_DISPLAY(),
+                                        LOCAL_EGL_SYNC_FENCE,
+                                        nullptr);
+      if (eglSync) {
+          mGLContext->fFlush();
+      }
+    } else {
+      NS_WARNING("No EGL fence support detected, rendering artifacts may occur!");
+    }
+
+    nsRefPtr<layers::Image> img = mImageContainer->CreateImage(ImageFormat::EGLIMAGE);
+    layers::EGLImageImage::Data data;
+    data.mImage = eglImage;
+    data.mSync = eglSync;
+    data.mOwns = true;
+    data.mSize = gfx::IntSize(mConfig.display_width, mConfig.display_height);
+    data.mInverted = false;
+
+    layers::EGLImageImage* typedImg = static_cast<layers::EGLImageImage*>(img.get());
     typedImg->SetData(data);
 
-    mCallback->Output(VideoData::CreateFromImage(videoInfo, mImageContainer, aInfo->getOffset(),
-                                                 aInfo->getPresentationTimeUs(),
-                                                 aDuration,
-                                                 img, isSync,
-                                                 aInfo->getPresentationTimeUs(),
-                                                 gfx::IntRect(0, 0,
-                                                   mConfig.display_width,
-                                                   mConfig.display_height)));
+    bool isSync = !!(MediaCodec::getBUFFER_FLAG_SYNC_FRAME() & aInfo->getFlags());
+
+    nsRefPtr<VideoData> v = VideoData::CreateFromImage(videoInfo, mImageContainer, aInfo->getOffset(),
+                                                       aInfo->getPresentationTimeUs(),
+                                                       aDuration,
+                                                       img, isSync,
+                                                       aInfo->getPresentationTimeUs(),
+                                                       gfx::IntRect(0, 0,
+                                                         mConfig.display_width,
+                                                         mConfig.display_height));
+    mCallback->Output(v);
     return NS_OK;
   }
 
 protected:
+  bool EnsureGLContext() {
+    if (mGLContext) {
+      return true;
+    }
+
+    mGLContext = GLContextProvider::CreateHeadless();
+    return mGLContext;
+  }
+
   layers::ImageContainer* mImageContainer;
   const mp4_demuxer::VideoDecoderConfig& mConfig;
   RefPtr<AndroidSurfaceTexture> mSurfaceTexture;
+  nsRefPtr<GLContext> mGLContext;
 };
 
 class AudioDataDecoder : public MediaCodecDataDecoder {
@@ -102,25 +178,6 @@ public:
   AudioDataDecoder(const char* aMimeType, MediaFormat* aFormat, MediaDataDecoderCallback* aCallback)
   : MediaCodecDataDecoder(MediaData::Type::AUDIO_DATA, aMimeType, aFormat, aCallback)
   {
-  }
-
-  virtual nsresult Input(mp4_demuxer::MP4Sample* aSample) MOZ_OVERRIDE {
-    if (!strcmp(mMimeType, "audio/mp4a-latm")) {
-      uint32_t numChannels = mFormat->GetInteger(NS_LITERAL_CSTRING("channel-count"));
-      uint32_t sampleRate = mFormat->GetInteger(NS_LITERAL_CSTRING("sample-rate"));
-      uint8_t frequencyIndex =
-          mp4_demuxer::Adts::GetFrequencyIndex(sampleRate);
-      uint32_t aacProfile = mFormat->GetInteger(NS_LITERAL_CSTRING("aac-profile"));
-      bool rv = mp4_demuxer::Adts::ConvertSample(numChannels,
-                                                 frequencyIndex,
-                                                 aacProfile,
-                                                 aSample);
-      if (!rv) {
-        printf_stderr("Failed to prepend ADTS header\n");
-        return NS_ERROR_FAILURE;
-      }
-    }
-    return MediaCodecDataDecoder::Input(aSample);
   }
 
   nsresult Output(BufferInfo* aInfo, void* aBuffer, MediaFormat* aFormat, Microseconds aDuration) {
@@ -133,12 +190,13 @@ public:
     AudioDataValue* audio = new AudioDataValue[aInfo->getSize()];
     PodCopy(audio, static_cast<AudioDataValue*>(aBuffer), aInfo->getSize());
 
-    mCallback->Output(new AudioData(aInfo->getOffset(), aInfo->getPresentationTimeUs(),
-                                    aDuration,
-                                    numFrames,
-                                    audio,
-                                    numChannels,
-                                    sampleRate));
+    nsRefPtr<AudioData> data = new AudioData(aInfo->getOffset(), aInfo->getPresentationTimeUs(),
+                                             aDuration,
+                                             numFrames,
+                                             audio,
+                                             numChannels,
+                                             sampleRate);
+    mCallback->Output(data);
     return NS_OK;
   }
 };
@@ -153,7 +211,7 @@ bool AndroidDecoderModule::SupportsAudioMimeType(const char* aMimeType) {
 }
 
 already_AddRefed<MediaDataDecoder>
-AndroidDecoderModule::CreateH264Decoder(
+AndroidDecoderModule::CreateVideoDecoder(
                                 const mp4_demuxer::VideoDecoderConfig& aConfig,
                                 layers::LayersBackend aLayersBackend,
                                 layers::ImageContainer* aImageContainer,
@@ -213,11 +271,6 @@ AndroidDecoderModule::CreateAudioDecoder(const mp4_demuxer::AudioDecoderConfig& 
     env->DeleteLocalRef(buffer);
   }
 
-  if (strcmp(aConfig.mime_type, "audio/mp4a-latm") == 0) {
-    format->SetInteger(NS_LITERAL_CSTRING("is-adts"), 1);
-    format->SetInteger(NS_LITERAL_CSTRING("aac-profile"), aConfig.aac_profile);
-  }
-
   nsRefPtr<MediaDataDecoder> decoder =
     new AudioDataDecoder(aConfig.mime_type, format, aCallback);
 
@@ -242,6 +295,7 @@ MediaCodecDataDecoder::MediaCodecDataDecoder(MediaData::Type aType,
   , mInputBuffers(nullptr)
   , mOutputBuffers(nullptr)
   , mMonitor("MediaCodecDataDecoder::mMonitor")
+  , mFlushing(false)
   , mDraining(false)
   , mStopping(false)
 {
@@ -309,9 +363,19 @@ nsresult MediaCodecDataDecoder::InitDecoder(jobject aSurface)
 // This is in usec, so that's 10ms
 #define DECODER_TIMEOUT 10000
 
+#define HANDLE_DECODER_ERROR() \
+  if (NS_FAILED(res)) { \
+    NS_WARNING("exiting decoder loop due to exception"); \
+    mCallback->Error(); \
+    break; \
+  }
+
 void MediaCodecDataDecoder::DecoderLoop()
 {
   bool outputDone = false;
+
+  bool draining = false;
+  bool waitingEOF = false;
 
   JNIEnv* env = GetJNIForThread();
   mp4_demuxer::MP4Sample* sample = nullptr;
@@ -322,7 +386,7 @@ void MediaCodecDataDecoder::DecoderLoop()
   for (;;) {
     {
       MonitorAutoLock lock(mMonitor);
-      while (!mStopping && !mDraining && mQueue.empty()) {
+      while (!mStopping && !mDraining && !mFlushing && mQueue.empty()) {
         if (mQueue.empty()) {
           // We could be waiting here forever if we don't signal that we need more input
           mCallback->InputExhausted();
@@ -335,12 +399,16 @@ void MediaCodecDataDecoder::DecoderLoop()
         break;
       }
 
-      if (mDraining) {
+      if (mFlushing) {
         mDecoder->Flush();
         ClearQueue();
-        mDraining =  false;
+        mFlushing =  false;
         lock.Notify();
         continue;
+      }
+
+      if (mDraining && !sample && !waitingEOF) {
+        draining = true;
       }
 
       // We're not stopping or draining, so try to get a sample
@@ -349,14 +417,22 @@ void MediaCodecDataDecoder::DecoderLoop()
       }
     }
 
+    if (draining && !waitingEOF) {
+      MOZ_ASSERT(!sample, "Shouldn't have a sample when pushing EOF frame");
+
+      int inputIndex = mDecoder->DequeueInputBuffer(DECODER_TIMEOUT, &res);
+      HANDLE_DECODER_ERROR();
+
+      if (inputIndex >= 0) {
+        mDecoder->QueueInputBuffer(inputIndex, 0, 0, 0, MediaCodec::getBUFFER_FLAG_END_OF_STREAM(), &res);
+        waitingEOF = true;
+      }
+    }
+
     if (sample) {
       // We have a sample, try to feed it to the decoder
       int inputIndex = mDecoder->DequeueInputBuffer(DECODER_TIMEOUT, &res);
-      if (NS_FAILED(res)) {
-        printf_stderr("exiting decoder loop due to exception while dequeuing input\n");
-        mCallback->Error();
-        break;
-      }
+      HANDLE_DECODER_ERROR();
 
       if (inputIndex >= 0) {
         jobject buffer = env->GetObjectArrayElement(mInputBuffers, inputIndex);
@@ -373,11 +449,7 @@ void MediaCodecDataDecoder::DecoderLoop()
         PodCopy((uint8_t*)directBuffer, sample->data, sample->size);
 
         mDecoder->QueueInputBuffer(inputIndex, 0, sample->size, sample->composition_timestamp, 0, &res);
-        if (NS_FAILED(res)) {
-          printf_stderr("exiting decoder loop due to exception while queuing input\n");
-          mCallback->Error();
-          break;
-        }
+        HANDLE_DECODER_ERROR();
 
         mDurations.push(sample->duration);
 
@@ -393,31 +465,42 @@ void MediaCodecDataDecoder::DecoderLoop()
       BufferInfo bufferInfo;
 
       int outputStatus = mDecoder->DequeueOutputBuffer(bufferInfo.wrappedObject(), DECODER_TIMEOUT, &res);
-      if (NS_FAILED(res)) {
-        printf_stderr("exiting decoder loop due to exception while dequeuing output\n");
-        mCallback->Error();
-        break;
-      }
+      HANDLE_DECODER_ERROR();
 
       if (outputStatus == MediaCodec::getINFO_TRY_AGAIN_LATER()) {
         // We might want to call mCallback->InputExhausted() here, but there seems to be
         // some possible bad interactions here with the threading
       } else if (outputStatus == MediaCodec::getINFO_OUTPUT_BUFFERS_CHANGED()) {
         res = ResetOutputBuffers();
-        if (NS_FAILED(res)) {
-          printf_stderr("exiting decoder loop due to exception while restting output buffers\n");
-          mCallback->Error();
-          break;
-        }
+        HANDLE_DECODER_ERROR();
       } else if (outputStatus == MediaCodec::getINFO_OUTPUT_FORMAT_CHANGED()) {
         outputFormat = new MediaFormat(mDecoder->GetOutputFormat(), GetJNIForThread());
       } else if (outputStatus < 0) {
-        printf_stderr("unknown error from decoder! %d\n", outputStatus);
+        NS_WARNING("unknown error from decoder!");
         mCallback->Error();
+
+        // Don't break here just in case it's recoverable. If it's not, others stuff will fail later and
+        // we'll bail out.
       } else {
         // We have a valid buffer index >= 0 here
         if (bufferInfo.getFlags() & MediaCodec::getBUFFER_FLAG_END_OF_STREAM()) {
+          if (draining) {
+            draining = false;
+            waitingEOF = false;
+
+            mMonitor.Lock();
+            mDraining = false;
+            mMonitor.Notify();
+            mMonitor.Unlock();
+
+            mCallback->DrainComplete();
+          }
+
+          mDecoder->ReleaseOutputBuffer(outputStatus, false);
           outputDone = true;
+
+          // We only queue empty EOF frames, so we're done for now
+          continue;
         }
 
         MOZ_ASSERT(!mDurations.empty(), "Should have had a duration queued");
@@ -446,6 +529,8 @@ void MediaCodecDataDecoder::DecoderLoop()
       }
     }
   }
+
+  Cleanup();
 
   // We're done
   mMonitor.Lock();
@@ -509,20 +594,26 @@ nsresult MediaCodecDataDecoder::ResetOutputBuffers()
 }
 
 nsresult MediaCodecDataDecoder::Flush() {
-  Drain();
+  MonitorAutoLock lock(mMonitor);
+  mFlushing = true;
+  lock.Notify();
+
+  while (mFlushing) {
+    lock.Wait();
+  }
+
   return NS_OK;
 }
 
 nsresult MediaCodecDataDecoder::Drain() {
   MonitorAutoLock lock(mMonitor);
+  if (mDraining) {
+    return NS_OK;
+  }
+
   mDraining = true;
   lock.Notify();
 
-  while (mDraining) {
-    lock.Wait();
-  }
-
-  mCallback->DrainComplete();
   return NS_OK;
 }
 

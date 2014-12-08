@@ -182,7 +182,7 @@ nsImageLoadingContent::Notify(imgIRequest* aRequest,
     }
     nsresult status =
         reqStatus & imgIRequest::STATUS_ERROR ? NS_ERROR_FAILURE : NS_OK;
-    return OnStopRequest(aRequest, status);
+    return OnLoadComplete(aRequest, status);
   }
 
   if (aType == imgINotificationObserver::DECODE_COMPLETE) {
@@ -205,8 +205,7 @@ nsImageLoadingContent::Notify(imgIRequest* aRequest,
 }
 
 nsresult
-nsImageLoadingContent::OnStopRequest(imgIRequest* aRequest,
-                                     nsresult aStatus)
+nsImageLoadingContent::OnLoadComplete(imgIRequest* aRequest, nsresult aStatus)
 {
   uint32_t oldStatus;
   aRequest->GetImageStatus(&oldStatus);
@@ -362,14 +361,51 @@ nsImageLoadingContent::GetImageBlockingStatus(int16_t* aStatus)
   return NS_OK;
 }
 
+static void
+ReplayImageStatus(imgIRequest* aRequest, imgINotificationObserver* aObserver)
+{
+  if (!aRequest) {
+    return;
+  }
+
+  uint32_t status = 0;
+  nsresult rv = aRequest->GetImageStatus(&status);
+  if (NS_FAILED(rv)) {
+    return;
+  }
+
+  if (status & imgIRequest::STATUS_SIZE_AVAILABLE) {
+    aObserver->Notify(aRequest, imgINotificationObserver::SIZE_AVAILABLE, nullptr);
+  }
+  if (status & imgIRequest::STATUS_FRAME_COMPLETE) {
+    aObserver->Notify(aRequest, imgINotificationObserver::FRAME_COMPLETE, nullptr);
+  }
+  if (status & imgIRequest::STATUS_HAS_TRANSPARENCY) {
+    aObserver->Notify(aRequest, imgINotificationObserver::HAS_TRANSPARENCY, nullptr);
+  }
+  if (status & imgIRequest::STATUS_IS_ANIMATED) {
+    aObserver->Notify(aRequest, imgINotificationObserver::IS_ANIMATED, nullptr);
+  }
+  if (status & imgIRequest::STATUS_DECODE_COMPLETE) {
+    aObserver->Notify(aRequest, imgINotificationObserver::DECODE_COMPLETE, nullptr);
+  }
+  if (status & imgIRequest::STATUS_LOAD_COMPLETE) {
+    aObserver->Notify(aRequest, imgINotificationObserver::LOAD_COMPLETE, nullptr);
+  }
+}
+
 NS_IMETHODIMP
 nsImageLoadingContent::AddObserver(imgINotificationObserver* aObserver)
 {
   NS_ENSURE_ARG_POINTER(aObserver);
 
   if (!mObserverList.mObserver) {
-    mObserverList.mObserver = aObserver;
     // Don't touch the linking of the list!
+    mObserverList.mObserver = aObserver;
+
+    ReplayImageStatus(mCurrentRequest, aObserver);
+    ReplayImageStatus(mPendingRequest, aObserver);
+
     return NS_OK;
   }
 
@@ -384,6 +420,9 @@ nsImageLoadingContent::AddObserver(imgINotificationObserver* aObserver)
   if (! observer->mNext) {
     return NS_ERROR_OUT_OF_MEMORY;
   }
+
+  ReplayImageStatus(mCurrentRequest, aObserver);
+  ReplayImageStatus(mPendingRequest, aObserver);
 
   return NS_OK;
 }
@@ -888,10 +927,16 @@ nsImageLoadingContent::LoadImage(nsIURI* aNewURI,
   rv = nsContentUtils::LoadImage(aNewURI, aDocument,
                                  aDocument->NodePrincipal(),
                                  aDocument->GetDocumentURI(),
+                                 aDocument->GetReferrerPolicy(),
                                  this, loadFlags,
                                  content->LocalName(),
                                  getter_AddRefs(req),
                                  policyType);
+
+  // Tell the document to forget about the image preload, if any, for
+  // this URI, now that we might have another imgRequestProxy for it.
+  // That way if we get canceled later the image load won't continue.
+  aDocument->ForgetImagePreload(aNewURI);
 
   if (NS_SUCCEEDED(rv)) {
     TrackImage(req);

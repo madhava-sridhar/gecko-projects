@@ -25,9 +25,9 @@ namespace {
 
 using mozilla::ErrorResult;
 using mozilla::dom::MSG_INVALID_REQUEST_METHOD;
-using mozilla::dom::OwningRequestOrScalarValueString;
+using mozilla::dom::OwningRequestOrUSVString;
 using mozilla::dom::Request;
-using mozilla::dom::RequestOrScalarValueString;
+using mozilla::dom::RequestOrUSVString;
 
 static bool
 IsValidPutRequestMethod(const Request& aRequest, ErrorResult& aRv)
@@ -43,7 +43,7 @@ IsValidPutRequestMethod(const Request& aRequest, ErrorResult& aRv)
 }
 
 static bool
-IsValidPutRequestMethod(const RequestOrScalarValueString& aRequest,
+IsValidPutRequestMethod(const RequestOrUSVString& aRequest,
                         ErrorResult& aRv)
 {
   if (!aRequest.IsRequest()) {
@@ -53,7 +53,7 @@ IsValidPutRequestMethod(const RequestOrScalarValueString& aRequest,
 }
 
 static bool
-IsValidPutRequestMethod(const OwningRequestOrScalarValueString& aRequest,
+IsValidPutRequestMethod(const OwningRequestOrUSVString& aRequest,
                         ErrorResult& aRv)
 {
   if (!aRequest.IsRequest()) {
@@ -93,7 +93,7 @@ Cache::Cache(nsIGlobalObject* aGlobal, const nsACString& aOrigin,
 }
 
 already_AddRefed<Promise>
-Cache::Match(const RequestOrScalarValueString& aRequest,
+Cache::Match(const RequestOrUSVString& aRequest,
              const QueryParams& aParams, ErrorResult& aRv)
 {
   MOZ_ASSERT(mActor);
@@ -120,7 +120,7 @@ Cache::Match(const RequestOrScalarValueString& aRequest,
 }
 
 already_AddRefed<Promise>
-Cache::MatchAll(const Optional<RequestOrScalarValueString>& aRequest,
+Cache::MatchAll(const Optional<RequestOrUSVString>& aRequest,
                 const QueryParams& aParams, ErrorResult& aRv)
 {
   MOZ_ASSERT(mActor);
@@ -148,7 +148,7 @@ Cache::MatchAll(const Optional<RequestOrScalarValueString>& aRequest,
 }
 
 already_AddRefed<Promise>
-Cache::Add(const RequestOrScalarValueString& aRequest, ErrorResult& aRv)
+Cache::Add(const RequestOrUSVString& aRequest, ErrorResult& aRv)
 {
   MOZ_ASSERT(mActor);
 
@@ -179,7 +179,7 @@ Cache::Add(const RequestOrScalarValueString& aRequest, ErrorResult& aRv)
 }
 
 already_AddRefed<Promise>
-Cache::AddAll(const Sequence<OwningRequestOrScalarValueString>& aRequests,
+Cache::AddAll(const Sequence<OwningRequestOrUSVString>& aRequests,
               ErrorResult& aRv)
 {
   MOZ_ASSERT(mActor);
@@ -222,7 +222,7 @@ Cache::AddAll(const Sequence<OwningRequestOrScalarValueString>& aRequests,
 }
 
 already_AddRefed<Promise>
-Cache::Put(const RequestOrScalarValueString& aRequest, Response& aResponse,
+Cache::Put(const RequestOrUSVString& aRequest, Response& aResponse,
            ErrorResult& aRv)
 {
   MOZ_ASSERT(mActor);
@@ -264,7 +264,7 @@ Cache::Put(const RequestOrScalarValueString& aRequest, Response& aResponse,
 }
 
 already_AddRefed<Promise>
-Cache::Delete(const RequestOrScalarValueString& aRequest,
+Cache::Delete(const RequestOrUSVString& aRequest,
               const QueryParams& aParams, ErrorResult& aRv)
 {
   MOZ_ASSERT(mActor);
@@ -291,7 +291,7 @@ Cache::Delete(const RequestOrScalarValueString& aRequest,
 }
 
 already_AddRefed<Promise>
-Cache::Keys(const Optional<RequestOrScalarValueString>& aRequest,
+Cache::Keys(const Optional<RequestOrUSVString>& aRequest,
             const QueryParams& aParams, ErrorResult& aRv)
 {
   MOZ_ASSERT(mActor);

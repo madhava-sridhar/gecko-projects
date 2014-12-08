@@ -322,6 +322,11 @@ partial interface Navigator {
 };
 #endif // MOZ_GAMEPAD
 
+partial interface Navigator {
+  [Throws, Pref="dom.vr.enabled"]
+  Promise<sequence<VRDevice>> getVRDevices();
+};
+
 #ifdef MOZ_B2G_BT
 partial interface Navigator {
   [Throws, CheckPermissions="bluetooth"]
@@ -397,3 +402,12 @@ partial interface Navigator {
   [Pref="dom.tv.enabled", CheckPermissions="tv", Func="Navigator::HasTVSupport"]
   readonly attribute TVManager? tv;
 };
+
+#ifdef MOZ_EME
+partial interface Navigator {
+  [Pref="media.eme.enabled", Throws, NewObject]
+  Promise<MediaKeySystemAccess>
+  requestMediaKeySystemAccess(DOMString keySystem,
+                              optional sequence<MediaKeySystemOptions> supportedConfigurations);
+};
+#endif

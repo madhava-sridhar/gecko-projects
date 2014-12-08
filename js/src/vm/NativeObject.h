@@ -550,6 +550,14 @@ class NativeObject : public JSObject
     bool shadowingShapeChange(ExclusiveContext *cx, const Shape &shape);
     bool clearFlag(ExclusiveContext *cx, BaseShape::Flag flag);
 
+    static void slotsSizeMustNotOverflow() {
+        static_assert((NativeObject::NELEMENTS_LIMIT - 1) <= INT32_MAX / sizeof(JS::Value),
+                      "every caller of this method requires that a slot "
+                      "number (or slot count) count multiplied by "
+                      "sizeof(Value) can't overflow uint32_t (and sometimes "
+                      "int32_t, too)");
+    }
+
     uint32_t numFixedSlots() const {
         return reinterpret_cast<const shadow::Object *>(this)->numFixedSlots();
     }
@@ -892,6 +900,13 @@ class NativeObject : public JSObject
     /* Upper bound on the number of elements in an object. */
     static const uint32_t NELEMENTS_LIMIT = JS_BIT(28);
 
+    static void elementsSizeMustNotOverflow() {
+        static_assert((NativeObject::NELEMENTS_LIMIT - 1) <= INT32_MAX / sizeof(JS::Value),
+                      "every caller of this method require that an element "
+                      "count multiplied by sizeof(Value) can't overflow "
+                      "uint32_t (and sometimes int32_t ,too)");
+    }
+
     ObjectElements * getElementsHeader() const {
         return ObjectElements::fromElements(elements_);
     }
@@ -1220,6 +1235,14 @@ class NativeObject : public JSObject
     }
     static size_t getPrivateDataOffset(size_t nfixed) { return getFixedSlotOffset(nfixed); }
     static size_t offsetOfSlots() { return offsetof(NativeObject, slots_); }
+};
+
+// Object class for plain native objects created using '{}' object literals,
+// 'new Object()', 'Object.create', etc.
+class PlainObject : public NativeObject
+{
+  public:
+    static const js::Class class_;
 };
 
 inline void

@@ -176,7 +176,6 @@ Context::QuotaInitRunnable::Run()
 
       nsCOMPtr<nsIPrincipal> principal = mManagerId->Principal();
       nsresult rv = qm->GetInfoFromPrincipal(principal,
-                                             PERSISTENCE_TYPE_PERSISTENT,
                                              &mQuotaInfo.mGroup,
                                              &mQuotaInfo.mOrigin,
                                              &mQuotaInfo.mIsApp,

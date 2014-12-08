@@ -123,8 +123,6 @@ class JSObject : public js::gc::Cell
     static js::types::TypeObject *makeLazyType(JSContext *cx, js::HandleObject obj);
 
   public:
-    static const js::Class class_;
-
     js::Shape * lastProperty() const {
         MOZ_ASSERT(shape_);
         return shape_;
@@ -1030,12 +1028,12 @@ GetInitialHeap(NewObjectKind newKind, const Class *clasp)
 
 // Specialized call for constructing |this| with a known function callee,
 // and a known prototype.
-extern NativeObject *
+extern PlainObject *
 CreateThisForFunctionWithProto(JSContext *cx, js::HandleObject callee, JSObject *proto,
                                NewObjectKind newKind = GenericObject);
 
 // Specialized call for constructing |this| with a known function callee.
-extern NativeObject *
+extern PlainObject *
 CreateThisForFunction(JSContext *cx, js::HandleObject callee, NewObjectKind newKind);
 
 // Generic call for constructing |this|.
@@ -1113,7 +1111,8 @@ js_FindVariableScope(JSContext *cx, JSFunction **funp);
 namespace js {
 
 bool
-LookupPropertyPure(JSObject *obj, jsid id, NativeObject **objp, Shape **propp);
+LookupPropertyPure(ThreadSafeContext *cx, JSObject *obj, jsid id, NativeObject **objp,
+                   Shape **propp);
 
 bool
 GetPropertyPure(ThreadSafeContext *cx, JSObject *obj, jsid id, Value *vp);

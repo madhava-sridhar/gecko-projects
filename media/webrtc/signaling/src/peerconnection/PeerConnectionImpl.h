@@ -226,7 +226,6 @@ public:
 
   enum Error {
     kNoError                          = 0,
-    kInvalidCandidateType             = 2,
     kInvalidMediastreamTrack          = 3,
     kInvalidState                     = 4,
     kInvalidSessionDescription        = 5,
@@ -427,6 +426,12 @@ public:
   nsresult GetId(nsAString& id)
   {
     id = NS_ConvertASCIItoUTF16(mName.c_str());
+    return NS_OK;
+  }
+
+  nsresult SetId(const nsAString& id)
+  {
+    mName = NS_ConvertUTF16toUTF8(id).get();
     return NS_OK;
   }
 #endif

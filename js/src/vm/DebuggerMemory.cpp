@@ -34,6 +34,7 @@ using JS::ubi::Node;
 
 using mozilla::Maybe;
 using mozilla::Move;
+using mozilla::Nothing;
 
 /* static */ DebuggerMemory *
 DebuggerMemory::create(JSContext *cx, Debugger *dbg)
@@ -200,7 +201,7 @@ DebuggerMemory::drainAllocationsLog(JSContext *cx, unsigned argc, Value *vp)
     result->ensureDenseInitializedLength(cx, 0, length);
 
     for (size_t i = 0; i < length; i++) {
-        RootedObject obj(cx, NewBuiltinClassInstance(cx, &JSObject::class_));
+        RootedPlainObject obj(cx, NewBuiltinClassInstance<PlainObject>(cx));
         if (!obj)
             return false;
 
@@ -362,7 +363,7 @@ class Tally {
     size_t total() const { return total_; }
 
     bool report(Census &census, MutableHandleValue report) {
-        RootedObject obj(census.cx, NewBuiltinClassInstance(census.cx, &JSObject::class_));
+        RootedPlainObject obj(census.cx, NewBuiltinClassInstance<PlainObject>(census.cx));
         RootedValue countValue(census.cx, NumberValue(total_));
         if (!obj ||
             !JSObject::defineProperty(census.cx, obj, census.cx->names().count, countValue))
@@ -434,7 +435,7 @@ class ByJSType {
     bool report(Census &census, MutableHandleValue report) {
         JSContext *cx = census.cx;
 
-        RootedObject obj(cx, NewBuiltinClassInstance(cx, &JSObject::class_));
+        RootedPlainObject obj(cx, NewBuiltinClassInstance<PlainObject>(cx));
         if (!obj)
             return false;
 
@@ -551,7 +552,7 @@ class ByObjectClass {
         qsort(entries.begin(), entries.length(), sizeof(*entries.begin()), compareEntries);
 
         // Now build the result by iterating over the sorted vector.
-        RootedObject obj(cx, NewBuiltinClassInstance(cx, &JSObject::class_));
+        RootedPlainObject obj(cx, NewBuiltinClassInstance<PlainObject>(cx));
         if (!obj)
             return false;
         for (Entry **entryPtr = entries.begin(); entryPtr < entries.end(); entryPtr++) {
@@ -660,7 +661,7 @@ class ByUbinodeType {
         qsort(entries.begin(), entries.length(), sizeof(*entries.begin()), compareEntries);
 
         // Now build the result by iterating over the sorted vector.
-        RootedObject obj(cx, NewBuiltinClassInstance(cx, &JSObject::class_));
+        RootedPlainObject obj(cx, NewBuiltinClassInstance<PlainObject>(cx));
         if (!obj)
             return false;
         for (Entry **entryPtr = entries.begin(); entryPtr < entries.end(); entryPtr++) {
@@ -754,34 +755,44 @@ bool
 DebuggerMemory::takeCensus(JSContext *cx, unsigned argc, Value *vp)
 {
     THIS_DEBUGGER_MEMORY(cx, argc, vp, "Debugger.Memory.prototype.census", args, memory);
-    Debugger *debugger = memory->getDebugger();
 
     dbg::Census census(cx);
     if (!census.init())
         return false;
+
     dbg::DefaultCensusHandler handler(census);
     if (!handler.init(census))
         return false;
 
-    {
-        JS::AutoCheckCannotGC noGC;
+    Debugger *dbg = memory->getDebugger();
 
-        dbg::DefaultCensusTraversal traversal(cx, handler, noGC);
+    // Populate census.debuggeeZones and ensure that all of our debuggee globals
+    // are rooted so that they are visible in the RootList.
+    JS::AutoObjectVector debuggees(cx);
+    for (GlobalObjectSet::Range r = dbg->allDebuggees(); !r.empty(); r.popFront()) {
+        if (!census.debuggeeZones.put(r.front()->zone()) ||
+            !debuggees.append(static_cast<JSObject *>(r.front())))
+        {
+            return false;
+        }
+    }
+
+    {
+        Maybe<JS::AutoCheckCannotGC> maybeNoGC;
+        JS::ubi::RootList rootList(cx, maybeNoGC);
+        if (!rootList.init(cx, census.debuggeeZones))
+            return false;
+
+        dbg::DefaultCensusTraversal traversal(cx, handler, maybeNoGC.ref());
         if (!traversal.init())
             return false;
         traversal.wantNames = false;
 
-        // Walk the debuggee compartments, using it to set the starting points
-        // (the debuggee globals) for the traversal, and to populate
-        // census.debuggeeZones.
-        for (GlobalObjectSet::Range r = debugger->debuggees.all(); !r.empty(); r.popFront()) {
-            if (!census.debuggeeZones.put(r.front()->zone()) ||
-                !traversal.addStart(static_cast<JSObject *>(r.front())))
-                return false;
-        }
-
-        if (!traversal.traverse())
+        if (!traversal.addStart(JS::ubi::Node(&rootList)) ||
+            !traversal.traverse())
+        {
             return false;
+        }
     }
 
     return handler.report(census, args.rval());

@@ -119,7 +119,11 @@ RootActor.prototype = {
 
   traits: {
     sources: true,
+    // Whether the inspector actor allows modifying outer HTML.
     editOuterHTML: true,
+    // Whether the inspector actor allows modifying innerHTML and inserting
+    // adjacent HTML.
+    pasteHTML: true,
     // Whether the server-side highlighter actor exists and can be used to
     // remotely highlight nodes (see server/actors/highlighter.js)
     highlightable: true,
@@ -128,7 +132,8 @@ RootActor.prototype = {
     customHighlighters: [
       "BoxModelHighlighter",
       "CssTransformHighlighter",
-      "SelectorHighlighter"
+      "SelectorHighlighter",
+      "RectHighlighter"
     ],
     // Whether the inspector actor implements the getImageDataFromURL
     // method that returns data-uris for image URLs. This is used for image
@@ -141,6 +146,9 @@ RootActor.prototype = {
     storageInspectorReadOnly: true,
     // Whether conditional breakpoints are supported
     conditionalBreakpoints: true,
+    // Whether the server supports full source actors (breakpoints on
+    // eval scripts, etc)
+    debuggerSourceActors: true,
     bulk: true,
     // Whether the style rule actor implements the modifySelector method
     // that modifies the rule's selector
@@ -153,7 +161,10 @@ RootActor.prototype = {
     // Whether the debugger server supports
     // blackboxing/pretty-printing (not supported in Fever Dream yet)
     noBlackBoxing: false,
-    noPrettyPrinting: false
+    noPrettyPrinting: false,
+    // Whether the page style actor implements the getUsedFontFaces method
+    // that returns the font faces used on a node
+    getUsedFontFaces: true
   },
 
   /**
@@ -280,14 +291,12 @@ RootActor.prototype = {
         newActorPool.addActor(tabActor);
         tabActorList.push(tabActor);
       }
-
       /* DebuggerServer.addGlobalActor support: create actors. */
       if (!this._globalActorPool) {
         this._globalActorPool = new ActorPool(this.conn);
-        this._createExtraActors(this._parameters.globalActorFactories, this._globalActorPool);
         this.conn.addActorPool(this._globalActorPool);
       }
-
+      this._createExtraActors(this._parameters.globalActorFactories, this._globalActorPool);
       /*
        * Drop the old actorID -> actor map. Actors that still mattered were
        * added to the new map; others will go away.
@@ -436,7 +445,7 @@ RootActor.prototype = {
    * is here because the Style Editor and Inspector share style sheet actors.
    *
    * @param DOMStyleSheet styleSheet
-   *        The style sheet to creat an actor for.
+   *        The style sheet to create an actor for.
    * @return StyleSheetActor actor
    *         The actor for this style sheet.
    *
@@ -451,7 +460,28 @@ RootActor.prototype = {
     this._globalActorPool.addActor(actor);
 
     return actor;
-  }
+  },
+
+  /**
+   * Remove the extra actor (added by DebuggerServer.addGlobalActor or
+   * DebuggerServer.addTabActor) name |aName|.
+   */
+  removeActorByName: function(aName) {
+    if (aName in this._extraActors) {
+      const actor = this._extraActors[aName];
+      if (this._globalActorPool.has(actor)) {
+        this._globalActorPool.removeActor(actor);
+      }
+      if (this._tabActorPool) {
+        // Iterate over TabActor instances to also remove tab actors
+        // created during listTabs for each document.
+        this._tabActorPool.forEach(tab => {
+          tab.removeActorByName(aName);
+        });
+      }
+      delete this._extraActors[aName];
+    }
+   }
 };
 
 RootActor.prototype.requestTypes = {

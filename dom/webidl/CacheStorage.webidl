@@ -11,7 +11,7 @@
 [Exposed=(Window,Worker),
  Func="mozilla::dom::cache::CacheStorage::PrefEnabled"]
 interface CacheStorage {
-   [Throws] Promise<Response> match((Request or ScalarValueString) request,
+   [Throws] Promise<Response> match((Request or USVString) request,
                                     optional QueryParams params);
    [Throws] Promise<boolean> has(DOMString cacheName);
    [Throws] Promise<Cache> open(DOMString cacheName);

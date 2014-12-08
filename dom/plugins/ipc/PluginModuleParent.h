@@ -115,14 +115,6 @@ protected:
     virtual bool
     RecvBackUpXResources(const FileDescriptor& aXSocketFd) MOZ_OVERRIDE;
 
-    virtual bool
-    AnswerNPN_UserAgent(nsCString* userAgent) MOZ_OVERRIDE;
-
-    virtual bool
-    AnswerNPN_GetValue_WithBoolReturn(const NPNVariable& aVariable,
-                                      NPError* aError,
-                                      bool* aBoolVal) MOZ_OVERRIDE;
-
     virtual bool AnswerProcessSomeEvents() MOZ_OVERRIDE;
 
     virtual bool
@@ -153,9 +145,6 @@ protected:
 
     virtual bool
     RecvPopCursor() MOZ_OVERRIDE;
-
-    virtual bool
-    RecvGetNativeCursorsSupported(bool* supported) MOZ_OVERRIDE;
 
     virtual bool
     RecvNPN_SetException(const nsCString& aMessage) MOZ_OVERRIDE;
@@ -242,6 +231,9 @@ protected:
 protected:
     void NotifyPluginCrashed();
 
+    bool GetSetting(NPNVariable aVariable);
+    void GetSettings(PluginSettings* aSettings);
+
     bool mIsChrome;
     bool mShutdown;
     bool mClearSiteDataSupported;
@@ -282,8 +274,6 @@ class PluginModuleContentParent : public PluginModuleParent
 #ifdef MOZ_CRASHREPORTER_INJECTOR
     void OnCrash(DWORD processID) MOZ_OVERRIDE {}
 #endif
-
-    static PluginModuleContentParent* sSavedModuleParent;
 };
 
 class PluginModuleChromeParent
@@ -311,6 +301,8 @@ class PluginModuleChromeParent
     void
     OnHangUIContinue();
 #endif // XP_WIN
+
+    void CachedSettingChanged();
 
 private:
     virtual void
@@ -360,7 +352,12 @@ private:
     void ShutdownPluginProfiling();
 #endif
 
+    void RegisterSettingsCallbacks();
+    void UnregisterSettingsCallbacks();
+
     virtual bool RecvNotifyContentModuleDestroyed() MOZ_OVERRIDE;
+
+    static void CachedSettingChanged(const char* aPref, void* aModule);
 
     PluginProcessParent* mSubprocess;
     uint32_t mPluginId;
@@ -422,6 +419,8 @@ private:
     DWORD mFlashProcess1;
     DWORD mFlashProcess2;
 #endif
+
+    nsCOMPtr<nsIObserver> mOfflineObserver;
 };
 
 } // namespace plugins

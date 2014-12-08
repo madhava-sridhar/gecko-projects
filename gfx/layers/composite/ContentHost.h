@@ -173,8 +173,8 @@ public:
   virtual TemporaryRef<TexturedEffect> GenEffect(const gfx::Filter& aFilter) MOZ_OVERRIDE;
 
 protected:
-  RefPtr<TextureHost> mTextureHost;
-  RefPtr<TextureHost> mTextureHostOnWhite;
+  CompositableTextureHostRef mTextureHost;
+  CompositableTextureHostRef mTextureHostOnWhite;
   CompositableTextureSourceRef mTextureSource;
   CompositableTextureSourceRef mTextureSourceOnWhite;
   bool mLocked;
@@ -241,7 +241,7 @@ public:
   explicit ContentHostIncremental(const TextureInfo& aTextureInfo);
   ~ContentHostIncremental();
 
-  virtual CompositableType GetType() { return CompositableType::BUFFER_CONTENT_INC; }
+  virtual CompositableType GetType() { return CompositableType::CONTENT_INC; }
 
   virtual LayerRenderState GetRenderState() MOZ_OVERRIDE { return LayerRenderState(); }
 

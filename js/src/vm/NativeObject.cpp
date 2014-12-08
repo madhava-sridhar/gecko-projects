@@ -26,9 +26,6 @@ using JS::GenericNaN;
 using mozilla::DebugOnly;
 using mozilla::RoundUpPow2;
 
-JS_STATIC_ASSERT(int32_t((NativeObject::NELEMENTS_LIMIT - 1) * sizeof(Value)) ==
-                 int64_t((NativeObject::NELEMENTS_LIMIT - 1) * sizeof(Value)));
-
 PropDesc::PropDesc()
 {
     setUndefined();
@@ -122,9 +119,9 @@ ObjectElements::ConvertElementsToDoubles(JSContext *cx, uintptr_t elementsPtr)
 /* static */ bool
 ObjectElements::MakeElementsCopyOnWrite(ExclusiveContext *cx, NativeObject *obj)
 {
-    // Make sure there is enough room for the owner object pointer at the end
-    // of the elements.
-    JS_STATIC_ASSERT(sizeof(HeapSlot) >= sizeof(HeapPtrObject));
+    static_assert(sizeof(HeapSlot) >= sizeof(HeapPtrObject),
+                  "there must be enough room for the owner object pointer at "
+                  "the end of the elements");
     if (!obj->ensureElements(cx, obj->getDenseInitializedLength() + 1))
         return false;
 
@@ -461,6 +458,7 @@ NativeObject::growSlots(ThreadSafeContext *cx, HandleNativeObject obj, uint32_t 
      * the limited number of bits to store shape slots, object growth is
      * throttled well before the slot capacity can overflow.
      */
+    NativeObject::slotsSizeMustNotOverflow();
     MOZ_ASSERT(newCount < NELEMENTS_LIMIT);
 
     if (!oldCount) {
@@ -1758,7 +1756,7 @@ Detecting(JSContext *cx, JSScript *script, jsbytecode *pc)
         return false;
     }
 
-    if (op == JSOP_GETGNAME || op == JSOP_NAME) {
+    if (op == JSOP_GETGNAME || op == JSOP_GETNAME) {
         /*
          * Special case #2: handle (document.all == undefined).  Don't worry
          * about a local variable named |undefined| shadowing the immutable
@@ -1919,13 +1917,14 @@ static bool
 MaybeReportUndeclaredVarAssignment(JSContext *cx, JSString *propname)
 {
     {
-        JSScript *script = cx->currentScript(nullptr, JSContext::ALLOW_CROSS_COMPARTMENT);
+        jsbytecode *pc;
+        JSScript *script = cx->currentScript(&pc, JSContext::ALLOW_CROSS_COMPARTMENT);
         if (!script)
             return true;
 
         // If the code is not strict and extra warnings aren't enabled, then no
         // check is needed.
-        if (!script->strict() && !cx->compartment()->options().extraWarnings(cx))
+        if (!IsStrictSetPC(pc) && !cx->compartment()->options().extraWarnings(cx))
             return true;
     }
 
@@ -2055,7 +2054,7 @@ baseops::SetPropertyHelper(typename ExecutionModeTraits<mode>::ContextType cxArg
     RootedShape shape(cxArg);
     if (mode == ParallelExecution) {
         NativeObject *npobj;
-        if (!LookupPropertyPure(obj, id, &npobj, shape.address()))
+        if (!LookupPropertyPure(cxArg, obj, id, &npobj, shape.address()))
             return false;
         pobj = npobj;
     } else {
@@ -2311,7 +2310,7 @@ baseops::DeleteGeneric(JSContext *cx, HandleNativeObject obj, HandleId id, bool 
 
         if (!CallJSDeletePropertyOp(cx, obj->getClass()->delProperty, obj, id, succeeded))
             return false;
-        if (!succeeded)
+        if (!*succeeded)
             return true;
 
         NativeObject *nobj = &obj->as<NativeObject>();
@@ -2330,7 +2329,7 @@ baseops::DeleteGeneric(JSContext *cx, HandleNativeObject obj, HandleId id, bool 
     RootedId propid(cx, shape->propid());
     if (!CallJSDeletePropertyOp(cx, obj->getClass()->delProperty, obj, propid, succeeded))
         return false;
-    if (!succeeded)
+    if (!*succeeded)
         return true;
 
     return obj->removeProperty(cx, id) && SuppressDeletedProperty(cx, obj, id);

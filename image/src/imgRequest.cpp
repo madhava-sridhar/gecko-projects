@@ -66,6 +66,7 @@ imgRequest::imgRequest(imgLoader* aLoader)
  , mValidator(nullptr)
  , mInnerWindowId(0)
  , mCORSMode(imgIRequest::CORS_NONE)
+ , mReferrerPolicy(mozilla::net::RP_Default)
  , mImageErrorCode(NS_OK)
  , mDecodeRequested(false)
  , mIsMultiPartChannel(false)
@@ -94,7 +95,8 @@ nsresult imgRequest::Init(nsIURI *aURI,
                           imgCacheEntry *aCacheEntry,
                           void *aLoadId,
                           nsIPrincipal* aLoadingPrincipal,
-                          int32_t aCORSMode)
+                          int32_t aCORSMode,
+                          ReferrerPolicy aReferrerPolicy)
 {
   MOZ_ASSERT(NS_IsMainThread(), "Cannot use nsIURI off main thread!");
 
@@ -117,6 +119,7 @@ nsresult imgRequest::Init(nsIURI *aURI,
 
   mLoadingPrincipal = aLoadingPrincipal;
   mCORSMode = aCORSMode;
+  mReferrerPolicy = aReferrerPolicy;
 
   mChannel->GetNotificationCallbacks(getter_AddRefs(mPrevChannelSink));
 
@@ -452,8 +455,10 @@ void imgRequest::SetIsInCache(bool incache)
 
 void imgRequest::UpdateCacheEntrySize()
 {
-  if (mCacheEntry)
-    mCacheEntry->SetDataSize(mImage->SizeOfData());
+  if (mCacheEntry) {
+    size_t size = mImage->SizeOfSourceWithComputedFallback(moz_malloc_size_of);
+    mCacheEntry->SetDataSize(size);
+  }
 }
 
 void imgRequest::SetCacheValidation(imgCacheEntry* aCacheEntry, nsIRequest* aRequest)
@@ -673,7 +678,6 @@ NS_IMETHODIMP imgRequest::OnStartRequest(nsIRequest *aRequest, nsISupports *ctxt
   // Note: refreshing progressTracker in case OnNewSourceData changed it.
   progressTracker = GetProgressTracker();
   progressTracker->ResetForNewRequest();
-  progressTracker->SyncNotifyProgress(FLAG_REQUEST_STARTED);
 
   nsCOMPtr<nsIChannel> channel(do_QueryInterface(aRequest));
   if (channel)
@@ -793,7 +797,7 @@ NS_IMETHODIMP imgRequest::OnStopRequest(nsIRequest *aRequest, nsISupports *ctxt,
     // We have to fire the OnStopRequest notifications ourselves because there's
     // no image capable of doing so.
     Progress progress =
-      OnStopRequestProgress(lastPart, /* aError = */ false, status);
+      LoadCompleteProgress(lastPart, /* aError = */ false, status);
 
     nsRefPtr<ProgressTracker> progressTracker = GetProgressTracker();
     progressTracker->SyncNotifyProgress(progress);
@@ -895,7 +899,6 @@ imgRequest::OnDataAvailable(nsIRequest *aRequest, nsISupports *ctxt,
         // Initialize a new status tracker.
         nsRefPtr<ProgressTracker> freshTracker = new ProgressTracker(nullptr);
         freshTracker->SetIsMultipart();
-        freshTracker->SyncNotifyProgress(FLAG_REQUEST_STARTED);
 
         // Replace the old status tracker with it.
         nsRefPtr<ProgressTracker> oldProgressTracker = GetProgressTracker();

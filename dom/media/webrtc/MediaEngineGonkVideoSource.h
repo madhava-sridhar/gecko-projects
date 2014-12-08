@@ -45,8 +45,8 @@ public:
 
   MediaEngineGonkVideoSource(int aIndex)
     : MediaEngineCameraVideoSource(aIndex, "GonkCamera.Monitor")
-    , mCameraControl(nullptr)
     , mCallbackMonitor("GonkCamera.CallbackMonitor")
+    , mCameraControl(nullptr)
     , mRotation(0)
     , mBackCamera(false)
     , mOrientationChanged(true) // Correct the orientation at first time takePhoto.
@@ -63,18 +63,18 @@ public:
                           SourceMediaStream* aSource,
                           TrackID aId,
                           StreamTime aDesiredTime,
-                          TrackTicks& aLastEndTime) MOZ_OVERRIDE;
+                          StreamTime &aLastEndTime) MOZ_OVERRIDE;
   virtual bool SatisfiesConstraintSets(
       const nsTArray<const dom::MediaTrackConstraintSet*>& aConstraintSets)
   {
     return true;
   }
 
-  void OnHardwareStateChange(HardwareState aState);
+  void OnHardwareStateChange(HardwareState aState, nsresult aReason) MOZ_OVERRIDE;
   void GetRotation();
-  bool OnNewPreviewFrame(layers::Image* aImage, uint32_t aWidth, uint32_t aHeight);
-  void OnUserError(UserContext aContext, nsresult aError);
-  void OnTakePictureComplete(uint8_t* aData, uint32_t aLength, const nsAString& aMimeType);
+  bool OnNewPreviewFrame(layers::Image* aImage, uint32_t aWidth, uint32_t aHeight) MOZ_OVERRIDE;
+  void OnUserError(UserContext aContext, nsresult aError) MOZ_OVERRIDE;
+  void OnTakePictureComplete(uint8_t* aData, uint32_t aLength, const nsAString& aMimeType) MOZ_OVERRIDE;
 
   void AllocImpl();
   void DeallocImpl();

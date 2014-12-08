@@ -16,6 +16,7 @@
 #include "TrackBuffer.h"
 
 #ifdef MOZ_FMP4
+#include "SharedDecoderManager.h"
 #include "MP4Decoder.h"
 #include "MP4Reader.h"
 #endif
@@ -62,6 +63,9 @@ MediaSourceReader::MediaSourceReader(MediaSourceDecoder* aDecoder)
   , mAudioIsSeeking(false)
   , mVideoIsSeeking(false)
   , mHasEssentialTrackBuffers(false)
+#ifdef MOZ_FMP4
+  , mSharedDecoderManager(new SharedDecoderManager())
+#endif
 {
 }
 
@@ -113,7 +117,6 @@ MediaSourceReader::OnAudioDecoded(AudioData* aSample)
     if (aSample->mTime < mTimeThreshold) {
       MSE_DEBUG("MediaSourceReader(%p)::OnAudioDecoded mTime=%lld < mTimeThreshold=%lld",
                 this, aSample->mTime, mTimeThreshold);
-      delete aSample;
       mAudioReader->RequestAudioData();
       return;
     }
@@ -158,7 +161,6 @@ MediaSourceReader::OnVideoDecoded(VideoData* aSample)
     if (aSample->mTime < mTimeThreshold) {
       MSE_DEBUG("MediaSourceReader(%p)::OnVideoDecoded mTime=%lld < mTimeThreshold=%lld",
                 this, aSample->mTime, mTimeThreshold);
-      delete aSample;
       mVideoReader->RequestVideoData(false, 0);
       return;
     }
@@ -178,7 +180,8 @@ void
 MediaSourceReader::OnNotDecoded(MediaData::Type aType, RequestSampleCallback::NotDecodedReason aReason)
 {
   MSE_DEBUG("MediaSourceReader(%p)::OnNotDecoded aType=%u aReason=%u IsEnded: %d", this, aType, aReason, IsEnded());
-  if (aReason == RequestSampleCallback::DECODE_ERROR) {
+  if (aReason == RequestSampleCallback::DECODE_ERROR ||
+      aReason == RequestSampleCallback::CANCELED) {
     GetCallback()->OnNotDecoded(aType, aReason);
     return;
   }
@@ -364,13 +367,25 @@ MediaSourceReader::CreateSubDecoder(const nsACString& aType)
     reader->SetStartTime(0);
   }
 
+  // This part is icky. It would be nicer to just give each subreader its own
+  // task queue. Unfortunately though, Request{Audio,Video}Data implementations
+  // currently assert that they're on "the decode thread", and so having
+  // separate task queues makes MediaSource stuff unnecessarily cumbersome. We
+  // should remove the need for these assertions (which probably involves making
+  // all Request*Data implementations fully async), and then get rid of the
+  // borrowing.
+  reader->SetBorrowedTaskQueue(GetTaskQueue());
+
   // Set a callback on the subreader that forwards calls to this reader.
   // This reader will then forward them onto the state machine via this
   // reader's callback.
   RefPtr<MediaDataDecodedListener<MediaSourceReader>> callback =
-    new MediaDataDecodedListener<MediaSourceReader>(this, GetTaskQueue());
+    new MediaDataDecodedListener<MediaSourceReader>(this, reader->GetTaskQueue());
   reader->SetCallback(callback);
-  reader->SetTaskQueue(GetTaskQueue());
+
+#ifdef MOZ_FMP4
+  reader->SetSharedDecoderManager(mSharedDecoderManager);
+#endif
   reader->Init(nullptr);
 
   MSE_DEBUG("MediaSourceReader(%p)::CreateSubDecoder subdecoder %p subreader %p",
@@ -637,6 +652,29 @@ MediaSourceReader::ReadMetadata(MediaInfo* aInfo, MetadataTags** aTags)
   *aTags = nullptr; // TODO: Handle metadata.
 
   return NS_OK;
+}
+
+void
+MediaSourceReader::ReadUpdatedMetadata(MediaInfo* aInfo)
+{
+  if (mAudioTrack) {
+    MOZ_ASSERT(mAudioTrack->IsReady());
+    mAudioReader = mAudioTrack->Decoders()[0]->GetReader();
+
+    const MediaInfo& info = mAudioReader->GetMediaInfo();
+    MOZ_ASSERT(info.HasAudio());
+    mInfo.mAudio = info.mAudio;
+  }
+
+  if (mVideoTrack) {
+    MOZ_ASSERT(mVideoTrack->IsReady());
+    mVideoReader = mVideoTrack->Decoders()[0]->GetReader();
+
+    const MediaInfo& info = mVideoReader->GetMediaInfo();
+    MOZ_ASSERT(info.HasVideo());
+    mInfo.mVideo = info.mVideo;
+  }
+  *aInfo = mInfo;
 }
 
 void

@@ -21,7 +21,7 @@ namespace mozilla {
 template <typename T>
 struct IsPixel : FalseType {};
 
-// See struct decleration for a description of each unit type
+// See struct declaration for a description of each unit type.
 struct CSSPixel;
 struct LayoutDevicePixel;
 struct LayerPixel;
@@ -234,6 +234,12 @@ struct LayoutDevicePixel {
 
   static LayoutDeviceIntRect FromAppUnitsToNearest(const nsRect& aRect, nscoord aAppUnitsPerDevPixel) {
     return FromUntyped(aRect.ToNearestPixels(aAppUnitsPerDevPixel));
+  }
+
+  static LayoutDeviceIntSize FromAppUnitsRounded(const nsSize& aSize, nscoord aAppUnitsPerDevPixel) {
+    return LayoutDeviceIntSize(
+      NSAppUnitsToIntPixels(aSize.width, aAppUnitsPerDevPixel),
+      NSAppUnitsToIntPixels(aSize.height, aAppUnitsPerDevPixel));
   }
 
   static nsSize ToAppUnits(const LayoutDeviceIntSize& aSize, nscoord aAppUnitsPerDevPixel) {

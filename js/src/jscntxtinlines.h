@@ -13,7 +13,7 @@
 #include "jsiter.h"
 
 #include "builtin/Object.h"
-#include "jit/IonFrames.h"
+#include "jit/JitFrames.h"
 #include "vm/ForkJoin.h"
 #include "vm/HelperThreads.h"
 #include "vm/Interpreter.h"
@@ -367,6 +367,8 @@ inline void
 JSContext::setPendingException(js::Value v)
 {
     MOZ_ASSERT(!IsPoisonedValue(v));
+    // overRecursed_ is set after the fact by js_ReportOverRecursed.
+    this->overRecursed_ = false;
     this->throwing = true;
     this->unwrappedException_ = v;
     // We don't use assertSameCompartment here to allow

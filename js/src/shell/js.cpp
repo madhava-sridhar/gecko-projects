@@ -22,11 +22,8 @@
 # include <io.h>     /* for isatty() */
 #endif
 #include <locale.h>
-#ifdef HAVE_MALLOC_H /* for malloc_usable_size on Linux, _msize on Windows */
-#include <malloc.h>
-#endif
-#ifdef HAVE_MALLOC_MALLOC_H
-#include <malloc/malloc.h> /* for malloc_size on OSX */
+#if defined(MALLOC_H)
+# include MALLOC_H    /* for malloc_usable_size, malloc_size, _msize */
 #endif
 #include <math.h>
 #include <signal.h>
@@ -860,8 +857,9 @@ LoadScript(JSContext *cx, unsigned argc, jsval *vp, bool scriptRelative)
             .setCompileAndGo(true)
             .setNoScriptRval(true);
         RootedScript script(cx);
+        RootedValue unused(cx);
         if ((compileOnly && !Compile(cx, thisobj, opts, filename.ptr(), &script)) ||
-            !Evaluate(cx, thisobj, opts, filename.ptr()))
+            !Evaluate(cx, thisobj, opts, filename.ptr(), &unused))
         {
             return false;
         }
@@ -1667,6 +1665,43 @@ Quit(JSContext *cx, unsigned argc, jsval *vp)
 
     gQuitting = true;
     return false;
+}
+
+static bool
+StartTimingMutator(JSContext *cx, unsigned argc, jsval *vp)
+{
+    CallArgs args = CallArgsFromVp(argc, vp);
+    if (args.length() > 0) {
+        JS_ReportErrorNumber(cx, my_GetErrorMessage, nullptr,
+                             JSSMSG_TOO_MANY_ARGS, "startTimingMutator");
+        return false;
+    }
+
+    cx->runtime()->gc.stats.startTimingMutator();
+    args.rval().setUndefined();
+    return true;
+}
+
+static bool
+StopTimingMutator(JSContext *cx, unsigned argc, jsval *vp)
+{
+    CallArgs args = CallArgsFromVp(argc, vp);
+    if (args.length() > 0) {
+        JS_ReportErrorNumber(cx, my_GetErrorMessage, nullptr,
+                             JSSMSG_TOO_MANY_ARGS, "stopTimingMutator");
+        return false;
+    }
+
+    double mutator_ms, gc_ms;
+    cx->runtime()->gc.stats.stopTimingMutator(mutator_ms, gc_ms);
+    double total_ms = mutator_ms + gc_ms;
+    if (total_ms > 0) {
+        fprintf(gOutFile, "Mutator: %.3fms (%.1f%%), GC: %.3fms (%.1f%%)\n",
+                mutator_ms, mutator_ms / total_ms * 100.0, gc_ms, gc_ms / total_ms * 100.0);
+    }
+
+    args.rval().setUndefined();
+    return true;
 }
 
 static const char *
@@ -2624,10 +2659,9 @@ EvalInContext(JSContext *cx, unsigned argc, jsval *vp)
             JS_ReportError(cx, "Invalid scope argument to evalcx");
             return false;
         }
-        if (!JS_EvaluateUCScript(cx, sobj, src, srclen,
-                                 filename.get(),
-                                 lineno,
-                                 args.rval())) {
+        JS::CompileOptions opts(cx);
+        opts.setFileAndLine(filename.get(), lineno);
+        if (!JS::Evaluate(cx, sobj, opts, src, srclen, args.rval())) {
             return false;
         }
     }
@@ -3578,30 +3612,6 @@ RedirectOutput(JSContext *cx, unsigned argc, jsval *vp)
     return true;
 }
 
-static bool
-System(JSContext *cx, unsigned argc, jsval *vp)
-{
-    CallArgs args = CallArgsFromVp(argc, vp);
-
-    if (args.length() == 0) {
-        JS_ReportErrorNumber(cx, my_GetErrorMessage, nullptr, JSSMSG_INVALID_ARGS,
-                             "system");
-        return false;
-    }
-
-    JSString *str = JS::ToString(cx, args[0]);
-    if (!str)
-        return false;
-
-    JSAutoByteString command(cx, str);
-    if (!command)
-        return false;
-
-    int result = system(command.ptr());
-    args.rval().setInt32(result);
-    return true;
-}
-
 static int sArgc;
 static char **sArgv;
 
@@ -4273,6 +4283,14 @@ static const JSFunctionSpecWithHelp shell_functions[] = {
 "  Throw if the first two arguments are not the same (both +0 or both -0,\n"
 "  both NaN, or non-zero and ===)."),
 
+    JS_FN_HELP("startTimingMutator", StartTimingMutator, 0, 0,
+"startTimingMutator()",
+"  Start accounting time to mutator vs GC."),
+
+    JS_FN_HELP("stopTimingMutator", StopTimingMutator, 0, 0,
+"stopTimingMutator()",
+"  Stop accounting time to mutator vs GC and dump the results."),
+
     JS_FN_HELP("throwError", ThrowError, 0, 0,
 "throwError()",
 "  Throw an error from JS_ReportError."),
@@ -4567,10 +4585,6 @@ static const JSFunctionSpecWithHelp fuzzing_unsafe_functions[] = {
 "redirect(stdoutFilename[, stderrFilename])",
 "  Redirect stdout and/or stderr to the named file. Pass undefined to avoid\n"
 "   redirecting. Filenames are relative to the current working directory."),
-
-    JS_FN_HELP("system", System, 1, 0,
-"system(command)",
-"  Execute command on the current host, returning result code."),
 
     JS_FN_HELP("nestedShell", NestedShell, 0, 0,
 "nestedShell(shellArgs...)",
@@ -5314,8 +5328,12 @@ NewGlobalObject(JSContext *cx, JS::CompartmentOptions &options,
         if (!js::DefineTestingFunctions(cx, glob, fuzzingSafe))
             return nullptr;
 
-        if (!fuzzingSafe && !JS_DefineFunctionsWithHelp(cx, glob, fuzzing_unsafe_functions))
-            return nullptr;
+        if (!fuzzingSafe) {
+            if (!JS_DefineFunctionsWithHelp(cx, glob, fuzzing_unsafe_functions))
+                return nullptr;
+            if (!js::DefineOS(cx, glob))
+                return nullptr;
+        }
 
         /* Initialize FakeDOMObject. */
         static const js::DOMCallbacks DOMcallbacks = {
@@ -5403,7 +5421,9 @@ ProcessArgs(JSContext *cx, JSObject *obj_, OptionParser *op)
         } else {
             const char *code = codeChunks.front();
             RootedValue rval(cx);
-            if (!JS_EvaluateScript(cx, obj, code, strlen(code), "-e", 1, &rval))
+            JS::CompileOptions opts(cx);
+            opts.setFileAndLine("-e", 1);
+            if (!JS::Evaluate(cx, obj, opts, code, strlen(code), &rval))
                 return gExitCode ? gExitCode : EXITCODE_RUNTIME_ERROR;
             codeChunks.popFront();
         }
@@ -5482,6 +5502,15 @@ SetRuntimeOptions(JSRuntime *rt, const OptionParser &op)
             jit::js_JitOptions.disableRangeAnalysis = true;
         else
             return OptionFailure("ion-range-analysis", str);
+    }
+
+    if (const char *str = op.getStringOption("ion-sink")) {
+        if (strcmp(str, "on") == 0)
+            jit::js_JitOptions.disableSink = false;
+        else if (strcmp(str, "off") == 0)
+            jit::js_JitOptions.disableSink = true;
+        else
+            return OptionFailure("ion-sink", str);
     }
 
     if (const char *str = op.getStringOption("ion-loop-unrolling")) {
@@ -5613,6 +5642,12 @@ SetRuntimeOptions(JSRuntime *rt, const OptionParser &op)
     dumpEntrainedVariables = op.getBoolOption("dump-entrained-variables");
 #endif
 
+#ifdef JS_GC_ZEAL
+    const char *zealStr = op.getStringOption("gc-zeal");
+    if (zealStr && !rt->gc.parseAndSetZeal(zealStr))
+        return false;
+#endif
+
     return true;
 }
 
@@ -5634,9 +5669,6 @@ Shell(JSContext *cx, OptionParser *op, char **envp)
         return 1;
 
     JSAutoCompartment ac(cx, glob);
-
-    if (!js::DefineOS(cx, glob))
-        return 1;
 
     int result = ProcessArgs(cx, glob, op);
 
@@ -5775,6 +5807,8 @@ main(int argc, char **argv, char **envp)
                                "Find edge cases where Ion can avoid bailouts (default: on, off to disable)")
         || !op.addStringOption('\0', "ion-range-analysis", "on/off",
                                "Range analysis (default: on, off to disable)")
+        || !op.addStringOption('\0', "ion-sink", "on/off",
+                               "Sink code motion (default: on, off to disable)")
         || !op.addStringOption('\0', "ion-loop-unrolling", "on/off",
                                "Loop unrolling (default: off, on to enable)")
         || !op.addBoolOption('\0', "ion-check-range-analysis",
@@ -5844,6 +5878,11 @@ main(int argc, char **argv, char **envp)
 #endif
 #ifdef JSGC_GENERATIONAL
         || !op.addIntOption('\0', "nursery-size", "SIZE-MB", "Set the maximum nursery size in MB", 16)
+#endif
+#ifdef JS_GC_ZEAL
+        || !op.addStringOption('z', "gc-zeal", "LEVEL[,N]",
+                               "Specifies zealous garbage collection, overriding the environement "
+                               "variable JS_GC_ZEAL.")
 #endif
     )
     {

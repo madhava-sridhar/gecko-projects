@@ -177,7 +177,10 @@ pref("browser.sessionhistory.max_total_viewers", -1);
 pref("ui.use_native_colors", true);
 pref("ui.click_hold_context_menus", false);
 pref("browser.display.use_document_fonts",  1);  // 0 = never, 1 = quick, 2 = always
-pref("browser.display.use_document_colors", true);
+// 0 = default: always, except in high contrast mode
+// 1 = always
+// 2 = never
+pref("browser.display.document_color_use", 0);
 pref("browser.display.use_system_colors",   false);
 pref("browser.display.foreground_color",    "#000000");
 pref("browser.display.background_color",    "#FFFFFF");
@@ -276,14 +279,15 @@ pref("media.fragmented-mp4.use-blank-decoder", false);
 pref("media.raw.enabled", true);
 #endif
 pref("media.ogg.enabled", true);
-#ifdef MOZ_OPUS
 pref("media.opus.enabled", true);
-#endif
 #ifdef MOZ_WAVE
 pref("media.wave.enabled", true);
 #endif
 #ifdef MOZ_WEBM
 pref("media.webm.enabled", true);
+#if defined(MOZ_FMP4) && defined(MOZ_WMF)
+pref("media.webm.intel_decoder.enabled", false);
+#endif
 #endif
 #ifdef MOZ_GSTREAMER
 pref("media.gstreamer.enabled", true);
@@ -424,7 +428,7 @@ pref("media.mediasource.enabled", true);
 pref("media.mediasource.mp4.enabled", false);
 pref("media.mediasource.webm.enabled", false);
 #else
-#ifdef XP_WIN
+#if defined(XP_WIN) || defined(XP_MACOSX)
 pref("media.mediasource.mp4.enabled", true);
 pref("media.mediasource.webm.enabled", false);
 #else
@@ -841,6 +845,7 @@ pref("application.use_ns_plugin_finder", false);
 pref("browser.fixup.alternate.enabled", true);
 pref("browser.fixup.alternate.prefix", "www.");
 pref("browser.fixup.alternate.suffix", ".com");
+pref("browser.fixup.dns_first_for_single_words", false);
 pref("browser.fixup.hide_user_pass", true);
 
 // Location Bar AutoComplete
@@ -1271,10 +1276,9 @@ pref("network.http.bypass-cachelock-threshold", 250);
 
 // Try and use SPDY when using SSL
 pref("network.http.spdy.enabled", true);
-pref("network.http.spdy.enabled.v3", true);
 pref("network.http.spdy.enabled.v3-1", true);
 pref("network.http.spdy.enabled.http2draft", true);
-pref("network.http.spdy.enabled.http2", false);
+pref("network.http.spdy.enabled.http2", true);
 pref("network.http.spdy.enforce-tls-profile", true);
 pref("network.http.spdy.chunk-size", 16000);
 pref("network.http.spdy.timeout", 180);
@@ -2124,7 +2128,7 @@ pref("layout.css.background-blend-mode.enabled", true);
 pref("layout.css.vertical-text.enabled", false);
 
 // Is support for object-fit and object-position enabled?
-pref("layout.css.object-fit-and-position.enabled", false);
+pref("layout.css.object-fit-and-position.enabled", true);
 
 // Is -moz-osx-font-smoothing enabled?
 // Only supported in OSX builds
@@ -2156,6 +2160,13 @@ pref("layout.css.grid.enabled", false);
 // mUASheet in nsLayoutStylesheetCache::DependentPrefChanged (if it's not
 // otherwise needed) are removed.
 pref("layout.css.ruby.enabled", false);
+
+// Is support for CSS display:contents enabled?
+#ifdef RELEASE_BUILD
+pref("layout.css.display-contents.enabled", false);
+#else
+pref("layout.css.display-contents.enabled", true);
+#endif
 
 // Is support for CSS box-decoration-break enabled?
 pref("layout.css.box-decoration-break.enabled", true);
@@ -2357,13 +2368,8 @@ pref("svg.display-lists.painting.enabled", true);
 // Is support for the SVG 2 paint-order property enabled?
 pref("svg.paint-order.enabled", true);
 
-// Is support for the new marker features from SVG 2 enabled?  Currently
-// this just includes <marker orient="auto-start-reverse">.
-#ifdef RELEASE_BUILD
-pref("svg.marker-improvements.enabled", false);
-#else
+// Is support for the <marker orient="auto-start-reverse"> feature enabled?
 pref("svg.marker-improvements.enabled", true);
-#endif
 
 #ifdef RELEASE_BUILD
 pref("svg.svg-iframe.enabled", false);
@@ -2648,7 +2654,8 @@ pref("ui.mouse.radius.inputSource.touchOnly", true);
 #ifdef XP_WIN
 
 pref("font.name.serif.ar", "Times New Roman");
-pref("font.name.sans-serif.ar", "Arial");
+pref("font.name.sans-serif.ar", "Segoe UI");
+pref("font.name-list.sans-serif.ar", "Segoe UI, Tahoma, Arial");
 pref("font.name.monospace.ar", "Courier New");
 pref("font.name.cursive.ar", "Comic Sans MS");
 
@@ -3562,14 +3569,17 @@ pref("font.name.monospace.x-western", "Fira Mono");
 pref("font.name.serif.zh-CN", "Charis SIL Compact");
 pref("font.name.sans-serif.zh-CN", "Fira Sans");
 pref("font.name.monospace.zh-CN", "Fira Mono");
+pref("font.name-list.sans-serif.zh-CN", "Fira Sans,Droid Sans Fallback");
 
 pref("font.name.serif.zh-HK", "Charis SIL Compact");
 pref("font.name.sans-serif.zh-HK", "Fira Sans");
 pref("font.name.monospace.zh-HK", "Fira Mono");
+pref("font.name-list.sans-serif.zh-HK", "Fira Sans,Droid Sans Fallback");
 
 pref("font.name.serif.zh-TW", "Charis SIL Compact");
 pref("font.name.sans-serif.zh-TW", "Fira Sans");
 pref("font.name.monospace.zh-TW", "Fira Mono");
+pref("font.name-list.sans-serif.zh-TW", "Fira Sans,Droid Sans Fallback");
 
 #elif defined(ANDROID)
 // We use the bundled fonts for Firefox for Android
@@ -3590,14 +3600,14 @@ pref("font.name.serif.ja", "Charis SIL Compact");
 pref("font.name.sans-serif.ja", "Clear Sans");
 pref("font.name.monospace.ja", "MotoyaLMaru");
 pref("font.name-list.serif.ja", "Droid Serif");
-pref("font.name-list.sans-serif.ja", "Clear Sans, Roboto, Droid Sans, MotoyaLMaru, MotoyaLCedar, Droid Sans Japanese");
+pref("font.name-list.sans-serif.ja", "Clear Sans, Roboto, Droid Sans, MotoyaLMaru, MotoyaLCedar, Noto Sans JP, Droid Sans Japanese");
 pref("font.name-list.monospace.ja", "MotoyaLMaru, MotoyaLCedar, Droid Sans Mono");
 
 pref("font.name.serif.ko", "Charis SIL Compact");
 pref("font.name.sans-serif.ko", "Clear Sans");
 pref("font.name.monospace.ko", "Droid Sans Mono");
 pref("font.name-list.serif.ko", "Droid Serif, HYSerif");
-pref("font.name-list.sans-serif.ko", "SmartGothic, NanumGothic, DroidSansFallback, Droid Sans Fallback");
+pref("font.name-list.sans-serif.ko", "SmartGothic, NanumGothic, Noto Sans KR, DroidSansFallback, Droid Sans Fallback");
 
 pref("font.name.serif.th", "Charis SIL Compact");
 pref("font.name.sans-serif.th", "Clear Sans");
@@ -3627,21 +3637,21 @@ pref("font.name.serif.zh-CN", "Charis SIL Compact");
 pref("font.name.sans-serif.zh-CN", "Clear Sans");
 pref("font.name.monospace.zh-CN", "Droid Sans Mono");
 pref("font.name-list.serif.zh-CN", "Droid Serif, Droid Sans Fallback");
-pref("font.name-list.sans-serif.zh-CN", "Roboto, Droid Sans, Droid Sans Fallback");
+pref("font.name-list.sans-serif.zh-CN", "Roboto, Droid Sans, Noto Sans SC, Droid Sans Fallback");
 pref("font.name-list.monospace.zh-CN", "Droid Sans Fallback");
 
 pref("font.name.serif.zh-HK", "Charis SIL Compact");
 pref("font.name.sans-serif.zh-HK", "Clear Sans");
 pref("font.name.monospace.zh-HK", "Droid Sans Mono");
 pref("font.name-list.serif.zh-HK", "Droid Serif, Droid Sans Fallback");
-pref("font.name-list.sans-serif.zh-HK", "Roboto, Droid Sans, Droid Sans Fallback");
+pref("font.name-list.sans-serif.zh-HK", "Roboto, Droid Sans, Noto Sans TC, Noto Sans SC, Droid Sans Fallback");
 pref("font.name-list.monospace.zh-HK", "Droid Sans Fallback");
 
 pref("font.name.serif.zh-TW", "Charis SIL Compact");
 pref("font.name.sans-serif.zh-TW", "Clear Sans");
 pref("font.name.monospace.zh-TW", "Droid Sans Mono");
 pref("font.name-list.serif.zh-TW", "Droid Serif, Droid Sans Fallback");
-pref("font.name-list.sans-serif.zh-TW", "Roboto, Droid Sans, Droid Sans Fallback");
+pref("font.name-list.sans-serif.zh-TW", "Roboto, Droid Sans, Noto Sans TC, Noto Sans SC, Droid Sans Fallback");
 pref("font.name-list.monospace.zh-TW", "Droid Sans Fallback");
 
 #endif
@@ -3765,42 +3775,32 @@ pref("image.mem.decodeondraw", true);
 // Allows image locking of decoded image data in content processes.
 pref("image.mem.allow_locking_in_content_processes", true);
 
-// Minimum timeout for image discarding (in milliseconds). The actual time in
-// which an image must inactive for it to be discarded will vary between this
-// value and twice this value.
-//
-// This used to be 120 seconds, but having it that high causes our working
-// set to grow very large. Switching it back to 10 seconds will hopefully
-// be better.
-pref("image.mem.min_discard_timeout_ms", 10000);
-
 // Chunk size for calls to the image decoders
 pref("image.mem.decode_bytes_at_a_time", 16384);
 
 // The longest time we can spend in an iteration of an async decode
 pref("image.mem.max_ms_before_yield", 5);
 
-// The maximum amount of decoded image data we'll willingly keep around (we
-// might keep around more than this, but we'll try to get down to this value).
-pref("image.mem.max_decoded_image_kb", 51200);
-
-// Hard limit for the amount of decoded image data, 0 means we don't have the
-// hard limit for it.
-pref("image.mem.hard_limit_decoded_image_kb", 0);
-
 // Minimum timeout for expiring unused images from the surface cache, in
 // milliseconds. This controls how long we store cached temporary surfaces.
 pref("image.mem.surfacecache.min_expiration_ms", 60000); // 60ms
 
 // Maximum size for the surface cache, in kilobytes.
-pref("image.mem.surfacecache.max_size_kb", 102400); // 100MB
+pref("image.mem.surfacecache.max_size_kb", 1048576); // 1GB
 
 // The surface cache's size, within the constraints of the maximum size set
-// above, is determined using a formula based on system capabilities like memory
-// size. The size factor is used to tune this formula. Larger size factors
-// result in smaller caches. The default should be a good balance for most
-// systems.
-pref("image.mem.surfacecache.size_factor", 64);
+// above, is determined as a fraction of main memory size. The size factor is
+// interpreted as a reciprocal, so a size factor of 4 means to use no more than
+// 1/4 of main memory.  The default should be a good balance for most systems.
+pref("image.mem.surfacecache.size_factor", 4);
+
+// How much of the data in the surface cache is discarded when we get a memory
+// pressure notification, as a fraction. The discard factor is interpreted as a
+// reciprocal, so a discard factor of 1 means to discard everything in the
+// surface cache on memory pressure, a discard factor of 2 means to discard half
+// of the data, and so forth. The default should be a good balance for desktop
+// and laptop systems, where we never discard visible images.
+pref("image.mem.surfacecache.discard_factor", 1);
 
 // Whether we decode images on multiple background threads rather than the
 // foreground thread.
@@ -3834,7 +3834,7 @@ pref("webgl.msaa-force", false);
 pref("webgl.prefer-16bpp", false);
 pref("webgl.default-no-alpha", false);
 pref("webgl.force-layers-readback", false);
-pref("webgl.lose-context-on-memory-preasure", false);
+pref("webgl.lose-context-on-memory-pressure", false);
 pref("webgl.can-lose-context-in-foreground", true);
 pref("webgl.restore-context-when-visible", true);
 pref("webgl.max-warnings-per-context", 32);
@@ -3982,6 +3982,8 @@ pref("gfx.direct2d.force-enabled", false);
 
 pref("layers.prefer-opengl", false);
 pref("layers.prefer-d3d9", false);
+pref("layers.d3d11.force-warp", false);
+pref("layers.d3d11.disable-warp", false);
 #endif
 
 // Force all possible layers to be always active layers
@@ -4218,6 +4220,10 @@ pref("dom.browserElement.maxScreenshotDelayMS", 2000);
 // Whether we should show the placeholder when the element is focused but empty.
 pref("dom.placeholder.show_on_focus", true);
 
+pref("dom.vr.enabled", false);
+// 0 = never; 1 = only if real devices aren't there; 2 = always
+pref("dom.vr.add-test-devices", 1);
+
 // MMS UA Profile settings
 pref("wap.UAProf.url", "");
 pref("wap.UAProf.tagname", "x-wap-profile");
@@ -4414,3 +4420,6 @@ pref("dom.beforeAfterKeyboardEvent.enabled", false);
 #ifdef XP_MACOSX
 pref("intl.collation.mac.use_icu", true);
 #endif
+
+// Enable meta-viewport support in remote APZ-enabled frames.
+pref("dom.meta-viewport.enabled", false);
