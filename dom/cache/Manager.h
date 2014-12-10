@@ -64,6 +64,7 @@ public:
     already_AddRefed<nsIInputStream> Extract(const nsID& aId);
 
     void NoteClosed(const nsID& aId);
+    void NoteClosedAll();
     void Close(const nsID& aId);
     void CloseAll();
 

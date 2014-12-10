@@ -42,7 +42,11 @@ void
 CacheStreamControlParent::ActorDestroy(ActorDestroyReason aReason)
 {
   MOZ_ASSERT(mStreamList);
+  for (uint32_t i = 0; i < mListeners.Length(); ++i) {
+    mListeners[i]->CloseStreamWithoutReporting();
+  }
   mStreamList->RemoveStreamControl(this);
+  mStreamList->NoteClosedAll();
   mStreamList = nullptr;
 }
 

@@ -1115,6 +1115,20 @@ Manager::StreamList::NoteClosed(const nsID& aId)
 }
 
 void
+Manager::StreamList::NoteClosedAll()
+{
+  NS_ASSERT_OWNINGTHREAD(Manager::StreamList);
+  for (uint32_t i = 0; i < mList.Length(); ++i) {
+    mManager->ReleaseBodyId(mList[i].mId);
+  }
+  mList.Clear();
+
+  if (mStreamControl) {
+    mStreamControl->Shutdown();
+  }
+}
+
+void
 Manager::StreamList::Close(const nsID& aId)
 {
   NS_ASSERT_OWNINGTHREAD(Manager::StreamList);

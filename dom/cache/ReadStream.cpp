@@ -348,6 +348,12 @@ ReadStream::CloseStream()
   Close();
 }
 
+void
+ReadStream::CloseStreamWithoutReporting()
+{
+  Forget();
+}
+
 bool
 ReadStream::MatchId(const nsID& aId)
 {

@@ -18,6 +18,7 @@ class CacheStreamControlListener
 public:
   virtual ~CacheStreamControlListener() { }
   virtual void CloseStream()=0;
+  virtual void CloseStreamWithoutReporting()=0;
   virtual bool MatchId(const nsID& aId)=0;
 };
 

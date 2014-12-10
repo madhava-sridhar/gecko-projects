@@ -46,7 +46,9 @@ CacheStreamControlChild::NoteClosed(const nsID& aId)
 void
 CacheStreamControlChild::ActorDestroy(ActorDestroyReason aReason)
 {
-  RecvCloseAll();
+  for (uint32_t i = 0; i < mListeners.Length(); ++i) {
+    mListeners[i]->CloseStreamWithoutReporting();
+  }
 }
 
 bool

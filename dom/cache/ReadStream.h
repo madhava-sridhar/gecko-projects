@@ -49,6 +49,7 @@ public:
 
   // CacheStreamControlListener methods
   virtual void CloseStream() MOZ_OVERRIDE;
+  virtual void CloseStreamWithoutReporting() MOZ_OVERRIDE;
   virtual bool MatchId(const nsID& aId) MOZ_OVERRIDE;
 
 protected:
