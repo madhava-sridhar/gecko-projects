@@ -87,13 +87,6 @@ DBAction::OpenConnection(const QuotaInfo& aQuotaInfo, nsIFile* aDBDir,
   rv = dbFile->Exists(&exists);
   if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 
-  nsCOMPtr<nsIFile> dbTmpDir;
-  rv = aDBDir->Clone(getter_AddRefs(dbTmpDir));
-  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
-
-  rv = dbTmpDir->Append(NS_LITERAL_STRING("db"));
-  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
-
   // XXX: Jonas tells me nsIFileURL usage off-main-thread is dangerous,
   //      but this is what IDB does to access mozIStorageConnection so
   //      it seems at least this corner case mostly works.
@@ -123,18 +116,6 @@ DBAction::OpenConnection(const QuotaInfo& aQuotaInfo, nsIFile* aDBDir,
   if (rv == NS_ERROR_FILE_CORRUPTED) {
     dbFile->Remove(false);
     if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
-
-    rv = dbTmpDir->Exists(&exists);
-    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
-
-    if (exists) {
-      bool isDir;
-      rv = dbTmpDir->IsDirectory(&isDir);
-      if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
-      if (NS_WARN_IF(!isDir)) { return NS_ERROR_UNEXPECTED; }
-      rv = dbTmpDir->Remove(true);
-      if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
-    }
 
     rv = ss->OpenDatabaseWithFileURL(dbFileUrl, aConnOut);
   }
