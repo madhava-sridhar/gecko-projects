@@ -198,14 +198,10 @@ FileUtils::BodyStartWriteStream(const QuotaInfo& aQuotaInfo,
     mode = NS_ASYNCCOPY_VIA_WRITESEGMENTS;
   }
 
-  // TODO: we should be able to auto-close now...
-
-  // Note, we cannot auto-close the source stream here because some of
-  // our source streams must be closed on the PBackground worker thread.
   rv = NS_AsyncCopy(aSource, fileStream, NS_GetCurrentThread(), mode,
                     4096, // chunk size
                     aCallback, aClosure,
-                    false, true, // close streams
+                    true, true, // close streams
                     aCopyContextOut);
   if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 
