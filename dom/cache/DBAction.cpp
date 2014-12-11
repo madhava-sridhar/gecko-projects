@@ -18,7 +18,7 @@ namespace mozilla {
 namespace dom {
 namespace cache {
 
-using mozilla::dom::quota::PERSISTENCE_TYPE_PERSISTENT;
+using mozilla::dom::quota::PERSISTENCE_TYPE_DEFAULT;
 using mozilla::dom::quota::PersistenceType;
 
 DBAction::DBAction(Mode aMode)
@@ -98,9 +98,8 @@ DBAction::OpenConnection(const QuotaInfo& aQuotaInfo, nsIFile* aDBDir,
   nsCOMPtr<nsIFileURL> dbFileUrl = do_QueryInterface(uri);
   if (NS_WARN_IF(!dbFileUrl)) { return NS_ERROR_UNEXPECTED; }
 
-  // TODO: use default storage
   nsAutoCString type;
-  PersistenceTypeToText(PERSISTENCE_TYPE_PERSISTENT, type);
+  PersistenceTypeToText(PERSISTENCE_TYPE_DEFAULT, type);
 
   rv = dbFileUrl->SetQuery(
     NS_LITERAL_CSTRING("persistenceType=") + type +

@@ -22,7 +22,7 @@ using mozilla::dom::Nullable;
 using mozilla::dom::cache::QuotaInfo;
 using mozilla::dom::quota::OriginOrPatternString;
 using mozilla::dom::quota::QuotaManager;
-using mozilla::dom::quota::PERSISTENCE_TYPE_PERSISTENT;
+using mozilla::dom::quota::PERSISTENCE_TYPE_DEFAULT;
 using mozilla::dom::quota::PersistenceType;
 
 class QuotaReleaseRunnable MOZ_FINAL : public nsIRunnable
@@ -53,7 +53,7 @@ QuotaReleaseRunnable::Run()
   QuotaManager* qm = QuotaManager::Get();
   MOZ_ASSERT(qm);
   qm->AllowNextSynchronizedOp(OriginOrPatternString::FromOrigin(mQuotaInfo.mOrigin),
-                              Nullable<PersistenceType>(PERSISTENCE_TYPE_PERSISTENT),
+                              Nullable<PersistenceType>(PERSISTENCE_TYPE_DEFAULT),
                               mQuotaId);
   return NS_OK;
 }
@@ -67,7 +67,7 @@ namespace cache {
 using mozilla::DebugOnly;
 using mozilla::dom::quota::OriginOrPatternString;
 using mozilla::dom::quota::QuotaManager;
-using mozilla::dom::quota::PERSISTENCE_TYPE_PERSISTENT;
+using mozilla::dom::quota::PERSISTENCE_TYPE_DEFAULT;
 using mozilla::dom::quota::PersistenceType;
 
 class Context::QuotaInitRunnable MOZ_FINAL : public nsIRunnable
@@ -186,9 +186,8 @@ Context::QuotaInitRunnable::Run()
       }
 
       mState = STATE_WAIT_FOR_OPEN_ALLOWED;
-      // TODO: use default storage instead of persistent
       rv = qm->WaitForOpenAllowed(OriginOrPatternString::FromOrigin(mQuotaInfo.mOrigin),
-                                  Nullable<PersistenceType>(PERSISTENCE_TYPE_PERSISTENT),
+                                  Nullable<PersistenceType>(PERSISTENCE_TYPE_DEFAULT),
                                   mQuotaId, this);
       if (NS_FAILED(rv)) {
         Resolve(rv);
@@ -215,7 +214,7 @@ Context::QuotaInitRunnable::Run()
       // recreated.
       QuotaManager* qm = QuotaManager::Get();
       MOZ_ASSERT(qm);
-      nsresult rv = qm->EnsureOriginIsInitialized(PERSISTENCE_TYPE_PERSISTENT,
+      nsresult rv = qm->EnsureOriginIsInitialized(PERSISTENCE_TYPE_DEFAULT,
                                                   mQuotaInfo.mGroup,
                                                   mQuotaInfo.mOrigin,
                                                   mQuotaInfo.mIsApp,

@@ -21,7 +21,7 @@ namespace cache {
 
 using mozilla::dom::quota::FileInputStream;
 using mozilla::dom::quota::FileOutputStream;
-using mozilla::dom::quota::PERSISTENCE_TYPE_PERSISTENT;
+using mozilla::dom::quota::PERSISTENCE_TYPE_DEFAULT;
 using mozilla::unused;
 
 // static
@@ -177,9 +177,8 @@ FileUtils::BodyStartWriteStream(const QuotaInfo& aQuotaInfo,
   if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
   if (NS_WARN_IF(exists)) { return NS_ERROR_FILE_ALREADY_EXISTS; }
 
-  // TODO: use default storage
   nsCOMPtr<nsIOutputStream> fileStream =
-    FileOutputStream::Create(PERSISTENCE_TYPE_PERSISTENT, aQuotaInfo.mGroup,
+    FileOutputStream::Create(PERSISTENCE_TYPE_DEFAULT, aQuotaInfo.mGroup,
                              aQuotaInfo.mOrigin, tmpFile);
   if (NS_WARN_IF(!fileStream)) { return NS_ERROR_UNEXPECTED; }
 
@@ -287,9 +286,8 @@ FileUtils::BodyOpen(const QuotaInfo& aQuotaInfo, nsIFile* aBaseDir,
   if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
   if (NS_WARN_IF(!exists)) { return NS_ERROR_FILE_NOT_FOUND; }
 
-  // TODO: use default storage
   nsCOMPtr<nsIInputStream> fileStream =
-    FileInputStream::Create(PERSISTENCE_TYPE_PERSISTENT, aQuotaInfo.mGroup,
+    FileInputStream::Create(PERSISTENCE_TYPE_DEFAULT, aQuotaInfo.mGroup,
                             aQuotaInfo.mOrigin, finalFile);
   if (NS_WARN_IF(!fileStream)) { return NS_ERROR_UNEXPECTED; }
 
