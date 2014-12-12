@@ -343,13 +343,10 @@ FetchPut::MatchInPutList(const PCacheRequest& aRequest,
     nsRefPtr<InternalHeaders> cachedResponseHeaders =
       new InternalHeaders(cachedResponse.headers());
 
-    // TODO: headers Has/Get/GetAll should not take an ErrorResult
-    ErrorResult rv;
-
     nsTArray<nsCString> varyHeaders;
-    cachedResponseHeaders->GetAll(NS_LITERAL_CSTRING("vary"), varyHeaders,
-                                       rv);
-    MOZ_ASSERT(!rv.Failed());
+    ErrorResult rv;
+    cachedResponseHeaders->GetAll(NS_LITERAL_CSTRING("vary"), varyHeaders, rv);
+    MOZ_ALWAYS_TRUE(!rv.Failed());
 
     // Assume the vary headers match until we find a conflict
     bool varyHeadersMatch = true;
@@ -359,13 +356,24 @@ FetchPut::MatchInPutList(const PCacheRequest& aRequest,
         continue;
       }
 
+      // The VARY header could in theory contain an illegal header name.  So
+      // we need to detect the error in the Get() calls below.  Treat these
+      // as not matching.
+      ErrorResult headerRv;
+
       nsAutoCString value;
       requestHeaders->Get(varyHeaders[j], value, rv);
-      MOZ_ASSERT(!rv.Failed());
+      if (NS_WARN_IF(rv.Failed())) {
+        varyHeadersMatch = false;
+        break;
+      }
 
       nsAutoCString cachedValue;
       cachedRequestHeaders->Get(varyHeaders[j], value, rv);
-      MOZ_ASSERT(!rv.Failed());
+      if (NS_WARN_IF(rv.Failed())) {
+        varyHeadersMatch = false;
+        break;
+      }
 
       if (value != cachedValue) {
         varyHeadersMatch = false;

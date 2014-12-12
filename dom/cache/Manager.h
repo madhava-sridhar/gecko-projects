@@ -127,7 +127,7 @@ public:
   void Shutdown();
   already_AddRefed<ManagerId> GetManagerId() const;
 
-  // TODO: consider moving CacheId up in the argument lists below
+  // TODO: consider moving CacheId up in the argument lists below (bug 1110485)
   void CacheMatch(Listener* aListener, RequestId aRequestId, CacheId aCacheId,
                   const PCacheRequest& aRequest,
                   const PCacheQueryParams& aParams);

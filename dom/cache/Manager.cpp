@@ -40,11 +40,11 @@ public:
   RunSyncWithDBOnTarget(const QuotaInfo& aQuotaInfo, nsIFile* aDBDir,
                         mozIStorageConnection* aConn) MOZ_OVERRIDE
   {
-    // TODO: init maintainance marker
-    // TODO: perform maintainance if necessary
-    // TODO: find orphaned caches in database
+    // TODO: init maintainance marker (bug 1110446)
+    // TODO: perform maintainance if necessary (bug 1110446)
+    // TODO: find orphaned caches in database (bug 1110446)
     // TODO: have Context create/delete marker files in constructor/destructor
-    //       and only do expensive maintenance if that marker is present
+    //       and only do expensive maintenance if that marker is present (bug 1110446)
 
     nsresult rv = FileUtils::BodyCreateDir(aDBDir);
     if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
@@ -1210,7 +1210,7 @@ Manager::ReleaseCacheId(CacheId aCacheId)
       if (mCacheIdRefs[i].mCount < 1) {
         bool orphaned = mCacheIdRefs[i].mOrphaned;
         mCacheIdRefs.RemoveElementAt(i);
-        // TODO: note that we need to check this cache for staleness on startup
+        // TODO: note that we need to check this cache for staleness on startup (bug 1110446)
         if (orphaned && !mShuttingDown) {
           CurrentContext()->CancelForCacheId(aCacheId);
           nsRefPtr<Action> action = new DeleteOrphanedCacheAction(this,
@@ -1578,7 +1578,7 @@ Manager::ReleaseBodyId(const nsID& aBodyId)
       if (mBodyIdRefs[i].mCount < 1) {
         bool orphaned = mBodyIdRefs[i].mOrphaned;
         mBodyIdRefs.RemoveElementAt(i);
-        // TODO: note that we need to check this body for staleness on startup
+        // TODO: note that we need to check this body for staleness on startup (bug 1110446)
         if (orphaned && !mShuttingDown) {
           nsRefPtr<Action> action = new DeleteOrphanedBodyAction(aBodyId);
           CurrentContext()->Dispatch(mIOThread, action);
@@ -1590,8 +1590,7 @@ Manager::ReleaseBodyId(const nsID& aBodyId)
   MOZ_ASSERT_UNREACHABLE("Attempt to release BodyId that is not referenced!");
 }
 
-// TODO: provide way to set body non-orphaned if its added back to a cache
-//       once same-origin de-duplication is implemented
+// TODO: provide way to set body non-orphaned if its added back to a cache (bug 1110479)
 
 bool
 Manager::SetBodyIdOrphanedIfRefed(const nsID& aBodyId)

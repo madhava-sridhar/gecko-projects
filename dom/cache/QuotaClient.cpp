@@ -68,6 +68,7 @@ using mozilla::dom::quota::UsageInfo;
 Client*
 QuotaClient::Create()
 {
+  // TODO: implement nsIOfflineStorage interface (bug 1110487)
   return new QuotaClient();
 }
 

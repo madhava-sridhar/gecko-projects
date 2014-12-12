@@ -90,7 +90,7 @@ DBAction::OpenConnection(const QuotaInfo& aQuotaInfo, nsIFile* aDBDir,
   // XXX: Jonas tells me nsIFileURL usage off-main-thread is dangerous,
   //      but this is what IDB does to access mozIStorageConnection so
   //      it seems at least this corner case mostly works.
-  // TODO: move this to main thread where GetInfoFromPrincipal() is executed
+  // TODO: move this to main thread where GetInfoFromPrincipal() is executed (bug 1110485)
   nsCOMPtr<nsIURI> uri;
   rv = NS_NewFileURI(getter_AddRefs(uri), dbFile);
   if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }

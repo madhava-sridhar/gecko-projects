@@ -36,11 +36,11 @@ public:
 
   static nsresult CreateCache(mozIStorageConnection* aConn,
                               CacheId* aCacheIdOut);
-  // TODO: improve naming (confusing with CacheDelete)
+  // TODO: improve naming (confusing with CacheDelete) (bug 1110485)
   static nsresult DeleteCache(mozIStorageConnection* aConn, CacheId aCacheId,
                               nsTArray<nsID>& aDeletedBodyIdListOut);
 
-  // TODO: Consider removing unused IsCacheOrphaned after writing cleanup code.
+  // TODO: Consider removing unused IsCacheOrphaned after writing cleanup code. (bug 1110446)
   static nsresult IsCacheOrphaned(mozIStorageConnection* aConn,
                                   CacheId aCacheId, bool* aOrphanedOut);
 

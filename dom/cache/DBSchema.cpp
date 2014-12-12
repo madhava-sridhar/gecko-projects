@@ -289,7 +289,7 @@ DBSchema::CacheMatchAll(mozIStorageConnection* aConn, CacheId aCacheId,
     if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
   }
 
-  // TODO: replace this with a bulk load using SQL IN clause
+  // TODO: replace this with a bulk load using SQL IN clause (bug 1110458)
   for (uint32_t i = 0; i < matches.Length(); ++i) {
     SavedResponse *savedResponse = aSavedResponsesOut.AppendElement();
     rv = ReadResponse(aConn, matches[i], savedResponse);
@@ -373,7 +373,7 @@ DBSchema::CacheKeys(mozIStorageConnection* aConn, CacheId aCacheId,
     if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
   }
 
-  // TODO: replace this with a bulk load using SQL IN clause
+  // TODO: replace this with a bulk load using SQL IN clause (bug 1110458)
   for (uint32_t i = 0; i < matches.Length(); ++i) {
     SavedRequest *savedRequest = aSavedRequestsOut.AppendElement();
     rv = ReadRequest(aConn, matches[i], savedRequest);
@@ -606,9 +606,6 @@ DBSchema::QueryCache(mozIStorageConnection* aConn, CacheId aCacheId,
 
   nsTArray<PCacheRequest> requestArray;
   nsTArray<PCacheResponse> responseArray;
-
-  // TODO: throw if new Request() would have failed:
-  // TODO:    - throw if aRequest is no CORS and method is not simple method
 
   if (!aParams.ignoreMethod() && !aRequest.method().LowerCaseEqualsLiteral("get")
                               && !aRequest.method().LowerCaseEqualsLiteral("head"))

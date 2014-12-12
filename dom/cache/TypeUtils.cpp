@@ -21,6 +21,7 @@
 #include "nsCOMPtr.h"
 #include "nsIAsyncInputStream.h"
 #include "nsIAsyncOutputStream.h"
+#include "nsIIPCSerializableInputStream.h"
 #include "nsStreamUtils.h"
 #include "nsString.h"
 #include "nsURLParsers.h"
@@ -74,7 +75,7 @@ ProcessURL(nsAString& aUrl, bool* aSchemeValidOut,
     return;
   }
 
-  // TODO: Remove this once Request/Response properly strip the fragment
+  // TODO: Remove this once Request/Response properly strip the fragment (bug 1110476)
   if (refLen >= 0) {
     // ParsePath gives us ref position relative to the start of the path
     refPos += pathPos;
@@ -180,7 +181,7 @@ TypeUtils::ToPCacheRequest(PCacheRequest& aOut, Request& aIn,
   if (aRv.Failed()) {
     return;
   }
-  // TODO: wrong scheme should trigger different behavior in Match vs Put, etc.
+  // TODO: wrong scheme should trigger different behavior in Match vs Put, etc. (bug 1110462)
   if (!schemeValid) {
     NS_NAMED_LITERAL_STRING(label, "Request");
     aRv.ThrowTypeError(MSG_INVALID_URL_SCHEME, &label, &aOut.url());
@@ -311,7 +312,7 @@ TypeUtils::ToPCacheResponseWithoutBody(PCacheResponse& aOut,
     if (aRv.Failed()) {
       return;
     }
-    // TODO: wrong scheme should trigger different behavior in Match vs Put, etc.
+    // TODO: wrong scheme should trigger different behavior in Match vs Put, etc. (bug 1110462)
     if (!schemeValid) {
       NS_NAMED_LITERAL_STRING(label, "Response");
       aRv.ThrowTypeError(MSG_INVALID_URL_SCHEME, &label, &aOut.url());
@@ -425,8 +426,7 @@ TypeUtils::ToInternalRequest(const PCacheRequest& aIn)
 {
   nsRefPtr<InternalRequest> internalRequest = new InternalRequest();
 
-  // TODO: Is this valid if DOM object has a system principal with
-  //       an origin of "[System Principal]"?
+  // TODO: Should not set origin on Request as it won't be valid for SystemPrincipal (bug 1110475)
   internalRequest->SetOrigin(Origin());
 
   internalRequest->SetMethod(aIn.method());
@@ -500,6 +500,12 @@ TypeUtils::SerializeCacheStream(nsIInputStream* aStream,
   if (controlled) {
     controlled->Serialize(aStreamOut);
     return;
+  }
+
+  // TODO: implement CrossProcessPipe if we cannot directly serialize (bug 1110814)
+  nsCOMPtr<nsIIPCSerializableInputStream> serial = do_QueryInterface(aStream);
+  if (!serial) {
+    aRv.Throw(NS_ERROR_FAILURE);
   }
 
   PCacheReadStream readStream;
