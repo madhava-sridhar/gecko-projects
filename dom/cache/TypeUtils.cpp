@@ -490,9 +490,8 @@ TypeUtils::SerializeCacheStream(nsIInputStream* aStream,
                                 PCacheReadStreamOrVoid* aStreamOut,
                                 ErrorResult& aRv)
 {
-  MOZ_ASSERT(aStreamOut);
+  *aStreamOut = void_t();
   if (!aStream) {
-    *aStreamOut = void_t();
     return;
   }
 
@@ -506,6 +505,7 @@ TypeUtils::SerializeCacheStream(nsIInputStream* aStream,
   nsCOMPtr<nsIIPCSerializableInputStream> serial = do_QueryInterface(aStream);
   if (!serial) {
     aRv.Throw(NS_ERROR_FAILURE);
+    return;
   }
 
   PCacheReadStream readStream;

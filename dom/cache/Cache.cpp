@@ -243,6 +243,7 @@ Cache::Put(const RequestOrUSVString& aRequest, Response& aResponse,
 
   ToPCacheRequest(put.request(), aRequest, ReadBody, PassThroughReferrer, aRv);
 
+  put.response().body() = void_t();
   if (!aRv.Failed()) {
     ToPCacheResponse(put.response(), aResponse, aRv);
   }
