@@ -21,6 +21,7 @@
 #include "mozilla/ipc/PBackgroundParent.h"
 #include "mozilla/ipc/PFileDescriptorSetChild.h"
 #include "mozilla/ipc/PFileDescriptorSetParent.h"
+#include "mozilla/SnappyUncompressInputStream.h"
 #include "nsIAsyncInputStream.h"
 #include "nsTArray.h"
 
@@ -363,6 +364,7 @@ ReadStream::MatchId(const nsID& aId)
 ReadStream::ReadStream(const nsID& aId, nsIInputStream* aStream)
   : mId(aId)
   , mStream(aStream)
+  , mSnappyStream(new SnappyUncompressInputStream(aStream))
   , mThread(NS_GetCurrentThread())
   , mClosed(false)
 {
@@ -421,7 +423,7 @@ ReadStream::Close()
 NS_IMETHODIMP
 ReadStream::Available(uint64_t* aNumAvailableOut)
 {
-  nsresult rv = mStream->Available(aNumAvailableOut);
+  nsresult rv = mSnappyStream->Available(aNumAvailableOut);
 
   if (NS_FAILED(rv)) {
     NoteClosed();
@@ -435,12 +437,13 @@ ReadStream::Read(char* aBuf, uint32_t aCount, uint32_t* aNumReadOut)
 {
   MOZ_ASSERT(aNumReadOut);
 
-  nsresult rv = mStream->Read(aBuf, aCount, aNumReadOut);
+  nsresult rv = mSnappyStream->Read(aBuf, aCount, aNumReadOut);
 
   // Don't auto-close when end of stream is hit.  We want to close
   // this stream on a particular thread in the parent case.
 
-  if (NS_FAILED(rv) && rv != NS_BASE_STREAM_WOULD_BLOCK) {
+  if ((NS_FAILED(rv) && rv != NS_BASE_STREAM_WOULD_BLOCK) ||
+      *aNumReadOut == 0) {
     NoteClosed();
   }
 
@@ -453,13 +456,14 @@ ReadStream::ReadSegments(nsWriteSegmentFun aWriter, void* aClosure,
 {
   MOZ_ASSERT(aNumReadOut);
 
-  nsresult rv = mStream->ReadSegments(aWriter, aClosure, aCount, aNumReadOut);
+  nsresult rv = mSnappyStream->ReadSegments(aWriter, aClosure, aCount,
+                                            aNumReadOut);
 
   // Don't auto-close when end of stream is hit.  We want to close
   // this stream on a particular thread in the parent case.
 
-  if (NS_FAILED(rv) && rv != NS_BASE_STREAM_WOULD_BLOCK &&
-                       rv != NS_ERROR_NOT_IMPLEMENTED) {
+  if ((NS_FAILED(rv) && rv != NS_BASE_STREAM_WOULD_BLOCK &&
+                        rv != NS_ERROR_NOT_IMPLEMENTED) || *aNumReadOut == 0) {
     NoteClosed();
   }
 
@@ -469,7 +473,7 @@ ReadStream::ReadSegments(nsWriteSegmentFun aWriter, void* aClosure,
 NS_IMETHODIMP
 ReadStream::IsNonBlocking(bool* aNonBlockingOut)
 {
-  return mStream->IsNonBlocking(aNonBlockingOut);
+  return mSnappyStream->IsNonBlocking(aNonBlockingOut);
 }
 
 } // namespace cache

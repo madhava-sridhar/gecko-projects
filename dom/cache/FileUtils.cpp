@@ -7,6 +7,7 @@
 #include "mozilla/dom/cache/FileUtils.h"
 
 #include "mozilla/dom/quota/FileStreams.h"
+#include "mozilla/SnappyCompressOutputStream.h"
 #include "mozilla/unused.h"
 #include "nsIFile.h"
 #include "nsIUUIDGenerator.h"
@@ -182,24 +183,12 @@ FileUtils::BodyStartWriteStream(const QuotaInfo& aQuotaInfo,
                              aQuotaInfo.mOrigin, tmpFile);
   if (NS_WARN_IF(!fileStream)) { return NS_ERROR_UNEXPECTED; }
 
-  // By default we would prefer to just use ReadSegments to copy buffers.
-  nsAsyncCopyMode mode = NS_ASYNCCOPY_VIA_READSEGMENTS;
+  nsRefPtr<SnappyCompressOutputStream> compressed =
+    new SnappyCompressOutputStream(fileStream);
 
-  // But first we must check to see if the source stream provides ReadSegments.
-  // If it does not, use a buffered output stream to write to the file.  We don't
-  // wrap the input because because that can lead to it being closed on the wrong
-  // thread.
-  if (!NS_InputStreamIsBuffered(aSource)) {
-    nsCOMPtr<nsIOutputStream> buffered;
-    rv = NS_NewBufferedOutputStream(getter_AddRefs(buffered), fileStream, 4096);
-    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
-
-    fileStream = buffered.forget();
-    mode = NS_ASYNCCOPY_VIA_WRITESEGMENTS;
-  }
-
-  rv = NS_AsyncCopy(aSource, fileStream, NS_GetCurrentThread(), mode,
-                    4096, // chunk size
+  rv = NS_AsyncCopy(aSource, compressed, NS_GetCurrentThread(),
+                    NS_ASYNCCOPY_VIA_WRITESEGMENTS,
+                    compressed->BlockSize(),
                     aCallback, aClosure,
                     true, true, // close streams
                     aCopyContextOut);

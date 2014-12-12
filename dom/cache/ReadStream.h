@@ -69,6 +69,7 @@ protected:
 
   const nsID mId;
   nsCOMPtr<nsIInputStream> mStream;
+  nsCOMPtr<nsIInputStream> mSnappyStream;
   nsCOMPtr<nsIThread> mThread;
   bool mClosed;
 
