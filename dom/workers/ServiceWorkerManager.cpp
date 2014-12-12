@@ -16,6 +16,7 @@
 #include "jsapi.h"
 
 #include "mozilla/DebugOnly.h"
+#include "mozilla/LoadContext.h"
 #include "mozilla/dom/BindingUtils.h"
 #include "mozilla/dom/DOMError.h"
 #include "mozilla/dom/ErrorEvent.h"
@@ -41,6 +42,10 @@
 #include "WorkerPrivate.h"
 #include "WorkerRunnable.h"
 #include "WorkerScope.h"
+
+#ifdef PostMessage
+#undef PostMessage
+#endif
 
 using namespace mozilla;
 using namespace mozilla::dom;
@@ -2381,6 +2386,17 @@ ServiceWorkerManager::CreateServiceWorker(const nsACString& aScriptSpec,
   }
 
   info.mPrincipal = aPrincipal;
+
+  // NOTE: this defaults the SW load context to:
+  //  - private browsing = false
+  //  - content = true
+  //  - use remote tabs = false
+  // Alternatively we could persist the original load group values and use
+  // them here.
+  rv = NS_NewLoadGroup(getter_AddRefs(info.mLoadGroup), info.mPrincipal);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
 
   AutoSafeJSContext cx;
 

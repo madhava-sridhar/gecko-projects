@@ -9,6 +9,7 @@
 #include "Workers.h"
 
 #include "nsIContentSecurityPolicy.h"
+#include "nsILoadGroup.h"
 #include "nsIWorkerDebugger.h"
 #include "nsPIDOMWindow.h"
 
@@ -162,6 +163,7 @@ public:
     nsCOMPtr<nsPIDOMWindow> mWindow;
     nsCOMPtr<nsIContentSecurityPolicy> mCSP;
     nsCOMPtr<nsIChannel> mChannel;
+    nsCOMPtr<nsILoadGroup> mLoadGroup;
 
     nsAutoPtr<PrincipalInfo> mPrincipalInfo;
     nsCString mDomain;
@@ -199,6 +201,9 @@ public:
 
       MOZ_ASSERT(!mChannel);
       aOther.mChannel.swap(mChannel);
+
+      MOZ_ASSERT(!mLoadGroup);
+      aOther.mLoadGroup.swap(mLoadGroup);
 
       MOZ_ASSERT(!mPrincipalInfo);
       mPrincipalInfo = aOther.mPrincipalInfo.forget();
@@ -556,6 +561,13 @@ public:
     return mLoadInfo.mPrincipal;
   }
 
+  nsILoadGroup*
+  GetLoadGroup() const
+  {
+    AssertIsOnMainThread();
+    return mLoadInfo.mLoadGroup;
+  }
+
   // This method allows the principal to be retrieved off the main thread.
   // Principals are main-thread objects so the caller must ensure that all
   // access occurs on the main thread.
@@ -566,7 +578,7 @@ public:
   }
 
   void
-  SetPrincipal(nsIPrincipal* aPrincipal);
+  SetPrincipal(nsIPrincipal* aPrincipal, nsILoadGroup* aLoadGroup);
 
   bool
   UsesSystemPrincipal() const
