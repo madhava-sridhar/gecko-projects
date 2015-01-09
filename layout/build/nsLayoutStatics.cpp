@@ -300,6 +300,8 @@ nsLayoutStatics::Initialize()
 
   IMEStateManager::Init();
 
+  ServiceWorkerRegistrar::Initialize();
+
   return NS_OK;
 }
 

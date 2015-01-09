@@ -27,7 +27,7 @@ class CacheStorageParent MOZ_FINAL : public PCacheStorageParent
 {
 public:
   CacheStorageParent(PBackgroundParent* aManagingActor, Namespace aNamespace,
-                     const ipc::PrincipalInfo& aPrincipalInfo);
+                     const mozilla::ipc::PrincipalInfo& aPrincipalInfo);
   virtual ~CacheStorageParent();
 
   // PCacheStorageParent methods

@@ -6,6 +6,7 @@
 #include "domstubs.idl"
 
 interface nsIDocument;
+interface nsIPrincipal;
 interface nsIInterceptedChannel;
 interface nsIURI;
 
@@ -18,7 +19,7 @@ interface nsIServiceWorkerUnregisterCallback : nsISupports
   [noscript] void UnregisterFailed();
 };
 
-[builtinclass, uuid(464882c8-81c0-4620-b9c4-44c12085b65b)]
+[builtinclass, uuid(861b55e9-d6ac-47cf-a528-8590e9b44de6)]
 interface nsIServiceWorkerManager : nsISupports
 {
   /**
@@ -35,7 +36,8 @@ interface nsIServiceWorkerManager : nsISupports
    * Unregister an existing ServiceWorker registration for `aScope`.
    * It keeps aCallback alive until the operation is concluded.
    */
-  void unregister(in nsIServiceWorkerUnregisterCallback aCallback,
+  void unregister(in nsIPrincipal aPrincipal,
+                  in nsIServiceWorkerUnregisterCallback aCallback,
                   in DOMString aScope);
 
   // Returns a Promise

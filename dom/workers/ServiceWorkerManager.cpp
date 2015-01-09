@@ -4,6 +4,7 @@
 
 #include "ServiceWorkerManager.h"
 
+#include "nsIAppsService.h"
 #include "nsIDOMEventTarget.h"
 #include "nsIDocument.h"
 #include "nsIHttpChannelInternal.h"
@@ -25,6 +26,9 @@
 #include "mozilla/dom/Navigator.h"
 #include "mozilla/dom/PromiseNativeHandler.h"
 #include "mozilla/dom/Request.h"
+#include "mozilla/ipc/BackgroundChild.h"
+#include "mozilla/ipc/PBackgroundChild.h"
+#include "mozilla/ipc/PBackgroundSharedTypes.h"
 
 #include "nsContentUtils.h"
 #include "nsGlobalWindow.h"
@@ -49,8 +53,93 @@
 
 using namespace mozilla;
 using namespace mozilla::dom;
+using namespace mozilla::ipc;
 
 BEGIN_WORKERS_NAMESPACE
+
+struct ServiceWorkerManager::PendingOperation
+{
+  nsCOMPtr<nsIRunnable> mRunnable;
+  ServiceWorkerRegistrationData mRegistration;
+};
+
+namespace {
+
+nsresult GetOriginFromWindow(nsPIDOMWindow* aWindow, nsAString& aOrigin)
+{
+  MOZ_ASSERT(aWindow);
+
+  nsIDocument* doc = aWindow->GetExtantDoc();
+  if (!doc) {
+    return NS_ERROR_UNEXPECTED;
+  }
+
+  nsIPrincipal* principal = doc->NodePrincipal();
+  if (!principal) {
+    return NS_ERROR_UNEXPECTED;
+  }
+
+  uint16_t appStatus = principal->GetAppStatus();
+  uint32_t appId = principal->GetAppId();
+
+  if (appStatus == nsIPrincipal::APP_STATUS_NOT_INSTALLED ||
+      appId == nsIScriptSecurityManager::NO_APP_ID ||
+      appId == nsIScriptSecurityManager::UNKNOWN_APP_ID) {
+    nsAutoString origin;
+    nsresult rv = nsContentUtils::GetUTFOrigin(principal, origin);
+    if (NS_WARN_IF(NS_FAILED(rv))) {
+      return rv;
+    }
+
+    aOrigin = origin;
+    return NS_OK;
+  }
+
+  nsresult rv;
+  nsCOMPtr<nsIAppsService> appsService =
+    do_GetService("@mozilla.org/AppsService;1", &rv);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+     return rv;
+   }
+
+  return appsService->GetManifestURLByLocalId(appId, aOrigin);
+}
+
+nsresult
+PopulateRegistrationData(nsIPrincipal* aPrincipal,
+                         const ServiceWorkerRegistrationInfo* aRegistration,
+                         ServiceWorkerRegistrationData& aData)
+{
+  MOZ_ASSERT(aPrincipal);
+  MOZ_ASSERT(aRegistration);
+
+  bool isNullPrincipal = true;
+  nsresult rv = aPrincipal->GetIsNullPrincipal(&isNullPrincipal);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+
+  // No null principals.
+  if (NS_WARN_IF(isNullPrincipal)) {
+    return NS_ERROR_FAILURE;
+  }
+
+  rv = PrincipalToPrincipalInfo(aPrincipal, &aData.principal());
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+
+  aData.scope() = aRegistration->mScope;
+  aData.scriptSpec() = aRegistration->mScriptSpec;
+
+  if (aRegistration->mActiveWorker) {
+    aData.currentWorkerURL() = aRegistration->mActiveWorker->GetScriptSpec();
+  }
+
+  return NS_OK;
+}
+
+} // Anonymous namespace
 
 NS_IMPL_ISUPPORTS0(ServiceWorkerJob)
 NS_IMPL_ISUPPORTS0(ServiceWorkerRegistrationInfo)
@@ -123,6 +212,7 @@ NS_IMPL_RELEASE(ServiceWorkerManager)
 
 NS_INTERFACE_MAP_BEGIN(ServiceWorkerManager)
   NS_INTERFACE_MAP_ENTRY(nsIServiceWorkerManager)
+  NS_INTERFACE_MAP_ENTRY(nsIIPCBackgroundChildCreateCallback)
   if (aIID.Equals(NS_GET_IID(ServiceWorkerManager)))
     foundInterface = static_cast<nsIServiceWorkerManager*>(this);
   else
@@ -130,7 +220,19 @@ NS_INTERFACE_MAP_BEGIN(ServiceWorkerManager)
 NS_INTERFACE_MAP_END
 
 ServiceWorkerManager::ServiceWorkerManager()
+  : mActor(nullptr)
 {
+  // Register this component to PBackground.
+  MOZ_ALWAYS_TRUE(BackgroundChild::GetOrCreateForCurrentThread(this));
+
+  if (XRE_GetProcessType() == GeckoProcessType_Default) {
+    nsRefPtr<ServiceWorkerRegistrar> swr = ServiceWorkerRegistrar::Get();
+    MOZ_ASSERT(swr);
+
+    nsTArray<ServiceWorkerRegistrationData> data;
+    swr->GetRegistrations(data);
+    LoadRegistrations(data);
+  }
 }
 
 ServiceWorkerManager::~ServiceWorkerManager()
@@ -436,6 +538,16 @@ public:
   void
   Start() MOZ_OVERRIDE
   {
+    MOZ_ASSERT(NS_IsMainThread());
+
+    nsRefPtr<ServiceWorkerManager> swm = ServiceWorkerManager::GetInstance();
+    if (!swm->HasBackgroundActor()) {
+      nsCOMPtr<nsIRunnable> runnable =
+        NS_NewRunnableMethod(this, &ServiceWorkerRegisterJob::Start);
+      swm->AppendPendingOperation(runnable);
+      return;
+    }
+
     if (mJobType == REGISTER_JOB) {
       nsRefPtr<ServiceWorkerManager> swm = ServiceWorkerManager::GetInstance();
       nsRefPtr<ServiceWorkerManager::ServiceWorkerDomainInfo> domainInfo =
@@ -457,6 +569,7 @@ public:
       }
 
       mRegistration->mScriptSpec = mScriptSpec;
+      swm->StoreRegistration(mPrincipal, mRegistration);
     } else {
       MOZ_ASSERT(mJobType == UPDATE_JOB);
     }
@@ -942,6 +1055,16 @@ ServiceWorkerManager::Register(nsIDOMWindow* aWindow,
   return NS_OK;
 }
 
+void
+ServiceWorkerManager::AppendPendingOperation(nsIRunnable* aRunnable)
+{
+  MOZ_ASSERT(!mActor);
+  MOZ_ASSERT(aRunnable);
+
+  PendingOperation* opt = mPendingOperations.AppendElement();
+  opt->mRunnable = aRunnable;
+}
+
 /*
  * Used to handle ExtendableEvent::waitUntil() and proceed with
  * installation/activation.
@@ -1097,6 +1220,7 @@ ServiceWorkerRegistrationInfo::Activate()
   mActiveWorker->UpdateState(ServiceWorkerState::Activating);
 
   swm->CheckPendingReadyPromises();
+  swm->StoreRegistration(mPrincipal, this);
 
   // "Queue a task to fire a simple event named controllerchange..."
   nsCOMPtr<nsIRunnable> controllerChangeRunnable =
@@ -1456,10 +1580,12 @@ ServiceWorkerManager::CheckReadyPromise(nsPIDOMWindow* aWindow,
 }
 
 NS_IMETHODIMP
-ServiceWorkerManager::Unregister(nsIServiceWorkerUnregisterCallback* aCallback,
+ServiceWorkerManager::Unregister(nsIPrincipal* aPrincipal,
+                                 nsIServiceWorkerUnregisterCallback* aCallback,
                                  const nsAString& aScope)
 {
   AssertIsOnMainThread();
+  MOZ_ASSERT(aPrincipal);
   MOZ_ASSERT(aCallback);
 
   nsCOMPtr<nsIURI> scopeURI;
@@ -1475,11 +1601,13 @@ ServiceWorkerManager::Unregister(nsIServiceWorkerUnregisterCallback* aCallback,
   {
     nsCOMPtr<nsIServiceWorkerUnregisterCallback> mCallback;
     nsCOMPtr<nsIURI> mScopeURI;
+    PrincipalInfo mPrincipalInfo;
 
   public:
     UnregisterRunnable(nsIServiceWorkerUnregisterCallback* aCallback,
-                       nsIURI* aScopeURI)
-      : mCallback(aCallback), mScopeURI(aScopeURI)
+                       nsIURI* aScopeURI, PrincipalInfo& aPrincipalInfo)
+      : mCallback(aCallback), mScopeURI(aScopeURI),
+        mPrincipalInfo(aPrincipalInfo)
     {
       AssertIsOnMainThread();
     }
@@ -1527,13 +1655,28 @@ ServiceWorkerManager::Unregister(nsIServiceWorkerUnregisterCallback* aCallback,
         domainInfo->RemoveRegistration(registration);
       }
 
+      MOZ_ASSERT(swm->mActor);
+      swm->mActor->SendUnregisterServiceWorker(mPrincipalInfo,
+                                               NS_ConvertUTF8toUTF16(spec));
       return NS_OK;
     }
   };
 
+  PrincipalInfo principalInfo;
+  if (NS_WARN_IF(NS_FAILED(PrincipalToPrincipalInfo(aPrincipal,
+                                                    &principalInfo)))) {
+    return NS_ERROR_DOM_SECURITY_ERR;
+  }
+
   nsRefPtr<nsIRunnable> unregisterRunnable =
-    new UnregisterRunnable(aCallback, scopeURI);
-  return NS_DispatchToCurrentThread(unregisterRunnable);
+    new UnregisterRunnable(aCallback, scopeURI, principalInfo);
+
+  if (mActor) {
+    return NS_DispatchToCurrentThread(unregisterRunnable);
+  }
+
+  AppendPendingOperation(unregisterRunnable);
+  return NS_OK;
 }
 
 /* static */
@@ -1672,6 +1815,92 @@ ServiceWorkerManager::CreateServiceWorkerForWindow(nsPIDOMWindow* aWindow,
 
   serviceWorker.forget(aServiceWorker);
   return rv;
+}
+
+void
+ServiceWorkerManager::LoadRegistrations(
+                  const nsTArray<ServiceWorkerRegistrationData>& aRegistrations)
+{
+  AssertIsOnMainThread();
+
+  for (uint32_t i = 0, len = aRegistrations.Length(); i < len; ++i) {
+    nsCOMPtr<nsIPrincipal> principal =
+      PrincipalInfoToPrincipal(aRegistrations[i].principal());
+    if (!principal) {
+      continue;
+    }
+
+    nsAutoString tmp;
+    nsresult rv = nsContentUtils::GetUTFOrigin(principal, tmp);
+    if (NS_WARN_IF(NS_FAILED(rv))) {
+      continue;
+    }
+
+    NS_ConvertUTF16toUTF8 origin(tmp);
+
+    nsRefPtr<ServiceWorkerDomainInfo> domainInfo;
+    if (!mDomainMap.Get(origin, getter_AddRefs(domainInfo))) {
+      domainInfo = new ServiceWorkerManager::ServiceWorkerDomainInfo();
+      mDomainMap.Put(origin, domainInfo);
+    }
+
+    ServiceWorkerRegistrationInfo* registration =
+      domainInfo->CreateNewRegistration(aRegistrations[i].scope(), principal);
+
+    registration->mScriptSpec = aRegistrations[i].scriptSpec();
+
+    registration->mActiveWorker =
+      new ServiceWorkerInfo(registration, aRegistrations[i].currentWorkerURL());
+  }
+}
+
+void
+ServiceWorkerManager::ActorFailed()
+{
+  MOZ_CRASH("Failed to create a PBackgroundChild actor!");
+}
+
+void
+ServiceWorkerManager::ActorCreated(mozilla::ipc::PBackgroundChild* aActor)
+{
+  MOZ_ASSERT(aActor);
+  MOZ_ASSERT(!mActor);
+  mActor = aActor;
+
+  // Flush the pending requests.
+  for (uint32_t i = 0, len = mPendingOperations.Length(); i < len; ++i) {
+    nsresult rv = NS_DispatchToCurrentThread(mPendingOperations[i].mRunnable);
+    if (NS_FAILED(rv)) {
+      NS_WARNING("Failed to dispatch a runnable.");
+      return;
+    }
+  }
+
+  mPendingOperations.Clear();
+}
+
+void
+ServiceWorkerManager::StoreRegistration(
+                                   nsIPrincipal* aPrincipal,
+                                   ServiceWorkerRegistrationInfo* aRegistration)
+{
+  MOZ_ASSERT(mActor);
+  MOZ_ASSERT(aPrincipal);
+  MOZ_ASSERT(aRegistration);
+
+  ServiceWorkerRegistrationData data;
+  nsresult rv = PopulateRegistrationData(aPrincipal, aRegistration, data);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return;
+  }
+
+  PrincipalInfo principalInfo;
+  if (NS_WARN_IF(NS_FAILED(PrincipalToPrincipalInfo(aPrincipal,
+                                                    &principalInfo)))) {
+    return;
+  }
+
+  mActor->SendRegisterServiceWorker(data);
 }
 
 already_AddRefed<ServiceWorkerRegistrationInfo>

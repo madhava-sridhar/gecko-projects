@@ -33,15 +33,16 @@ public:
   };
 
   static nsresult
-  Create(Listener* aListener, ipc::PBackgroundParent* aActor,
-         const ipc::PrincipalInfo& aPrincipalInfo,
+  Create(Listener* aListener, mozilla::ipc::PBackgroundParent* aActor,
+         const mozilla::ipc::PrincipalInfo& aPrincipalInfo,
          PrincipalVerifier** aVerifierOut);
 
   void ClearListener();
 
 private:
-  PrincipalVerifier(Listener* aListener, ipc::PBackgroundParent* aActor,
-                    const ipc::PrincipalInfo& aPrincipalInfo);
+  PrincipalVerifier(Listener* aListener,
+                    mozilla::ipc::PBackgroundParent* aActor,
+                    const mozilla::ipc::PrincipalInfo& aPrincipalInfo);
   virtual ~PrincipalVerifier();
 
   void VerifyOnMainThread();
@@ -51,7 +52,7 @@ private:
 
   Listener* mListener;
   nsRefPtr<ContentParent> mActor;
-  const ipc::PrincipalInfo mPrincipalInfo;
+  const mozilla::ipc::PrincipalInfo mPrincipalInfo;
   nsCOMPtr<nsIThread> mInitiatingThread;
   nsresult mResult;
   nsRefPtr<ManagerId> mManagerId;
