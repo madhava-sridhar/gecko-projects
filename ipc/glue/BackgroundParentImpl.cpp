@@ -344,7 +344,7 @@ private:
   nsString mScope;
 };
 
-class CheckPrincipalRunnable : MOZ_FINAL public nsRunnable
+class CheckPrincipalRunnable MOZ_FINAL : public nsRunnable
 {
 public:
   CheckPrincipalRunnable(already_AddRefed<ContentParent> aParent,
