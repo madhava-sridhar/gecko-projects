@@ -65,46 +65,6 @@ struct ServiceWorkerManager::PendingOperation
 
 namespace {
 
-nsresult GetOriginFromWindow(nsPIDOMWindow* aWindow, nsAString& aOrigin)
-{
-  MOZ_ASSERT(aWindow);
-
-  nsIDocument* doc = aWindow->GetExtantDoc();
-  if (!doc) {
-    return NS_ERROR_UNEXPECTED;
-  }
-
-  nsIPrincipal* principal = doc->NodePrincipal();
-  if (!principal) {
-    return NS_ERROR_UNEXPECTED;
-  }
-
-  uint16_t appStatus = principal->GetAppStatus();
-  uint32_t appId = principal->GetAppId();
-
-  if (appStatus == nsIPrincipal::APP_STATUS_NOT_INSTALLED ||
-      appId == nsIScriptSecurityManager::NO_APP_ID ||
-      appId == nsIScriptSecurityManager::UNKNOWN_APP_ID) {
-    nsAutoString origin;
-    nsresult rv = nsContentUtils::GetUTFOrigin(principal, origin);
-    if (NS_WARN_IF(NS_FAILED(rv))) {
-      return rv;
-    }
-
-    aOrigin = origin;
-    return NS_OK;
-  }
-
-  nsresult rv;
-  nsCOMPtr<nsIAppsService> appsService =
-    do_GetService("@mozilla.org/AppsService;1", &rv);
-  if (NS_WARN_IF(NS_FAILED(rv))) {
-     return rv;
-   }
-
-  return appsService->GetManifestURLByLocalId(appId, aOrigin);
-}
-
 nsresult
 PopulateRegistrationData(nsIPrincipal* aPrincipal,
                          const ServiceWorkerRegistrationInfo* aRegistration,
