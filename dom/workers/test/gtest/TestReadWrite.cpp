@@ -219,11 +219,9 @@ TEST(ServiceWorkerRegistrar, TestWriteData)
     for (int i = 0; i < 10; ++i) {
       ServiceWorkerRegistrationData* d = data.AppendElement();
 
-      if ((i % 3) == 0) {
-        d->principal() = mozilla::ipc::NullPrincipalInfo();
-      } else if ((i % 3) == 1) {
+      if ((i % 2) == 0) {
         d->principal() = mozilla::ipc::SystemPrincipalInfo();
-      } else if ((i % 3) == 2) {
+      } else if ((i % 2) == 1) {
         nsAutoCString spec;
         spec.AppendPrintf("spec write %d", i);
         d->principal() = mozilla::ipc::ContentPrincipalInfo(i, i % 2, spec);
@@ -249,11 +247,9 @@ TEST(ServiceWorkerRegistrar, TestWriteData)
   for (int i = 0; i < 10; ++i) {
     nsAutoCString test;
 
-    if ((i % 3) == 0) {
-      ASSERT_EQ(data[i].principal().type(), mozilla::ipc::PrincipalInfo::TNullPrincipalInfo);
-    } else if ((i % 3) == 1) {
+    if ((i % 2) == 0) {
       ASSERT_EQ(data[i].principal().type(), mozilla::ipc::PrincipalInfo::TSystemPrincipalInfo);
-    } else if ((i % 3) == 2) {
+    } else if ((i % 2) == 1) {
       ASSERT_EQ(data[i].principal().type(), mozilla::ipc::PrincipalInfo::TContentPrincipalInfo);
       const mozilla::ipc::ContentPrincipalInfo& cInfo = data[i].principal();
 
